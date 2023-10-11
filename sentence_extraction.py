@@ -72,11 +72,13 @@ for pdf_path in os.listdir('PaperPDF'):
 
     # Closing the pdf file object
     pdfFileObj.close()
+    all_sentences = []
     for v in text_per_page.values():
         sentences = ''.join(v).replace('\n', ' ').replace('- ', '')
         # print('References' in sentences, sentences)
         if 'References' in sentences:
             break
         sentences = sentences.split('. ')
-        with open(f'SentenceExtraction/{pdf_path[:-4]}.json', 'a') as f:
-            json.dump([{'text': sentence} for sentence in sentences], f)
+        all_sentences += sentences
+    with open(f'SentenceExtraction/{pdf_path[:-4]}.json', 'w') as f:
+        json.dump([{'text': sentence} for sentence in all_sentences], f)
