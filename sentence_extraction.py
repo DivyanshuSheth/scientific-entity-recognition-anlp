@@ -77,6 +77,5 @@ for pdf_path in os.listdir('PaperPDF'):
         # print('References' in sentences, sentences)
         if 'References' in sentences:
             break
-        sentences = sentences.split('. ')
-        with open(f'SentenceExtraction/{pdf_path[:-4]}.json', 'a') as f:
-            json.dump([{'text': sentence} for sentence in sentences], f)
+        with open(f'SentenceExtraction/{pdf_path[:-4]}.txt', 'a') as f:
+            f.write(sentences + '\n')
