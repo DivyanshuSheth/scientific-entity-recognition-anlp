@@ -10,7 +10,7 @@ import re
 import json
 
 # Get all papers from ACL Anthology
-def get_papers(acl_anthology_base, conference, year):
+def get_paper_urls(acl_anthology_base, conference, year):
     papers = []
 
     url = acl_anthology_base + os.path.join("events", f"{conference}-{year}")
@@ -31,12 +31,12 @@ def get_papers(acl_anthology_base, conference, year):
 
     return papers
 
-if __name__ == "__main__":
+def save_all_paper_urls():
     acl_anthology_base = "https://aclanthology.org/"
-    acl_2022 = get_papers(acl_anthology_base, "acl", "2022")
-    acl_2023 = get_papers(acl_anthology_base, "acl", "2023")
-    emnlp_2022 = get_papers(acl_anthology_base, "emnlp", "2022")
-    naacl_2022 = get_papers(acl_anthology_base, "naacl", "2022")
+    acl_2022 = get_paper_urls(acl_anthology_base, "acl", "2022")
+    acl_2023 = get_paper_urls(acl_anthology_base, "acl", "2023")
+    emnlp_2022 = get_paper_urls(acl_anthology_base, "emnlp", "2022")
+    naacl_2022 = get_paper_urls(acl_anthology_base, "naacl", "2022")
 
     all_paper_urls = {}
 
@@ -48,3 +48,31 @@ if __name__ == "__main__":
     #save to json
     with open("all_paper_urls.json", "w") as f:
         json.dump(all_paper_urls, f, indent=4)
+
+def download_first_n_pdfs(n):
+    with open("all_paper_urls.json", "r") as f:
+        all_paper_urls = json.load(f)
+
+    for conference in all_paper_urls:
+        for i, pdf_url in enumerate(all_paper_urls[conference]):
+            if i >= n:
+                break
+            print(pdf_url)
+            pdf = requests.get(pdf_url)
+            pdf_name = pdf_url.split("/")[-1][:-4]
+            with open(f"PaperPDF/{pdf_name}.pdf", "wb") as f:
+                f.write(pdf.content)
+
+def count_paper_urls():
+    with open("all_paper_urls.json", "r") as f:
+        all_paper_urls = json.load(f)
+    total = 0
+    for conference in all_paper_urls:
+        print(f"{conference}: {len(all_paper_urls[conference])}")
+        total += len(all_paper_urls[conference])
+    print(f"Total: {total}")
+
+if __name__ == "__main__":
+    # get_paper_urls()
+    # count_paper_urls()
+    download_first_n_pdfs(5)
