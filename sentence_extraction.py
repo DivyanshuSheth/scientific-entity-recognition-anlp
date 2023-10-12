@@ -10,6 +10,8 @@ import pdfplumber
 import os
 import json
 
+from tokenizer import tokenize_sentences
+
 
 def text_extraction(element):
     # Extracting the text from the in-line text element
@@ -72,13 +74,12 @@ for pdf_path in os.listdir('PaperPDF'):
 
     # Closing the pdf file object
     pdfFileObj.close()
-    all_sentences = []
+    paper_text = ''
     for v in text_per_page.values():
-        sentences = ''.join(v).replace('\n', ' ').replace('- ', '')
+        sentences = tokenize_sentences(''.join(v).replace('\n', ' ').replace('- ', ''))
         # print('References' in sentences, sentences)
         if 'References' in sentences:
             break
-        sentences = sentences.split('. ')
-        all_sentences += sentences
-    with open(f'SentenceExtraction/{pdf_path[:-4]}.json', 'w') as f:
-        json.dump([{'text': sentence} for sentence in all_sentences], f)
+        paper_text += sentences + ' '
+    with open(f'SentenceExtraction/{pdf_path[:-4]}.txt', 'w') as f:
+        f.write(paper_text)
