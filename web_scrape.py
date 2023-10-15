@@ -8,6 +8,7 @@ import requests
 import os
 import re
 import json
+import numpy as np
 
 # Get all papers from ACL Anthology
 def get_paper_urls(acl_anthology_base, conference, year):
@@ -49,7 +50,7 @@ def save_all_paper_urls():
     with open("all_paper_urls.json", "w") as f:
         json.dump(all_paper_urls, f, indent=4)
 
-def download_first_n_pdfs(n):
+def download_first_n_sample_pdfs(n):
     with open("all_paper_urls.json", "r") as f:
         all_paper_urls = json.load(f)
 
@@ -57,6 +58,19 @@ def download_first_n_pdfs(n):
         for i, pdf_url in enumerate(all_paper_urls[conference]):
             if i >= n:
                 break
+            print(pdf_url)
+            pdf = requests.get(pdf_url)
+            pdf_name = pdf_url.split("/")[-1][:-4]
+            with open(f"SamplePDF/{pdf_name}.pdf", "wb") as f:
+                f.write(pdf.content)
+
+def download_random_n_pdfs(n):
+    with open("all_paper_urls.json", "r") as f:
+        all_paper_urls = json.load(f)
+    
+    for conference in all_paper_urls:
+        random_n = np.random.choice(all_paper_urls[conference], n, replace=False)
+        for pdf_url in random_n:
             print(pdf_url)
             pdf = requests.get(pdf_url)
             pdf_name = pdf_url.split("/")[-1][:-4]
@@ -75,4 +89,5 @@ def count_paper_urls():
 if __name__ == "__main__":
     # get_paper_urls()
     # count_paper_urls()
-    download_first_n_pdfs(5)
+    download_first_n_sample_pdfs(5)
+    # download_random_n_pdfs(325)
