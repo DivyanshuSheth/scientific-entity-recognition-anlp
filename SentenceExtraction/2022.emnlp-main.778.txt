@@ -1,1 +1,793 @@
-11322 Proceedings of the 2022 Conference on Empirical Methods in Natural Language Processing , pages 11322 11334 December 7 - 11 , 2022 © 2022 Association for Computational Linguistics 11323 11324 11325 11326 11327 11328 11329 11330 11331 11332 11333 11334 
+
+Shengjie Li andVincent Ng
+Human Language Technology Research Institute
+University of Texas at Dallas
+Richardson, TX 75083-0688
+{sxl180006,vince}@hlt.utdallas.edu
+Abstract
+We adapt Lee et al.’s (2018) span-based entity
+coreference model to the task of end-to-end
+discourse deixis resolution in dialogue, specif-
+ically by proposing extensions to their model
+that exploit task-specific characteristics. The
+resulting model, dd-utt , achieves state-of-
+the-art results on the four datasets in the CODI-
+CRAC 2021 shared task.
+1 Introduction
+Discourse deixis (DD) resolution, also known as ab-
+stract anaphora resolution, is an under-investigated
+task that involves resolving a deictic anaphor to its
+antecedent. A deixis is a reference to a discourse
+entity such as a proposition, a description, an event,
+or a speech act (Webber, 1991). DD resolution
+is arguably more challenging than the extensively-
+investigated entity coreference resolution task. Re-
+call that in entity coreference, the goal is to cluster
+the entity mentions in narrative text or dialogue,
+which are composed of pronouns, names, and nom-
+inals, so that the mentions in each cluster refer to
+the same real-world entity. Lexical overlap is a
+strong indicator of entity coreference, both among
+names (e.g., “President Biden”, “Joe Biden”) and in
+the resolution of nominals (e.g., linking “the presi-
+dent” to “President Biden”). DD resolution, on the
+other hand, can be viewed as a generalized case of
+event coreference involving the clustering of deictic
+anaphors, which can be pronouns or nominals, and
+clauses, such that the mentions in each cluster re-
+fer to the same real-world proposition/event/speech
+act, etc. The first example in Figure 1 is an exam-
+ple of DD resolution in which the deictic anaphor
+“the move” refers to Salomon’s act of issuing war-
+rants on shares described in the preceding sentence.
+DD resolution is potentially more challenging than
+entity coreference resolution because (1) DD res-
+olution involves understanding clause semantics
+since antecedents are clauses, and clause semantics
+Figure 1: Examples of discourse deixis resolution. In
+each example, the deictic anaphor is italicized and the
+antecedent is boldfaced.
+are arguably harder to encode than noun phrase
+semantics; and (2) string matching plays little role
+in DD resolution, unlike in entity coreference.
+In this paper, we focus on end-to-end DD res-
+olution in dialogue. The second example in Fig-
+ure 1 shows a dialogue between A and B in which
+the deictic anaphor “it” refers to the utterance
+by B in which s/he said s/he would donate $10.
+While the deictic anaphors in dialogue are also
+composed of pronouns and nominals, the propor-
+tion of pronominal deictic anaphors in dialogue
+is much higher than that in narrative text. For
+instance, while 76% of the deictic anaphors in
+two text corpora (ARRAU RST and GNOME) are
+pronominal, the corresponding percentage rises to
+93% when estimated based on seven dialogue cor-
+pora (TRAINS91, TRAINS93, PEAR, and the four
+CODI-CRAC 2021 development sets). In fact, the
+three pronouns “that”, “this”, and “it” alone com-
+prise 89% of the deictic anaphors in these dialogue
+corpora. The higher proportion of pronominal de-
+ictic anaphors potentially makes DD resolution in
+dialogue more challenging than those in text: since
+a pronoun is semantically empty, the successful
+resolution of a pronominal deictic anaphor depends
+entirely on proper understanding of its context. In
+addition, it also makes DD recognition more chal-
+lenging in dialogue. For instance, while the head of
+a non-pronominal phrase can often be exploited to
+determine whether it is a deictic anaphor (e.g., “the11322man” cannot be a deictic anaphor, but “the move”
+can), such cues are absent in pronouns.
+Since DD resolution can be cast as a general-
+ized case of event coreference, a natural question
+is: how successful would a state-of-the-art entity
+coreference model be when applied to DD reso-
+lution? Recently, Kobayashi et al. (2021) have
+applied Xu and Choi’s (2020) re-implementation
+of Lee et al.’s span-based entity coreference model
+to resolve the deictic anaphors in the DD track of
+the CODI-CRAC 2021 shared task after augment-
+ing it with a type prediction model (see Section 4).
+Not only did they achieve the highest score on
+each dataset, but they beat the second-best system
+(Anikina et al., 2021), which is a non-span-based
+neural approach combined with hand-crafted rules,
+by a large margin. These results suggest that a span-
+based approach to DD resolution holds promise.
+Our contributions in this paper are three-fold.
+First, we investigate whether task-specific obser-
+vations can be exploited to extend a span-based
+model originally developed for entity coreference
+to improve its performance for end-to-end DD res-
+olution in dialogue. Second, our extensions are
+effective in improving model performance, allow-
+ing our model to achieve state-of-the-art results
+on the CODI-CRAC 2021 shared task datasets.
+Finally, we present an empirical analysis of our
+model, which, to our knowledge, is the first analy-
+sis of a state-of-the-art span-based DD resolver.
+2 Related Work
+Broadly, existing approaches to DD resolution can
+be divided into three categories, as described below.
+Rule-based approaches. Early systems that re-
+solve deictic expressions are rule-based (Eckert
+and Strube, 2000; Byron, 2002; Navarretta, 2000).
+Specifically, they use predefined rules to extract
+anaphoric mentions, and select antecedent for each
+extracted anaphor based on the dialogue act types
+of each candidate antecedent.
+Non-neural learning-based approaches. Early
+non-neural learning-based approaches to DD reso-
+lution use hand-crafted feature vectors to represent
+mentions (Strube and Müller, 2003; Müller, 2008).
+A classifier is then trained to determine whether a
+pair of mentions is a valid antecedent-anaphor pair.
+Deep learning-based approaches. Deep learn-
+ing has been applied to DD resolution. For in-
+stance, Marasovi ´c et al. (2017) and Anikina et al.
+(2021) use a Siamese neural network, which takesas input the embeddings of two sentences, one con-
+taining a deictic anaphor and the other a candidate
+antecedent, to score each candidate antecedent and
+subsequently rank the candidate antecedents based
+on these scores. In addition, motivated by the re-
+cent successes of Transformer-based approaches
+to entity coreference (e.g., Kantor and Globerson
+(2019)), Kobayashi et al. (2021) have recently pro-
+posed a Transformer-based approach to DD res-
+olution, which is an end-to-end coreference sys-
+tem based on SpanBERT (Joshi et al., 2019, 2020).
+Their model jointly learns mention extraction and
+DD resolution and has achieved state-of-the-art re-
+sults in the CODI-CRAC 2021 shared task.
+3 Corpora
+We use the DD-annotated corpora provided as part
+of the CODI-CRAC 2021 shared task. For train-
+ing, we use the official training corpus from the
+shared task (Khosla et al., 2021), ARRAU (Poesio
+and Artstein, 2008), which consists of three con-
+versational sub-corpora (TRAINS-93, TRAINS-
+91, PEAR) and two non-dialogue sub-corpora
+(GNOME, RST). For validation and evaluation, we
+use the official development sets and test sets from
+the shared task. The shared task corpus is com-
+posed of four well-known conversational datasets:
+AMI (McCowan et al., 2005), LIGHT (Urbanek
+et al., 2019), Persuasion (Wang et al., 2019), and
+Switchboard (Godfrey et al., 1992). Statistics on
+these corpora are provided in Table 1.
+4 Baseline Systems
+We employ three baseline systems.
+The first baseline, coref-hoi , is Xu and
+Choi’s (2020) re-implementation of Lee et
+al.’s (2018) widely-used end-to-end entity coref-
+erence model. The model ranks all text spans of
+up to a predefined length based on how likely they
+correspond to entity mentions. For each top-ranked
+spanx, the model learns a distribution P(y)over
+its antecedents y∈ Y(x), where Y(x)includes a
+dummy antecedent ϵand every preceding span:
+P(y) =e
+/summationtexte
+where s(x, y)is a pairwise score that incorporates
+two types of scores: (1) s(·), which indicates
+how likely a span is a mention, and (2) s(·)and
+s(·), which indicate how likely two spans refer11323
+to the same entity(s(x, ϵ) = 0 for dummy an-
+tecedents):
+where gandgare the vector representations of
+xandy,Wis a learned weight matrix for bilinear
+scoring, FFNN( ·)is a feedforward neural network,
+andϕ(·)encodes features. Two features are used,
+one encoding speaker information and the other the
+segment distance between two spans.
+The second baseline, UTD_NLP, is the top-
+performing system in the DD track of the CODI-
+CRAC 2021 shared task (Kobayashi et al., 2021).
+It extends coref-hoi with a set of modifications.
+Two of the most important modifications are: (1)
+the addition of a sentence distance feature to ϕ(·),
+and (2) the incorporation into coref-hoi atype
+prediction model, which predicts the type of a span.
+The possible types of a span iare:A
+(ificorresponds to an antecedent), A (ifi
+corresponds to an anaphor), and N (if it is nei-
+ther an antecedent nor an anaphor). The types pre-
+dicted by the model are then used by coref-hoi
+as follows: only spans predicted as A can
+be resolved, and they can only be resolved to spans
+predicted as A . Details of how the
+type prediction model is trained can be found in
+Kobayashi et al. (2021).
+The third baseline, coref-hoi-utt , is essen-
+tially the first baseline except that we restrict the
+candidate antecedents to be utterances . This re-
+striction is motivated by the observation that theantecedents of the deictic anaphors in the CODI-
+CRAC 2021 datasets are all utterances. To see what
+an utterance is, consider again the second exam-
+ple in Figure 1. Each line in this dialogue is an
+utterance. As can be seen, an utterance roughly
+corresponds to a sentence, although it can also
+be a text fragment or simply an interjection (e.g.,
+“uhhh”). While by definition the antecedent of a
+deictic anaphor can be any clause, the human an-
+notators of the DD track of the CODI-CRAC 2021
+shared task decided to restrict the unit of annota-
+tion to utterances because (1) based on previous
+experience it was difficult to achieve high inter-
+annotator agreement when clauses are used as the
+annotation unit (Poesio and Artstein, 2008); and
+(2) unlike the sentences in narrative text, which
+can be composed of multiple clauses and therefore
+can be long, the utterances in these datasets are
+relatively short and can reliably be used as annota-
+tion units. From a modeling perspective, restricting
+candidate antecedents also has advantages. First,
+it substantially reduces the number of candidate
+antecedents and therefore memory usage, allowing
+our full model to fit into memory. Second, it allows
+us to focus on resolution rather than recognition
+of deictic anaphors, as the recognition of clausal
+antecedents remains a challenging task, especially
+since existing datasets for DD resolution are rela-
+tively small compared to those available for entity
+coreference (e.g., OntoNotes (Hovy et al., 2006)).
+5 Model
+Next, we describe our resolver, dd-utt , which
+augments coref-hoi-utt with 10 extensions.
+E1. Modeling recency. Unlike in entity coref-
+erence, where two coreferent names (e.g., “Joe
+Biden”, “President Biden”) can be far apart from11324each other in the corresponding document (because
+names are non-anaphoric), the distance between
+a deictic anaphor and its antecedent is compara-
+tively smaller. To model recency, we restrict the set
+of candidate antecedents of an anaphor to be the
+utterance containing the anaphor as well as the pre-
+ceding 10 utterances, the choice of which is based
+on our observation of the development data, where
+the 10 closest utterances already cover 96–99% of
+the antecedent-anaphor pairs.
+E2. Modeling distance. While the previous ex-
+tension allows us to restrict our attention to candi-
+date antecedents that are close to the anaphor, it
+does not model the fact that the likelihood of being
+the correct antecedent tends to increase as its dis-
+tance from the anaphor decreases. To model this re-
+lationship, we subtract the term γDist(x, y)from
+s(x, y)(see Equation (1)), where Dist(x, y)is the
+utterance distance between anaphor xand candi-
+date antecedent yandγis a tunable parameter that
+controls the importance of utterance distance in the
+resolution process. Since s(x, y)is used to rank
+candidate antecedents, modeling utterance distance
+by updating s(x, y)will allow distance to have a
+direct impact on DD resolution.
+E3. Modeling candidate antecedent length.
+Some utterances are pragmatic in nature and do not
+convey any important information. Therefore, they
+cannot serve as antecedents of deictic anaphors. Ex-
+amples include “Umm”, “Ahhhh... okay”, “that’s
+right”, and “I agree”. Ideally, the model can iden-
+tify such utterances and prevent them from be-
+ing selected as antecedents. We hypothesize that
+we could help the model by modeling such utter-
+ances. To do so, we observe that such utterances
+tend to be short and model them by penalizing
+shorter utterances. Specifically, we subtract the
+termγfrom s(x, y), where Length (y)
+is the number of words in candidate antecedent
+yandγis a tunable parameter that controls the
+importance of candidate antecedent length in reso-
+lution.
+E4. Extracting candidate anaphors. As men-
+tioned before, the deictic anaphors in dialogue are
+largely composed of pronouns. Specifically, in
+our development sets, the three pronouns “that”,
+“this”, and ‘it’ alone account for 74–88% of the
+anaphors. Consequently, we extract candidate deic-
+tic anaphors as follows: instead of allowing each
+span of length nor less to be a candidate anaphor,
+we only allow a span to be a candidate anaphor ifits underlying word/phrase has appeared at least
+once in the training set as a deictic anaphor.
+E5. Predicting anaphors. Now that we have
+the candidate anaphors, our next extension in-
+volves predicting which of them are indeed deictic
+anaphors. To do so, we retrain the type prediction
+model in UTD_NLP , which is a FFNN that takes
+as input the (contextualized) span representation g
+of candidate anaphor iand outputs a vector otof
+dimension 2 in which the first element denotes the
+likelihood that iis a deictic anaphor and the second
+element denotes the likelihood that iis not a deictic
+anaphor. iis predicted as a deictic anaphor if and
+only if the value of the first element of otis bigger
+than its second value:
+ot=FFNN (g)
+t= arg maxot(x)
+where A(A ) and NA(N-A )
+are the two possible types. Following UTD_NLP ,
+this type prediction model is jointly trained with
+the resolution model. Specifically, we compute the
+cross-entropy loss using ot, multiply it by a type
+loss coefficient λ, and add it to the loss function of
+coref-hoi-utt .λis a tunable parameter that
+controls the importance of type prediction relative
+to DD resolution.
+E6. Modeling the relationship between anaphor
+recognition and resolution. In principle, the
+model should resolve a candidate anaphor to a non-
+dummy candidate antecedent if it is predicted to
+be a deictic anaphor by the type prediction model.
+However, type prediction is not perfect, and enforc-
+ing this consistency constraint, which we will refer
+to as C1, will allow errors in type prediction to
+be propagated to DD resolution. For example, if
+a non-deictic anaphor is misclassified by the type
+prediction model, then it will be (incorrectly) re-
+solved to a non-dummy antecedent. To alleviate
+error propagation, we instead enforce C1in asoft
+manner. To do so, we define a penalty function p,
+which imposes a penalty on span iifC1is violated
+(i.e., a deictic anaphor is resolved to the dummy
+antecedent), as shown below:
+Intuitively, pestimates the minimum amount to
+be adjusted so that span i’s type is not A .11325We incorporate pinto the model as a penalty
+term in s(Equation (1)). Specifically, we redefine
+s(i, j)when j=ϵ, as shown below:
+s(i, ϵ) =s(i, ϵ)−[γp(i)]
+where γis a positive constant that controls the
+hardness of C1. The smaller γis, the softer C1is.
+Intuitively, if C1is violated, s(i, ϵ)will be lowered
+by the penalty term, and the dummy antecedent
+will less likely be selected as the antecedent of i.
+E7. Modeling the relationship between non-
+anaphor recognition and resolution. Another
+consistency constraint that should be enforced is
+that the model should resolve a candidate anaphor
+to the dummy antecedent if it is predicted as a non-
+deictic anaphor by the type prediction model. As
+in Extension E6, we will enforce this constraint,
+which we will refer to as C2, in a soft manner by
+defining a penalty function p, as shown below:
+Then we redefine s(i, j)when j̸=ϵas follows:
+s(i, j) =s(i, j)−[γp(i)]
+where γis a positive constant that controls the
+hardness of C2. Intuitively, if C2is violated, s(i, j)
+will be lowered by the penalty term, and jwill less
+likely be selected as the antecedent of i.
+E8. Encoding candidate anaphor context. Ex-
+amining Equation (1), we see that s(x, y)is com-
+puted based on the span representations of xand
+y. While these span representations are contextu-
+alized, the contextual information they encode is
+arguably limited. As noted before, most of the de-
+ictic anaphors in dialogue are pronouns, which are
+semantically empty. As a result, we hypothesize
+that we could improve the resolution of these deic-
+tic anaphors if we explicitly modeled their contexts.
+Specifically, we represent the context of a candi-
+date anaphor using the embedding of the utterance
+in which it appears and add the resulting embed-
+ding as features to both the bilinear score s(x, y)
+and the concatenation-based score s(x, y):
+s(x, y) =gWg+gWg
+s(x, y) =FFNN(g, g, g◦g, g, ϕ(x, y))
+where WandWare learned weight matrices,
+gis the embedding of the utterance sin which
+candidate anaphor xappears, and ϕ(x, y)encodes
+the relationship between xandyas features.
+E9. Encoding the relationship between candi-
+date anaphors and antecedents. As noted in
+Extension E8, ϕ(x, y)encodes the relationship
+between candidate anaphor xand candidate an-
+tecedent y. In UTD_NLP ,ϕ(x, y)is composed
+of three features, including two features from
+coref-hoi-utt (i.e., the speaker id and the seg-
+ment distance between xandy) and one feature that
+encodes the utterance distance between them. Sim-
+ilar to the previous extension, we hypothesize that
+we could better encode the relationship between x
+andyusing additional features. Specifically, we
+incorporate an additional feature into ϕ(x, y)that
+encodes the utterance distance between xandy.
+Unlike the one used in UTD_NLP , this feature aims
+to more accurately capture proximity by ignoring
+unimportant sentences (i.e., those that contain only
+interjections, filling words, reporting verbs, and
+punctuation) when computing utterance distance.
+The complete list of filling words and reporting
+verbs that we filter can be found in Table 2.
+E10. Encoding candidate antecedents. In
+coref-hoi-utt , a candidate antecedent is sim-
+ply encoded using its span representation. We hy-
+pothesize that we could better encode a candidate
+antecedent using additional features . Specifically,
+we employ seven features to encode a candidate
+antecedent yand incorporate them into ϕ(x, y): (1)
+the number of words in y; (2) the number of nouns
+iny; (3) the number of verbs in y; (4) the number
+of adjectives in y; (5) the number of content word
+overlaps between yand the portion of the utterance
+containing the anaphor that precedes the anaphor;
+(6) whether yis the longest among the candidate an-
+tecedents; and (7) whether yhas the largest number11326of content word overlap (as computed in Feature
+5) among the candidate antecedents. Like Exten-
+sion E3, some features implicitly encode the length
+of a candidate antecedent. Despite this redundancy,
+we believe the redundant information could be ex-
+ploited by the model differently and may therefore
+have varying degrees of impact on it.
+6 Evaluation
+6.1 Experimental Setup
+Evaluation metrics. We obtain the results of DD
+resolution using the Universal Anaphora Scorer (Yu
+et al., 2022b). Since DD resolution is viewed as a
+generalized case of event coreference, the scorer re-
+ports performance in terms of CoNLL score, which
+is the unweighted average of the F-scores of three
+coreference scoring metrics, namely MUC (Vilain
+et al., 1995), B(Bagga and Baldwin, 1998), and
+CEAF(Luo, 2005). In addition, we report the
+results of deictic anaphor recognition. We express
+recognition results in terms of Precision (P), Recall
+(R) and F-score, considering an anaphor correctly
+recognized if it has an exact match with a gold
+anaphor in terms of boundary.
+Model training and parameter tuning. For
+coref-hoi andcoref-hoi-utt , we use
+SpanBERT as the encoder and reuse the hy-
+perparameters from Xu and Choi (2020) with
+the only exception of the maximum span width:
+forcoref-hoi , we increase the maximum
+span width from 30 to 45 in order to cover
+more than 97% of the antecedent spans; for
+coref-hoi-utt we use 15 as the maximum
+span width, which covers more than 99% of the
+anaphor spans in the training sets. For UTD_NLP ,
+we simply take the outputs produced by the model
+on the test sets and report the results obtained by
+running the scorer on the outputs.Fordd-utt ,
+we use SpanBERT as the encoder. Since we do
+not rely on span enumerate to generate candidate
+spans, the maximum span width can be set to any
+arbitrary number that is large enough to cover all
+candidate antecedents and anaphors. In our case,
+we use 300 as our maximum span width. We tune
+the parameters (i.e., λ,γ,γ,γ,γ) using grid
+search to maximize CoNLL score on development
+data. For the type loss coefficient, we search outof {0.2, 0.5, 1, 200, 500, 800, 1200, 1600}, and
+forγ, we search out of {1, 5, 10}. We reuse other
+hyperparameters from Xu and Choi (2020).
+All models are trained for 30 epochs with a
+dropout rate of 0.3 and early stopping. We use
+1×10as our BERT learning rate and 3×10
+as our task learning rate. Each experiment is run
+using a random seed of 11 and takes less than three
+hours to train on an NVIDIA RTX A6000 48GB.
+Train-dev partition. Since we have four test
+sets, we use ARRAU and all dev sets other than
+the one to be evaluated on for model training and
+the remaining dev set for parameter tuning. For
+example, when evaluating on AMI, we train
+models on ARRAU, LIGHT, Persuasionand
+Switchboardand use AMIfor tuning.
+6.2 Results
+Recall that our goal is to perform end-to-end DD
+resolution, which corresponds to the Predicted eval-
+uation setting in the CODI-CRAC shared task.
+Overall performance. Recognition results (ex-
+pressed in F-score) and resolution results (ex-
+pressed in CoNLL score) of the three baselines
+and our model on the four test sets are shown in
+Table 3, where the Avg. columns report the macro-
+averages of the corresponding results on the four
+test sets, and the parameter settings that enable our
+model to achieve the highest CoNLL scores on
+the development sets are shown in Table 4. Since
+coref-hoi andcoref-hoi-utt do not ex-
+plicitly identify deictic anaphors, we assume that
+all but the first mentions in each output cluster are
+anaphors when computing recognition precision;
+and while UTD_NLP (the top-performing system
+in the shared task) does recognize anaphors, we
+still make the same assumption when computing
+its recognition precision since the anaphors are not
+explicitly marked in the output (recall that we com-
+puted results of UTD_NLP based on its outputs).
+We test the statistical significance among the
+four models using two-tailed Approximate Ran-
+domization (Noreen, 1989). For recognition, the
+models are statistically indistinguishable from each
+other w.r.t. their Avg. score ( p <0.05). For reso-
+lution, dd-utt is highly significantly better than
+the baselines w.r.t. Avg. ( p < 0.001), while the
+three baselines are statistically indistinguishable
+from each other. These results suggest that (1)
+dd-utt ’s superior resolution performance stems
+from better antecedent selection, not better anaphor11327
+recognition; and (2) the restriction of candidate an-
+tecedents to utterances in coref-hoi-utt does
+not enable the resolver to yield significantly better
+resolution results than coref-hoi .
+Per-anaphor results. Next, we show the recog-
+nition and resolution results of the four models on
+the most frequently occurring deictic anaphors in
+Table 5 after micro-averaging them over the four
+test sets. Not surprisingly, “that” is the most fre-
+quent deictic anaphor on the test sets, appearing as
+an anaphor 402 times on the test sets and contribut-
+ing to 68.8% of the anaphors. This is followed by
+“it” (16.3%) and “this” (4.3%). Only 8.9% of the
+anaphors are not among the top four anaphors.
+Consider first the recognition results. As can
+be seen, “that” has the highest recognition F-score
+among the top anaphors. This is perhaps not sur-
+prising given the comparatively larger number of
+“that” examples the models are trained on. While
+“it” occurs more frequently than “this” as a deictic
+anaphor, its recognition performance is lower than
+that of “this”. This is not surprising either: “this”,
+when used as a pronoun, is more likely to be de-
+ictic than “it”, although both of them can serve as
+a coreference anaphor and a bridging anaphor. In
+other words, it is comparatively more difficult to
+determine whether a particular occurrence of “it”
+is deictic. Overall, UTD_NLP recognizes more
+anaphors than the other models.
+Next, consider the resolution results. To obtain
+the CoNLL scores for a given anaphor, we retain
+all and only those clusters containing the anaphor
+in both the gold partition and the system partition
+and apply the official scorer to them. Generally, themore frequently occurring an anaphor is, the better
+its resolution performance is. Interestingly, for the
+“Others” category, dd-utt achieves the highest
+resolution results despite having the lowest recog-
+nition performance. In contrast, while UTD_NLP
+achieves the best recognition performance on aver-
+age, its resolution results are among the worst.
+Per-distance results. To better understand how
+resolution results vary with the utterance distance
+between a deictic anaphor and its antecedent, we
+show in Table 6 the number of correct and incor-
+rect links predicted by the four models for each
+utterance distance on the test sets. For comparison
+purposes, we show at the top of the table the distri-
+bution of gold links over utterance distances. Note
+that a distance of 0 implies that the anaphor refers
+to the utterance in which it appears.
+A few points deserve mention. First, the distri-
+bution of gold links is consistent with our intuition:
+a deictic anaphor most likely has the immediately
+preceding utterance (i.e., distance = 1) as its ref-
+erent. In addition, the number of links drops as
+distance increases, and more than 90% of the an-
+tecedents are at most four utterances away from
+their anaphors. Second, although UTD_NLP rec-
+ognizes more anaphors than the other models, it
+is the most conservative w.r.t. link identification,
+predicting the smallest number of correct and incor-
+rect links for almost all of the utterance distances.
+Third, dd-utt is better than the other models at
+(1) identifying short-distance anaphoric dependen-
+cies, particularly when distance ≤1, and (2) posit-
+ing fewer erroneous long-distance anaphoric depen-
+dencies. These results provide suggestive evidence
+ofdd-utt ’s success at modeling recency and dis-
+tance explicitly. Finally, these results suggest that
+resolution difficulty increases with distance: except
+forUTD_NLP , none of the models can successfully
+recognize a link when distance >5.
+Ablation results. To evaluate the contribution of
+each extension presented in Section 5 to dd-utt ’s
+resolution performance, we show in Table 7 ab-
+lation results, which we obtain by removing one11328
+extension at a time from dd-utt and retraining it.
+For ease of comparison, we show in the first row
+of the table the CoNLL scores of dd-utt .
+A few points deserve mention. First, when E1
+(Modeling recency) is ablated, we use as candi-
+date antecedents the 10 highest-scoring candidate
+antecedents for each candidate anaphor according
+tos(x, y)(Equation (3)). Second, when one of
+E2, E3, E6, and E7 is ablated, we set the corre-
+sponding λto zero. Third, when E4 is ablated,
+candidate anaphors are extracted in the same way
+as incoref-hoi andcoref-hoi-utt , where
+the top spans learned by the model will serve as
+candidate anaphors. Fourth, when E5 is ablated,
+E6 and E7 will also be ablated because the penalty
+functions pandpneed to be computed based on
+the output of the type prediction model in E5.
+We use two-tailed Approximate Randomization
+to determine which of these ablated models is statis-
+tically different from dd-utt w.r.t. the Avg. score.
+Results show that except for the model in which E1
+is ablated, all of the ablated models are statistically
+indistinguishable from dd-utt (p <0.05). Note
+that these results do notimply that nine of the ex-
+tensions fail to contribute positively to dd-utt ’s
+resolution performance: it only means that none of
+them is useful in the presence of other extensions
+w.r.t. Avg. We speculate that (1) some of these ex-
+tensions model overlapping phenomena (e.g., both
+E2 and E9 model utterance distance); (2) when the
+model is retrained, the learner manages to adjust
+the network weights so as to make up for the poten-
+tial loss incurred by ablating an extension; and (3)
+large fluctuations in performance can be observed
+on individual datasets in some of the experiments,
+but they may just disappear after averaging. Exper-
+iments are needed to determine the reason.
+6.3 Error Analysis
+Below we analyze the errors made by dd-utt .
+DD anaphora recognition precision errors. A
+common type of recognition precision errors in-
+volves misclassifying a coreference anaphor as a
+deictic anaphor. Consider the first example in Fig-
+ure 2, in which the pronoun “that” is a coreference
+anaphor with “voice recognition” as its antecedent
+but is misclassified as a deictic anaphor with the
+whole sentence as its antecedent. This type of error
+occurs because virtually all of the frequently occur-
+ring deictic anaphors, including “that”, “it”, “this”,
+and “which”, appear as a coreference anaphor in
+some contexts and as a deictic anaphor in other con-
+texts, and distinguishing between the two different
+uses of these anaphors could be challenging.
+DD anaphor recognition recall errors. Con-
+sider the second example in Figure 2, in which11329
+“it” is a deictic anaphor that refers to the boldfaced
+utterance, but dd-utt fails to identify this and
+many other occurrences of “it” as deictic, proba-
+bly because “it” is more likely to be a coreference
+anaphor than a deictic anaphor: in the dev sets, 80%
+of the occurrences of “it” are coreference anaphors
+while only 5% are deictic anaphors.
+DD resolution precision errors. A major source
+of DD resolution precision errors can be attributed
+to the model’s failure in properly understanding the
+context in which a deictic anaphor appears. Con-
+sider the third example in Figure 2, in which “that”
+is a deictic anaphor that refers to the boldfaced ut-
+terance. While dd-utt correctly identifies “that”
+as a deictic anaphor, it erroneously posits the itali-
+cized utterance as its antecedent. This example is
+interesting in that without looking at the boldfaced
+utterance, the italicized utterance is a plausible an-
+tecedent for “that” because “I am not surprised to
+hear that at all” can be used as a response to al-
+most every statement. However, when both the
+boldfaced utterance and the italicized utterance are
+taken into consideration, it is clear that the bold-
+faced utterance is the correct antecedent for “that”
+because winning over seven awards for some chari-
+table work is certainly more surprising than seeing
+a place bring awareness to the needs of the young.
+Correctly resolving this anaphor, however, requires
+modeling the emotional implication of its context.
+6.4 Further Analysis
+Next, we analyze the deictic anaphors correctly
+resolved by dd-utt but erroneously resolved by
+the baseline resolvers.
+The example shown in Figure 3 is one such
+case. In this example, dd-utt successfully ex-
+tracts the anaphor “that” and resolves it to the cor-
+rect antecedent “Losing one decimal place, that is
+okay”. UTD_NLP fails to extract “that” as a deic-
+tic anaphor. While coref-hoi correctly extracts
+the anaphor, it incorrectly selects “You want your
+rating to be a two?” as the antecedent. From a
+cursory look at this example one could infer that
+this candidate antecedent is highly unlikely to be
+the correct antecedent since it is 10 utterances away
+from the anaphor. As for coref-hoi-utt , the
+resolver successfully extracts the anaphor but in-
+correctly selects “Its just two point five for that
+one” as the antecedent, which, like the antecedent
+chosen by coref-hoi , is farther away from the
+anaphor than the correct antecedent is. We specu-
+late that coref-hoi andcoref-hoi-utt fail
+to identify the correct antecedent because they do
+not explicitly model distance and therefore may not
+have an idea about how far a candidate antecedent
+is from the anaphor under consideration. The ad-
+ditional features that dd-utt has access to, in-
+cluding the features that encode sentence distance
+as well as those that capture contextual informa-
+tion, may have helped dd-utt choose the correct
+antecedent, but additional analysis is needed to de-
+termine the reason.
+7 Conclusion
+We presented an end-to-end discourse deixis res-
+olution model that augments Lee et al.’s (2018)
+span-based entity coreference model with 10 ex-
+tensions. The resulting model achieved state-of-
+the-art results on the CODI-CRAC 2021 datasets.
+We employed a variant of this model in our recent
+participation in the discourse deixis track of the
+CODI-CRAC 2022 shared task (Yu et al., 2022a)
+and achieved the best results (see Li et al. (2022)
+for details). To facilitate replicability, we make our
+source code publicly available.11330Limitations
+Below we discuss several limitations of our work.
+Generalization to corpora with clausal an-
+tecedents. As mentioned in the introduction, the
+general discourse deixis resolution task involves
+resolving a deictic anaphor to a clausal antecedent.
+The fact that our resolver can only resolve anaphors
+to utterances raises the question of whether it can be
+applied to resolve deictic anaphors in texts where
+antecedents can be clauses. To apply our resolver
+to such datasets, all we need to do is to expand
+the set of candidate antecedents of an anaphor to
+include those clauses that precede it. While cor-
+pora annotated with clausal antecedents exist (e.g.,
+TRAINS-91 and TRAINS-93), we note that the de-
+cision made by the CODI-CRAC 2021 shared task
+organizers to use utterances as the unit of annota-
+tion has to do with annotation quality, as the inter-
+annotator agreement on the selection of clausal
+antecedents tends to be low (Poesio and Artstein,
+2008),
+Discourse deixis resolution in dialogue vs. nar-
+rative text. Whether our model will generalize
+well to non-dialogue datasets (e.g., narrative text)
+is unclear. Given the differences between dialogue
+and non-dialogue datasets (e.g., the percentage of
+pronominal anaphors), we speculate that the perfor-
+mance of our resolver will take a hit when applied
+to resolving deictic anaphors in narrative text.
+Size of training data. We believe that the perfor-
+mance of our resolver is currently limited in part by
+the small amount of data on which it was trained.
+The annotated corpora available for training a dis-
+course deictic resolver is much smaller than those
+available for training an entity coreference resolver
+(e.g., OntoNotes (Hovy et al., 2006)).
+Data biases. Generally, our work should not
+cause any significant risks. However, language
+varieties not present in training data can potentially
+amplify existing inequalities and contribute to mis-
+understandings.
+Acknowledgments
+We thank the three anonymous reviewers for their
+insightful comments on an earlier draft of the paper.
+This work was supported in part by NSF Grant
+IIS-1528037. Any opinions, findings, conclusions
+or recommendations expressed in this paper are
+those of the authors and do not necessarily reflectthe views or official policies, either expressed or
+implied, of the NSF.
+References1133111332
+A Detailed Experimental Results
+We report the resolution results of the four resolvers
+(UTD_NLP ,coref-hoi ,coref-hoi-utt ,
+anddd-utt ) on the CODI-CRAC 2021 shared
+task test sets in terms of MUC, B, and CEAF
+scores in Table 8 and their mention extraction re-
+sults in terms of recall (R), precision (P), and F-
+score (F) in Table 9.
+Consider first the resolution results in Table 8.
+As can be seen, not only does dd-utt achieve
+the best CoNLL scores on all four datasets, but
+it does so via achieving the best MUC, B, and
+CEAFF-scores. In terms of MUC F-score, the
+performance difference between dd-utt and the
+second best resolver on each dataset is substantial
+(2.2%–14.9% points). These results suggest that
+better link identification, which is what the MUC F-
+score reveals, is the primary reason for the superior
+performance of dd-utt . Moreover, Persuasion
+appears to be the easiest of the four datasets, as
+this is the dataset on which three of the four re-
+solvers achieved the highest CoNLL scores. Note
+that Persuasion is also the dataset on which the
+differences in CoNLL score between dd-utt and
+the other resolvers are the smallest. These results
+seem to suggest that the performance gap between
+dd-utt and the other resolvers tends to widen as
+the difficulty of a dataset increases.
+Next, consider the anaphor extraction results
+in Table 9. In terms of F-score, dd-utt lags be-
+hindUTD_NLP on two datasets, AMI and Switch-
+board. Nevertheless, the anaphor extraction pre-
+cision achieved by dd-utt is often one of the
+highest in each dataset.1133311334

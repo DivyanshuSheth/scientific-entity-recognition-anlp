@@ -1,1 +1,953 @@
-7123 Proceedings of the 2022 Conference on Empirical Methods in Natural Language Processing , pages 7123 7138 December 7 - 11 , 2022 © 2022 Association for Computational Linguistics 7124 7125 7126 7127 7128 7129 7130 7131 7132 7133 7134 7135 7136 7137 7138 
+
+Toru NishinoYasuhide MiuraTomoki TaniguchiTomoko Ohkuma
+Yuki SuzukiShoji KidoNoriyuki TomiyamaFujifilm CorporationOsaka University Graduate School of Medicine
+toru.nishino@fujifilm.com
+Abstract
+Radiology report generation systems have the
+potential to reduce the workload of radiolo-
+gists by automatically describing the findings
+in medical images. To broaden the applica-
+tion of the report generation system, the sys-
+tem should generate reports that are not only
+factually accurate but also chronologically con-
+sistent, describing images that are presented in
+time order, that is, the correct order. We employ
+a planning-based radiology report generation
+system that generates the overall structure of re-
+ports as “plans” prior to generating reports that
+are accurate and consistent in order. Addition-
+ally, we propose a novel reinforcement learning
+and inference method, Coordinated Planning
+(CoPlan), that includes a content planner and a
+text generator to train and infer in a coordinated
+manner to alleviate the cascading of errors that
+are often inherent in planning-based models.
+We conducted experiments with single-phase
+diagnostic reports in which the factual accuracy
+is critical and multi-phase diagnostic reports in
+which the description order is critical. Our pro-
+posed CoPlan improves the content order score
+by 5.1 pt in time series critical scenarios and
+the clinical factual accuracy F-score by 9.1 pt
+in time series irrelevant scenarios, compared
+those of the baseline models without CoPlan.
+1 Introduction
+Radiologists regularly write qualitative radiology
+reports to accurately describe the recognized find-
+ings in medical images. Recently, we can observe
+two different approaches to radiology imaging: a
+single-phase and a multiphase imaging method. A
+single-phase diagnostic approach, as applied in a
+plain X-ray machine, scans only once, while many
+modern procedures, including liver contrast CT,
+use a multiphase diagnostic method, scanning se-
+quentially in a period of several minutes. The time-
+dependent scans are labeled as phases . Reports of
+single-phase diagnoses are time series irrelevant,
+so the factual accuracy is the most critical qualityFigure 1: Comparison of reports of single-phase diag-
+nosis and multiphase diagnosis with time series.
+Figure 2: Overview of our planning-based report gener-
+ation system.
+consideration. However, reports of multiphase di-
+agnoses are time series critical, so a time-variable
+transition of lesions in the image must be correctly
+described with consistent description order. For
+example ,in Figure 1, a liver contrast CT report is
+composed to reflect the order of time series, with an
+arterial phase followed by a delayed phase; on the
+contrary, the chest X-ray reports are composed with
+no regard to timing because there are no phases.
+To broaden the application of report generation
+systems to multiphase diagnosis, the system should
+also become capable of generating reports that are
+written in consistent description order. Radiolo-7123gists intend to write high-quality radiology reports
+with consistent description order so that doctors
+can review and understand the radiology reports
+within a short time (European Society of Radiology
+(ESR), 2011). The existing studies (Monshi et al.,
+2020) can support single-phase diagnostics only,
+particularly in chest X-ray images. As mentioned
+in the limitation section of (Nguyen et al., 2021),
+contemporary studies face obstacles to generating
+reports with time series.
+This study aims to design an automated radiol-
+ogy report generation system that generates factu-
+ally accurate reports for time series irrelevant diag-
+noses and consistent description order reports for
+time series critical diagnostics. As shown in Figure
+2, we employ a planning-based report generation
+system that consists of three modules: image clas-
+sifier, content planner, and text generator. The con-
+tent planner generates the “plan,” which represents
+the content and description order of the reports, and
+then the text generator predicts accurate and consis-
+tent description order reports. Planning-based mod-
+els generate more faithful sentences without hal-
+lucination than end-to-end models (Ferreira et al.,
+2019).
+However, planning-based approaches have a crit-
+ical disadvantage; they cascade errors in modules
+within the system. To solve the error cascading
+problem, PlanGen (Su et al., 2021) employs a rein-
+forcement learning that encourages the generated
+output to adhere to the given content plan, and
+DYPLOC (Hua et al., 2021) uses multiple plan can-
+didates in the content realization process to reflect
+the dynamic nature of plans.
+We propose Coordinated Planning-based text
+generation (CoPlan), a novel unified framework
+that trains and conducts inferences on the content
+planner and text generator in coordination to gen-
+erate more accurate reports in a consistent order.
+CoPlan checks cascaded errors in the final output of
+the system with a report evaluator to generate more
+appropriate plans for creating accurate reports. We
+employ two types of report evaluators for CoPlan, a
+fact-based evaluator and a description-order-based
+evaluator, to generate factually accurate reports
+for time series irrelevant scenarios and consistent
+description order reports for time series critical sce-
+narios.
+The contributions of this study are as follows:
+•We present a planning-based report genera-
+tion framework to generate radiology reportswith a factually accurate and consistent de-
+scription order to broaden the application of
+the radiology report generation system to the
+multiphase diagnostics applications.
+•We propose CoPlan , which trains and con-
+ducts inference on the content planner and
+the text generator in a coordinated manner to
+generate correct and order consistent reports.
+We evaluate our proposed CoPlan in both time-
+series irrelevant and critical scenarios. The datasets
+of multiple languages and modalities are used: the
+JLiverCT dataset in which the reports are written
+with time series description and the MIMIC-CXR
+dataset (Johnson et al., 2019) containing time irrel-
+evant reports (i.e. only factual accuracy is critical).
+The results of the automatic and human evalua-
+tions show that our proposed method improves the
+accuracy of the dataset without times series and
+improves the consistency of the description order
+of the dataset with time series, compared to those
+of the models without CoPlan.
+2 Related Works
+Radiology Report Generation. Most radiology
+report generation studies (Monshi et al., 2020) pro-
+posed end-to-end systems that generate reports di-
+rectly from images. However, they still cannot gen-
+erate sufficiently accurate and consistent written or-
+der reports to replace the human radiologists, partic-
+ularly in the time series critical scenario. Kurisinkel
+et al. (2021) proposed a two-stage model that pre-
+dicts image representations for each sentence first
+and then decodes sentence-by-sentence to gener-
+ate reports in a more consistent order. TS-MRGen
+(Nishino et al., 2020) consists of an image classi-
+fier that reads images and a data-to-text module
+to control the findings that should be described in
+the reports. Our proposed system combines the
+advantages of the two methods mentioned above; it
+generates accurate reports in a consistent order and
+enables the radiologists to control the generation
+process in the system.
+Planning-based Text Generation. While current
+studies are primarily based on end-to-end neural
+text generation models, a neural planning-based
+approach that combines advantages of traditional
+pipeline text generation and neural text genera-
+tion is widely researched (Tang et al., 2022). Ma
+et al. (2019); Moryossef et al. (2019) conducted a
+planning-based neural data-to-text research which7124comprises text planning and text realization mod-
+ules to realize controllable and faithful text genera-
+tion. However, the cascading of errors is a known
+problem in planning-based models. Errors occur-
+ring in the text planning module significantly affect
+the quality of the output of the text realization mod-
+ule. Shen et al. (2020) proposed an end-to-end
+trainable planning-based model with segmentation
+and generation processes to address the error cas-
+cading problem. Su et al. (2021) proposed PlanGen,
+which applied a structured-aware reinforcement
+learning to cope with the cascading of errors. Plan-
+Gen uses the BLEU score between a gold sequence
+and a generated sequence as a reward to train the
+content planner so that PlanGen can directly train
+the content planner from the final output of the
+planning-based model. DYPLOC (Hua et al., 2021)
+uses multiple plan candidates to generate sentences
+in a text generator with content item conditioning
+based on the scores of the plan scoring network.
+We employed a unified framework that enables
+both training time and inference time to cope with
+error cascading. In addition, our CoPlan addresses
+factual accuracy and the description order-based
+output candidate quality estimator for both time
+series irrelevant scenarios and time series critical
+scenarios to select the best plans.
+3 Method
+Radiology report generation is a task of generat-
+ing reports comprising a sequence of sentences
+Y={Y, ...Y}, where Yrepresents a sequence
+of words Y={y, y, ...y}from a set of images
+X={x}. We annotated a set of finding la-
+belsF={f, f, ...f}for each set of images X.
+Further, we also annotated a subset of the described
+finding labels F={f, ...f}for each sentence
+Y. We define the plan Fas a list of subsets of
+finding labels F={F, ...F, ...F}.
+3.1 Text Generation system with Planning
+Unlike in an end-to-end system Y= P(X), our
+pipeline radiology report generation system com-
+prises three stages; image classifier (IC), content
+planner (CP), and the text generator (TG). Image
+classifier F= P(X)is a multi-class multi-label
+image classifier pretrained on ImageNet (Deng
+et al., 2009) to distinguish the finding labels F
+found in the image.
+The content planner F= P(F)generates
+a plan F, which represents the content and de-
+scription order of the reports. We use an LSTM
+encoder-decoder with attention (Bahdanau et al.,
+2015) as the content planner. We employ three
+simple constraints (Shen et al., 2020) during the
+inference phase of the decoder of content planner:
+1. Segments in a plan must not be empty.
+2.The same finding label cannot be realized
+more than once.
+3.The generation of a plan must not be com-
+pleted until all input finding labels have been
+realized.
+Constraints 2 and 3 contribute to the significant
+reduction of the repetition problem and the missing
+information problem because all finding labels in
+the input are guaranteed to be generated only once
+in the generated plan.
+The text generator Y= P(F)generates each
+sentence Yfrom the predicted plan Fsentence-
+by-sentence. We use T5 (Raffel et al., 2020) as
+the text generator. We treat the combination of the
+content planner and the text generator as the data-
+to-text (D2T) generation system Y= P(F).
+3.2 Coordinated Planning-based text
+generation (CoPlan).
+We propose Coordinated Planning-based text gen-
+eration (CoPlan), which trains and conducts infer-7125ence of the content planner and the text generator
+coordinately to address the error cascading prob-
+lems. CoPlan comprises two methods: (1) rein-
+forcement learning during the training phase and
+(2) coordinated inference with the beam search.
+Figure 3 shows an overview of CoPlan.
+CoPlan in Reinforcement Learning (CoPlan
+(RL) ). The error cascading problems are attributed
+to the independent training of the content planner
+and the text generator. The training of the con-
+tent planner does not consider the text generator’s
+final output; therefore, the content planner can gen-
+erate inappropriate plans that cause errors in the
+generated reports. Further, there are several plan
+candidates for one correct report. Reinforcement
+learning (RL) is appropriate for these characteris-
+tics of the plan generation. Liu et al. (2019a) ap-
+plied RL with clinically coherent rewards to train
+the text generator.
+We introduce CoPlan in Reinforcement Learning
+(CoPlan (RL) ), which uses an estimated quality of
+the generated reports as a reward for the RL of the
+content planner. CoPlan (RL) leverages the esti-
+mated quality of the final output of the system, such
+as factual accuracy, to train the content planner, the
+first stage of the planning-based modules. There-
+fore CoPlan (RL) can train the content planner to
+alleviate the cascading of errors.
+The procedure of CoPlan (RL) is as follows.
+First, the text generator generates the report based
+on the plan predicted in the content planner. Sec-
+ond, a report evaluator (RE) calculates the quality
+of the generated reports and then uses it as a reward
+for the RL of the content planner. We adopt SCST
+(Rennie et al., 2017) to approximate this loss as:
+L=λL+ (1−λ)L(1)
+∇L≈−∇logP(ˆY)(R( ˆY)−R(ˆY))(2)
+where Lindicates a cross-entropy loss, ˆYrep-
+resents a sequence generated by a Monte Carlo
+sampling, ˆYis a sequence greedily generated,
+R(ˆY)represents the reward regarding the gener-
+ated report ˆY, and λis a hyperparameter.
+We employ a report evaluator (RE) to quantify
+the quality of generated reports and use estimated
+scores as the reward R(ˆY). In this study, we use a
+reconstructor REC( ˆY)as the report evaluator. The
+reconstructor predicts the appropriate finding labels
+or description order from the generated reports in
+reverse, so it allows the report evaluator to quantify
+the clinical correctness.We use two types of reconstructors to estimate
+the quality of the report: the factual accuracy-
+estimation reconstructor RECand the descrip-
+tion order consistency-estimation reconstructor
+REC. For the factual accuracy-estimation re-
+constructor REC, we use fine-tuned ELEC-
+TRA (Clark et al., 2019) to predict finding labels
+from the reports, and an F-score of the predicted
+finding labels against the input finding labels is
+used as a report score. For the description order
+consistency-estimation reconstructor REC, we
+use fine-tuned T5 to predict the description order of
+finding labels. The Damerau-Levenshtein Distance
+(Brill and Moore, 2000) between the sequence of
+input finding labels and the predicted labels are
+treated as a report score.
+To stabilize the training of RL, we append the
+ROUGE scores to the reward to avoid the sparsity
+of the reward.
+The overall reward R(ˆY)regarding generated
+report ˆYis formulated as follows:
+R(ˆY) = λROUGE( Y,ˆY)
++(1−λ)REC( ˆY) (3)
+CoPlan in Beam Search (CoPlan (BS) ). In addi-
+tion to the RL, we introduce CoPlan (BS) in which
+the content planner decodes plans using the beam
+search in the inference phase in a coordinated man-
+ner. The output correctness is crucial for the prac-
+tical use of medical systems, and thus, the system
+should avoid the risk of missing or incorrect de-
+scriptions. CoPlan (BS) aims to detect the errors
+in the outputs and correct them by modifying the
+plan used to generate them.
+The content planner with CoPlan (BS) predicts
+the plan ˆF={ˆf, ...,ˆf}in accordance with
+the factual accuracy or the consistent description
+order of the generated report ˆY. The scores of
+report evaluator are added to the scoring function
+of the beam search. The recursive algorithm of the
+beam search is formulated as:
+ˆf=<BOP >
+ˆf= argmaxlogp(F|F) +λRE(ˆY)(4)
+where RE(ˆY)represents the scores of the report
+evaluator for ˆYgenerated by P(ˆF)during the
+decoding step of beam search. λis a hyperparam-
+eter. ˆfdenotes the predicted finding labels in time
+stept, and Bindicates the candidate plans in the
+search space.7126
+RECandRECin CoPlan (RL) are also
+used as the report evaluator RE(ˆY)of CoPlan
+(BS).
+4 Experiments
+4.1 Datasets.
+We used two datasets with different modalities and
+languages: JLiverCT for the time series-critical
+scenario and MIMIC-CXR for evaluating the time
+series irrelevant scenario. Table 1 presents the basic
+statistical features of the datasets. The details of
+these datasets and ethical policies are included in
+the Appendix for reproducibility.
+The JLiverCT dataset. For the JLiverCT dataset,
+we collected radiology reports of liver lesions from
+a hospital and extracted 1,083 reports. All extracted
+reports had at least one description of findings re-
+garding liver lesions and at least two descriptions
+describing a time series.
+The JLiverCT dataset contains pairs of input sets
+for finding labels and target radiology reports writ-
+ten in Japanese. Following LI-RADS (Chernyak
+et al., 2018), we defined 65 types of finding labels
+and seven time series. We define the finding labels
+as a combination of time series, findings, and le-
+sion conditions. For example, the presence of “ring
+enhancement” in the arterial phase is indicated as
+(Arterial, Ring_Enhancement, P), and the weak
+enhancement in the delayed phase is indicated as
+(Delayed, Enhancement, Weak). The time series
+represents a chronological order of scan timing: the
+first scan timing is “arterial phase,” followed by the
+“early phase,” “equilibrium phase,” “delayed phase,”
+and so forth. The status of the lesion indicates
+the degree of findings, such as “weak” or “strong,”
+in addition to “positive” or “negative,” which con-
+tributes to the estimated extent of the disease.
+Annotators with sufficient knowledge of radiol-
+ogy reporting have manually annotated the finding
+labels in the reports. We focused only on the find-
+ings in the reports, so sentences unrelated to any
+finding labels were omitted from reports becauseof privacy concerns.
+The MIMIC-CXR dataset. The MIMIC-CXR
+dataset includes chest X-ray images and the corre-
+sponding radiology reports written in English. We
+used the 14 categories of finding types defined in
+the CheXpert Labeler (Irvin et al., 2019). The orig-
+inal MIMIC-CXR dataset does not contain plan
+labels, so we have annotated the MIMIC-CXR
+dataset using the CheXpert labeler to obtain plans
+of the reports following the order that appeared
+in the report. The finding label fis defined as
+a combination of finding type and polarity. Four
+polarity types are defined; abnormalities (indicated
+as P), normalities (indicated as N), uncertain find-
+ings (indicated as U), and no mentioned findings
+(indicated as X). For example, the label “(Pleu-
+ral_Effusion, P)” is annotated to the report if the
+finding suggests pleural effusion.
+Doctors are required to write concise and infor-
+mative radiology reports, and they reflect their in-
+tention to write the reports by selecting the critical
+finding to be described in the reports or otherwise.
+In a few cases, doctors intentionally wrote normali-
+ties in the report to emphasize the absence of the
+finding, and in other cases, doctors intentionally
+omit the description regarding normalities. The
+former case is labeled as “negative” findings, while
+the latter is labeled as “no mention.”
+4.2 Models
+Details of models, hyperparameter searches, train-
+ing procedures, and the accuracy of reconstructors
+trained in advance are described in the Appendix
+C.
+Models for the JLiverCT Dataset. We use LSTM
+as the content planner, T5as the text generator
+and the reconstructor REC, and ELECTRAas
+the reconstructor REC.
+Models for the MIMIC-CXR Dataset. The im-
+age classification model (IC) for the MIMIC-CXR
+dataset is a four-class multi-label classification task
+which diagnoses four polarity types for each find-
+ing type from images. We trained the 4-class IC
+with the annotated 4-class MIMIC-CXR dataset.
+The 4-class IC predicts a set of probabilities of all
+four types of polarity (abnormalities, normalities,7127uncertain, and no mention) for each finding label; it
+passes three types of labels other than the no men-
+tion label to the D2T module. We use EfficientNet-
+B4 (Tan and Le, 2019) in the multi-class multi-label
+classifier pretrained on ImageNet.
+We use LSTM as the content planner, T5-baseas the text generator, and ELECTRAas the
+reconstructor REC. Only RECare used as
+the reconstructor of CoPlan because reports in the
+MIMIC-CXR dataset are time series irrelevant.
+4.3 Definition of the Evaluation Metrics.
+In addition to the NLG metrics, such as BLEU
+(Papineni et al., 2002), BERTScore (Zhang et al.,
+2019), and ROUGE (Lin, 2004), we deploy a clini-
+cal factual accuracy metric in Miura et al. (2021)
+and Content Ordering (CO) metric (Wiseman et al.,
+2017) that quantifies the consistency of the descrip-
+tion order of the reports. The description order not
+only indicates a chronological order but also relates
+to the clinical importance where the important find-
+ings of a report are likely to be written in the earlier
+parts of the report. CO metrics are commonly used
+to quantify the correctness of description order in
+the data-to-text research area, so we evaluated the
+generated reports with CO. The finding labels in
+the reports are extracted with the orders of the cor-
+responding descriptions, and subsequently, CO is
+calculated as the normalized Damerau-Levenshtein
+Distance between the extracted labels of the pre-
+dicted and the gold reports. CO can estimate the
+description order accurately based on the content
+of the reports rather than the surface-based metric
+in Kurisinkel et al. (2021). Details of these metrics,
+testing, and labeler are described in the Appendix
+C.
+5 Experimental Results
+We conducted two types of experiments: the D2T
+experiment for evaluating the D2T module and the
+E2E experiment for evaluating the entire system.
+5.1 Effect of Planning and CoPlan
+Result on the JLiverCT Dataset. We conducted
+a D2T experiment using the JLiverCT dataset to
+evaluate the effect of the planning and CoPlan on
+thetime-series critical scenario . We applied twotypes of reconstructors for CoPlan: REC(in-
+dicated as CoPlan) and REC(indicated as
+CoPlan). We prepared three baseline models
+to calibrate our results: template-based generation
+(Template ), nearest-neighbor search method ( 1-
+NN) (Boag et al., 2020), and T5 model in which
+the labels are fed in chronological order ( T5-base ).
+An automatic evaluation result of Table 2 indi-
+cates that CoPlanachieved the best BLEU4 and
+CO scores among all and the best factual accuracy
+among all neural-based models. CoPlanpre-
+dicts better plans than CoPlan; this results in
+the improvement in the factual accuracy as well as
+content order scores. The template was the most
+factually accurate, but the corresponding reports
+were inappropriate because of unnecessary redun-
+dancy. Additionally, the average length was longer
+than text generation models. According to the ra-
+diologists consulted, they focus significantly on
+concise and consistent description order reports in
+addition to the factual accuracy; therefore, neural-
+based generation models are preferred. On the
+contrary, reports generated by T5 tend to be short
+and omit important descriptions. Because of the im-
+balanced nature of the JLiverCT dataset, a plain T5
+model causes omission problems, but the planning
+models effectively reduce omissions.
+Comparison of Report Evaluator Ablation
+study of Table 2 shows a comparison of report
+evaluator type between RECandREC.
+CoPlan(RL)contributed to the improvement of
+both factual accuracy and content ordering scores,
+while CoPlan(RL)slightly improved factual
+accuracy. For the time series critical scenario, gen-
+erated plans with appropriate ordering tend to be
+similar to the gold plans in training data, so this
+results in improving the factual accuracy of the text
+generator.
+From Table 2, we assumed that RL with fac-
+tual reward CoPlan(RL)has no effect on the
+factual accuracy. To investigate the effect of RL
+with factual reward, we further compared the plain
+planning-based model with CoPlan(RL)with-
+out the constraints mentioned in Sec 3.1. Without
+constraints, CoPlan(RL)improved the factual
+accuracy by 1.3 pt compared to Planning. There-
+foreCoPlan(RL)clearly improves the accu-
+racy of reports, but the constraints concealed the
+effect.
+Result on the MIMIC-CXR Dataset. Addition-
+ally, we conducted a D2T experiment using the7128
+MIMIC-CXR dataset to evaluate the effect of
+the planning and CoPlan with RECon the
+time-series irrelevant scenario . We compared our
+CoPlan with the T5-base and a plain planning
+model without CoPlan. We applied only reconstruc-
+torRECfor CoPlan (indicated as CoPlan)
+because the factual accuracy is the most critical for
+the time series irrelevant scenario.
+Table 2 shows the results of the D2T experi-
+ment. Both CoPlan(RL)andCoPlan(BS)
+improve factual accuracy; CoPlanfurther im-
+proves factual accuracy. However, the surface-
+based metrics (BLEU4, ROUGE) are slightly de-
+creased. The differences in BLEU and ROUGE
+are because the reports of CoPlan are redundant, as
+shown in Avg.Len in Table 2.
+These results on the JLiverCT and MIMIC-CXR
+indicate that our CoPlan improves the quality of
+generated reports for both time series critical and ir-
+relevant scenarios, provided that a report evaluator
+is selected correctly.
+5.2 Comparison with Previous Studies
+We conducted an E2E experiment on the MIMIC-
+CXR dataset to evaluate the entire system. We
+compare our CoPlan with four previous studies:CoAtt (Jing et al., 2018), which comprises of
+hierarchical LSTM with auxiliary tag prediction
+task, R2Gen (Chen et al., 2020), which uses
+memory-driven transformer, IFCC (Miura et al.,
+2021), which applies RL with NLI-based rewards,
+R2GenCMN (Chen et al., 2021), which deploys a
+cross-modal memory network to enhance encoder-
+decoder model, and R2GenRL (Qin and Song,
+2022), which applied RL with NLG metrics.
+Table 3 shows a result of the E2E experiment. In
+surface-based metrics, such as BLEU scores, our
+proposed system has a slightly lower score than
+R2Gen and IFCC. However, in clinical-based met-
+rics, our proposed system improves the scores of
+factual accuracy and CO. The results show that our
+proposed model can generate reports with a more
+correct and consistent description order compared
+to end-to-end systems.
+5.3 Human Evaluation
+We conducted a human evaluation to validate the
+effect of CoPlan. We used three human evaluation
+metrics for the JLiverCT dataset: correctness, flu-
+ency, and content order metrics. Only correctness
+and fluency are used for the MIMIC-CXR dataset
+because of the time series irrelevant scenario. Cor-7129
+rectness measures how well a report describes its
+clinical information. We define the correctness
+of reports as an F-score between the finding la-
+bels observed in a generated report and the labels
+contained in the corresponding gold report. The
+fluency score evaluates the naturalness of the gener-
+ated reports with a 5-point Likert scale. Annotators
+extract the positions of descriptions regarding any
+finding labels in the gold report and the generated
+report; then, these positions are used to calculate
+the normalized Damerau-Levenshtein Distance to
+obtain the content order score. Two experts for
+the JLiverCT and six experts for the MIMIC-CXR
+dataset who are knowledgeable in radiology reports
+measured 100 randomly selected reports, as in pre-
+vious research (Zhang et al., 2020).
+Table 4 shows a human evaluation result in the
+JLiverCT and the MIMIC-CXR dataset. Our pro-
+posed CoPlan is effective on both the correctness
+and content order of the generated reports; however,
+the fluency is slightly decreased in the MIMIC-
+CXR dataset. The redundancy of the generated
+reports caused this drop of the fluency.6 Discussion
+6.1 Qualitative Results
+The middle section of Table 5 presents examples
+of the generated reports with T5, Planning with-
+out CoPlan, and CoPlan of the JLiverCT dataset
+in the D2T experiment. In the reports generated
+using T5, several descriptions of the input finding
+label are omitted. The report by Planning without
+CoPlan has no omissions or missing findings, but
+the repetition resulted from the poor plan. The
+two sentences regarding the findings in the same
+phase “arterial phase” should be combined to one
+sentence to generate a concise and informative re-
+port. However, the reports generated by CoPlan
+are written in a consistent order without any omis-
+sion. This shows CoPlan can generate reports with
+a description order consistent with the gold report.
+6.2 Importance of Normality and Uncertain
+Labels.
+We further analyzed the clinical accuracy scores
+for each type of finding label to observe the dif-
+ferences in the modality of the finding labels. In
+addition to the 4-class IC in Sec 4.1, we employed
+a 2-class IC trained by the 2-class MIMIC-CXR
+dataset. The 2-class MIMIC-CXR dataset was an-
+notated with VisualCheXBERT (Jain et al., 2021b),
+and two polarity labels were annotated: positive or
+negative findings. The 2-class IC predicts a set of
+probabilities of two types of labels (positive and
+negative) for each finding label; it passes only the
+positive labels as abnormalities to the D2T module.
+Table 6 shows a comparison of the 4-class IC
+and the 2-class IC. A large discrepancy between
+4-class IC and 2-class IC indicates a difference be-
+tween the findings shown in the radiology images7130
+and those described in the reports. For a concise
+and informative report, radiologists intentionally
+omit some apparent findings and obscure descrip-
+tions (Jain et al., 2021b), and thus, the findings
+described in the reports deviate from the findings
+in the images, particularly for the 4-class IC.
+The right section of Table 3 shows the factual
+accuracy of the reports generated by the label type.
+Gold IC + CoPlan indicates the upper bound of
+the performance of the D2T module when the gold
+classification results are provided. The results of
+the 4-class IC + CoPlan and 2-class IC + CoPlan
+are significantly lower than those of the Gold IC
++ CoPlan; this is because it is difficult for IC to
+distinguish normalities and uncertain labels signif-
+icantly affected by the intentions of radiologists.
+The 2-class IC cannot predict negative and uncer-
+tain labels, and therefore, the 2-class IC + CoPlan
+merely generates the description of normalities and
+uncertain findings. Regarding the adequacy of ab-
+normalities, the 4-class IC + CoPlan is lower than
+that of the 2-class IC + CoPlan because the 4-class
+IC is severely affected by the presence of normali-
+ties and uncertain findings.
+This result indicates that the all fully-automated
+radiology report generation systems have a limi-
+tation to generate descriptions about normalities
+and uncertain finding labels without the intentions
+of doctors. The radiology report generation sys-
+tems must comply with the intentions of doctors tocorrectly generate descriptions before applying the
+radiology report generation systems in practice.
+7 Conclusion
+We proposed a planning-based neural radiology
+report generation method for generating reports
+with the consistent description order on top of the
+factual accuracy of the content.The results of the
+evaluations in both time series critical and time se-
+ries irrelevant datasets revealed that our proposed
+CoPlan improved both the factual accuracy and con-
+sistency of the description order of the generated
+reports. However, as shown in Sec. 6.2, all radi-
+ology report systems have a limitation to generate
+descriptions regarding normalities without doctors’
+intentions. In the future, we will combine our sys-
+tem with a human-in-the-loop approach that can
+reflect doctors’ intentions to co-create high-quality
+reports in a short time.7131A Limitations
+We recognize that this system currently targets sup-
+port the workflow of radiologists , not substituting
+the role of a radiologist in the entire workflow.
+From the discussion of Sec. 6.2, the report gen-
+eration systems without any intervention from doc-
+tors have an obstacle to generating reports in which
+the intention of doctors is adequately reflected. A
+human-in-the-loop system that enables the work-
+flow composed of suggested generated candidate
+reports, corrects predicted plans by radiologists,
+subsequently completes reports, reflecting the in-
+tention of doctors. Our planning-based radiology
+report generation system can easily build a human-
+in-the-loop system that can reflect doctors’ inten-
+tions because it uses discrete representations for
+the plans; this is a great advantage of our approach
+compared to the existing systems. Radiologists can
+check and correct the result of the image classi-
+fier or the content planner, and this strategy exces-
+sively reduces the risk that the system errors could
+threaten the life of patients while contributing to
+the reduction of the radiologists’ workload.
+B Ethics Statement
+Both the JLiverCT dataset and the MIMIC-CXR
+dataset were de-identified to respect patients’ pri-
+vacy. We use the MIMIC-CXR dataset under the
+license of PhysioNet Credentialed Health Data Li-
+cense 1.5.0. On the distributed MIMIC-CXR
+dataset, all Protected Health Information (PHI) was
+removed to satisfy the US Health Insurance Porta-
+bility, and Accountability Act of 1996 (HIPAA)
+Safe Harbor requirements (Johnson et al., 2019).
+Likewise, on our originally collected JLiverCT
+dataset, all personal information in the reports was
+removed to respect patients’ privacy. We extracted
+descriptions referring only to findings, and all other
+descriptions including medical examination num-
+bers and names of the patients are omitted. All
+radiographs and radiology reports used to con-
+struct the JLiverCT dataset were collected under
+the agreement of patients or agents of patients, and
+the JLiverCT dataset and this research have been
+approved by the Institutional Review Board of the
+hospital and our institution.References713271337134C Appendix
+C.1 Dataset and Preprocessing
+JLiverCT Dataset. We constructed the JLiverCT
+dataset to train the data-to-text module of the ra-
+diology report generation system. We collected
+1,083 reports that indicate the diagnosis of liver
+contrast CT from a hospital. In the preprocess-
+ing phase, we omitted the sentences that did not
+describe the CT images’ findings to avoid violat-
+ing patients’ privacy. We annotated 65 types of
+finding labels, seven instances of time series, and
+lexicalized descriptions referring to the position
+and size of the nodules For training an LSTM-
+based text generation model, we used MeCab
+and mecab-ipadic-NEologd (Sato et al., 2017),
+to tokenize the reports, and for training the T5-
+based model, we used SentencePiece-based tok-
+enizer (Kudo and Richardson, 2018) trained on the
+Japanese Wikipedia dataset.
+the MIMIC-CXR Dataset. We used the MIMIC-
+CXR Dataset, which contains pairs of chest X-
+ray radiographs and free-text radiology reports. In
+the preprocessing phase, we extracted the finding
+sections of the reports using the scriptsand split
+the reports into train, validation, and test data based
+on the split distributed in the MIMIC-CXR-JPG
+(Johnson et al., 2019)dataset. In the training
+data, we truncated the sentences in the reports that
+were unrelated to any findings using the CheXpert
+Labeler and NegBio (Peng et al., 2018) parser to
+improve the stability of training the model. We
+omitted reports that did not mention any findings
+or had no finding sections from the training data.
+MIMIC-CXR Dataset for Image Classifier. To
+train the image classification module (IC), we anno-
+tated the MIMIC-CXR dataset with two automated
+labelers: VisualCheXBERT (Jain et al., 2021b),
+CheXBERT (Smit et al., 2020), and CheXpert La-
+beler (Irvin et al., 2019). We annotate a 4-class im-
+age classification dataset with CheXBERT, which
+can annotate 14 categories of labels with four polar-
+ities: abnormalities, normalities, uncertain, and un-
+seen. However, Jain et al. (2021a) reported that the
+accuracy of annotations with CheXpert Labeler is
+lower than that of a system including human expert
+annotations, in terms of normalities and uncertain
+labels. We annotated a 2-Class image classification
+dataset with VisualCheXBERT which can annotate
+14 categories of labels with two polarities: abnor-
+malities and other than abnormalities. Jain et al.
+(2021b) trained VisualCheXBERT with both report
+labels and image labels to annotate more accurate
+labels. VisualCheXBERT adopts the ZeroOne strat-
+egy, which maps the uncertain and unseen labels to
+positive (abnormalities) or negative labels. There-
+fore, VisualCheXBERT can annotate labels more
+accurately than CheXpert Labeler, but it cannot
+annotate normalities and uncertain labels.
+the MIMIC-CXR Dataset for the Data-to-Text
+module. We annotated finding labels and plans
+to the MIMIC-CXR dataset with the CheXpert
+Labeler (Irvin et al., 2019) to train the data-to-
+text module. We define the plans F as fol-
+lows: F={F, F...F},F={f, ...f}
+for each sentence Y. For example, we anno-
+tated the plan “(Lung_Opacity, P) <SEP> (Pleu-
+ral_Effusion, N)”to the report “There is a new opac-
+ity in the left lobe. No pleural effusion.”
+However, the original CheXpert Labeler cannot
+extract the finding labels with their positions men-
+tioned in the report. We modified the extraction
+process inside the CheXpert Labeler to include the
+described position of a lesion as written in the re-
+port and annotated the labels accordingly for each
+sentence in the report. We omitted annotated sen-
+tences with no finding labels because these descrip-
+tions cannot be generated from input images.
+For calculating CO metrics, we utilized the
+CheXpert Labeler for MIMIC-CXR, and the orig-
+inal rule-based labeler was used for the JLiverCT
+to extract the finding labels with the corresponding
+descriptions’ orders.
+C.2 Training Details
+Image Classifier (IC). All images were fed into a
+network of the size of 256×256pixels. We defined
+the loss as the sum of the multi-class class-balanced
+cross-entropy loss (Cui et al., 2019) and used the7135
+RAdam (Liu et al., 2019b) optimizer with a learn-
+ing rate of 1.0×10. We applied label smooth-
+ing (Müller et al., 2019) with the hyperparameter
+α= 0.1. Table 11 presents hyperparameters used
+to train the image classifier. We manually tuned
+all hyperparameters on the validation set of the
+MIMIC-CXR dataset, and the models with high-
+est F-scores REC( ˆY)were selected as the best
+model. Table 10 presents F-scores for each finding
+label in the MIMIC-CXR dataset.
+It is worth mentioning that specific studies in-
+clude two or more diagnostic images (e.g., frontal
+and lateral images) in one report. First, the image
+classifier estimates the predicted scores of finding
+labels for each image in one study, and then, the av-
+erage scores of the images are calculated to obtain
+the classification result for the entire study. To deal
+with the imbalanced nature of the MIMIC-CXR
+dataset, we optimized the threshold of the output
+probability scores of the classification model for
+each finding label. We evaluated the validationset with the threshold values between 0.0 to 1.0 in
+increments of 0.05 and then determined the thresh-
+old values which achieved the best F-scores as the
+threshold for the IC module. Table 11 presents
+hyperparameters used to train the image classifier.
+We manually tuned all hyperparameters on the val-
+idation set of the MIMIC-CXR dataset, and the
+model with highest F-score was selected as the best
+model.
+Data-to-Text Module We used T5-small model
+provided by Huggingfacefor the text generator
+of the MIMIC-CXR and T5-Japanese-base model
+for the text generator of the JLiverCT dataset. Ta-
+ble 8 and Table 9 present hyperparameters used
+to train the content planner and the text genera-
+tor. We manually tuned all hyperparameters on the
+validation set of the datasets, and the models with
+highest report evaluator scores REC( ˆY)were se-
+lected as the best model. The number of parame-
+ters of the data-to-text module was 220M for the
+JLiverCT dataset and 61M for the MIMIC-CXR
+dataset. We used an Intel Core i9-9900K CPU
+and NVIDIA GTX 2080 GPU for training, and the
+training time was approximately 12h for the JLiv-
+erCT dataset and 40h for the MIMIC-CXR dataset.
+The ROUGE-L score of our CoPlan on the valida-
+tion set of the JLiverCT dataset is 60.6, and the
+ROUGE-L score of our CoPlan on the validation
+set of the JLiverCT dataset is 12.5, respectively.
+Reconstructor. We used the pretrained Japanese
+BERT modelto train the factual accuracy re-
+constructor RECand Japanese T5 modelto
+train the description order reconstructor REC
+for the JLiverCT dataset. We split the training data
+contained in the data-to-text module into 4:1 ra-
+tio and used the greater part as training data and
+the smaller part as validation data for the recon-
+structor. We used binary cross-entropy loss to train
+the model and applied Class Balanced Loss (CBL)
+(Cui et al., 2019) with β= 0.999to the BERT
+model REC. The number of parameters of the
+reconstructor was 110M for REC, and 247M
+forREC. We fine-tuned the model with five
+epochs and conducted 5-fold cross-validation to
+determine the hyperparameters. The F-score on the
+validation dataset was 99.4 for RECand 98.1
+forREC. We used an Intel Core i9-9900K CPU
+and NVIDIA GTX 2080 GPU for training, and the7136
+training time was approximately two hours.
+We used the pretrained ELECTRA-based model
+to train the reconstructor for the MIMIC-CXR
+dataset (Clark et al., 2019). We have split the train-
+ing data in the ratio 4:1, and we used the greater
+subset as the training data and the smaller one as
+the validation data for the reconstructor, which is
+analogous to the approach applied with the JLiv-
+erCT dataset. We used binary cross-entropy loss
+to train the model, and applied Class Balanced
+Loss (CBL) (Cui et al., 2019) with β= 0.999.
+The number of parameters of the reconstructor was
+110M. We fine-tuned the model with five epochs
+and conducted 5-fold cross-validation to determine
+the hyperparameters. The F-score on the validation
+dataset was 96.6. We used an Intel Core i9-9900K
+CPU and NVIDIA GTX 2080 GPU for training,
+and the training time was approximately 10 h.
+C.3 Execution Time for Inference.
+The execution time is crucial in the radiology report
+generation system for practical use. We calculated
+the execution time of our system trained with the
+JLiverCT dataset. In the end-to-end T5-Japanese-
+base model, the inference process incurred 0.4 sec-
+onds per report. However plain CoPlan model in-curred approximately 10 seconds to conduct infer-
+ence for one report. The slow inference process
+impedes the applicablity of the radiology report
+generation system.
+To generate the reports faster with the CoPlan
+model, we employed several techniques in the infer-
+ence phase. First, once the report evaluator quanti-
+fied the report quality score of a plan, the estimated
+report quality score was cached to avoid recalcu-
+lating the score. Radiology reports tend to be not
+very diverse in structure and sentence constructions.
+The same sentence structure, identified as a plan in
+our system, repeatedly appeared during the infer-
+ence phase; therefore, caching the scores can drasti-
+cally reduce the inference time of CoPlan. Second,
+the estimated quality scores RE(P(ˆF))are
+updated only when the separate token of the plan
+(“<SEP>”) is predicted. With these techniques,
+CoPlan performed inference for one report in 1.5
+seconds.
+C.4 Evaluation Settings.
+Following (Dror et al., 2018), we use an approxi-
+mate randomization testto evaluate the statistical7137
+significance (sample size is 1,000). We calculated
+Krippendorff’s alpha with the python Krippendorff
+library. Table 12 shows Krippendorff’s alpha
+scores for each metric on both the MIMIC-CXR
+and the JLiverCT datasets.
+Evaluation Metrics on the JLiverCT Dataset.
+For the automatic evaluation of the JLiverCT
+dataset, we used BLEU (Papineni et al., 2002),
+F-scores of ROUGE-L (Lin, 2004), and CRS as
+metrics. We used the Natural Language Toolkit
+(NLTK)to calculate the BLEU scores, and the
+ROUGE Python libraryto calculate the ROUGE-
+L scores.
+Evaluation Metrics on the MIMIC-CXR
+Dataset. For comparison with the previous im-
+age captioning approaches (Miura et al., 2021), we
+used BLEU-4 calculated by the NLTK library and
+BERTScore metrics (Zhang et al., 2019)library.
+DistilBERT is used to calculate the BERTScore
+aligning our experimental conditions with previous
+end-to-end research Miura et al. (2021). However,
+word-overlap-based metrics, such as BLEU, fail
+to assume the factual correctness of the generated
+reports. We compared the labels assigned in the
+CheXpert Labeler between the generated reports
+and gold reports to calculate the CheXpert accu-
+racy, precision, micro F-score, and macro F-score.
+Note that we conducted a report-level evaluation in
+the same manner as for Miura et al. (2021), differ-
+ent from an image-level evaluation in Chen et al.
+(2020).
+Details of the Annotators for the Human Evalua-
+tion. We outsourced a human evaluation task to the
+data annotation company with an adequate budget
+compared to the minimum wage in Japan. All six
+annotators for the MIMIC-CXR dataset and the two
+annotators for the JLiverCT dataset were Japanese
+but were also fluent in English and had substantial
+experience annotating medical corpora. Before re-
+questing the evaluation task, we demonstrated an
+instruction for the human evaluation (Table 13) and
+agreed on the evaluation’s purpose.
+To evaluate the report in the MIMIC-CXR
+dataset, all annotators complete the “Data or Speci-
+mens Only Research” course of the CITI programand received a certificate. This course deals
+with ethics of human subjects research and privacy-
+related matter to handle clinical datasets.7138

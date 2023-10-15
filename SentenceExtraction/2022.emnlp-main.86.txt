@@ -1,1 +1,786 @@
-1324 Proceedings of the 2022 Conference on Empirical Methods in Natural Language Processing , pages 1324 1341 December 7 - 11 , 2022 © 2022 Association for Computational Linguistics 1325 1326 1327 1328 1329 1330 1331 1332 1333 1334 1335 1336 1337 1338 1339 1340 1341 
+
+Minsoo KimYeonJoon JungDohyeon LeeSeung-won Hwang
+Abstract
+World models have improved the ability of rein-
+forcement learning agents to operate in a sam-
+ple efficient manner, by being trained to predict
+plausible changes in the underlying environ-
+ment. As the core tasks of world models are fu-
+ture prediction and commonsense understand-
+ing, our claim is that pre-trained language mod-
+els (PLMs) already provide a strong base upon
+which to build world models. Worldformer is a
+recently proposed world model for text-based
+game environments, based only partially on
+PLM and transformers. Our distinction is to
+fully leverage PLMs as actionable world mod-
+els in text-based game environments, by refor-
+mulating generation as constrained decoding
+which decomposes actions into verb templates
+and objects. We show that our model improves
+future valid action prediction and graph change
+prediction.Additionally, we show that our
+model better reflects commonsense than stan-
+dard PLM.
+1 Introduction
+In model-based reinforcement learning, world mod-
+els (Ha and Schmidhuber, 2018), being trained to
+predict plausible changes in the underlying environ-
+ment, has helped agents to quickly identify sensible
+or high-value actions. As a result, agents equipped
+with world models have outperformed state-of-the
+art model-free algorithms in Atari games, while
+drastically improving sample efficiency (Kaiser
+et al., 2019; Hafner et al., 2020).
+In this work, we focus on world modeling in text-
+based game (TBG) environments, in which play-
+ers and agents must perceive and interact with the
+world entirely through textual natural language. As
+such, they present several unique challenges (Côté
+et al., 2018; Hausknecht et al., 2019; AmmanabroluFigure 1: Model architecture of AWM-BART, illus-
+trating the dual world modeling tasks of JerichoWorld.
+BART encoder-decoder denoted in blue learns the future
+valid actions prediction task, while the one denoted in
+orange simultaneously learns the graph difference pre-
+diction task. The light yellow blocks denote generation
+constrained by a template, bringing generation closer
+to the target controlled sublanguage of the text-based
+game’s parser.
+and Riedl, 2021b): Aside from language under-
+standing itself, TBGs require dealing with an expo-
+nential action space: For instance, the action space
+size for Zork1, combining five words from a vocab-
+ulary of 697 words, is O(10). TBGs also require
+rich and accurate knowledge representations of lo-
+cations and objects, in order to facilitate navigation
+and interaction. Finally, solving TBGs requires
+commonsense reasoning, including understanding
+object affordance, and the causal ramifications of
+actions. The first dataset and model for learn-
+ing world models in TBGs were proposed by Jeri-
+choWorld (Ammanabrolu and Riedl, 2021b), and
+Worldformer (Ammanabrolu and Riedl, 2021a), re-
+spectively. Intuitively, large pre-trained language
+models (PLMs), make promising candidates for
+instantiating world models (Yao et al., 2020), as
+they are already trained to generate language in a
+much larger action space, e.g. O(40,000), as-
+suming a standard vocabulary of 40,000tokens,
+and context length of 512 tokens. While promis-
+ing, adapting PLMs to TBGs is non-trivial, as in1324TBGs, generated actions must be executable in the
+game environment. While we are not generating
+in a formal syntax as in semantic parsing, we are
+still constrained by a controlled sublanguage (Shin
+et al., 2021) , which is closer to natural language but
+follows a grammar defined by the engine’s parser.
+Furthermore, a world modeling task such as the
+valid action decoding task of JerichoWorld, re-
+quires predicting, from a particular world state, all
+future valid actions . In contrast, semantic parsing
+focuses on learning a one-to-one mapping between
+natural language and the controlled sublanguage.
+To encapsulate these challenges, we define a con-
+cept of actionability as the main objective of the
+valid action generation task of JerichoWorld, in
+that the model’s generation should be actionable
+in the TBG environment, by 1) conforming to the
+parseable controlled sublanguage, and 2) ensuring
+the generation of valid actions consistent with the
+commonsense governing the dynamics of the TBG
+environment. In this work, we focus on improving
+the actionability of the world model’s generations,
+focusing in particular on bringing the PLM’s com-
+monsense and reasoning capabilities to bear on
+world modeling tasks.
+We begin by building Worldformer-BART, an
+implementation of Worldformer based on BART.
+While successful, commonsense in PLM-based
+world models are not easily transferred to more
+formal forms, such as that of the controlled sub-
+language of TBGs. Motivated by these findings,
+we build a retrieval-augmented model which aims
+to enhance actionability by formalizing common-
+sense through templates, hence named Actionable
+World Model (A WM) . We show through experi-
+mental results that AWM-BART significantly im-
+proves actionability over Worldformer-BART. We
+also compare with augmenting trained models with
+a COMET-based commonsense filter, showing that
+our model outperforms such approaches.
+2 Background
+2.1 Text World Environments
+Text world environments are typically modeled as
+Partially-Observable Markov Decision Processes
+(POMDPs) (Côté et al., 2018; Hausknecht et al.,
+2019), defined by the tuple ⟨S, A, T, Ω, O, R, , γ ⟩.
+Respectively, each item in the tuple corresponds to
+the set of environment states, the text-based action
+that changes the game state according to a transi-
+tion function, the mostly-deterministic latent transi-tion function, observation conditional probabilities,
+the observations, i.e. the game’s text responses, the
+reward function, and the discount factor.
+While state-of-the-art agents can be trained on
+these environments using model-free RL algo-
+rithms, they often rely on large amounts of inter-
+action with the environment (Kaiser et al., 2019;
+Yarats et al., 2021). In contrast, model-based learn-
+ing proposes to learn a predictive model of the
+environment, also known as a world model , to aid
+an agent to learn the underlying dynamics of the
+game, and better predict which actions will lead to
+desirable outcomes. These approaches are closely
+inspired by research on human cognitive processes,
+which hypothesize that human decision-making is
+directly influenced by an internal predictive model
+of the future (Ha and Schmidhuber, 2018). For
+world models, recurrent neural networks are a suit-
+able solution to overcome the partial observability
+of the environment in POMDPs, and in text-based
+games environments, pre-trained language models
+are promising candidates.
+Popular text-based game environments include
+TextWorld (Côté et al., 2018), which provides
+procedurally generated environments, allowing
+for the complexity and content of the generated
+game to be variable, LIGHT (Urbanek et al.,
+2019), a large-scale crowdsourced text adventure
+game, whose dataset provides agent-to-agent di-
+alogs to study grounded social interactions, and
+Jericho (Hausknecht et al., 2019), a collection of
+32 diverse human-made interactive fiction games,
+covering a wide range of genres.
+2.2 JerichoWorld
+Different from the aforementioned environments,
+JerichoWorld (Ammanabrolu and Riedl, 2021b)
+is the first dataset specifically targeting the learn-
+ing of world models in text-based game environ-
+ments. JerichoWorld is generated by simulating
+playthroughs of Jericho games, based on human-
+generated gold walkthroughs, combined with ran-
+dom exploration to increase the coverage of the
+state spaces of games. Each example in the dataset
+is a tuple of the form, ⟨S, A, S, R⟩consisting
+of a previous state S, a transition action A, the
+next state S, and the observed reward R. A key
+feature of the dataset is that it maps text observa-
+tions to both knowledge graphs, which consist of a
+set of⟨s, r, o⟩tuples that reflecting the world state,
+and a set of valid actions . Valid actions in Jericho1325
+are actions recognized by the game’s parser that
+cause changes in the world state.
+Overall, there are 24,198 training instances from
+27 text games in multiple genres, and 7,836 heldout
+test instances from 9 additional games. Notably,
+the test set consists of a diverse set of never-before-
+seen text games, requiring zero-shot prediction of
+world modeling tasks. As the test games differ
+widely in terms of genre and structure, and are
+never seen during training, we follow the conven-
+tion in the literature to refer to these games as out-
+of-distribution games (Adhikari et al., 2020; Atzeni
+et al., 2021).
+2.2.1 JerichoWorld Tasks
+A state Sin each example of JerichoWorld consists
+ofO, V, G∈S, indicating the textual observa-
+tion, the valid actions, and the knowledge graph,
+respectively.JerichoWorld proposes two predic-
+tive world modeling tasks:
+The first task is to predict the future graph at time
+stept+ 1,G∈S, from O, V, G∈Sandthe transition action A. For the graph prediction
+task, we follow the simplification in Ammanabrolu
+and Riedl (2021a), to limit the task to predicting
+node additions, i.e. predicting the graph difference
+caused by additions, as these are sufficient to infer
+node deletions as well.
+The second task is to predict the set of future
+valid actions at time step t+ 1,V∈S, from
+O, V, G∈Sand the transition action A. In this
+work, we focus on the valid action prediction task,
+which we illustrate in detail in Table 1.
+2.2.2 JerichoWorld 2.0
+Since JerichoWorld is generated by simulating Jeri-
+cho games, to ensure there are no data artifact is-
+sues, we also provide an updated version of Jeri-
+choWorld. We follow the methodology in Am-
+manabrolu and Riedl (2021b) to generate the data,
+making sure to generate roughly the same num-
+ber of instances for each game, from the same
+human walkthroughs. Overall, there are 24,198
+training instances and 7505 test instances in our
+dataset. A comparison of the test sets can be
+found in Appendix A.4. Our dataset additionally
+provides templates and objects for all actions, as
+well as de-abbreviating commands from the human
+playthrough for consistency of commands.
+3 Preliminaries
+We now describe our base models in detail. We
+begin with a description of Worldformer, which
+forms the basis of our model architectures.
+3.1 Background: Worldformer
+Worldformer is a multi-task architecture designed
+to perform the dual world modeling tasks of Jeri-
+choWorld. The model consists of two BERT-based
+encoders and two randomly initialized transformer
+decoders. The first pair of encoder and decoder
+solves the future valid action prediction task, and
+the second solves the future graph prediction task.
+Both tasks are learned simultaneously via multi-
+task learning. Additionally, a domain-adaptive
+MLM task is used to further pre-train the encoders,
+and a domain-specific vocabulary and tokenizer
+built for Jericho is used for both encoders and de-
+coders. Ammanabrolu and Riedl (2021a) show that
+Worldformer achieves state-of-the art performance
+on both tasks.13263.2 Baseline: Worldformer-BART
+As a starting point for adapting PLMs as world
+models, we build a world model based on adapting
+BART with minimal changes. The model consists
+of two pre-trained BART models, arranged in a
+similar multi-task architecture to Worldformer. We
+finetune both BARTs directly, without any further
+pre-training or any changes to vocabulary or tok-
+enization, such as building a domain-specific vo-
+cabulary as in Ammanabrolu and Riedl (2021a),
+or limiting the softmax operation. We give a full
+description of the model below. For ease of no-
+tation, we divide BART into its encoder and de-
+coder components, where BARTandBART
+together compose the first BART encoder-decoder,
+andBARTandBARTcompose the second.
+Formally, the JerichoWorld example
+⟨S, A, S, R⟩yields two sets of input and
+target token sequences, X={x, ..., x}andY=
+{y, ..., y}. That is, for the valid action prediction
+task,⟨X, Y⟩=⟨O+ +V+ +A, V⟩, and for the
+graph prediction task, ⟨X, Y⟩=⟨G+ +A, G⟩
+where + +indicates string concatenation. During
+model operation, each BART encoder produces
+contextual encodings given their respective
+inputs, O=BART(O+ +V+ +A)and
+G=BART(G+ +A). As in Worldformer,
+the aggregation module produces the state vector,
+s=Agg(O,G)
+Without loss of generality, both tasks are mod-
+eled by the conditional distribution,
+P(Y|X) =/productdisplayP(y|y, s;BART(X))
+(1)
+and each BART encoder-decoder is trained to gen-
+erate the target sequence through maximum log
+likelihood loss, as follows:
+L= log P(Y|X)
+=/summationdisplaylogp(y|y, s;BART(X))(2)
+where pis modeled by corresponding BART.
+3.3 Motivation: Qualitative Study
+To motivate actionability objectives, we qualita-
+tively analyze Worldformer-BART, which is an ef-
+fective starting point for building actionable world
+models, but with three major types of actionability
+errors:•Object Localization and Inference (OLI) er-
+rors: We define these as reasoning errors
+wherein the model fails to track the current
+location of object(s), i.e. whether an object
+is found in the inventory, the surrounding en-
+vironment, or is not found at all. Examples
+include attempting to put a first aid kit down,
+before ever having picked it up, or trying to
+open a case of cigarettes after it is no longer
+in the player’s possession. These constitute
+false positive generated actions.
+•Object Affordance errors : These errors occur
+when an incorrect understanding of the affor-
+dance of objects leads the model to generate
+actions which are nonsensical or impossible.
+Examples include asking a library about a li-
+brary, attempting to drink out of an empty
+bucket, or looking with a net, etc. These also
+constitute false positive generated actions.
+•Insufficient Interaction Coverage : We define
+these errors as those in which, despite the
+presence of objects, the model’s generation
+is insufficient to enumerate all possible inter-
+actions with the objects. These errors can be
+caused by errors of reasoning, or by the inabil-
+ity of decoding schemes to generate with high
+coverage. Most false negatives fall into this
+category.
+We perform human analysis of 50 randomly sam-
+pled examples from the validation set. A subset of
+samples from the human analysis can be found in
+Appendix A.7. Of the analyzed samples, we find
+that ~33%, ~48%, and ~88% of samples exhibit
+each type of error, respectively. These results in-
+dicate that actionability for world models is not
+sufficiently satisfied by naive adaptation of PLMs.
+4 A WM-BART for Actionable World
+Model
+We now propose our model, which aims to im-
+prove the actionability of the BART-based world
+model. We decompose action generation as tem-
+plate selection and filling, aiming to capture two
+benefits: Through input-constrained decoding us-
+ing templates, we enhance the parseability of the
+world model’s generations. Furthermore, we posit
+that the inductive bias from templates will aid the
+world model to learn more accurate object affor-
+dance and object localization, improving common-
+sense.1327More specifically, BART now performs the
+task of generating the sequence of possible fillings
+Y={y, ..., y},Y={Y, ..., Y}of a
+template t∈T, of a Jericho game environment.
+Then, the template-conditional action generation
+task is reformulated as follows:
+P(Y|X, t)
+=/productdisplayP(y|y, s;
+BART(O+ +V+ +A+ +t)(3)
+The mask filling task is illustrated in Fig.1. The
+above formulation is advantageous in that the task
+of filling the masks of an action template brings
+the generation objective close to BART’s original
+objective. However, it does not address the issue
+ofchoosing an appropriate template to fill. We
+next describe how we employ multitask learning to
+utilize a single BART encoder-decoder as both a
+template retrieval and generation model.
+4.1 Template Retrieval
+In contrast to previous works utilizing template
+selection and filling (Hausknecht et al., 2019; Am-
+manabrolu and Hausknecht, 2020) for in-domain
+learning of agents, our aim is to build a model to
+generalize to any arbitrary set of natural language
+templates, as the world modeling tasks of Jeri-
+choWorld require zero-shot prediction on unseen
+games. Taking inspiration from recent advances in
+retrieval using neural models, we propose to extend
+BARTas a retriever. The goal of the retriever is
+to identify the subset of templates T⊆T,
+i.e. the templates defining the valid actions V,
+given the current world state Sand the transition
+action A. Therefore, we use the set of future valid
+actions, V, to extract the valid templates T.
+In the retrieval nomenclature, first and second-
+stage retrieval refer respectively to a fast and ef-
+ficient retrieval model to quickly identify a set of
+promising candidates, and a computationally ex-
+pensive but effective re-ranking model, which pro-
+duces fine-grained rankings over the smaller set of
+first-stage candidates. In our case, it is possible to
+adopt BARTas a dense first-stage retriever (Lee
+et al., 2019; Karpukhin et al., 2020), as well as a
+re-ranker (Nogueira et al., 2019). Note that in our
+setting, since we have access to the set of all pos-
+sible templates, and their number does not exceed
+300 for any environment, we forego the usage of afirst-stage retriever, and simply enumerate over all
+templates (on average around ~200).
+To learn the relevance score rbetween
+⟨O, V, A⟩and each template t∈T, for
+each template twe concatenate tto the en-
+coder input. The BART encoder operates as be-
+fore, but we now extract a summary vector as
+well as the contextual encodings, i.e. (O, o) =
+BART(O+ +V+ +A+ +t). Here, ocan be
+any pooled vector, and we choose the vector encod-
+ing of the EOS token. Similarly, we extract gas
+(G, g) =BART(O+ +V+ +A). These vec-
+tors are concatenated with state vector s, and fed
+to a re-ranking head, which computes the template
+relevance score r:
+r=P(l= 1;o⊕g⊕s) (4)
+where lindicates the ground truth label of template
+t. The re-ranking cross-entropy loss is defined as
+follows:
+L =−/summationdisplaylog(r)−/summationdisplaylog(1−r)(5)
+where Iare the indices of templates in T,
+andIare the indices of templates belonging
+to the complement set. The re-ranking objective
+enables the full utilization of the BART encoder to
+model fine-grained relationships between the input
+context and each template.
+4.2 Template Filling
+In addition to the template retrieval task, given
+template t, we use BART to generate the filled
+version of the template, with Pdefined in Eq. 3.
+L = log P(Y|X, t) (6)
+As per the definition in Eq 3, the same BART
+is shared between both retrieval and filling tasks,
+allowing efficient adaptation of BART to the target
+controlled sublanguage through multitask learning.
+We observe that conditioning the encoder alone
+with templates can effectively force the decoder
+to produce faithful fillings of the provided masked
+template. While template constraints intuitively
+improve the actionabillity of model generations in
+terms of parseability, we additionally expect that
+templates can provide a useful inductive bias for
+reducing OLI and Object Affordance errors. Our
+hypothesis is that, since the decoder is trained to
+fill only a single masked template at a time, this1328has the implicit effect of marginalizing out the ef-
+fect of other templates. To see why, consider the
+default decoding objective which treats all valid
+actions (generated from all t∈T) as a sin-
+gle sequence to be generated. This causes every
+action to be conditioned on other valid templates
+t∈T which appear at a previous position in
+the target sequence. In contrast, our template con-
+ditioned objective removes this effect, replacing it
+with a strong conditioning on the masked template,
+allowing the affordance relationship between tem-
+plate verbs and their corresponding objects to be
+learned efficiently. Finally, during inference time,
+the template retrieval module works as an effective
+filter which refines the action space to a promising
+subset, further reducing the room for error.
+4.3 Training
+In our experiments, we found it most effective to
+train the model in phases. In the first phase, we
+multi-task train the template filling task for action
+generation, together with the graph prediction task:
+L=L +L (7)
+Then, using the trained weights, we train on all
+losses simultaneously in the second stage:
+L=L +L +L (8)
+Note that, when training in the second phase, batch
+items vary depending on whether the template tin
+the input O+ +V+ +A+ +thas label l= 1, or
+l= 0. We activate the full loss only in the former
+case, and only activate L in the latter via a
+loss mask.
+4.4 Hard Negatives Mining
+Our retrieval formulation motivates our application
+of the technique of hard negative example mining
+to the template retrieval task. We supply hard nega-
+tives from a model trained with Eq. 8, as additional
+negative examples for Eq. 5. As we later show, hard
+negatives further improve the accuracy of rerank-
+ing, and the overall performance of valid action
+generation.
+5 Experiments
+We evaluate our models on the JerichoWorld mod-
+eling tasks.5.1 Metrics
+We report the F1 and EM metrics from Am-
+manabrolu and Riedl (2021b), where F1 is a har-
+monic mean of predicted precision and recall, while
+EM (exact match) checks for accuracy or direct
+overlap between the predictions and ground truth.
+The original dataset defines F1 and EM at two dif-
+ferent levels: token-level, and graph tuple-level.
+We focus on the tuple-level metrics, as they
+are the main metrics for the action task in Am-
+manabrolu and Riedl (2021a) . For the graph task, a
+tuple-level true positive occurs when all three items
+within an ⟨s, r, o⟩tuplematches a tuple within the
+ground truth graph. The same holds for the ac-
+tion task, where predicted and ground truth valid
+actions are likewise defined as ordered tuples of to-
+kens. The tuple-level metrics are stricter and more
+relevant for actionability, as EM match means the
+model generated an action correctly in its entirety,
+making the action executable by the game engine.
+5.2 Baselines
+We compare AWM-BART with the following mod-
+els:
+1.Worldformer-BART Action decoder from
+scratch is our reimplementation of World-
+former (Ammanabrolu and Riedl, 2021a). To re-
+produce Worldformer, which is a multi-task world
+model composed of pre-trained BERT encoders
+and transformer decoders, We initialized the action
+decoder weights from scratch, while keeping the
+rest of the BART pre-trained weights. Under such
+minor modification, we achieved similar results
+reported in original Worldformer.
+2.CALM (Yao et al., 2020) is a GPT-2
+based model finetuned to generate Vfrom
+O, A, O. While it does not directly train on the
+Jericho suite of games, it trains on on a dataset of
+426 human gameplay transcripts for 590 different
+text-based games, ClubFloyd.
+3.Worldformer-BART is our implementation of
+Worldformer based on BART, a simple adaptation
+of PLMs as world models.
+4.Worldformer-BART + COMETis a COMET-
+augmented version of Worldformer-BART. We use
+logits of a pre-trained COMET model to filter out1329
+actions, based on the commonsenseness of actions
+given the current observation and inventory.
+6 Results
+We report the results of our experiments in Ta-
+ble 2. Our Worldformer-BART performs on par
+with Worldformer on graph prediction, but shows
+improvement on action generation, due to the lever-
+aging of BART. Augmenting Worldformer-BART
+with a COMET-based filter fails to improve the
+action generation performance meaningfully, in-
+dicating that zero-shot adaptation of conventional
+commonsense PLMs to TBGs is challenging. Com-
+pared to CALM, our model is significantly better in
+action generation, indicating the importance of con-
+sidering actionability in adapting PLMs to TBGs.
+Our model was able to outperform all compared
+models in both tasks, achieving a significant im-
+provement in action generation.
+6.1 Ablation Study
+In order to validate the usefulness of each of our
+model components, we report the results of the
+ablation study in Table 3. We begin by compar-
+ing Worldformer-BART and AWM-BART trained
+with Eq. 8 without hard negatives (AWM-BART
+- hard negatives), where we observe that our pro-
+posed template-constrained architecture improves
+the learning of both tasks over Worldformer-BART.
+We next compare the two AWM-BART variants
+with and without hard negatives, which shows that
+while maintaining graph prediction performance,
+hard negatives significantly boost valid action gen-eration, by making the reranking head more robust
+and reducing false positives. Finally, we report the
+results from using an oracle template retriever with
+AWM-BART (AWM-BART + Oracle). We can see
+that our trained template retriever approaches the
+performance of the oracle retriever, which indicates
+that there are potentially more improvements to be
+gained by improving the decoder.
+6.2 Commonsense Study
+In order to scale the analysis from Sec. 3.3 to
+the entire test set, we build an automated, rule-
+based system for detecting the OLI and affordance
+errors. We validate the system on the human-
+annotated samples, where the system recovered
+91% of the human-annotated OLI and affordance
+errors. Implementation details are provided in Ap-
+pendix A.6. In Table 4, we report the results of the
+commonsense error analysis using the automated
+system. The purpose of this study is to determine
+whether the improved performance of AWM-BART
+is attributable to the model’s improved common-
+sense understanding. We compare our model with
+Worldformer-BART, and Worldformer-BART with
+a COMET filter.
+We find that the number of errors successfully
+filtered out by COMET was negligible, and was
+outpaced by the increase in the number of false
+negatives. In contrast, relative to Worldformer-
+BART, AWM-BART reduces OLI errors by ~47%,
+affordance errors by ~33%, and insufficient gen-
+eration coverage errors by ~24%. Taken in con-
+junction with the results on world modeling tasks,1330
+these findings lend support to our hypothesis that
+the template-constrained generation of our model
+enhances not only the parseability in a target con-
+trolled sublanguage, but improves the common-
+sense understanding of the PLM as a world model.
+While the results of AWM-BART are encouraging,
+our findings raise new questions about precisely
+what kind of commonsense is being captured by
+PLMs, and whether the conventional definition of
+commonsense in the literature is general enough
+to capture the varied ways in which humans can
+employ commonsense, as they do in TBGs.
+7 Related Works
+7.1 Template-based Action Space
+For in-domain generalization to a single-
+game setting, previous works such as
+LSTM-DQN (Narasimhan et al., 2015),
+TDQN (Hausknecht et al., 2019), and KG-
+A2C (Ammanabrolu and Hausknecht, 2020)
+have proposed using template-based action
+spaces in text-based games. Our distinction ofemploying templates, is to improve actionability of
+PLM-based world models. In particular, we design
+a template retrieval task which allows our model
+to generalize to any arbitrary set of templates,
+unlike previous works. Template retrieval plays
+a key role in ours, for generalizing to unseen,
+out-of-distribution games.
+7.2 PLMs for TBG
+While research adapting PLMs for TBGs is still
+in its early stages, there are notable works which
+have leveraged the linguistic, semantic and com-
+monsense priors of PLMs to TBG agents. DBERT-
+DRRN (Singh et al., 2022) proposes a single-game
+agent based on DistilBERT (Sanh et al., 2019)
+to improve the semantic understanding of agents,
+achieving state of the art on performance on sev-
+eral games in Jericho. CALM (Yao et al., 2020)
+trains a GPT-2 model to train a single model which
+can be deployed to generate actions across many
+different downstream games, and CALM is shown
+to improve the existing agents on unseen games by
+reranking action candidates to maximize rewards.
+Like CALM, we tackle generalizing PLMs to un-
+seen games, but our distinction is to consider ac-
+tionability as the key criterion in doing so. Our
+results show that actionability is indeed crucial in
+building PLM-based world models for TBGs.
+7.3 Commonsense in Text-based Games
+Prior works have proposed incorporating exter-
+nal commonsense knowledge to TBG agents.
+Dambekodi et al. (2020); Ryu et al. (2022) pro-
+pose to incorporate commonsense knowledge into
+a KG-A2C agent by augmenting its graph with
+commonsense inferences using COMET (Bosselut
+et al., 2019). Murugesan et al. (2021) propose to1331jointly leverage a commonsense knowledge graph
+directly retrieved from ConceptNet along with a
+textual graph. Ammanabrolu and Riedl (2019) pro-
+pose to use knowledge graphs to transfer common-
+sense across agents. Our distinction is to envision
+and enhance commonsense as an innate component
+of TBG world models.
+8 Conclusion
+In this work, we build world models based on
+PLMs. Towards leveraging semantic and linguis-
+tic priors learned by PLMs, we identified major
+areas in which PLMs need to be systematically im-
+proved, namely generation to a controlled sublan-
+guage, and commonsense understanding. We pro-
+pose an actionable world model based on template-
+augmented generation, showing that both parseabil-
+ity and commonsense understanding can be sig-
+nificantly improved. As future work, we consider
+combining PLM-based world models with reward-
+based agents to learn goal-directed policies as a
+promising direction. Finally, our hope is that our
+work will contribute to the active exploration of
+text-based games as an alternative testbed for fur-
+ther research on commonsense reasoning.
+Limitations
+A limitation of our work is that while we aim to
+adapt pre-trained language models as world models
+for text-based game environments, due to limited
+computational resources, we are not able to test
+our models on larger scales, and take greater ad-
+vantage of language model scaling laws (Kaplan
+et al., 2020). As such, our results should be un-
+derstood in terms of the intermediate-scale regime
+of PLMs. Nevertheless, we believe that actionable
+world models should keep efficiency as one of their
+core criteria.
+A second limitation is that in this work, our ex-
+periments have focused solely on data which origi-
+nates from the Jericho suite of games. While this
+is outside the immediate scope of this work, there
+are several other TBG environments which may be
+suitable candidates for learning PLM-based world
+models. While scaling to a greater number of TBG
+environments is a challenging task, we hold the
+view that the promise of world models in TBGs will
+be fulfilled by models which generalize to many
+environments across varying domains, structures
+and rules.Acknowledgements
+This work was partly supported by Institute of In-
+formation & communications Technology Planning
+& Evaluation (IITP) grant funded by the Korea
+government(MSIT) [NO.2021-0-01343, Artificial
+Intelligence Graduate School Program (Seoul Na-
+tional University)] and [(No. 2022-0-00077, AI
+Technology Development for Commonsense Ex-
+traction, Reasoning, and Inference from Heteroge-
+neous Data)].
+References13321333
+A Appendix
+A.1 Model Architecture details
+We use BART-base (Lewis et al., 2020) to build
+Worldformer-BART and AWM-BART. The overall
+parameters counts of the models are 320 million
+and 322 million, respectively, indicating a roughly
+~15% reduction relative to Worldformer, which has
+380 million parameters. We use BART’s default to-
+kenizer with the exception of adding several special
+tokens for usage as delimiters. All models generate
+with beam search decoding, using a beam size of
+15.
+A.2 Training details
+We use Adam optimizer (Kingma and Ba, 2015),
+with learning rate 3×10and batch size 16 to
+train our models. For AWM-BART, we first train
+with Eq. 7 for a single epoch, then continue training
+with Eq. 8, reducing learning rate by 1/10. For thelatter phase, to train the retrieval head, we randomly
+sample negative templates with 1:1 ratio between
+positive and negative templates. When applying
+additional hard negative mining, the mined tem-
+plates are added to the pool of randomly sampled
+negatives, increasing the total number of negative
+templates. We perform model selection based on
+the combined loss of all tasks on the validation
+set. Our models are trained using a single NVIDIA
+GeForce RTX 3090 Ti GPU, taking between 3 and
+5 hours per epoch.
+A.3 Original Worldformer Results
+As a reference, report the results reported in the
+original Worldformer, on the original JerichoWorld
+dataset in Table 5.
+A.4 JerichoWorld 2.0 Test set details
+In Table 6, we compare the the test sets of Jeri-
+choWorld 2.0 with that of the original, to confirm
+that the distribution of instances across of games
+remains consistent.
+A.5 Implementation COMET-based Score
+Filter
+We adopt an off-the-shelf COMET-BART
+model (Hwang et al., 2021) as a commonsenseness
+scorer. We follow the method in Bosselut et al.
+(2021); Ryu et al. (2022) to compute the score of
+a target sequence of tokens, based on COMET’s
+logits. We feed the current observation context and
+inventory, concatenated with the transition action
+and an ATOMIC2020 relation as the input to
+COMET, as done in Ryu et al. (2022). Each token
+in the target sequence, which is an action being
+evaluated, is then fed sequentially to COMET, to
+obtain model logits. We use the relations xNeed
+and xWant, averaging the two scores for each
+token, and the overall score of the action is given as
+the average over the tokens in the action. To filter
+out actions, we compute the mean and standard
+deviation of scores of all generated actions per data
+example, and drop outliers whose scores are more
+than 1 standard deviation lower than the mean.
+A.6 Implementation of Automated
+Commonsense Error Detector
+Based on our preliminary analysis, we develop a
+heuristic method for detecting commonsense errors
+defined in Sec. 3.3. We leverage the ⟨S, A, S⟩
+tuples in the dataset, to directly measure these er-1334
+rors automatically. Specifically, we detect the fol-
+lowing types of errors:
+•Object Localization and Inference errors :
+For false positive actions, 1. Predicted valid
+action attempts to interact with an object not
+present in the current environment or inven-
+tory. 2. Predicted valid action attempts to
+take object from the environment when it is
+expected to in inventory already, after the tran-
+sition action. 3. Predicted valid action at-
+tempts to put object down when object is not
+expected to be in inventory after the transition
+action. Furthermore, we build special heuris-
+tics for when the object in question is ’all’, as
+the game’s parser understands this as referring
+to all objects in either the environment or the
+player inventory, depending on the action.
+•Object Affordance Errors : After first filter-
+ing for OLI errors, we check an action for
+the following: First, we check that a false
+positive action has at least two noun phrases,
+such that an affordance between two objects
+can be established. Next, to account for id-
+iosyncrasies of the engine in terms of action
+validity (e.g. push lens to glasses is a valid
+action), we check that the action was not a
+valid action in the previous state. If the action
+passes both checks, we judge the action to
+be an affordance error (e.g. throw lantern at
+garlic )
+•Insufficient Iteraction Coverage : We con-
+sider all false negatives as these.
+To extract objects in predicted actions, we extract
+noun phrases using the Flair framework (Akbik
+et al., 2018). To check the existence of objectsin the environment, inventory and graph, we use
+simple string matching of the object name.
+A.7 Qualitative study samples
+In Tables 7 through 9, we show a subset of the
+dev set error analysis results, comparing the hu-
+man annotated errors with the annotation by our
+automated system.
+A.8 Examples of model predictions
+In Tables 10 through 14, we show several exam-
+ples of models’ valid action predictions on the
+test set. Worldformer-BART and AWM-BART are
+compared.1335133613371338133913401341

@@ -1,1 +1,856 @@
-10251 Proceedings of the 61st Annual Meeting of the Association for Computational Linguistics Volume 1 : Long Papers , pages 10251–10269 July 9 - 14 , 2023 © 2023 Association for Computational Linguistics 10252 10253 10254 10255 10256 10257 10258 10259 10260 10261 10262 10263 10264 10265 10266 10267 10268 10269 
+
+Jeremiah Milbauer, Annie Louis, Mohammad Javad Hosseini,
+Alex Fabrikant, Donald Metzler, Tal SchusterGoogle ResearchCarnegie Mellon University
+Abstract
+Transformer encoders contextualize token rep-
+resentations by attending to all other tokens
+at each layer, leading to quadratic increase
+in compute effort with the input length. In
+practice, however, the input text of many
+NLP tasks can be seen as a sequence of re-
+lated segments (e.g., the sequence of sen-
+tences within a passage, or the hypothesis
+and premise in NLI). While attending across
+these segments is highly beneﬁcial for many
+tasks, we hypothesize that this interaction
+can be delayed until later encoding stages.
+To this end, we introduce Layer- Adjustable
+Interactions in Transformers (LAIT). Within
+LAIT, segmented inputs are ﬁrst encoded in-
+dependently, and then jointly. This par-
+tial two-tower architecture bridges the gap
+between a Dual Encoder’s ability to pre-
+compute representations for segments and a
+fully self-attentive Transformer’s capacity to
+model cross-segment attention. The LAIT
+framework effectively leverages existing pre-
+trained Transformers and converts them into
+the hybrid of the two aforementioned architec-
+tures, allowing for easy and intuitive control
+over the performance-efﬁciency tradeoff. Ex-
+perimenting on a wide range of NLP tasks, we
+ﬁnd LAIT able to reduce 30-50% of the at-
+tention FLOPs on many tasks, while preserv-
+ing high accuracy; in some practical settings,
+LAIT could reduce actual latency by orders of
+magnitude.
+1 Introduction
+Although the meaning of a sentence may depend
+on the context in which it appears, sentences still
+have meaning per se . However, in tasks involving
+reasoning across multiple sentences or text seg-
+ments — like natural language inference (NLI),
+fact veriﬁcation, question answering (QA), seman-
+tic similarity (STS), etc. — the common setting
+is to concatenate and jointly process all tokenizedFigure 1: A comparison of three approaches to multi-
+segment modeling for an arbitrary claim veriﬁcation
+task. a) Fully-self attentive architecture, with each to-
+ken attending to each other token over Llayers. b) Gen-
+eralized dual encoder, with each segment encoded sep-
+arately by an L-layer Transformer and representations
+concatenated. c) Layer-adjustable interactions ( ours ),
+with N layers of independent segment encoding and
+L−Players of fully self-attentive segment encoding.
+segments as input to a neural model, most often
+some form of bidirectional Transformer-based ar-
+chitecture (Vaswani et al., 2017). In this setting,
+the self-attention blocks of the Transformer layers
+contextualize the per-token representations against
+all other input tokens, including those of differ-
+ent input segments. The potential for independent
+sentence-level semantics is largely ignored.
+While this practice has shown to achieve high
+accuracy, it is computationally expensive due to
+the quadratic increase in cost with the input length.
+And in practical settings, such as large-scale cita-
+tion retrieval (Petroni et al., 2022a) or document-
+level NLI (Koreeda and Manning, 2021), where
+a given segment may occur multiple times, the
+full Cartesian product of the sets of text segments10251must be processed, e.g., Schuster et al. (2022a)
+processes all sentence pairs from two Wikipedia
+articles around one subject but in two different lan-
+guages to identify potential discrepancies. This
+leads to yet another quadratic increase in cost. Our
+goal is to reduce both of these computational bur-
+dens, rendering transformer architectures more ef-
+ﬁcient for large-scale multi-segment reasoning.
+In this paper, we present LAIT (/le It/), a late
+interaction Transformer model with easy to im-
+plement Layer- Adjustable Interactions. LAIT in-
+cludes encoder layers that process each segment
+locally and independent of the other segments, fol-
+lowed by traditional Transformer layers, in a sim-
+ple but effective way. Unlike the late interaction
+components of other models, such as ColBERT
+(Khattab and Zaharia, 2020), which are speciﬁ-
+cally geared toward measuring a similarity score
+between two text segments, LAIT generally sup-
+ports any sequence-to-sequence task and any num-
+ber of input segments.
+LAIT enables several desirable properties for an
+efﬁcient encoder: it (1) is easy to train on top of
+existing pretrained language models; (2) readily
+supports any seq-2-seq task, and any segmenta-
+tion of the input; (3) improves the encoding ef-
+ﬁciency by skipping a large number of attention
+computations; (4) disentangles independent seg-
+ment representations from joint processing to al-
+low caching of intermediate segment representa-
+tions for repeated computations; and (5) provides
+an easy-to-tune hyperparameter for controlling the
+efﬁciency-performance tradeoff.
+2 Background: Full Self-attention vs.
+Dual Encoders
+A key strength of a fully self-attentive (FSA) archi-
+tecture, such as BERT or T5 (Devlin et al., 2019;
+Raffel et al., 2020) is the ability of each token in
+the input to interact with each other token in the
+input throughout all layers of the model. Although
+expensive, this type of architecture has shown im-
+pressive performance across a wide variety of NLP
+tasks such as those in the GLUE and SuperGLUE
+benchmarks (Wang et al., 2019b,a).
+A common alternative to FSA is the dual encoder
+(DE) framework (Gillick et al., 2018). With DE,
+two text segments are embedded independently,
+either by separate networks or by two networks
+that share parameters. A DE typically involves two
+encoders, Enc(·)andEnc(·), and a comparisonfunction Comp (·), and for a given pair of input
+segmentsq,d:score =Comp (Enc(q),Enc(d)).
+In practice, the two encoders can share parameters.
+DE is typically trained with a contrastive loss
+over a set of positive q,dpairs, with the goal of
+having the score of positive pairs greater than that
+of negatives. Therefore, DE is most suited for simi-
+larity tasks such as information retrieval.
+A speciﬁc advantage of the DE architecture for
+retrieval tasks is its ability to independently encode
+the two input segments. In practice, this allows
+encoding and storing many documents’ representa-
+tions in parallel in advance. Then, only new queries
+need to be encoded into a vector that can be used
+for retrieving the top similar documents from the
+pre-encoded corpus using efﬁcient methods such
+as maximum inner product search (MIPS).
+The method above, however, only supports simi-
+larity tasks or binary classiﬁcation tasks over input
+pairs. To expand this setting to multi-class tasks,
+prior approaches like Casanueva et al. (2020); Ni
+et al. (2022) add a classiﬁcation head with optional
+non-linear layers on top of the two encoded rep-
+resentations. Since the classiﬁer requires a ﬁxed-
+size input, the segment representations are aggre-
+gated (e.g., by taking the average over tokens, or
+by selecting a predeﬁned special token). While
+conceptually enabling any classiﬁcation task, the
+performance of such models is usually far behind
+the state-of-the-art (see Section 5).
+3 Layer-Adjustable Interactions
+We argue that both FSA and DE Transformer mod-
+els can be seen as special cases of a general ar-
+chitecture with adjustable layer depths for both
+segment-independence and segment-interaction,
+which we will call a “ Layer- Adjustable Interaction
+Transformer" (LAIT).
+For a Transformer with Llayers and an input
+withNsegments, LAIT is a set of Nindependent
+stacks ofPlayers each, followed by L−Pfully
+self-attentive encoder layers. Any function can
+be used after the encoder. Thus a typical fully
+self-attentive Encoder-Decoder Transformer is a
+LAIT where P= 0, and a shared-parameter dual
+encoder is a LAIT where P=LandN= 2. In
+the fully self-attentive Transformer, each token in
+each segment is interacting with each token in each
+other segment throughout the entire depth of the
+encoder; in a Dual Encoder, each segment is treated
+independently throughout the encoder.10252
+The LAIT framework allows us to make the core
+questions of this work precise: (1) to what extent
+are interactions across multiple input text segments
+necessary? And (2) If they are not always neces-
+sary, how can we take advantage of this fact to per-
+form multi-segment modeling efﬁciently at scale?
+Speciﬁcally, given an input Xwithmtokens
+that is split into nsegmentss...sof possibly
+different lengths, the LAIT encoder is deﬁned as:
+LAIT (s,s,...,s) =
+Enc([Enc(s);Enc(s);...;Enc(s)]),
+where [x;y]denotes concatenating vectors xandy,
+andEnc(·)denotes a Transformer encoder with
+Klayers.
+The rule for splitting the input into segments
+R(x,...,x)→s,...,sis predeﬁned for
+each task, based either on prior knowledge of the in-
+put structure, or on a simple segmentation function.
+For example, in NLI we can simply use the hypoth-
+esis and premise as two segments. In passage-level
+QA, we can use the question as one segment and the
+passage as another. However, splitting the passage
+into multiple shorter segments could help further
+reduce compute. For instance, we can split the pas-
+sage by sentences to ksegments, leading to a total
+ofk+ 1segments.
+ForP∈[0,L], LAIT interpolates between an
+N-Encoder model and a fully-self attentive Trans-
+former. Because interaction between segments is
+delayed, representations computed at layer Pof
+the model can be stored or cached for later reuse asthey are independently generated. Figure 2 demon-
+strates the basic LAIT architecture, as well as pos-
+sibilities for partial caching (for instance, multiple
+unique questions about the same passage), or full
+caching (for instance, NLI-based cross-document
+reasoning (Schuster et al., 2022a)).
+Similar to general text-to-text models, the out-
+puts of the LAIT encoder, consisting of mcontex-
+tualized representations for mtokens, are passed to
+the Transformer-decoder for generating the output
+sequence. Similarly, the decoder may be replaced
+with a classiﬁcation head, or any other module.
+3.1 Attention Complexity
+By ﬁrst processing text independently, and then
+processing the intermediate representations jointly,
+LAIT reduces the attention complexity within a
+Transformer in accordance with both the degree of
+independence (i.e., P) and the balance of length
+across segment inputs. We can calculate the num-
+ber of attention operations, O, for a given input to
+LAIT with the formula:
+O=O+O (1)
+O=P·/summationdisplay|s|(2)
+O= (L−P)·/bracketleftBig/summationdisplay|s|/bracketrightBig
+(3)
+where|s|denotes the length of segment iout ofn
+total segments for a given input.10253
+Ultimately, the number of FLOPs to process a
+single example will depend on the lengths of the
+input segments, the Transformer architecture used,
+and the degree of independence P. We discuss
+these practical details in Section 4.2, and Table 4.
+3.2 Training LAIT
+Thanks to LAIT not adding any new parameters
+to the Transfomer architecture, we can easily con-
+vert an existing Transformer to the LAIT frame-
+work and train it end-to-end with any objective. In
+this work, we focus on the T5 (Raffel et al., 2020)
+model since it is a general text-to-text Transfomer,
+and apply LAIT to the encoder stack. In our exper-
+iments here, since we focus on classiﬁcation tasks,
+we only keep a single decoding layer.
+Given an input with ntext segments, LAIT ﬁrst
+encodes and concatenates the segments. During
+encoding, a block-diagonal attention mask restricts
+attention between different text segments for the
+early layers of the model (denoted “parallel lay-
+ers"), and allows cross-segment attention for the
+later layers of the model (“joint layers"). Figure 3
+illustrates the block-diagonal attention mask used
+for parallel layers.
+This approach allows for parameter sharing
+while independently encoding the segments, as
+well as ﬂexibility for tasks with different numbers
+of input segments without needing to initialize ad-
+ditional models.4 Experimental Setting
+Below, we describe our evaluation setting, tasks,
+used metrics, and baselines.
+4.1 Implementation details
+We implement LAIT on top of the T5 model (Raffel
+et al., 2020) using Google’s T5x library (Roberts
+et al., 2022). In all experiments, we use T5-base
+which has a total of 12 encoder layers and 220M
+parameters. To reduce compute effort, we use only
+a single decoder layer for LAIT (See Appendix B.1
+for larger models). We load the parameters from the
+public pretrained checkpoint, and ﬁnetune on the
+target task for up to 100K steps with different LAIT
+conﬁgurations (value of P). We train LAIT on 16
+TPUv3 chips, taking about 4 hours per run. We
+run a small grid search over learning rate and batch
+size conﬁgurations, and pick the top performing
+checkpoint based on validation performance.
+4.2 Tasks and metrics
+We experiment using LAIT on a diverse set of com-
+mon tasks and datasets. For each task, we must
+determine which ﬁelds of the dataset to use as input
+segments for LAIT. We evaluate each task using its
+typical quality metric. In addition, to measure the
+efﬁciency gains of different LAIT conﬁgurations,
+we compute the average self-attention FLOPs. We
+use Equation (1) and the precise conﬁguration of
+theT5-base model we implement LAIT within,
+which has 768-dimensional embeddings and 12 64 -
+dimensional attention heads.
+The evaluated tasks are described below. Many
+of these tasks are from the popular GLUE (Wang
+et al., 2019b) and SuperGLUE (Wang et al., 2019a)
+benchmarks, and all are in English. Number of
+used segments and average lengths per task are
+summarized in Table 1. Pre-processing and con-
+catenation strategy are described in Appendix A.
+MNLI (Williams et al., 2018): A dataset for nat-
+ural language inference across diverse categories.
+We use the hypothesis and premise as separate seg-
+ments, and predict one of three labels: “entailment",
+“contradiction", and “neutral". We report accuracy
+on the “matched” eval set.
+RTE : The Recognizing Textual Entailment dataset
+combines the data from a series of annual textual
+entailment challenges (Dagan et al., 2005; Bar-
+Haim et al., 2006; Giampiccolo et al., 2007; Ben-
+tivogli et al., 2009). We use the hypothesis and the10254
+premise as separate segments and predict “entail-
+ment” vs. “non-entailment”, and measure accuracy.
+QQP (Iyer et al., 2017): Quora Question Pairs
+dataset is a collection of question pairs from Quora,
+where the task is to determine whether a pair of
+questions have the same meaning. For LAIT, we
+treat each question as a segment, and predict “du-
+plicate” or “not_duplicate”, and measure accuracy.
+STSB (Cer et al., 2017): Semantic textual similar-
+ity benchmark, a task for estimating the similarity
+of a pair of sentences. We use each sentence as
+a separate segment, and predict a score in [0,5],
+represented as a string rounded to 2 decimal places.
+We measure Spearman correlation.
+AE (Bulian et al., 2022): Answer Equivalence
+requires determining whether a “candidate" answer
+is semantically equivalent to a “reference" answer,
+given a question. We use the question and each of
+the answers as independent text segments, make
+a binary prediction “true” or “false”, and measure
+accuracy.
+BoolQ (Clark et al., 2019): Boolean Questions is
+a binary question answering task with passages and
+questions. We use the provided text passage and
+the question as text segments, and make a binary
+prediction “true” or “false”, and measure accuracy.
+BoolQ-Split A modiﬁcation of BoolQ, where each
+passage is split into 5 sub-passages, treated as
+independent input segments. The sub-passages
+are formed by greedily merging the passage’s sen-
+tences, smallest merge ﬁrst.
+WiC (Pilehvar and Camacho-Collados, 2019):
+Words in Context is a task for evaluating contextual
+word meanings. Given a word and two sentences
+in which it occurs, determine whether the word has
+the same meaning in each sentence. For LAIT, wepreﬁx each sentence by the speciﬁed word and treat
+the newly-preﬁxed sentences as our text segments.
+We then predict “true” or “false”, corresponding to
+whether the word has the same in-context meaning
+in both sentences. Evaluation is by accuracy.
+FEVER (Thorne et al., 2018): A dataset for fact
+veriﬁcation with claims and corresponding evi-
+dence. Each claim-evidence pair is labeled as “sup-
+ported," “refuted," or “NotEnoughInfo." For LAIT,
+we treat the claim and the evidence as our separate
+text segments, and aim to predict the correct label.
+Evaluation is done by accuracy.
+VitaminC (Schuster et al., 2021): A challenging
+dataset for fact veriﬁcation which includes “con-
+trastive evidence", i.e., claim-evidence pairs that
+differ only slightly (in either the text of the claim or
+that of the evidence) from another claim-evidence
+pair, but have a different label. We treat the claim
+and evidence as independent text segments, and
+evaluate by accuracy.
+MultiRC (Khashabi et al., 2018): The Multi-
+Sentence Reading Comprehension dataset is a ques-
+tion answering dataset, where each example con-
+tains a passage, a question, and an answer. For
+LAIT, we use the passage, the question, and the
+answer as the segments. The label is either “True”
+or “False” meaning whether the answer is correct
+or not. Evaluation is done by computing the F1
+score over all answers.
+4.3 Baselines
+We compare LAIT against two groups of baselines:
+Dual Encoder models and Fully self-attentive mod-
+els. For the Dual Encoder, we use the SentenceT5-
+base (Ni et al., 2022) shared-parameter Dual En-
+coder which outputs the concatenation of the av-
+erage of the per-token output representations from
+the two encoders, together with their difference
+and dot product, followed by a classiﬁer. We ex-
+periment with two depths of classiﬁer: One with a
+single non-linear layer, and one with 2 additional
+hidden layers ( d= 768 for all layers). As fully
+self-attentive baselines, we consider T5-base and
+T5-small (Raffel et al., 2020).
+5 Results
+To study the performance-efﬁciency tradeoff, we
+consider multiple conﬁgurations of LAIT to fully
+interpolate between a Dual Encoder and a fully self-10255
+attentive Transformer. As T5-base has a 12-layer
+encoder, we consider all LAIT- p, forp∈[0,12],
+wherepis the number of layers of independent
+segment processing before the fully self-attentive
+component. Note that LAIT-0 is roughly equivalent
+toT5-base , though it uses a 1-layer decoder vs.
+the 12-layer decoder of T5-base .As can be seen in Tables 2 and 3, which com-
+pare best validation-set performance across models,
+LAIT either matches, nearly-matches, or outper-
+forms the T5-base baseline for every task. This
+holds even in conﬁgurations where cross-segment
+interaction is delayed to the last few layers of the
+encoder. As long as there are a few cross-segment
+interactions later in the model, performance re-
+mains relatively stable even as the architecture be-
+comes increasingly efﬁcient; crucially, LAIT can
+delay cross-segment interaction by 8-10 layers
+without a notable decrease in performance. We
+speciﬁcally focus on the most efﬁcient LAIT mod-
+els that: (1) achieve within 99% of LAIT-0 per-
+formance, which we call LAIT-99%; (2) achieve
+within 95% of LAIT-0 perfomrance, called LAIT-
+95%; and (3) achieve within the 95% conﬁdence
+interval within LAIT-0 performance, called LAIT ⋆.
+To select these models with higher validity, we per-
+form a synthetic dev/test split of the validation sets
+and report the held-out validation performance of
+the LAIT models with the highest performance on
+the synthetic dev set, reported in Appendix B.
+These results also suggest differences in the pro-
+portion of cross-segment processing necessary for10256
+different tasks. Sentence and word representation
+tasks (i.e., Answer Equivalence, STSB, and WiC)
+have much better LAIT ⋆models than reasoning-
+intensive tasks, such as MNLI, BoolQ, and Vita-
+minC. We note that FEVER appears to be easier
+for LAIT than other “reasoning" tasks, which we
+explore further in Section 5.3. We also note that
+some degree of cross-segment processing is neces-
+sary for all tasks, evidenced by the steep drop in
+performance as papproaches 12(see Figure 4).
+5.1 Scalability
+By deferring the expensive cross-segment attention
+to later stages of the model, LAIT both reduces the
+attention complexity of the model, and enables the
+caching and reuse of partial representations com-
+puted before the cross-segment attention layers.
+Table 4 shows improvements in attention FLOPs
+for LAIT, both with and without caching of the
+intermediate representations, when using the LAIT-
+95% model. Table 10 contains results for LAIT ⋆.
+As we would expect from Equation 1, datasets with
+text segments of similar size beneﬁt the most in
+the typical setting. Howevever, to fully realize this
+beneﬁt for single forward passes would require a
+custom kernel, such as those implemented in work
+on sparse transformers.
+5.2 Caching and Reusing Representations
+A key advantage of the delayed cross-segment inter-
+action in LAIT is the ability to cache and reuse in-
+termediate representations of text segments. Unlike
+in benchmarks, real-world settings almost never
+process a set of segments in isolation; it is much
+more likely that the processing of a set of text seg-
+ments occurs as part of a larger task such as doc-
+ument comparison, document analysis, or claim
+veriﬁcation.
+Recently, a number of datasets (Schuster et al.,
+2022a; Koreeda and Manning, 2021; Petroni et al.,
+2022b) have suggested the usefulness of natural lan-
+guage inference in large-scale real-world reasoning
+tasks. In one such dataset, ContractNLI (Koreeda
+and Manning, 2021), a ﬁxed set of 17 claims are
+evaluated against different legal contracts. In other
+scenarios (Schuster et al., 2022a; Gu et al., 2020),
+the contents of multiple documents within a cluster
+of related documents must be compared.
+In both scenarios, a typical approach would re-
+quire comparing each sentence within a document
+with each other sentence, leading to a complex-
+ity that scales quadratically with the size of the
+document cluster, the size of the documents, and
+the length of the sentences. But with LAIT, the
+bulk of the work will be performed only once. Be-
+cause each document or claim can be encoded in-
+dependently for most of the layers of the model,
+the latency improvement offered by LAIT in these10257Dataset FSA Sparse LAIT-12 LAIT-95%
+MNLI - Full 167.9 (1.3) 275.3 (0.96) 111.3 (1.4) 116.02 + /epsilon1
+BoolQ-S - Full 54.40 (0.43) 87.72 (0.38) 37.51 (0.21) 41.73 + /epsilon1
+ContractNLI - Single 0.0071 (0.0012) 0.0094 (0.0005) 0.0004 (0.0000) -
+ContractNLI - Full 25.03 (0.58) 34.28 (0.46) 0.0593 (0.0008) -
+WikiClusters - Single 1390. (6.0) 1871. (7.1) 1.086 (0.03) -
+WikiClusters - Full 4805. (32.) 5451. (15.) 87.79 (0.78) -
+settings is related to the overall redundancy and
+duplication of text segments within the task.
+Table 5 demonstrates the savings possible for
+both popular academic tasks, and two realistic set-
+tings: ContractNLI (Koreeda and Manning, 2021),
+and WikiClusters (Schuster et al., 2022a). For
+MNLI and BoolQ, we measure the time to en-
+code the entire dataset. For WikiClusters and Con-
+tractNLI, we both measure the time to encode the
+entire dataset and the time to encode a single docu-
+ment (in the case of ContractNLI) or cluster (in the
+case of WikiClusters). We compare a standard fully
+self-attentive model (T5), a sparse model (LongT5
+with local attention), and LAIT. For MNLI and
+BoolQ, we estimate the latency of the LAIT-95%
+model for that task, as a weighted average of FSA
+and LAIT layers.
+Even without a custom kernel, LAIT’s indepen-
+dent processing of input segments enables signif-
+icant speedups for processing real-world data. In-
+terestingly, the sparse transformer demonstrates
+slightly increased latency, likely because the the in-
+put sizes are relatively short. However, even when
+enabled by a sparse transformer, processing larger
+chunks of data – such as an entire ContractNLI
+contract alongside each of the 17 claims – will not
+fully alleviate the problem, as the contracts must
+still be processed 17 times, rather than just once
+as in LAIT. In these situations, LAIT may be able
+to complement a sparse transformer; this would
+require further study.
+5.3 Robustness
+A potential concern with an approach like LAIT is
+that it may be more susceptible to reported biases in
+sentence-level models (Poliak et al., 2018; Schuster
+et al., 2021). We test LAIT’s effect on the model’s
+robustness to domain shifts, and to biases in the
+training data such as over-relying on clues in one ofModel FEVER VitaminC MNLI
+Training Data: FEVER-train
+LAIT-0 97.33 65.12 47.93
+LAIT-3 97.31 64.73 45.85
+LAIT-6 97.10 63.62 35.15
+LAIT-9 96.82 62.97 33.82
+LAIT-12 88.35 49.91 34.29
+Training Data: VitaminC-train
+LAIT-0 78.54 88.07 80.37
+LAIT-3 78.96 87.96 80.01
+LAIT-6 78.72 87.46 78.74
+LAIT-9 77.70 86.26 76.74
+LAIT-12 54.04 57.00 43.38
+the segments instead of performing cross-segment
+reasoning.
+Schuster et al. (2021) found that in FEVER,
+when evidence text in a claim-evidence pair was
+revised in a way that would reverse the semantic
+relationship (e.g., f (Claim, Evidence, R- )→(Claim, Evidence,S ), models
+trained on FEVER would only make the correct
+prediction 56% of the time. Table 6 summarizes
+our robustness experiments using zero-shot transfer
+from FEVER and VitaminC.
+We ﬁnd that when LAIT is trained on on FEVER,
+the transfer performance drops faster than the in-
+domain performance as independence is increased.
+However, when training on VitaminC, the decrease
+in accuracy as a function of Pis more correlated
+with the in-domain trend. This suggests that LAIT
+models can be robust against domain shifts and
+contrastive adversarial examples when trained with
+appropriate data.102586 Related Work
+Sentence encoders. Modern representation learn-
+ing systems at the sentence level have rapidly risen
+in popularity, starting with InferSent (Conneau
+et al., 2017), ESIM (Cer et al., 2018), and USE
+(Chen et al., 2017). Following the inception of
+Transformer (Vaswani et al., 2017), new sentence
+encoders (see e.g., Gao et al., 2021; Ni et al., 2022;
+Reimers and Gurevych, 2019) demonstrated im-
+proved performance on many sentence-pair bench-
+marks. Other work extended this approach to doc-
+ument encoders by hierarchically encoding sen-
+tences independently before combining them into
+a pooled document embedding (Wu et al., 2021;
+Yang et al., 2020). Yet, unlike previous work, LAIT
+effectively breaks a pretrained Transformer into a
+hybrid of multiple parallel segment encoders and
+powerful fully-attentive layers to match state-of-
+the-art performance across many NLP tasks.
+Efﬁcient text classiﬁers Dual encoder architec-
+tures, originally dating back to the Siamese archi-
+tecture of (Bromley et al., 1993), were proposed
+for efﬁcient retrieval in (Gillick et al., 2018). (Ni
+et al., 2021) and (Menon et al., 2022) signiﬁcantly
+broaden the range of tasks efﬁciently served by
+dual encoders.
+Building on the Transformer architecture, LAIT
+can also readily leverage many other known efﬁ-
+ciency solutions (Tay et al., 2022) such as distilla-
+tion (Sanh et al., 2019; Jiao et al., 2020), quantiza-
+tion (Shen et al., 2020; Zafrir et al., 2019), and early
+exiting (Schuster et al., 2022b; Xin et al., 2020).
+Sparse attention. Sparse attention architectures
+have demonstrated that not all attention connec-
+tions within a Transformer are necessary, and that
+impressive performance can be achieved even when
+removing a large number of the cross-token atten-
+tion. Examples such as BigBird, Longformer, and
+LongT5 (Zaheer et al., 2020; Beltagy et al., 2020;
+Guo et al., 2021) use local attention windows and
+some form of global attention to reduce the atten-
+tion complexity. Other approaches dynamically
+skip certain computations (Tay et al., 2020). Un-
+like these approaches, here we impose the sparsity
+on top of known input segments, which preserves
+segment-level semantics and supports parallel com-
+puting and caching of segments. Despite their bene-
+ﬁts, sparse transformers still include cross-segment
+attention at every layer of the model, and as such
+they cannot encode segments independently.
+Late interaction. Some recent work has consid-ered precomputing full-token representations of
+some, but not all, text segments, as well as late in-
+teraction between queries and documents (Lu et al.,
+2020; Xiong et al., 2017). ColBERT (Khattab and
+Zaharia, 2020; Santhanam et al., 2022) uses pre-
+computed token representations as part of a DE
+retrieval framework. These architectures, however,
+are tailored for retrieval tasks that use embedding
+similarity scores, and generally under-perform in
+classiﬁcation tasks like NLI. The fully-attentive
+layers in LAIT allow bridging this performance
+gap while still providing efﬁciency gains. Our
+caching variant also relates to other recent paral-
+lel work on precomputing and reusing representa-
+tions of repeated passages to speed up computation
+(Saad-Falcon et al., 2023; de Jong et al., 2023; Li
+et al., 2022). Hui et al. (2022) develop a fully par-
+allel encoder for documents and queries, where
+both encodings are fed to a joint decoder for re-
+ranking. Most similar to our work is MacAvaney
+et al. (2020) that study a hybrid Transformer ar-
+chitecture for ranking. In this work, we focus on
+general NLP tasks with an arbitrary number of seg-
+ments, and unconstrained output space.
+7 Conclusion
+We present Layer-Adjustable Interactions in Trans-
+formers (LAIT) to allow simple-but-effective ef-
+ﬁciency gains over a wide range of NLP tasks.
+The LAIT framework leverages existing pretrained
+Transformers such as T5, and converts them during
+ﬁnetuning into a hybrid model that combines par-
+allel independent encoding of multiple segments,
+followed by fully-attentive layers to allow cross-
+segment reasoning.
+We evaluate LAIT on a large set of 10 well-
+known datasets, involving different examined ca-
+pabilities, number of segments, input lengths, out-
+put spaces, and difﬁculty levels. We ﬁnd LAIT
+to consistently provide signiﬁcant reduction in en-
+coder attention complexity while preserving high
+accuracy. Furthermore, we show that the parallel
+independent segment encoding of LAIT enables ad-
+ditional inference-time compute savings by caching
+representations of repeated segments in large scale
+real-world settings.
+LAIT demonstrates that transformers can
+achieve high performance even without cross-
+segment interaction at every layer; essentially, that
+sentences can be just as effectively encoded if ﬁrst
+processed separately, and then processed jointly.10259Limitations
+While the LAIT framework can signiﬁcantly reduce
+the computation required for large-scale sentence-
+level reasoning and classiﬁcation tasks, we do
+foresee some limitations in its use. Caching per-
+token representations for large numbers of text
+segments leads to a dramatic increase in memory
+requirements, which could be prohibitive for ex-
+tremely low-compute end users. We also note that
+LAIT can further exacerbate segment-level bias in
+datasets. While we believe that careful data cura-
+tion approaches ameliorate this issue, the risk of
+bias is not always known to downstream users and
+as such corrective datasets may not always be avail-
+able. Finally, LAIT can increase the cost of train-
+ing because the optimal degree of independence
+is not known until all LAIT- pmodels are evalu-
+ated, though in practical settings (1) it is possible
+to perform a binary search of LAIT conﬁgurations
+because performance generally decreases mono-
+tonically as pincreases; (2) even a naive rule of
+settingpto a quarter of the model’s depth seems
+to provide some immediate gains while preserv-
+ing 99% of the accuracy in all our evaluated tasks;
+and (3) inference-time cost improvements will far
+outweigh training costs.
+References102601026110262A Segment Preprocessing
+For each task, we must prepare the text segments
+for processing by either the Dual Encoder, Fully
+Self-attentive, or LAIT models. Here, we report the
+preprocessing and concatenation strategy used. For
+the FSA models, we concatenate each segment. For
+the DE and LAIT models, we treat each segment
+as a separate input.
+MNLI
+•hypothesis: <hypothesis text>
+•premise: <premise text>
+WiC
+•<key word>: <sentence1>
+•<key word>: <sentence2>
+STSB
+•sentence1: <sentence1>
+•sentence2: <sentence2>
+BoolQ
+•question: <question>
+•passage: <passage>
+RTE
+•hypothesis: <hypothesis>
+•premise: <premise>
+QQP
+•question1: <question1>
+•question2: <question2>
+FEVER
+•hypothesis: <claim>
+•premise: <evidence>
+VitaminC
+•hypothesis: <claim>
+•premise: <evidence>
+Answer Equivalence
+•question: <question>
+•answer1: <answer1>
+•answer2: <answer2>10263MultiRC
+•question: <question>
+•answer: <answer>
+•paragraph: <paragraph>
+BoolQ-Split
+•question: <question>
+•passage1: <passage1>
+•passage2: <passage2>
+•passage3: <passage3>
+•passage4: <passage4>
+•passage5: <passage5>B Additional Results
+B.1 Full Decoder and T5-Large Models
+For our experiments in the main paper we used a
+T5-base model with only a single decoder layer.
+Using only one decoder layer is faster at inference
+time enforces the model to more heavily rely on
+the encoder stack, and therefore the strong results
+of LAIT in that setting are even more encouraging.
+We also experiment with a LAIT on top of a T5-
+Base with all 12 decoder layers and with a larger
+T5-Large that has 24 layers in both encoder and
+decoder stacks.
+Table 7 and Table 8 present the results for T5-
+Base and T5-Large, respectively. LAIT shows sim-
+ilar trends for these different conﬁgurations, indi-
+cating that our approach is general and translates to
+different model conﬁgurations. Also, as expected,
+larger decoder allows LAIT to further postpone
+the cross-segment interactions (larger P) without
+loosing accuracy.
+B.2 Generalization of LAIT conﬁguration
+Here, we report additional results using our split of
+the existing validation sets into a synthetic valida-
+tion set and a heldout test set.
+Figure 5 reports the decrease in model perfor-
+mance as the number of parallel encoder layers
+increases. Table 9 reports the heldout test results
+for the LAIT models with the best synthetic val-
+idation performance. Table 11 includes the tasks
+with more than two segments. Table 10 reports
+the cost of both full encoding and partially-cached
+encoding for LAIT ⋆models identiﬁed from Tables
+9 and 11.1026410265P MNLI WiC BoolQ MultiRC
+Accuracy Relative Accuracy Relative Accuracy Relative F1 Relative
+0 90.19 73.82 86.88 84.16
+1 90.01 99.80% 73.35 99.36% 86.88 100.00% 84.03 99.85%
+2 90.16 99.97% 73.82 100.00% 86.76 99.86% 83.76 99.52%
+3 90.10 99.90% 73.35 99.36% 86.85 99.97% 84.04 99.86%
+4 89.97 99.76% 73.51 99.58% 87.25 100.43% 84.20 100.05%
+5 90.09 99.89% 74.14 100.43% 87.19 100.36% 84.26 100.12%
+6 89.97 99.76% 74.29 100.64% 87.09 100.24% 84.19 100.04%
+7 90.39 100.22% 74.14 100.43% 87.22 100.39% 83.75 99.51%
+8 90.15 99.96% 74.45 100.85% 86.88 100.00% 84.04 99.86%
+9 90.07 99.87% 73.98 100.22% 87.22 100.39% 83.86 99.64%
+10 89.87 99.65% 74.29 100.64% 86.94 100.07% 84.00 99.81%
+11 89.84 99.61% 74.45 100.85% 87.03 100.17% 83.82 99.60%
+12 90.13 99.93% 74.92 101.49% 87.06 100.21% 83.97 99.77%
+13 89.75 99.51% 74.29 100.64% 86.88 100.00% 83.54 99.26%
+14 89.59 99.33% 73.82 100.00% 86.45 99.51% 83.11 98.75%
+15 89.86 99.63% 72.73 98.52% 86.94 100.07% 82.80 98.38%
+16 89.81 99.58% 73.04 98.94% 86.70 99.79% 82.44 97.96%
+17 89.50 99.23% 73.98 100.22% 86.09 99.09% 81.85 97.26%
+18 89.37 99.09% 73.51 99.58% 86.02 99.01% 81.57 96.92%
+19 88.66 98.30% 74.14 100.43% 84.89 97.71% 78.99 93.86%
+20 88.50 98.13% 72.88 98.73% 83.33 95.91% 76.66 91.09%
+21 88.39 98.00% 73.82 100.00% 82.45 94.90% 74.67 88.72%
+22 88.16 97.75% 72.26 97.89% 81.83 94.19% 73.02 86.76%
+23 86.93 96.39% 71.16 96.40% 79.24 91.21% 61.11 72.61%
+24 85.83 95.17% 68.03 92.16% 76.88 88.49% 59.34 70.51%10266Task Full Encoding ↓with Caching↓
+MNLI 83.33% 69.85%
+STSB 63.07% 62.78%
+AnswerEq 54.94% 41.21%
+BoolQ 89.72% 83.53%
+BoolQ-S 48.69% 47.12%
+WiC 55.85% 55.85%
+FEVER 78.19% 47.74%
+VitaminC 80.42% 70.67%
+MultiRC 94.93% 59.02%
+RTE 82.49% 82.04%
+QQP 64.05% 61.85%
+Potential practical settings:
+ContractNLI 99.46% 60.75%
+WikiClusters 81.51% 58.47%10267ACL 2023 Responsible NLP Checklist
+A For every submission:
+/squareA1. Did you describe the limitations of your work?
+We discuss limitations in section 5.2, as well as an un-numbered ﬁnal "Limitations" section.
+/squareA2. Did you discuss any potential risks of your work?
+Yes, in the ﬁnal un-numbered "Limitations" section.
+/squareA3. Do the abstract and introduction summarize the paper’s main claims?
+Abstract is un-numbered; main claims are in sections: 1, 3, 3.1, 5, 5.1
+/squareA4. Have you used AI writing assistants when working on this paper?
+Left blank.
+B/squareDid you use or create scientiﬁc artifacts?
+Datasets and pretrained models. Section 4.1, Section 4.2, Section 5.2
+/squareB1. Did you cite the creators of artifacts you used?
+Section 4.1, Section 4.2, Section 5.2
+/squareB2. Did you discuss the license or terms for use and / or distribution of any artifacts?
+All datasets and checkpoints are public; we cite the relevant papers and repositories in 4.1 and 4.2
+and 5.2 for more details.
+/squareB3. Did you discuss if your use of existing artifact(s) was consistent with their intended use, provided
+that it was speciﬁed? For the artifacts you create, do you specify intended use and whether that is
+compatible with the original access conditions (in particular, derivatives of data accessed for research
+purposes should not be used outside of research contexts)?
+We use common benchmarks and model checkpoints. We believe that our use of these data clearly
+falls within the intended use of those resources.
+/squareB4. Did you discuss the steps taken to check whether the data that was collected / used contains any
+information that names or uniquely identiﬁes individual people or offensive content, and the steps
+taken to protect / anonymize it?
+The datasets we use are standards of the ﬁeld for model evaluation; we do not believe our work
+introduces any new concerns regarding offensiveness, identiﬁcation, or anonymization.
+/squareB5. Did you provide documentation of the artifacts, e.g., coverage of domains, languages, and
+linguistic phenomena, demographic groups represented, etc.?
+Section 4.2
+/squareB6. Did you report relevant statistics like the number of examples, details of train / test / dev splits,
+etc. for the data that you used / created? Even for commonly-used benchmark datasets, include the
+number of examples in train / validation / test splits, as these provide necessary context for a reader
+to understand experimental results. For example, small differences in accuracy on large test sets may
+be signiﬁcant, while on small test sets they may not be.
+Table 110268C/squareDid you run computational experiments?
+Section 4, Section 5
+/squareC1. Did you report the number of parameters in the models used, the total computational budget
+(e.g., GPU hours), and computing infrastructure used?
+Section 4.1, Section 5.1, Section 5.2
+/squareC2. Did you discuss the experimental setup, including hyperparameter search and best-found
+hyperparameter values?
+In section 4.1 we describe the search, the evaluation strategy (select by either best performance on
+validation or on a synthetic dev/test split), the models used, and the tasks used.
+/squareC3. Did you report descriptive statistics about your results (e.g., error bars around results, summary
+statistics from sets of experiments), and is it transparent whether you are reporting the max, mean,
+etc. or just a single run?
+Section 5
+/squareC4. If you used existing packages (e.g., for preprocessing, for normalization, or for evaluation), did
+you report the implementation, model, and parameter settings used (e.g., NLTK, Spacy, ROUGE,
+etc.)?
+Section 4.1
+D/squareDid you use human annotators (e.g., crowdworkers) or research with human participants?
+Left blank.
+/squareD1. Did you report the full text of instructions given to participants, including e.g., screenshots,
+disclaimers of any risks to participants or annotators, etc.?
+No response.
+/squareD2. Did you report information about how you recruited (e.g., crowdsourcing platform, students)
+and paid participants, and discuss if such payment is adequate given the participants’ demographic
+(e.g., country of residence)?
+No response.
+/squareD3. Did you discuss whether and how consent was obtained from people whose data you’re
+using/curating? For example, if you collected data via crowdsourcing, did your instructions to
+crowdworkers explain how the data would be used?
+No response.
+/squareD4. Was the data collection protocol approved (or determined exempt) by an ethics review board?
+No response.
+/squareD5. Did you report the basic demographic and geographic characteristics of the annotator population
+that is the source of the data?
+No response.10269

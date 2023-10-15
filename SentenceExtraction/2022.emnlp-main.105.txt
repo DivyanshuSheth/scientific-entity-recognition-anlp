@@ -1,1 +1,770 @@
-1617 Proceedings of the 2022 Conference on Empirical Methods in Natural Language Processing , pages 1617 1634 December 7 - 11 , 2022 © 2022 Association for Computational Linguistics 1618 1619 1620 1621 1622 1623 1624 1625 1626 1627 1628 1629 1630 1631 1632 1633 1634 
+
+Yuxian Gu, Pei Ke, Xiaoyan Zhu, Minlie Huang
+The CoAI group, Tsinghua University, Beijing, China
+Institute for Artificial Intelligence, State Key Lab of Intelligent Technology and Systems,
+Beijing National Research Center for Information Science and Technology,
+Department of Computer Science and Technology, Tsinghua University, Beijing, China
+guyx21@mails.tsinghua.edu.cn ,kepei1106@outlook.com
+{zxy-dcs,aihuang}@tsinghua.edu.cn
+Abstract
+Training language models to learn from human
+instructions for zero-shot cross-task general-
+ization has attracted much attention in NLP
+communities. Recently, instruction tuning (IT),
+which fine-tunes a pre-trained language model
+on a massive collection of tasks described via
+human-craft instructions, has been shown ef-
+fective in instruction learning for unseen tasks.
+However, IT relies on a large amount of human-
+annotated samples, which restricts its general-
+ization. Unlike labeled data, unlabeled data
+are often massive and cheap to obtain. In this
+work, we study how IT can be improved with
+unlabeled data. We first empirically explore the
+IT performance trends versus the number of la-
+beled data, instructions, and training tasks. We
+find it critical to enlarge the number of train-
+ing instructions, and the instructions can be
+underutilized due to the scarcity of labeled data.
+Then, we propose Unlabeled Data Augmented
+Instruction Tuning (UDIT) to take better ad-
+vantage of the instructions during IT by con-
+structing pseudo-labeled data from unlabeled
+plain texts. We conduct extensive experiments
+to show UDIT’s effectiveness in various sce-
+narios of tasks and datasets. We also compre-
+hensively analyze the key factors of UDIT to
+investigate how to better improve IT with un-
+labeled data. The code is publicly available at
+https://github.com/thu-coai/UDIT .
+1 Introduction
+The instruction learning paradigm (Weller et al.,
+2020), where language models learn from human
+instructions to perform unseen tasks in zero-shot
+scenarios, has received increasing attention re-
+cently. Compared to conventional machine learn-
+ing paradigms that mainly learn from data exam-
+ples, instruction learning requires models to com-
+plete tasks based on the understanding of human-
+written task descriptions without task-specific data,Figure 1: The performance of IT and UDIT with respect
+to the instruction numbers and labeled data amounts.
+We follow Sanh et al. (2022) to fine-tune a 700M PLM
+and then test its zero-shot generalization ability on un-
+seen tasks. The x-axis represents the number of labeled
+samples in each training task, and the y-axis is the av-
+erage performance on evaluation tasks. We control the
+instruction numbers by gradually adding training tasks.
+which is closer to general AI systems. For instance,
+in summarization tasks, a model is only given an
+explicit instruction “Summarize the following ar-
+ticle in brief:” and an article to generate the corre-
+sponding summary. To realize instruction learning,
+recent works such as FLAN (Wei et al., 2022) and
+T0 (Sanh et al., 2022) propose instruction tuning
+(IT), which fine-tunes pre-trained language models
+(PLMs) (Han et al., 2021) on a large collection of
+tasks with human-annotated data specified in de-
+scriptive instructions. Through IT, PLMs learn to
+follow the human-written instructions to complete
+the corresponding tasks, which enables them to
+perform instruction learning in unseen tasks.
+An intuitive way to boost the performance of
+IT is to increase the number of training instruc-
+tions and data examples. As shown in Figure 1, the
+number of training instructions largely determines
+the best performance of IT, and the corresponding
+human-annotated data should be also sufficient for
+the model to learn these instructions well. However,
+the amount and domain diversity of labeled data in1617different tasks vary greatly. In practice, many low-
+resource tasks lack sufficient multi-domain human-
+annotated examples. This can lead to easy overfit-
+ting to specific domains or examples when learning
+the corresponding instructions, which affects the
+zero-shot performance in instruction learning.
+Introducing unlabeled data is a common ap-
+proach to alleviating the data scarcity problem in
+supervised learning (Brown et al., 2020; Xie et al.,
+2020; Du et al., 2021) because large-scale unla-
+beled plain texts are much easier to access. How-
+ever, we argue that their benefit to IT is still in-
+conclusive. This is because IT is much more chal-
+lenging, requiring learning the mapping between
+human instructions and task semantics rather than
+that between samples and labels in a single task.
+Therefore, in this work, we investigate incorpo-
+rating unlabeled data into instruction learning. We
+focus on the two questions: (1) Is it possible to
+perform IT with unlabeled plain texts when there
+are few or even no human-annotated data? and (2)
+How to better use unlabeled plain texts to improve
+IT for zero-shot cross-task generalization?
+To study (1), we propose Unlabeled Data Aug-
+mented Instruction Tuning (UDIT) to effectively
+use unlabeled data to help instruction learning.
+Specifically, we construct pseudo-labeled data from
+unlabeled plain texts according to task instructions.
+The pseudo-labeled data which enlarge training
+samples and diversify data domains help to learn
+the meanings of the corresponding task instructions
+better. We test UDIT under various scenarios of
+training tasks and labeled data to verify that learn-
+ing instructions from unlabeled data is possible.
+To study (2), we compare UDIT with previous
+methods to show its superior performance in using
+unlabeled data. We also conduct extensive exper-
+iments to reveal the underlying factors to the suc-
+cess of UDIT. Specifically, our contributions are
+summarized as follows:
+•We introduce UDIT, a training framework that
+incorporates unlabeled data into instruction
+tuning for zero-shot cross-task generalization.
+•Through UDIT, we empirically verify that
+PLMs can learn to follow human-written in-
+structions with unlabeled data when there are
+few or even no annotated samples.
+•We show that UDIT is a significantly better
+way to use unlabeled data to improve instruc-tion tuning, making a 700M PLM with UDIT
+outperform the 3B counterpart based on IT.
+•We comprehensively analyze the key factors
+of UDIT and give some insights into using un-
+labeled data to improve instruction learning.
+2 Related Works
+Instruction Learning. Recently, large PLMs like
+GPT-3 (Brown et al., 2020) have shown promis-
+ing performance in learning from human instruc-
+tions to solve tasks in few-shot and zero-shot sce-
+narios (Liu et al., 2021). Several works propose
+benchmarks (Weller et al., 2020; Efrat and Levy,
+2020; Mishra et al., 2022; Finlayson et al., 2022)
+to evaluate instruction learning for zero-shot cross-
+task generalization (Ye et al., 2021). To enhance
+instruction understanding, many works adopt IT,
+which fine-tunes PLMs on massive task clusters
+described by instructions in a multi-task fashion,
+such as FLAN (Wei et al., 2022), T0 (Sanh et al.,
+2022), ZeroPrompt (Xu et al., 2022a), and Instruct-
+GPT (Ouyang et al., 2022). These models show
+superior zero-shot performance on unseen tasks.
+To better understand IT and zero-shot learning
+of PLMs, Wang et al. (2022) compares different
+model architectures and training objectives. Some
+works also incorporate unlabeled data to improve
+the zero-shot performance of IT (Zhou et al., 2022;
+Lin et al., 2022). But they assume the existence
+of unlabeled samples in evaluation tasks, while we
+only use plain texts, which is more in line with the
+zero-shot cross-task evaluation scenario.
+Semi-Supervised Learning. Semi-supervised
+learning adopts unlabeled data to improve super-
+vised learners (Chapelle et al., 2009). Many pre-
+vious works use consistency training to regularize
+model predictions (Bachman et al., 2014; Rasmus
+et al., 2015; Xie et al., 2020). Self-training (Scud-
+der, 1965; Du et al., 2021) is also widely used,
+which assigns synthetic labels to unlabeled data
+with a teacher model. These data are then used to
+train the student model. However, these methods
+typically assume the availability of unannotated
+task-specific data while we focus on using task-
+agnostic plain texts, which is more practical.
+Self-Supervised Training in NLP. Training with
+self-supervised tasks is also related to our method,
+which helps models obtain versatile knowledge
+from large-scale plain texts and boosts the model1618
+performance (Devlin et al., 2019; Radford et al.,
+2019; Raffel et al., 2020; Lewis et al., 2020; Lan
+et al., 2020; Fang et al., 2020). Some works
+also find that carefully designed self-supervised
+tasks can bring further improvement to low-
+resource tasks (Bansal et al., 2020; Gu et al., 2022;
+Chen et al., 2022). However, conventional self-
+supervised tasks are designed independent of hu-
+man instructions (Aroca-Ouellette and Rudzicz,
+2020), while tasks in UDIT match the instruction
+semantics closely, which is crucial to instruction
+learning for zero-shot cross-task generalization.
+3 Method
+3.1 Background
+In this section, we first give a formal descrip-
+tion of IT. We define a “task” as a pair (D, I ),
+where Dis the task-specific dataset, and Iis a
+set of instructions describing the task. We as-
+sume that the tasks can be divided into nclus-
+tersT={T, T,···, T}according to the
+task similarities, where the icluster T=
+{(D, I),(D, I),···,(D, I)}contains k
+tasks. For example, in the cluster “Multiple-Choice
+QA”, a data sample typically consists of a pas-
+sage, a question, several answer options, and the
+answer. As shown in Figure 2, the instructions
+serve as templates to convert the inputs and outputs
+to natural texts and formulate all tasks into text-to-
+text language modeling problems. In IT, a PLMis first fine-tuned on several clusters T⫋T
+in a multi-task fashion. Then the model is evalu-
+ated on the tasks in novel clusters T=T \T
+with instructions only, as shown in the “Zero-Shot
+Cross-Task Generalization” part of Figure 2.
+In this paper, we mainly follow the settings of
+T0 (Sanh et al., 2022), including the training tasks,
+instructions, and the split of task clusters. How-
+ever, our findings can also be applied to other sce-
+narios. T0 is a representative model instruction-
+tuned on 8 task clusters based on the pre-trained T5
+model (Raffel et al., 2020) and tested on 4 task clus-
+ters. The instructions are collected from the Public
+Pool of Prompts (P3) (Bach et al., 2022) which
+contains thousands of crowdsourced instructions.
+3.2 Overview
+Figure 2 shows an overview of UDIT. To better
+learn the instructions in T, we construct pseudo-
+labeled data from the unlabeled plain texts accord-
+ing to the meaning of the instructions in each task
+cluster T∈ T. The plain texts are a mixture of
+multi-domain corpora, including BookCorpus (Zhu
+et al., 2015), CC-News (Sebastian, 2016), Open-
+WebText (Gokaslan et al., 2019), Wikipedia (Foun-
+dation, 2022), and IMDB Review (Maas et al.,
+2011), totaling about 37.2G. The details of these
+corpora are shown in Appendix A. The construct-
+ing process is based on heuristic rules, widely used1619NLP toolkits like NLTK, and basic data augmen-
+tation techniques like back-translation (Sennrich
+et al., 2016). Then, we apply the instructions in
+Tto the pseudo-labeled samples and fine-tune the
+PLM on pseudo-labeled and labeled samples with a
+multi-task language modeling objective. Although
+the pseudo-labeled data are constructed at the level
+of task clusters rather than single tasks, we find they
+match the meanings of most instructions in the cor-
+responding cluster due to the task similarities. Note
+that we do not assume the existence of labeled data
+during the constructing process, which means that
+UDIT is applicable under various settings with or
+without labeled data. The following section briefly
+introduces the pseudo-labeled data construction for
+the 8 task clusters in T0. We provide some exam-
+ples of the constructed data in Appendix D.
+3.3 Constructing Pseudo-Labeled Data
+Multiple-Choice QA (MCQA). The sample in
+MCQA consists of a passage, a related question,
+an answer, and several options. Given a plain-text
+document, we design two methods to construct
+pseudo-labeled data: (1) We first randomly replace
+one noun in a randomly selected sentence with a
+"_" symbol. Then, we add a “?” mark to the end
+of the sentence to form a question. We treat the
+texts before the sentence as the passage and the
+replaced word as the answer. The options are sam-
+pled from the words with the same part of speech
+as the answer. (2) We observe that many questions
+are naturally followed by its answer in our corpus.
+Therefore, we search for questions in the document
+and treat previous texts as the passage and the fol-
+lowing sentence as the answer. The options are
+sampled from the sentences after the answer.
+Extractive QA (EXQA). EXQA aims to answer
+the questions using the phrases in the given pas-
+sages. We mainly follow Fabbri et al. (2020) which
+first selects entities in the plain-text documents as
+the answers and uses templates to convert the sen-
+tences containing the answers to questions.
+Close-Book QA (CBQA). CBQA is similar to
+EXQA except for the absence of the passage.
+Therefore, we use the question-answer pair from
+the pseudo-labeled data of EXQA.
+Sentiment (SENT). SENT requires identifying
+the sentiment labels of given texts. We use akeyword-based sentiment analyzer in NLTK to an-
+notate sentiment labels. To improve the label qual-
+ity, we only construct pseudo-labeled data from the
+IMDB Review corpus for this cluster.
+Topic Classification (TC). TC requires finding
+proper topic labels for input passages. We notice
+that many URLs of the CC-News corpus contain
+the topic of passages. Therefore, we devise heuris-
+tic rules to extract topic labels from the URLs to
+build the pseudo-labeled data. We first split the
+URL by “/” and search for topic words from left to
+right. We stop at the first string that is composed
+of English letters, shorter than 20 characters, and
+not in [“news”, “en”, “story”, “us”, “articles”, “lo-
+cal”, “english”, “tag”, “post”]. Then, we choose
+the most frequent 14 strings as the topic labels and
+the corresponding passages as the inputs.
+Structure-to-Text (S2T). S2T requires generat-
+ing natural sentences that describe input structural
+data like graphs. Since the input data are usually
+linearized as word sequences in the instructions, we
+adopt a keyword-to-text generation task that takes
+a random subset of the notional words in a sentence
+as the input and the sentence as the output.
+Summarization (SUM). For summarization, we
+adopt Leading Sentence Generation (LSG) and Gap
+Sentence Generation (GSG) from Liu et al. (2022).
+LSG takes the title of a passage as the summary
+and the body as the input. GSG treats the sentence
+overlapping other document parts the most as the
+summary and the remaining sentences as the input.
+Paraphrase Identification (PARA). PARA aims
+to identify whether two sentences have the same
+meaning. Given a sentence sin the plain texts, we
+add word-level perturbation to sto get s. We
+consider two kinds of perturbations: (1) Randomly
+choosing a word and replacing it with its antonym
+via NLTK. (2) Picking out nouns in the sentence
+via NLTK and shuffling their order. Then we get /tildewides
+and/tildewidesby adopting back-translation to sands,
+respectively. We treat (s,/tildewides)as the positive pair and
+(s,/tildewides)as the negative pair.
+4 Experiment
+4.1 Setup
+Settings. We consider three scenarios in which
+unlabeled data can be utilized to enhance instruc-
+tion learning: (1) No Labeled Data , where only
+the instructions for each task are available. (2) Few1620Labeled Data , where only a small part of the la-
+beled data is available. (3) Full Labeled Data ,
+where all the labeled data are available during IT.
+Datasets. Following Sanh et al. (2022), we use 8
+task clusters as T, which contains 36 datasets
+and 304 instructions. Tcontains 6 task clusters
+consisting of 9 text classification tasksand 2 lan-
+guage generation tasks. Detailed data information
+can be found in Appendix A.
+Training and Evaluation Details. For compu-
+tational efficiency, we conduct our experiments
+mainly based on a 700M T5 model. We mix the
+labeled and pseudo-labeled data for multi-task fine-
+tuning. Unless specified otherwise, we use at most
+10k labeled/pseudo-labeled samples for each task
+because we find more samples bring little improve-
+ment. We choose the best checkpoint on the merged
+validation splits of datasets in T for evalua-
+tion. More hyper-parameter details are shown in
+Appendix B. In evaluation, we report the mean
+(Section 4.2) and median (Appendix C.2) of the
+performance across different instructions on the
+validation set of each task in T. For the multiple-
+choice tasks, we select the option with the highest
+log-likelihood (Brown et al., 2020) as the answer.
+Baselines. We consider the following baselines:
+(1)Direct Zero-Shot (DirectZS ): The PLM is di-
+rectly evaluated on Twithout fine-tuning.
+(2)Vanilla Instruction Tuning (Vanilla-IT ): The
+model is instruction-tuned on the labeled data in
+T, which stays the same with Sanh et al. (2022).
+(3)Self-Supervised Training : Besides the labeled
+data in IT, the model is also tuned on our unlabeled
+plain-text corpus with the language modeling objec-
+tive ( ExtraLM ) or the four self-supervised objec-
+tives proposed in Chen et al. (2022) ( SelfSup-IT ).
+The proportion of training samples to our pseudo-
+labeled samples is 1:1.
+(4)Data Augmentation (DataAug-IT ): For the
+tasks with few labeled data, we perform back-
+translation and augment the labeled data to twice
+as large (Xu et al., 2022b).
+4.2 Results
+4.2.1 No Labeled Data
+Table 1 shows the results where no labeled data are
+available, from which we have 3 observations.First , all methods that use unlabeled data (Ex-
+traLM, SelfSup-IT, and UDIT) outperform Di-
+rectZS, suggesting that PLMs can learn to follow
+instructions for zero-shot cross-task generalization
+with unlabeled data when human-labeled samples
+are absent.
+Second , among different methods using unla-
+beled data, self-supervised training only brings
+marginal improvement, while UDIT boosts the per-
+formance largely on most tasks. This indicates
+that using unlabeled data to improve instruction
+learning is non-trivial. Simple self-supervised tasks
+cannot reflect the characteristics of human instruc-
+tions, while UDIT directly helps the PLM learn the
+mapping between instructions and task semantics.
+Third , UDIT can be combined with self-
+supervised training when we mix the training sam-
+ples augmented by these two methods. The row
+“UDIT + SelfSup-IT” achieves the best average per-
+formance, which means that these two methods are
+complementary in this scenario.
+4.2.2 Few Labeled Data
+In this section, we study a more practical scenario
+where only a small set of labeled data are available
+for IT and show the results in Table 2. We explore
+three different data scarcity settings. “Few Tasks”
+simulates the setting where only a few task clusters
+have enough labeled data. Here, we choose EXQA
+as the data-sufficient cluster, where each task con-
+tains 10K samples. The results of other choices are
+shown in Appendix C.1. “Few Datasets” means
+only 10% human-labeled datasets exist in each task
+cluster. And the “Few Samples” block shows the
+results where IT is performed on all task clusters,
+but each dataset contains only 100 samples. Note
+that data augmentation (DataAug-IT) can only be
+applied to the “Few Samples” setting because there
+are no source data for back-translation in other set-
+tings. UDIT adds the pseudo-labeled data to those
+data-scarce tasks to enhance instruction learning.
+Our findings from Table 2 are as follows:
+1.SelfSup-IT and DataAug-IT fail to bring sig-
+nificant improvement over Vanilla-IT. It is
+probably because the self-supervised tasks do
+not use instructions, and the augmented data
+are too similar to the source samples.
+2.UDIT performs the best on average under all
+the three settings, indicating that learning in-
+struction semantics and training on sufficient1621
+diverse data are crucial to zero-shot cross-task
+generalization of PLMs.
+3.Unlike the observations in Section 4.2.1, the
+benefit of combining self-supervised tasks
+with UDIT vanishes with the existence of the
+few labeled data.
+We also evaluate Vanilla-IT and UDIT when the
+number of data-sufficient tasks varies. In Figure
+3(a), we incrementally add task clusters containing
+full labeled data. And in Figure 3(b), we gradually
+increase the proportion of data-sufficient tasks in
+each cluster. In these processes, other tasks are
+considered data-scarce, containing 100 (Few Extra
+Labeled) or no (No Extra Labeled) labeled samples
+to simulate the situation when both data-sufficient
+and data-scarce tasks exist. UDIT enhances the
+data-scarce tasks with pseudo-labeled data.1622
+By comparing the solid anddashed lines, we
+conclude that training on more tasks and instruc-
+tions is beneficial, even if some tasks contain only
+100 samples, which is consistent with Figure 1.
+Also, by comparing the orange and blue lines, we
+can see that UDIT leads to further improvement
+when applied to those data-scarce tasks, regard-
+less of the existence of the 100 labeled samples.
+From Figure 3(a), we notice the performance drop
+when adding TC, which matches the observation
+in Xu et al. (2022a) that not all the task clusters
+are helpful. But in general, the performance of IT
+has a positive correlation with the task number and
+diversity.
+4.2.3 Full Labeled Data
+When the labeled data are sufficient, we can also
+mix them with the pseudo-labeled data to perform
+IT. Table 3 shows that adding 10K pseudo-labeled
+data can improve the IT performance, making our
+700M model outperform the 3B model with Vanilla-
+IT. But increasing labeled data to 50k only leads
+to little further improvement (Figure 1). This in-
+dicates that the pseudo-labeled data do not merely
+contribute to the data amount per task. We conjec-
+ture that these samples also help avoid overfitting
+to the domain of specific datasets during IT, owing
+to the domain diversity of unlabeled corpora, which
+will be further analyzed in Section 5.2.
+4.2.4 Language Generation Tasks
+We also test the instruction-tuned models on two
+language generation tasks. From Table 4, we
+observe the similar phenomenon that UDIT im-
+proves IT the most in all scenarios. We also no-
+tice that self-supervised training is more beneficial
+to language generation than classification. Thisis likely because the self-supervised tasks include
+Next Sentence Generation and Next Phrase Gen-
+eration (Chen et al., 2022), which resemble the
+generation tasks used in the zero-shot evaluation.
+4.3 Discussion
+Based on the results in Section 4.2, we conclude
+that UDIT is effective under all three settings on
+both classification and generation tasks.
+We observe that UDIT brings larger improve-
+ments to Natural Language Inference (NLI) and
+Sentence Completion (Sentence Comp.) compared
+to Coreference Resolution (Coref.) and Word
+Sense Disambiguation (WSD), which resembles
+the phenomenon of Vanilla-IT. We suspect that our
+training tasks are mostly sentence-level, while the
+tasks in Coref. and WSD are word-level. Although
+IT enables cross-task generalization for PLMs, it is
+still challenging to generalize from sentence-level
+tasks to word-level tasks. This also emphasizes the
+importance of using instructions from more diverse
+tasks for IT.
+Besides, we also find that the performance vari-
+ance across different testing instructions is high
+on some tasks (Figure 5 in Appendix C.3), which
+is consistent with the observations in Sanh et al.
+(2022). Reducing the sensitivity of PLMs to
+prompts and instructions has been largely discussed
+in previous literature (Zhao et al., 2021; Zhou et al.,
+2022). Most of these methods are applicable to our
+settings.
+5 Analysis
+5.1 Effect of Instruction Tuning
+IT brings two effects: (1) helping the model get
+familiar with the input form containing human in-
+structions and (2) enabling the model to learn the
+mapping between the instructions and task seman-
+tics. To differentiate these effects, we construct1623
+tasks that do not match the instructions by ran-
+domly setting the labels in the labeled and pseudo-
+labeled samples. As shown in Table 5, although
+we randomize the labels, the results of IT are still
+slightly better than No IT, suggesting that the input
+form matters. Furthermore, a large performance
+gap exists between the random and correct labels,
+indicating that the model learns the instruction-task
+mapping in addition to the instruction form.
+5.2 Effect of Domain Diversity
+As described in Section 3.2, our unlabeled data
+are a mixture of multi-domain plain-text corpora.
+To investigate the domain diversity effect, we con-
+struct pseudo-labeled data only from Wikipedia for
+the task clusters other than SENT and TC, where
+we still use IMDB Review and CC-News. This
+ensures that each cluster contains a single domain.
+We also maintain the same amount of training sam-
+ples as the multi-domain circumstance. From the
+results in Table 6, we observe that reducing the
+domain diversity hurts UDIT. In the “No Labeled
+Data” scenario, the performance of UDIT mostly
+comes from the additional instructions. But in the
+“Full Labeled Data” scenario, the domain diversity
+contributes most to the improvement of UDIT.
+5.3 Effect of Data Amount
+Since the pseudo-labeled data are constructed from
+the plain-text corpus, we can obtain numerous train-
+ing samples for UDIT. However, as shown in Figure
+4(a), the performance converges when the number
+of pseudo-labeled training samples per task reaches
+10k in all the three scenarios we consider in Section
+4.2. This is different from other methods using un-
+labeled data, such as self-supervised pre-training,
+where increasing the data amount continuously im-
+proves downstream performance (Liu et al., 2019;
+Kaplan et al., 2020). These results suggest that
+UDIT is not data-hungry and does not consume
+much more training resources than Vanilla-IT.
+5.4 Effect of Individual Task Clusters
+The pseudo-labeled data inevitably contain noises
+which may hurt the model performance. Therefore,1624
+we investigate the influence of these noises in each
+task cluster. We choose one task cluster at a time,
+replace the labeled samples with pseudo-labeled
+samples, and perform IT on the mixed data. In
+Figure 4(b), we can see that using pseudo-labeled
+data in MCQA affects the zero-shot performance
+the most. But in general, replacing one task cluster
+does not bring much influence. This means that
+pseudo-labeled data in each cluster are of high qual-
+ity and UDIT is robust to the noises in individual
+task clusters. However, comparing Table 1 and Ta-
+ble 3, we find that UDIT still has a performance
+drop that cannot be ignored when replacing all the
+labeled data. It is probably caused by the noise ac-
+cumulation in the pseudo-labeled data of multiple
+tasks. We leave how to further reduce the noises in
+the pseudo-labeled data as future work.
+6 Conclusion and Future Work
+In this work, we investigate performing IT with
+unlabeled data for zero-shot cross-task generaliza-
+tion. We first empirically find that the IT perfor-
+mance is largely restricted by the number of dis-
+tinct tasks, instructions, and training samples in
+data-scarce tasks. Then, we propose UDIT to take
+better advantage of the instructions by constructing
+pseudo-labeled data from the unlabeled plain texts.
+Through UDIT, it is possible to perform IT with
+unlabeled data when there are few or no human-
+annotated samples, which offers a better way to
+incorporate unlabeled data compared with other
+approaches. Through comprehensive analysis, we
+find that the domain diversity and the matching
+between the pseudo-labeled data and correspond-
+ing instructions are essential for UDIT. In contrast,
+noises in individual task clusters and colossal data
+amount are less influential. There are three direc-
+tions for future work: (1) Designing automatic and
+generalizable methods to construct pseudo-labeled
+data for instruction tuning. (2) Mining novel in-structions from the unlabeled corpus to enlarge the
+amount of instructions during training. (3) Fur-
+ther denoising the pseudo-labeled data built from
+unlabeled plain texts.
+Limitations
+The limitation of our work is that the process of con-
+structing pseudo-labeled data from unlabeled plain
+texts still needs manual design. Although the strate-
+gies we use are easy to implement and our pseudo-
+labeled data have covered a big part of classic NLP
+tasks, there may exist some “hard tasks” where
+finding suitable methods to construct high-quality
+pseudo-labeled data is not easy. However, this is
+not a severe problem in practice because UDIT
+boosts instruction learning for zero-shot cross-task
+generalization. This means we can still improve the
+performance on the “hard tasks” with UDIT based
+on the pseudo-labeled data from the “easy tasks”.
+We believe that more generalizable and elaborate
+data construction methods would further improve
+performance. We leave this as future work, and the
+findings in this work can guide the design of these
+methods.
+Acknowledgements
+This paper was supported by the National Key Re-
+search and Development Program of China (No.
+2021ZD0113304), the National Science Founda-
+tion for Distinguished Young Scholars (with No.
+62125604), and the NSFC projects (Key project
+with No. 61936010 and regular project with No.
+61876096). This work was also supported by
+the Guoqiang Institute of Tsinghua University,
+with Grant No. 2019GQG1 and 2020GQG0005,
+and sponsored by Tsinghua-Toyota Joint Research
+Fund.
+References16251626162716281629Appendices
+A Data Information
+A.1 Training Tasks
+Following Sanh et al. (2022), we adopt 8 task clus-
+ters containing 36 datasets. The datasets and the
+number of instructions in each cluster are shown in
+Table 7. All instructions are taken from the Public
+Pool of Prompts (P3) (Bach et al., 2022).
+A.2 Evaluation Tasks
+We evaluate our model on 4 text classification task
+clusters and 2 language generation task clusters.
+The text classification task clusters and datasets
+include: (1) Coreference Resolution (Coref.):
+WSC and Winogrande (Wino.) (Levesque et al.,
+2012); (2) Natural Language Inference (NLI):
+CB (De Marneffe et al., 2019), RTE (Dagan et al.,
+2006), and ANLI-R1 (Nie et al., 2020); (3) Sen-
+tence Completion (Sentence Comp.): COPA (Gor-
+don et al., 2012), HellaSwag (H-Swag) (Zellers
+et al., 2019), and Story Cloze (Mostafazadeh
+et al., 2016); (4) Word Sense Diasambiguation
+(WSD): WIC (Pilehvar and Camacho-Collados,
+2019). The language generation task clusters
+and datasets include: (5) Question Generation
+(QG): SQuAD (Rajpurkar et al., 2016); (6) Open-
+Ended Natural Language Generation (ONLG):
+Roc Story (Mostafazadeh et al., 2016). All instruc-
+tions are obtained from the Public Pool of Prompts
+(P3) (Bach et al., 2022).
+A.3 Unlabeled Data
+Our unlabeled plain texts consist of the multi-
+domain corpus, including BookCorpus (Zhu et al.,
+2015) (5.5G), Wikipedia (Foundation, 2022) (20G),
+CC-News (Sebastian, 2016) (1.7G), OpenWeb-
+Text (Gokaslan et al., 2019) (10G), IMDB Re-
+view (Maas et al., 2011) (65M). We access these
+data from the HuggingFace Datasets (Lhoest et al.,
+2021). For OpenWebText, we randomly sample
+10GB sample from the original 38GB samples to
+balance the data sources.
+B More Training Details
+We run IT on a 700M T5 model. The max input
+sequence lengths of the encoder and the decoder
+are 512 and 128, respectively. We first run Vanilla-
+IT to select the hyper-parameters that yield the best
+performance on the validation splits of the training
+datasets. Then, we fix the hyper-parameters in
+all our experiments. We search for the learning
+rate in [3e-5, 5e-5, 1e-4], the batch size in [512,
+1024, 2048], and the max training steps in [10K,
+30K]. We finally set the learning rate to 5e-5, batch
+size to 1024, and the max training steps to 10K
+for both Vanilla-IT and UDIT. We use the Adam
+optimizer (Kingma and Ba, 2015) with β= 0.9,
+β= 0.999,ϵ= 1e−8, and weight_decay =
+0.01. We follow Wei et al. (2022) to balance each
+dataset by treating each task at most 3K samples
+per instruction for sampling.
+To improve the training efficiency, we adopt the
+mixed-precision training (Micikevicius et al., 2018)1630
+and ZeRO (stage-1) (Rajbhandari et al., 2020) im-
+plemented in DeepSpeed (Rasley et al., 2020).
+Note that the T0-3B model is evaluated in FP32
+precision. Our experiments are all conducted on
+the NVIDIA 32G V100 GPU. We use two GPUs
+for each run of IT, which completes in about 12
+hours, depending on the total training data amount.
+The inference of a single model occupies one GPU
+and takes about 10 minutes.
+C More results
+C.1 Other Choices of the “Few Tasks” Setting
+In Table 9, we present the results when we use
+different task clusters as the data-sufficient cluster,
+as a complementary to Table 2. From the results,
+we can see that UDIT improves Vanilla IT in most
+cases. One exception is the language generation
+tasks when we train the model on EXQA. We think
+the reason is that some tasks in EXQA are also
+formulated to question generation tasks, which are
+too similar to the evaluation task and cover the ef-
+fect of UDIT. Note that the zero-shot performance
+of Vanilla-IT on language generation tasks is re-
+ally poor when the model is trained only on SENT,
+TC, or PARA, which mainly consist of text clas-
+sification tasks. We observe that all output texts
+are biased to the labels of corresponding training
+datasets, which means the model overfits the text
+classification tasks during IT and fails to learn to
+follow instructions in unseen tasks.
+C.2 Median Results Across Different Testing
+Instructions
+Following Sanh et al. (2022), we also report the
+median of the performances across different testing
+instructions in Table 10, Table 11, and Table 12 as
+a supplement to the mean of the performances in
+Table 1, Table 2, and Table 3, respectively. Com-
+paring different approaches, we can draw similar
+conclusions as Section 4.2 that UDIT offers a sig-
+nificantly better way to incorporate unlabeled data
+into IT and improves the zero-shot cross-task gen-
+eralization. We also observe that the mean and
+median do not differ much on most datasets, except
+for CB where the median is much better.
+C.3 Variance Across Instructions
+We draw the box plot of UDIT and some baselines
+under the “No Labeled Data” (Section 4.2.1) and
+the “Full Labeled Data” (Section 4.2.3) settings
+to show the variance across different instructions.
+From Figure 5, we can see that the results vary
+across instructions in all methods, which is also
+observed in Sanh et al. (2022). There are plenty
+of studies on how to reduce the variance across
+prompts or instructions (Zhou et al., 2022; Zhao
+et al., 2021; Lu et al., 2022). Most of them can be
+combined with our methods.
+C.4 Human Evaluation on Pseudo-Labeled
+Data
+We conduct human evaluation on the pseudo-
+labeled data, and the results are shown in Table
+13. For each task cluster, we randomly select 50
+sample-instruction pairs and recruit 3 different an-
+notators from Amazon Mechanical Turkto evalu-1631
+ate whether the pseudo-labeled sample is aligned
+with the instruction (scored as 1) or not (scored
+as 0). The final score for each task cluster is aver-
+aged over all the samples and 3 different annotators.
+From the results, we can see that although most of
+the pseudo-labeled samples make sense to humans,
+there inevitably exist some mislabeled samples that
+may be harmful to the model. We leave how to
+further denoise the pseudo-labeled data to future
+work.
+D Examples of Pseudo-Labeled Data
+We list a few examples of the pseudo-labeled data
+for the 8 task clusters in Table 14. In MCQA,
+EXQA, and CBQA, although the constructing
+process relies on some assumptions, the pseudo-
+labeled data reflect the task semantics well and thus
+match the meanings of the corresponding instruc-
+tions. We notice some incoherence and typos in
+the pseudo-labeled data, but this does not affect the
+general meanings of the sentences. For TC, SENT,and SUM, we find the pseudo-labeled data to be
+of high quality. For S2T and PARA, we observe
+that the pseudo-labeled data is much easier than the
+labeled data. This may harm conventional super-
+vised learning since these data can hurt the model’s
+ability to solve hard samples. However, we argue
+that this issue is not that severe in instruction learn-
+ing because “learning to follow instructions” only
+requires the correct mapping between the instruc-
+tions and the task semantics, which is satisfied in
+the pseudo-labeled data, despite its simpleness.163216331634

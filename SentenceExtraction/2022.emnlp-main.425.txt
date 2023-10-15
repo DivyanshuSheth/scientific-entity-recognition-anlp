@@ -1,1 +1,940 @@
-6327 Proceedings of the 2022 Conference on Empirical Methods in Natural Language Processing , pages 6327 6340 December 7 - 11 , 2022 © 2022 Association for Computational Linguistics 6328 6329 6330 6331 6332 6333 6334 6335 6336 6337 6338 6339 6340 
+
+Weiyan Shi, Ryan Shea, Si Chen, Chiyuan Zhang, Ruoxi Jia, Zhou Yu
+Columbia University, Virginia Tech, Google Research
+{ws2634,rs4235}@columbia.edu ,chensi@vt.edu ,chiyuan@google.com ,
+ruoxijia@vt.edu ,zy2461@columbia.edu
+Abstract
+Protecting large language models from privacy
+leakage is becoming increasingly crucial with
+their wide adoption in real-world products. Yet
+applying differential privacy (DP), a canonical
+notion with provable privacy guarantees for ma-
+chine learning models, to those models remains
+challenging due to the trade-off between model
+utility and privacy loss. Utilizing the fact that
+sensitive information in language data tends to
+be sparse, Shi et al. (2021) formalized a DP no-
+tion extension called Selective Differential Pri-
+vacy (SDP) to protect only the sensitive tokens
+defined by a policy function. However, their al-
+gorithm only works for RNN-based models. In
+this paper, we develop a novel framework, Just
+Fine-tune Twice (J), that achieves SDP for
+state-of-the-art large transformer-based models.
+Our method is easy to implement: it first fine-
+tunes the model with redacted in-domain data,
+and then fine-tunes it again with the original
+in-domain data using a private training mecha-
+nism. Furthermore, we study the scenario of im-
+perfect implementation of policy functions that
+misses sensitive tokens and develop systematic
+methods to handle it. Experiments show that
+our method achieves strong utility compared to
+previous baselines. We also analyze the SDP
+privacy guarantee empirically with the canary
+insertion attack.
+1 Introduction
+With the rapid advancement in natural language
+processing (NLP), it has become increasingly im-
+portant to protect NLP models from leaking privacy
+information. Previous work has attempted to tackle
+this challenge by applying differential privacy (DP,
+Dwork et al., 2014) on these models (McMahan
+et al., 2018; Li et al., 2021). However, existing
+DP learning algorithms suffer from limited user
+control andlow utility , as they protect the entiretyof each training example (e.g., one complete sen-
+tence) regardless of users’ privacy preference, and
+therefore tend to be overly pessimistic when only
+partial information in a training example is sensi-
+tive. This problem is particularly pertinent in NLP,
+as NLP training data are often mixed with sparse
+domain-dependent private information, and not all
+tokens need to be protected. For example, for the
+sentence “My SSN is 123-45-6789” , only the last
+few tokens of the actual SSN need to be protected.
+In fact, the definition of DP does notprevent
+usat all from protecting only the sensitive part of
+data. Specifically, DP ensures that the output of a
+data analysis algorithm stays roughly the same for
+neighboring datasets, while providing the flexibil-
+ity to adjust the definition of neighboring relation
+to specific application contexts. Shi et al. (2021)
+recently proposed an instantiation of DP, called
+Selective-DP (SDP), which defines neighboring
+datasets to differ only in the sensitive part of a
+training example and as a result, SDP selectively
+hides the difference in the sensitive part only. SDP
+is particularly suitable for NLP and many other
+unstructured, high-dimensional data, wherein sen-
+sitive information only accounts for a small part.
+But their privacy mechanism to achieve SDP suf-
+fers from three problems: 1) it requires substantial
+knowledge about the model to separate the private
+and public variables, and it is unclear how their al-
+gorithm tailored to recurrent neural networks could
+be extended to modern Transformer-based NLP
+models; 2) it has only been evaluated with explicit
+private entities but not with contextual sensitive
+information; 3) it doesn’t provide protection for
+undetected sensitive tokens; These constraints limit
+the applicability of SDP in real-world scenarios.
+Large language models (LLMs) (Vaswani et al.,
+2017) have achieved tremendous success in NLP.
+They are pretrained on a massive amount of pub-
+lic textual data, and thus excel at capturing gen-
+eral language structures. A common practice in6327NLP is to fine-tune these LLMs on downstream
+tasks. Such a fine-tuning process also works well
+in the private training context. Previously, Yu et al.
+(2021a) showed that privately fine-tuning an ad-
+ditional small set of parameters on top of off-the-
+shelf LLMs with private data achieves comparable
+performance to non-private baselines. Inspired by
+their findings, in this paper, we propose a two-phase
+fine-tuning privacy mechanism, Just fine-tune twice
+(J), to achieve SDP for LLMs. Instead of di-
+rectly using off-the-shelf models to fine-tune once,
+we have two fine-tuning steps: 1) we first redact
+the in-domain data of the downstream tasks, and
+fine-tune the model with these in-domain redacted
+data ( redacted -fine-tune), and 2) then privately fine-
+tune the model on the original private data ( private -
+fine-tune). This additional redacted -fine-tune step
+allows the model to directly learn information from
+the in-domain data and thus leads to a better model
+initialization for the second private -fine-tune step.
+Moreover, in the redacted -fine-tune step, we show
+that even with limited public data (where manual
+screening is possible), Jachieves better utility
+than fine-tune-once baselines. Additionally, we can
+apply lightly-noised optimizers and privacy ampli-
+fication to protect undetected sensitive tokens.
+Our contributions are as follows. First, we pro-
+pose an effective and generalizable privacy mech-
+anism to achieve SDP for large language models
+for various NLP tasks. Second, we design secret
+detectors of different privacy levels (explicit and
+contextual sensitive data) and study their implica-
+tions on the models. Third, our method can utilize
+even a small amount of public data to achieve bet-
+ter utility, and mitigate the missed sensitive token
+problem with lightly-noised optimizer and privacy
+amplification. Finally, we show that, opposite to
+the common belief that privacy is at odds with util-
+ity, private learning doesn’t have to conflict with
+the utility because private information in the data
+could be irrelevant to the learning task.
+2 Preliminary
+A differentially private algorithm hides the differ-
+ence between two neighboring datasets.
+Definition 1 (Differential Privacy) .Given a do-
+mainD, any two neighboring datasets D, D⊆ D
+a randomized algorithm M:D → R is(ϵ, δ)-
+differential private if for all neighboring datasets
+DandDand all T⊆ R ,
+Pr[M(D)∈T]≤ePr[M(D)∈T] +δ.The neighboring relation captures what is pro-
+tected. Traditional DP literature has considered
+neighboring datasets as those differing in one train-
+ing example; thus, the corresponding DP protects
+each training example as a whole. We denote by ϵ
+andδthe privacy parameters achieved under this
+traditional neighboring relation definition. Given
+the sparsity of sensitive information in language
+data, this instantiation of neighboring relations is
+apparently over-pessimistic. Shi et al. (2021) pro-
+posed Selective-DP (SDP), which instantiates the
+neighboring datasets to be those that differ in the
+sensitive attributes of a training sample; as a result,
+SDP selectively hides the difference in the sensitive
+part only. In the context of NLP, a training example
+could be a sentence or a paragraph depending on
+the task and the attributes are individual tokens.
+In this paper, we will focus on designing learning
+algorithms to achieve SDP. Formally, SDP relies
+on a policy function Fthat specifies the sensitive
+information in a training example to be protected
+in an application-dependent fashion.
+Definition 2 (Policy Function) .A policy function
+F:τ→ {0,1}decides which attributes of an
+example r∈τare public ( F(r)= 1) or private
+(F(r)= 0).|r|is the number of attributes in r.
+Detecting private information manually in a
+large corpus based on the policy function is of-
+ten costly. In that case, one may resort to building
+automatic secret detectors to identify the sensitive
+attributes. A simple example of a secret detector
+is a regular expression to capture phone numbers.
+However, secret detectors could miss some private
+attributes and produce false negatives, which intu-
+itively would weaken the privacy guarantees. Ex-
+isting work (Doudalis et al., 2017; Shi et al., 2021;
+Zhao et al., 2022) that selectively protects data ei-
+ther assumes a perfect detector or uses an overly
+conservative detector with a low false negative but
+at the cost of a high false positive. In this paper, we
+provide alternative ways to address this issue with
+a better privacy-utility tradeoff (Section 3).
+With F, SDP defines F-Neighbors.
+Definition 3. (F-Neighbors). Consider a policy
+function Fand two datasets DandD.Dis a
+F-neighbor of D(denoted by D∈N(D)) if and
+only if ∃r∈Ds.t.,F(r)has at least one private
+attribute, ∃r∈Ds.t.,F(r)andF(r)differ by at
+least one private attribute, and D=D\{r}∪{r}.
+Given the definition, the dataset with “My ID
+is123” and the dataset with “My ID is 456” are6328
+F-Neighbors (because except for the actual ID
+number, the other tokens are the same), while
+the datasets with “Hi there” and the dataset with
+“Hello there” are not F-neighbors because the only
+token they differ in is not sensitive. An SDP algo-
+rithm guarantees that F-neighbors cannot be dis-
+tinguished by attackers if they observed the output.
+Definition 4. (Selective Differential Privacy). Un-
+der a policy function F, a randomized algorithm
+M:D → R satisfies (F, ϵ, δ)-selective differen-
+tial privacy if for ∀D, D∈N(D), and∀T⊆ R ,
+Pr[M(D)∈T]≤ePr[M(D)∈T] +δ.
+In this paper, we differentiate between SDP and
+DP for two reasons. Firstly, we want to highlight
+that the privacy parameters associated with SDP
+(ϵandδ) and DP ( ϵandδ) are incomparable.
+For instance, one cannot claim which of (1, 0.001)-
+SDP and (2, 0.001)-DP provides stronger privacy
+guarantees because they are under different privacy
+notions. To meaningfully present the value of these
+privacy parameters, we need to specify under which
+definition these parameters are calculated; to mean-
+ingfully compare the value of these parameters, we
+need to make sure that the parameters are calcu-
+lated under the same privacy definition. Secondly,
+we would like to remain the same terminology as
+our main reference, Shi et al. (2021), which also
+uses the terms SDP and DP to refer to the privacy
+guarantees under the two different neighboring re-
+lations. In the rest of the paper, we use different
+notations to distinguish the privacy parameters as-
+sociated with SDP ( ϵandδ) and DP ( ϵandδ).3 J: Just Fine-tune Twice
+Now we describe J, a two-phase privacy mech-
+anism to achieve SDP for large language models
+(Figure 1). In the first redacted-fine-tune phase,
+we redact the private data Dwith a secret detec-
+tor to obtain the redacted version D, and learn a
+redacted model from Din a privacy-preserving
+way. In the second private-fine-tune phase, we
+further fine-tune the redacted model (from phase
+one) on the private data Dwith a private optimizer
+to achieve SDP guarantees.
+3.1 Phase 1: Redacted -fine-tune
+Jis built upon the observation that the public
+portion of the in-domain data does not require pro-
+tection and can be utilized in various ways to help
+the model learn in-domain information. In this
+phase, we apply the secret detector to redact the
+private data Dand obtain redacted in-domain data
+D. Dependent on the detector performance, we
+propose the three following methods to use Dto
+fine-tune off-the-shelf language models.
+Direct Usage. If the secret detector masks all
+the sensitive information in D(which is possible
+when Dis small enough to support thorough in-
+spection or when a detector is very conservative
+and removes most of the essential information, see
+examples in Table 1), we can use the redacted D
+directly to fine-tune the model with a public and
+unnoised optimizer like SGD.
+Selective Manual Screening. If the secret detec-
+tor is imperfect, we can select an affordable subset6329from Dand then manually sanitize all the missed
+secrets. Then we fine-tune the model with this
+small sanitized subset with a public optimizer. Ex-
+periments show that even with a small amount of
+sanitized in-domain data, the resulting model still
+outperforms the traditional DP learning algorithms
+that pessimistically protect every single token.
+Lightly-Noised Fine-tuning. When the detector
+is imperfect, besides manually screening out the
+missed secrets, we could also employ a private opti-
+mizer to train on Dthat contains missed sensitive
+tokens. Because missed tokens only account for
+a small portion of D, intuitively, a much smaller
+noise is needed to ensure the privacy of the missed
+tokens than the noise magnitude required to ensure
+the privacy of the entire D. We propose to leverage
+privacy amplification by subsampling (PAS) (Balle
+et al., 2018) to calculate the privacy parameters
+associated with the private optimizer. The intuition
+of PAS is that if we perform a DP mechanism on
+random subsamples of the data, and one data point
+is not included in the subsamples, nothing about
+it could be leaked. In this way, we could amplify
+the privacy guarantee. In our scenario, we need to
+protect the missed sensitive tokens. If we know the
+secret detector’s missing rate m(i.e.,m=number of
+missed sensitive tokens/total tokens, the probability
+of sampling a missed secret), we can calculate the
+privacy budget ϵby privacy amplification using
+the subsampling ratio m.
+Note that the application of PAS requires the
+number of missed tokens that appear in any batch
+to be the same, which does not necessarily hold.
+Hence, the privacy parameters calculated from pri-
+vacy amplification are an empirical estimate of the
+actual privacy loss. In practice, the secret detector’s
+missing rate is unknown and we need to estimate
+it (denoted as /tildewidem). Then we change the original
+sampling rate pin moment accounting-based pri-
+vacy parameter calculation (Abadi et al., 2016) to
+p=p∗/tildewidemand calculate the noise injected into
+each private optimizer iteration according to a pre-
+defined privacy budget ϵunder p.
+In our experiments, we sample 0.01% training
+data for 10 times, and estimate the 95% confidence
+interval of the missing rate, [ /tildewidem,/tildewidem]. For both
+/tildewidemand/tildewidem, we can calculate an associated ϵ
+andϵaccording to Theorem 9 in Balle et al.
+(2018), and report both ϵ.3.2 Phase 2: Private -fine-tune.
+In the second phase, we initialize the model with
+the redacted model from phase one, and fine-tune it
+with the original private Dand a private optimizer
+(e.g., DPSGD (Abadi et al., 2016) or any other
+more advanced private optimizer that achieves DP).
+Unlike the privacy mechanism in Shi et al.
+(2021), our algorithm does not require knowledge
+about the models or the tasks, and therefore can be
+easily applied to different models such as GPT2
+(Radford et al., 2019) and Roberta (Liu et al., 2019),
+and different tasks such as language generation and
+natural language understanding. See Section A.2
+for more implementation details.
+One-phase vs two-phase. Compared to conven-
+tional differentially private training, our algorithm
+introduces an additional stage that involves redac-
+tion and regular unnoised training on redacted data.
+In fact, the computational cost of the additional
+stage is much lower than the cost originally in-
+curred by DP learning, because the additional first
+phase does not need costly per-sample gradient
+clipping and noising operations. And redaction is a
+common first-step people are already doing and fa-
+miliar with. Also, there exist abundant off-the-shelf
+tools that allow redaction at scale.
+3.3 Privacy Analysis
+We provide Theorem 1 for privacy analysis. It
+ensures that, if the user has a secret detector with
+100% recall, JFT-trained models achieve (0,0)-SDP
+after phase one and ( ϵ,δ)-SDP after phase two. A
+secret detector with 100% recall is possible if the
+user can afford manual inspection or have enough
+domain knowledge. When a detector with 100%
+recall is not possible, we use lightly-noised fine-
+tuning to empirically protect the missed secrets as
+mentioned in Section 3.1.
+Theorem 1. Given that 1) in the first phase, the
+data used for fine-tuning do not contain sensitive
+tokens and a public optimizer is used, and 2) in
+the second phase, the private optimizer achieves
+(ϵ, δ)-DP , Jachieves (ϵ, δ)-SDP .
+The proofs are deferred to Section A.1. The
+theorem shows that under direct usage or selective
+screening of D,Jachieves SDP with the same
+privacy parameter values as the ones pertaining to
+the private optimizer used in the second phase.63304 Secret Detectors of Different Levels
+Typical private information includes personal-
+identifiable information (PII) such as name and
+birthday. But as pointed out in Brown et al. (2022),
+one key challenge in NLP is that private informa-
+tion is often contextual. For example, they pre-
+sented a dialogue between Alice and Bob about
+Alice’s divorce (Table 1): none of the tokens in
+“What are you going to do about the custody of the
+kids?” , are PII by themselves, but combined to-
+gether, the semantics reveals private information.
+To build generalizable secret detectors, we uti-
+lize off-the-shelf NER, dependency parser, and
+POS tagger in spaCy (Honnibal and Montani, 2017)
+to label each token, and redact different sets of
+tokens to achieve the different privacy levels be-
+low (entity level and contextual level). To qualita-
+tively show their protection levels, we apply them
+to redact two sentences from the divorce dialogue
+in Brown et al. (2022). The results are in Table 1.
+Low entity redacts four types of named entities
+(person, organization, date, and location), which
+are considered PII defined by the US Department of
+Labor. We use NER in spaCy to detect them. If we
+apply this detector, “Did you hear Alice is getting
+divorced?” becomes “Did you hear <PERSON >
+is getting divorced?” An attacker who attacks a
+model trained on the latter sentence can at best
+learn about the divorce but cannot know who.
+High entity redacts all the 18 entities in spaCy in-
+cluding the four above and more, like time entity.
+The two secret detectors above rely on named
+entities, so they are more explicit than the two de-tectors below, which consider the overall sentence
+structure and thus are more contextual.
+Low contextual protects all the 18 entities plus
+proper nouns, pronouns, and sentence subjects and
+objects. This detector drastically increases the pri-
+vacy level: we cannot get any useful information
+from the left example in Table 1.
+High contextual further redacts all the verbs, in ad-
+dition to the tokens redacted by the low contextual
+detector. It increases the privacy level even further
+and we cannot learn anything from both examples.
+This is to stress-test Jand see the model utility
+when the majority of the tokens are redacted.
+Human language is diverse, and private infor-
+mation can take various forms. So instead of de-
+signing sophisticated algorithms, we intentionally
+rely on common NLP tools to build easy-to-use
+domain-agnostic secret detectors with high recalls
+to protect privacy as much as possible. As shown
+in Table 1, these detectors tend to over-sanitize
+the sentences. But we will show later, even with
+over-redaction, Jstill achieve good performance.
+Private textual information can be treated more
+sophisticatedly, but how to better detect private in-
+formation is not the focus of this paper. Our goal
+is to show that simply redacting tokens achieves
+promising performance and Jis compatible with
+better private information detection algorithms to
+further improve the results.
+5 Experiments
+We conduct experiments on two NLP tasks: 1)nat-
+ural language understanding (NLU, on GLUE) and
+2)language generation (on Wikitext-2 and ABCD).
+Datasets. 1)GLUE (Wang et al., 2018) is a widely-
+used multi-task benchmark dataset for NLU. It
+contains sensitive information such as name and
+date. 2)Wikitext-2 (Merity et al., 2017) contains
+Wikipedia articles with private information such as
+name and date. 3)ABCD (Chen et al., 2021) is a
+human-human customer service dialogue dataset
+under real-world scenarios with user private infor-
+mation such as name and order IDs.
+Models. We use Roberta (Liu et al., 2019) for the
+NLU classification task and GPT2 (Radford et al.,
+2019) for the language generation task. Due to com-
+putational constraints, we use Roberta-base and
+GPT2-small for the experiments. We use an effi-6331cient implementation of DPSGD in Li et al. (2021).
+Based on previous studies (Li et al., 2021; Yu et al.,
+2021a), larger DP models usually achieve better
+results and thus we expect that larger SDP models
+will achieve even better performances.
+Baselines. 1)No-DP : the model is fine-tuned
+using regular Adam optimizer (Kingma and Ba,
+2014) without extra noise and hence it does not
+have any privacy guarantees (i.e., ϵ=ϵ=∞).
+2)DPSGD: the model is fine-tuned with tradi-
+tional DPSGD Abadi et al. (2016) where the gra-
+dient is clipped and noised in every gradient de-
+scent iteration (we employ the DP-Adam variant
+where the optimizer is Adam but its gradient pri-
+vatization is the same as DPSGD, and we keep the
+term DPSGD as it is more accessible to the com-
+munity). While DPSGD was originally proposed
+to achieve the DP guarantees that protect a train-
+ing example as a whole, it can also achieve SDP
+guarantees with the same privacy parameters (i.e.,
+ϵ=ϵandδ=δ).3)CRT : the model is
+trained with the recently proposed Confidentially
+Redacted Training (Zhao et al., 2022) that achieves
+(ϵ, δ)-Confidentiality. Confidentiality is a new
+definition related to SDP but different from SDP,
+it ensures the indistinguishability between a secret
+and a <MASK> token, so its privacy parameters are
+not directly comparable to SDP. Thus, we add the
+same amount of noise to CRT and SDP, empirically
+compare SDP and CRT with the canary insertion
+attack in Figure 2 and 3, and report the utility in
+Table 6 in the Appendix. 4)Redacted : We also
+present the utility of the redacted models since they
+are also privacy-preserving. Note when the secret
+detector is perfect, the redacted models have a per-
+fect SDP privacy guarantee (i.e., ϵ= 0). However,
+it does not allow the model to learn from sensitive
+tokens at all. J, by contrast, empowers the model
+to learn from sensitive data with a flexible, tunable
+tradeoff between privacy and utility. Moreover, it
+provides ways to offer quantifiable privacy in the
+presence of imperfect secret detectors.
+Our models. 1)J: this is our Jmodel di-
+rectly using the redacted data in phase one. 2)J
++manual screening : this is Jusing a subset ofthe redacted data where missed secrets are manu-
+ally filtered out in phase one. 3)J+light noise :
+this is Jwhere we add light noises according to
+the estimated missing rate in phase one.
+6 Results
+We show three major findings: 1)the impacts of
+secret detectors are task-dependent on the result-
+ingJmodels, but even for conservative contex-
+tual detectors (30%+ tokens are redacted), Jstill
+achieves better results than naive DPSGD (Sec-
+tion 6.1); 2)despite the small scale, using the man-
+ual screened in-domain data still improves the J
+model utility (Section 6.2); 3)lightly noised opti-
+mizer with privacy amplification protects missed
+sensitive tokens from attacks (Section 6.3).
+There is always a privacy-utility trade-off, so
+larger epsilons lead to better utilities but worse
+privacy. And when comparing models, we need
+to look at the model utility under a similar privacy
+budget. An epsilon of 1 to 3 is commonly used in
+various privacy literature (Yu et al., 2021a; Li et al.,
+2021; Zhao et al., 2022). In our experiments, we
+pre-calculated the privacy parameter so that an ϵof
+around 3 is spent when training ends.
+6.1 Secret Detectors of Different Levels
+Table 2 show the results on GLUE (left) and gen-
+eration (right). Pctis the percentage of sensitive
+tokens redacted by the detector. ϵis the SDP pri-
+vacy budget, the lower the better. We compare
+model utility under a similar privacy budget ϵ.
+Natural Language Understanding. Table 2 (left)
+shows that under a similar ϵ, all the Jmodels
+achieve better performance than the DPSGD base-
+line, even when over 40% of tokens are redacted.
+Besides, for all the tasks, all the redacted mod-
+els achieve reasonable utility, even when a large
+portion of the tokens are redacted. For exam-
+ple, the redacted model (high contextual) is better
+than DPSGD on MNLI ( 83.23vs82.10,44.27%
+redacted) and SST-2 ( 91.17vs86.12,38.13%
+redacted). This confirms the motivation of SDP
+that when building private NLP models, we should
+not naively protect all the tokens regardless of their
+properties. Instead, we should consider if the sen-
+sitive tokens will impact the task. If not, we can
+simply redact them to build private models.
+Also, if Jcan improve the redacted model
+depends on the task. For SST-2 on sentiment anal-
+ysis, the private -fine-tune step does not improve6332
+the redacted model. This is because, the redacted
+models achieve a high accuracy (even the worst
+accuracy is 91.86, only a 2.94drop from the SOTA
+public model with an accuracy of 94.8), and fine-
+tuning them on the private data with noisy gradients
+is not enough to close the small gap. But for tasks
+with a bigger gap between the redacted and No-DP
+models (e.g., MNLI, QQP, and QNLI), Jcan fur-
+ther improve the redacted model. Besides, the gap
+between the redacted model and the correspond-
+ingJmodel becomes bigger as the privacy level
+increases: for QNLI (low contextual), the gap is
+87.99-85.30=2.69, while for QNLI (high contex-
+tual), the gap is 87.06-82.81=4.25. This shows
+the model does learn useful information from the
+sensitive tokens during the private -fine-tune step.
+Language Generation. Table 2 (right) shows the
+language generation results. We note that language
+generation is different from NLU tasks, because
+for NLU, the models used for initialization without
+any fine-tuning (“No-fine-tune” in Table 2) start
+with a bad accuracy ( ≤50%, just random guess),
+and adding special tokens to it would still start with
+a random guess, so additional special tokens will
+not impact the final results greatly. But for the gen-
+eration task, the “No-fine-tune” GPT2 is already a
+strong model for initialization with ppl= 30.08on
+Wikitext-2 and 13.60on ABCD, and we found that
+adding special tokens would disturb this initializa-
+tion and greatly impact the final result. Because
+all the Jmodels have added special tokens like
+“<MASK>” and “SYS:”, for a fair comparison, we
+report two DPSGD baselines, one without specialtokens (“DPSGD”) and one with special tokens
+(“DPSGD (+spe)”). See Section A.2 for more dis-
+cussions on the impact of special tokens.
+Compared to “DPSGD (+spe)”, all Jmodels
+achieve better model utility on both datasets. For
+“DPSGD” without special tokens, fine-tuning on
+the downstream tasks improves the model from
+30.08to27.05(the improvement ∆=3.03); for J
+(low contextual), it is initialized with the redacted
+model with ppl= 37.90, and privately fine-tuning it
+improves the perplexity to 25.62(∆=12.28). This
+shows that although the initialization seems worse
+(30.08vs37.90), since the redacted model is fine-
+tuned directly on in-domain redacted data, it does
+learn useful information from the first redacted -
+fine-tune step, and the second private -fine-tune step
+can further improve upon the redacted model. For
+J(high contextual) for the stress test, although
+45% tokens are masked and the language structure
+is largely impacted, Jstill improves the redacted
+model utility from 54.29to27.19(∆=27.10) and
+performs on par with DPSGD ( 27.05vs27.19).
+6.2 Selective Manual Screening
+As mentioned earlier, secret detectors can miss
+certain secrets and we can manually filter out the
+missed secrets at a small scale and fine-tune with
+the small manually sanitized set. Denote the orig-
+inal data as D. We sample 0.1% data from D,
+apply the high entity secret detectors (because it is
+less conservative and could miss secrets), and man-
+ually sanitize the missed secrets to get D. We use
+D= 0.1%Dduring redacted -fine-tune to train6333
+the redacted model, and the entire DasDduring
+private -fine-tune to obtain Jmodels.
+Table 4 shows the results. D=0.1% Dcontains
+100∼300 examples for GLUE and 10 articles and
+10 dialogues for Wikitext-2 and ABCD respectively.
+On all the tasks, Jachieves better utilities than
+DPSGD. This shows that even fine-tuning with a
+small manually-screened in-domain subset can still
+help the model learn in-domain information, and
+lead to better utility. We also simulate a completely
+low-resource setting where we simply have limited
+training data (i.e., D=0.1% D,D=0.1% D). See
+Section A.4 for the results.
+6.3 Lightly Noised Optimizer with Privacy
+Amplification
+Besides manually inspecting the missed secrets, we
+can also use noised optimizers in the first phase to
+protect the missed secrets from attacks and then
+adopt privacy amplification to estimate the corre-
+sponding privacy parameters. We again perform
+the experiments on the high entity detector and Ta-
+ble 3 shows the results. We convert the missing
+ratem(%) to the recall of the secret detector, i.e.,
+recall=(1- m/Pct ), where Pct is the percentage
+of sensitive tokens among all tokens. “ J+light
+noise” shows the model performance with a noised
+optimizer and privacy amplification employed in
+the first step. Besides, we add more noise thanneeded to obtain a conservative model (“ J+light
+conservative noise”): for instance, MNLI data con-
+tains8.63% sensitive tokens, although the secret de-
+tector’s missing rate mranges from (0.3%,1.2%)
+with95% probability, we assume mto be 8.63%
+(i.e., it miss all sensitive tokens and thus recall= 0)
+to calculate and add the noises that are more than
+actually needed.
+The results show that “ J+light noise” achieves
+better utility than DPSGD, especially on gener-
+ation tasks. The perplexity is (25.21vs27.05,
+5.78vs8.31), and the estimated ϵranges from
+(2.73,2.92)and(1.08,1.60)with 95% probability.
+Even for the conservative models, “ J+light con-
+servative noise” is still better than DPSGD ( 26.59
+vs27.05, and 6.64vs8.31).
+6.4 Attack Results
+We perform the canary insertion attack (Carlini
+et al., 2019) to empirically show how much the
+models memorize the training data unintentionally.
+The attack is to insert a canary of a certain format
+into the training data, and calculate its exposure,
+which is the rank of the inserted canary amongst all
+possible values of the same format. The lower the
+exposure is, the safer the model is. In our experi-
+ments, we insert the canary “My ID is 341752” into
+the training data for 10 times to make the perfor-
+mance difference of different models more salient.
+By definition, for a six-digit canary, an exposure
+close to log(10)≈19.9means the canary can be
+extracted by the attackers. The result is in Figure 2.
+Each point on the figure is a model checkpoint.
+The X-axis shows the perplexity (utility), and the
+y-axis is the exposure (privacy), so Figure 2 shows
+different models’ privacy-utility tradeoffs.
+One major reason why the model remembers a
+canary is that it has seen the canary many times.
+For “No-DP”, initially, its exposure is low because
+it hasn’t seen the canary many times. But because6334
+the model is unprotected, its exposure is unbounded
+and increases dramatically after it accesses the data
+for more epochs. This suggests that models without
+protection do memorize the data unintentionally.
+For protected models (DPSGD, redacted, and
+J), if the canary is captured by the detector (“not
+missed” in the figure), then the exposure does not
+increase much even if the data are accessed many
+times. Under similar exposure, Jachieves better
+utility than DPSGD and the redacted models.
+But if the secret detector misses the canary (we
+purposely code it to mark the canary as public), the
+exposure is increased for both “Redacted (missed)”
+and “ J(missed)”. But if we add light noise in the
+first phase (“Redacted+light noise” in red), even if
+the canary is missed for 10 times, its exposure is
+still low. If we continue to privately fine-tune in
+the second phase (“ J+light noise” in pink), we
+can further improve the utility but still achieve a
+low exposure value. Both DPSGD and CRT also
+achieve a low exposure value if the canary is missed
+by the secret detector, but with worse utilities than
+“J+light noise”. This shows “ J+light noise”
+can protect missed secrets while achieving better
+utility. We also performed the canary insertion at-
+tack with one canary inserted once, and 10 different
+canaries inserted once, shown in Section A.5.
+We also tested the membership inference attack
+(MIA), but it wasn’t successful (inference accuracy
+is around 60% even for public models). Previous
+studies also observed unsuccessful MIA (Shi et al.,
+2021; Zhao et al., 2022) and our future work in-
+cludes developing better MIA for NLP.
+7 Related Work
+Recent work studied private language models on
+various model architectures such as RNNs (McMa-
+han et al., 2018; Ramaswamy et al., 2020) and largelanguage models (Anil et al., 2021; Li et al., 2021;
+Yu et al., 2021a). Li et al. (2021) proposed ghost-
+clipping to reduce the computational cost in per-
+sample gradients of DPSGD, and achieved strong
+private LLMs. Yu et al. (2021a) added a small set
+of private parameters to off-the-shelf LLMs and
+privately tune them on private data and obtained
+performant private models. Most previous works
+achieve canonical DP. Shi et al. (2021) proposed
+Selective-DP for applications with sparse sensitive
+information like NLP, and a privacy mechanism
+for RNN models. Our work proposes an effective
+mechanism for LLMs to achieve SDP and study
+the impact of secret detectors at different levels.
+Our work is also closely related to utilizing pub-
+lic data for private learning (Papernot et al., 2018;
+Tramer and Boneh, 2020; Ghazi et al., 2021; Yu
+et al., 2021a). One working direction assumes ac-
+cess to large unlabeled public data to train DP mod-
+els. For example, PATE (Papernot et al., 2016) used
+unlabeled public data and knowledge distillation to
+build DP models. Hoory et al. (2021) used public
+medical data to pre-train domain-specific private
+vocabulary and models. Another direction lever-
+aged small public data to guide the private updates
+in lower-dimension subspaces (Zhou et al., 2020;
+Yu et al., 2021b). Our work is distinct from previ-
+ous studies: instead of querying public data from
+outside, we utilize the public portion of in-domain
+data and achieve SDP with better model utility.
+8 Conclusions
+In this paper, we propose J, which can achieve
+Selective-DP for large language models. We also
+design generalizable secret detectors to provide pro-
+tection at different levels and study their impacts
+on the resulting SDP models, and address the prob-
+lem of missed sensitive tokens via selective manual
+screening and private training with reduced noise,
+which is justified by privacy amplification. The
+results show that the proposed Jproduces SDP
+models with strong performance while remaining
+robust to the canary insertion attack.
+Limitations
+Parameter search in DP learning is challenging as
+the training process takes a long time and is quite
+sensitive to different parameters (Li et al., 2021).
+So the findings in the paper are based on the param-
+eter tuning performed by the authors (Table 5), and
+more parameter tuning could potentially lead to6335better results than the results reported in the paper.
+In our experiments, we simply fine-tuned the
+models on the in-domain redacted data without ad-
+justment for the redaction. We could potentially
+utilize more sophisticated methods to train better
+redacted models to further improve the Jutility.
+Besides, for the selective manual screening experi-
+ments, we did not adjust the redacted -fine-tune step
+for the low-resource setting where D= 0.1%D.
+Future work includes how to train a better redacted
+model given limited data.
+When the gap between the SOTA public model
+and the redacted model is small, the private -fine-
+tuning step cannot further improve the results be-
+cause of the noisy gradients (e.g., in SST-2), we
+plan to develop better algorithms to utilize the
+redacted data and apply denoising methods (Welch
+et al., 1995) to close the gap further.
+One thing to note is that if the secret detector
+misses a secret and the secret appears multiple
+times in the data, then it is likely that the secret
+detector will miss it multiple times. Therefore,
+deduplicating the data first is important. We plan
+to study data deduplication in NLP in the future.
+Ethical Considerations
+To prevent real-world harm, all the datasets and
+models used in this paper are already public with
+either public or synthesized information. So no real
+personal information will be leaked.
+This work tackles the challenge of privacy pro-
+tection and can be utilized in various domains or ap-
+plications to build models that preserve privacy. We
+will release the code to facilitate privacy-preserving
+model building. The canary insertion attack is well-
+known (Carlini et al., 2019, 2020) and adjusted
+specifically for our setting, so it cannot be directly
+utilized to attack real-world models successfully.
+Acknowledgements
+We would like to thank Da Yu, Xuechen Li, and
+Zhiliang Tian for the valuable discussions. We also
+thank the anonymous area chair and reviewers for
+their insightful suggestions.
+References63366337A Appendix
+A.1 Proofs
+Theorem 1 (restated) .Given that 1) in the first
+phase, the data used for fine-tuning does not con-
+tain sensitive tokens and a public optimizer is used,
+and 2) in the second phase, the private optimizer
+achieves (ϵ, δ)-DP , Jachieves (ϵ, δ)-SDP .
+Proof. Since the first phase does not incur any pri-
+vacy loss on the sensitive tokens, the first phase
+achieves (0,0)-SDP.
+DP implies SDP. In other words, if an algorithm
+achieves (ϵ, δ)-DP, then it also satisfies (ϵ, δ)-SDP.
+Hence, the second phase achieves (ϵ, δ)-SDP. By
+the composition of SDP, Jachieves (ϵ, δ)-SDP.
+Note that the first phase achieves (0,0)-SDP but
+cannot achieve (0,0)-DP. DP aims to protect the
+entire token sequence, whether it is considered
+sensitive or non-sensitive by the policy function.
+Because the first phase does not noise the non-
+sensitive tokens at all, it cannot ensure DP.
+A.2 Implementation Details
+Notes on special tokens. When fine-tuning LLMs,
+it is a common practice to add new special tokens
+to fit the need of the downstream tasks. For exam-
+ple, in dialogue tasks, we often have prompts like
+“SYS:” and “USR:” to indicate the speaker in the
+data. This step doesn’t affect the public models that
+much (20.48 without special tokens vs 20.44 with
+special tokens), but as it does change the model
+structure (additional embeddings) and the model
+initialization, we notice that in our experiments,
+DPSGD is sensitive to the addition of special to-
+kens (because the model initialization is changed):
+after reasonable amounts of parameter tuning (see
+Table 5), DPSGD initialized with the original GPT
+achieves 27.05 in PPL, while DPSGD with added
+special tokens achieves 30.32 in PPL on Wikitext-2.
+The gap could potentially be reduced with more pa-
+rameter tuning, but we just want to mention that in
+practice, it may not be easy to find the best param-
+eters. In our experiments, for WikiText-2, we add
+<mask>as the special token; for ABCD, as it is a
+dialogue task, we add <mask>, “ACT:”, “SYS:” ,
+and“USR:” . Since all the Jmodels have added
+special tokens, we report two DPSGD results, one
+without special tokens and one with special tokens,
+for a fair comparison in terms of model structure.
+Also, the secret detectors replace the sensitive
+information with artificial special tokens such as“<SSN>” and “ <NAME >”. But these tokens
+don’t appear in the validation or test set and thus in-
+serting them will skew the training data distribution
+and lead to inferior results, especially when the sen-
+sitive token portion is high. In our experiments, we
+mask the detected sensitive information with the
+same “ <mask>” token and ignore this special to-
+ken in the loss calculation. In this way, for models
+with an existing “ <mask>” token (like Roberta),
+we can utilize the existing embedding; for models
+without “ <mask>”, the model only needs to learn
+one additional special embedding. This improves
+the validation perplexity from 64.82to37.90for
+the redacted GPT2 model with the low contextual
+secret detector.
+We could potentially apply the same secret detec-
+tor on the validation and test set to mitigate special
+token issues. However, this causes two concerns:
+1) if the secrete detector redacts 45% of tokens (e.g.
+the high contextual one redacts all the verbs, etc),
+then the performance on validation/test is not infor-
+mative at all, and cannot be compared to the public
+baseline; 2) in the past privacy literature (Papernot
+et al., 2018; Ghazi et al., 2021), the conventional
+problem setup considers validation/test sets as pub-
+lic and focuses only on the training privacy. We
+inherit the same treatment to be comparable with
+prior literature. But in privacy-related NLP prob-
+lems, how to treat the validation/test sets remains
+an open question as they can contain private infor-
+mation.
+Our experiments find that adding many special
+tokens impacts the results. In the future, we plan to
+study how to treat special tokens better in privacy-
+preserving LMs.
+Parameters Range
+ϵ 3
+Clipping norm C 0.1
+Batch size {256, 512, 1024}
+Learning rate {5, 10, 50} ·10
+Epochs E {10, 100, 200, 600}
+Noise scale σ Pre-calculated so that ϵis
+spent when training ends
+Hyper-parameter tuning. Hyper-parameter tun-
+ing remains a challenging problem in DP learning
+as the training takes a long time, and the model
+can be sensitive to the hyper-parameters. Guided6338
+Batch size Epoch PPL
+256 200 27.04
+512 200 27.05
+1024 200 27.18
+1024 600 27.01
+1024 10 28.84
+by Li et al. (2021), we tune the learning rate, the
+number of training epochs, and the batch size on
+the validation set and report the best results. Please
+refer to Table 5 for the parameter range.
+In our experiments, we tuned the batch size,
+learning rate, and epoch number for the best models
+in different settings. In practice, we found increas-
+ing the epoch number and batch size helps, but
+these two factors can interact with each other, the
+gain could be small after the batch size and epoch
+number are large enough. Table 7 shows the conver-
+gent model utility of DPSGD on WikiText-2 with
+different hyper-parameters. In our experiments, we
+pick the best set of parameters that balances the
+computational cost and the utility.
+A.3 Comparison with CRT
+Table 6 shows the comparison between Jand
+CRT on the model utility and privacy guarantee.
+Note that Jachieves (ϵ, δ)-SDP, and CRT re-
+alizes (ϵ, δ)-Confidentiality, because the underly-
+ing privacy notion is different, we cannot directly
+compare the ϵ. We pre-calculate the noises given
+ϵ= 3, add the same amount of noises to both CRT
+andJ, and report the best valid utility. With the
+same amount of noise added, Jachieves better
+model utilities than CRT for all the tasks across
+different secret detectors.A.4 Low-Resource Results
+Privacy protection is important in oftentimes low-
+resource domains such as health care. We simulate
+the low-resource setting where we have both lim-
+ited redacted and private data, i.e., ( D=0.1% D,
+D=0.1% D) and the results are in Table 8.
+The redacted model always performs better than
+DPSGD, suggesting that for low-resource settings,
+we can simply redact the data to train the model
+instead of employing differential privacy. Also,
+for the QNLI task, Jshows promising results.
+With 0.1% training data (100 records), the redacted
+model improve the accuracy from random guess
+to 66.5%. Jcan even further improve the accu-
+racy to 67.49%. But the baseline DPSGD fails to
+improve the model at all (accuracy=50.54%). We
+plan to study how to better fine-tune the redacted
+model privately with limited data.
+A.5 Canary Insertion Attack
+Figure 3 shows the canary insertion attack result
+when the canary is inserted only once. We see
+that the exposure is low for all the models (<3,
+so not extractable) including the public “No-DP”
+without any protections. This agrees with Figure 4
+in Carlini et al. (2019) that when the canary is
+inserted for very limited times, its exposure is low.6339
+Figure 4 shows the canary insertion attack re-
+sults when we insert ten different canaries into the
+training data. The exposure is the average expo-
+sure of the ten canaries. In this experiment, we
+treat the inserted canaries as the only secrets, so
+the “Redacted” and “ J” model utilities are close
+to the black “No-DP” model, and we can better
+compare with the “No-DP” model. We also artifi-
+cially vary the recall of the secret detector to see
+the effect. “Recall=0.4” means that the detector
+can only detect four of the ten canaries. Because
+each canary only appears once in the dataset, the
+exposure is low, similar to the ones in Figure 3. But
+if the recall is higher (0.6), the exposure will still be
+lower. “ J+light noise” achieves low exposure,
+similar to the baseline DPSGD that protects all ca-
+naries, but with much higher utility over DPSGD.
+These experiments may suggest that for large
+NLP models, if the sensitive tokens only appear for
+very limited times, they may not be extracted using
+the canary insertion attack.6340

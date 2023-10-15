@@ -1,1 +1,663 @@
-6690 Proceedings of the 60th Annual Meeting of the Association for Computational Linguistics Volume 1 : Long Papers , pages 6690 6702 May 22 - 27 , 2022 c(cid:13)2022 Association for Computational Linguistics 6691 6692 6693 6694 6695 6696 6697 6698 6699 6700 6701 6702 
+
+Zhuohao Chen, Jangwon Kim, Ram Bhakta, Mustafa Y. SirUniversity of Southern California, Los Angeles, USAAmazon, Seattle, USA
+zhuohaoc@usc.edu {jangwok, simustaf}@amazon.com
+hiten.bhakta@gmail.com
+Abstract
+Identifying sections is one of the critical com-
+ponents of understanding medical information
+from unstructured clinical notes and devel-
+oping assistive technologies for clinical note-
+writing tasks. Most state-of-the-art text clas-
+siﬁcation systems require thousands of in-
+domain text data to achieve high performance.
+However, collecting in-domain and recent clin-
+ical note data with section labels is challenging
+given the high level of privacy and sensitivity.
+This paper proposes an algorithmic way to im-
+prove the task transferability of meta-learning-
+based text classiﬁcation in order to address the
+issue of low-resource target data. Speciﬁcally,
+we explore how to make the best use of the
+source dataset and propose a unique task trans-
+ferability measure named Normalized Nega-
+tive Conditional Entropy (NNCE). Leveraging
+the NNCE, we develop strategies for selecting
+clinical categories and sections from source
+task data to boost cross-domain meta-learning
+accuracy. Experimental results show that our
+task selection strategies improve section clas-
+siﬁcation accuracy signiﬁcantly compared to
+meta-learning algorithms.
+1 Introduction
+An important part of Electronic Health Records
+(EHRs) is the digitized clinical notes that contain
+the medical and treatment histories of patients. The
+section of clinical notes can be deﬁned as a text seg-
+ment that clusters consecutive sentences with rele-
+vant content of one dimension of a patient’s health
+encounter (Pomares-Quimbaya et al., 2019). Clin-
+ical note sections, labeled with either headings or
+subheadings, make the notes well organized and of-
+fer improved clinical information extraction (Wang
+et al., 2018b). However, many clinical notes con-
+tain narratives that are in an unstructured free-textformat, (e.g., History of Present Illnesses described
+in paragraph form), which makes it challenging to
+retrieve and utilize this information. In the United
+States, physicians generally spend an excessive
+amount of time interfacing with EHRs and com-
+puterized physician order entry (CPOE) workﬂows
+in their aftercare work, resulting in burnout, low
+job satisfaction, and system-wise inefﬁciencies (Pa-
+tel et al., 2018). An automated section classiﬁer
+can play a key role in mitigating this problem. In
+some cases, section classiﬁcation serves as an end
+task of automatic report segmentation. For exam-
+ple, according to an internal survey we conducted
+with Amazon Care providers, we found evidence
+that classifying sentences related to the History of
+Present Illness from medical encounters can greatly
+assist providers with their documentation. For
+computer-assisted report generation, understand-
+ing clinical notes from an unstructured format is
+an important data pre-processing (Gopinath et al.,
+2020).
+There are some challenges for clinical note sec-
+tion classiﬁcation in practice. First, it is difﬁcult
+to collect and access a large amount of in-domain
+data. Second, section types and medical contents
+within a section substantially vary depending on
+care providers, which makes it hard to utilize open-
+source datasets. Even though some sections exist
+in multiple different sources, their contents vary
+across clinical categories. For example, the Diag-
+nosis section for Nutrition specialty and Rehabili-
+tation Service specialty vary in types of content.
+Recently developed neural network language
+technologies capture rich contextual information
+in sentences. Among them, Bidirectional En-
+coder Representations from Transformers (BERT)
+achieved signiﬁcant improvements in multiple Nat-
+ural Language Processing (NLP) tasks, establish-
+ing strong baselines in low-resource scenarios (De-
+vlin et al., 2019). However, there remains room
+for performance improvement because BERT uses6690source data – data outside of in-domain or target-
+domain data – in an unsupervised training fash-
+ion only. Another approach for low-resource in-
+domain NLP tasks is Multi-Task Learning (MTL).
+The MTL adopts shared text encoding layers across
+all tasks while the top layers are task-speciﬁc for
+each dataset (Liu et al., 2015, 2019). The target
+task with limited data beneﬁts from the knowledge
+learned from source tasks. Instead of MTL, which
+minimizes the loss of the source tasks, Dou et al.
+(2019) proposed a model-agnostic meta-learning
+algorithm that ﬁnds optimal model parameters for
+better adaptation capability to new tasks. In classi-
+ﬁcation tasks, Nichol et al. (2018) proposed Rep-
+tile, an optimization-based meta-learning algorithm
+for section classiﬁcation, and achieved comparable
+accuracy on well-established benchmarks on low
+resourced image datasets. In the present paper, we
+adopted these methods as strong baselines in our ex-
+periments and computed the relative performance
+improvement of our method.
+Task transferability denotes how easy it is to
+transfer the representation learned from one task
+to another task (Tran et al., 2019; Nguyen et al.,
+2020b). It helps discover the relationship between
+two types of tasks and provides supporting evi-
+dence for developing transfer learning strategies.
+Task transferability becomes more useful in real-
+istic situations where the assumption of the meta-
+learning, which is that data of the target task can
+be drawn from the distribution of the source tasks,
+does not hold. One common example is that there
+are ‘outlier tasks’ in the training (source) tasks,
+which are dissimilar from the testing (target) ones
+(Venkitaraman et al., 2020). For this problem, good
+selection of relevant source tasks can beneﬁt knowl-
+edge transfer to unseen tasks (Zamir et al., 2018;
+Achille et al., 2019; Nguyen et al., 2020a).
+In clinical section classiﬁcation, we suppose how
+close a source task is toward the target task is de-
+termined by its specialty and the section types in-
+cluded. However, few studies of task transferabil-
+ity estimation have discussed the function of each
+label. Thus we propose an information-theoretic
+metric for task transferability, namely Normalized
+Negative Conditional Entropy (NNCE). The NNCE
+score is calculated by the classiﬁer of a source task
+and target data samples without training on the tar-
+get task, thus saving expensive computation for
+model optimization. We hypothesize that this score
+correlates with how well the source data labels (sec-tions) distinguish the target labels.
+Leveraging the NNCE, we explore strategies of
+source task selection to improve the performance
+of meta-learning. The goal is to make the best use
+of available data from various clinical specialties
+for any target tasks. Speciﬁcally, we explore two
+strategies: 1) category selection - we select a sub-
+set of clinical categories that are relevant to the
+target task; 2) section selection - for a clinical cat-
+egory, we ﬁlter out the samples of certain section
+types which are not relevant to the target task and
+merge similar sections by assigning the same label.
+The category selection is informed directly by the
+best NNCE scores. For section selection, however,
+there are too many combinations, and it is time-
+consuming to train models for every possible task
+and ﬁnd optimal ones. To handle that, we apply
+a backward selection method for heuristic search.
+The experiment results show that our task selec-
+tion strategies improve the meta-transfer learning
+of section classiﬁcation in low-resource scenarios.
+Our work has the following contributions:
+•We apply the meta-learning for clinical sec-
+tion classiﬁcation at sentence level in low-
+resource scenarios utilizing out-of-domain
+datasets.
+•We propose a task transferability metric for
+selecting the source tasks relevant to the target
+tasks by category and section selection, which
+improves meta-learning performance.
+•We evaluate a computationally efﬁcient back-
+ward selection method for section selection
+and show that it leads to a better knowledge
+transfer. To the best of our knowledge, this is
+the ﬁrst attempt to apply class subset selection
+to improve the task transferability in the NLP
+ﬁeld.
+2 Related Work
+In this section, we brieﬂy discuss several areas in
+machine learning that are related to our work.
+2.1 Clinical Section Classiﬁcation
+The goal of this paper is to address the automated
+clinical section classiﬁcation task in low-resource
+scenarios. Notable early work focused on the ex-
+traction of frequency-based features and classiﬁed
+the sections of the clinical narratives with tradi-
+tional machine learning approaches, including Sup-
+port Vector Machines (Apostolova et al., 2009),6691Maximum Entropy (MaxEnt) models (Tepper et al.,
+2012) and Bayesian models (Ganesan and Subotin,
+2014). Li et al. (2010) framed section mapping as
+a sequence-labeling problem and adopted a Hidden
+Markov Model (HMM). Dai et al. (2015) formu-
+lated the task as a token-based classiﬁcation using
+the conditional random ﬁelds (CRF) model. Ni
+et al. (2015) applied active learning and distant su-
+pervision to the section classiﬁcation. In the study
+of Tran et al. (2015), the tasks were performed by
+an object-based section annotator using an ontol-
+ogy to describes the relationship among the section
+concepts. However, most of the studies above in-
+vestigate the section classiﬁcation task for a single
+domain without exploring how to transfer knowl-
+edge from the source dataset to an unseen target
+domain with limited data.
+Recently, Rosenthal et al. (2019) leveraged the
+data from medical literature and performed sec-
+tion classiﬁcation at the sentence level via transfer
+learning, recurrent neural networks (RNNs), and
+BERT in scenarios where a limited amount of in-
+domain training data was available. This work per-
+forms simple transfer learning and only predicts the
+shared sections across different clinical categories,
+and in practice, most section labels are domain-
+speciﬁc. This paper applies meta-learning and task
+transferability to transfer information learned from
+the source category to the target category with a
+new section classiﬁcation task.
+2.2 Meta-learning
+Meta-learning aims at fast adaptation to new tasks
+with small amounts of data through learning knowl-
+edge from multiple source tasks. Among differ-
+ent approaches to meta-learning, one proposal is
+learning the initialization of a network that is good
+at adapting to new jobs. Dou et al. (2019) ap-
+plied this proposal to the General Language Under-
+standing Evaluation (GLUE) benchmark (Wang
+et al., 2018a) and explored the model-agnostic
+meta-learning (MAML) (Finn et al., 2017) and its
+variants called ﬁrst-order MAML (FO-MAML) and
+Reptile. In this paper, we adopted the Reptile algo-
+rithm that achieved the best performance in (Dou
+et al., 2019).
+2.3 Task Transferability
+Previous work explores the relationship between
+classiﬁcation tasks on task similarity using tra-
+ditional machine learning algorithms (Thrun and
+O’Sullivan, 1996; Bakker and Heskes, 2003; Xueet al., 2007; Zhang and Yeung, 2010). Other re-
+cent work mapped the functions into a vector space
+(Achille et al., 2019, 2021) to estimate the transfer-
+ability using a non-symmetric distance. Vu et al.
+(2020) further developed the task embeddings ap-
+proach and applied it to the NLP ﬁeld to predict
+the most transferable source tasks. Zamir et al.
+(2018) modeled the underlying structure among
+different tasks to reduce the number of labeled
+training data. However, the common theme in all
+these approaches is that they require ﬁne-tuning the
+target task and exhaustive optimization of parame-
+ters. The transferability estimation, unfortunately,
+is not robust if there are insufﬁcient training sam-
+ples. Moreover, none of these algorithms have
+discussed label selection which is crucial for task
+selection in clinical section classiﬁcation. Tran
+et al. (2019) investigated the correlation of the la-
+bel distributions between those tasks and proposed
+a negative conditional entropy (NCE) measure to
+estimate the task transferability. This algorithm
+only requires the source model and the labeled tar-
+get samples without ﬁne-tuning the in-domain data.
+Nguyen et al. (2020b) developed a variant of NCE
+measure called the Log Expected Empirical Predic-
+tion (LEEP) that denotes the average log-likelihood
+of the expected empirical predictor. Our proposed
+NNCE is similar in concept to NCE and LEEP.
+However, we apply the class subset selection to
+improve the knowledge transfer. Unlike previous
+work (Manjunatha et al., 2018), which does not use
+knowledge about the target task while ﬁnding the
+subset, our approach incorporates how the decision
+boundary of each source label distinguishes the
+labels of the target task.
+3 Dataset
+We conduct experiments on the Medical Infor-
+mation Mart for Intensive Care III (MIMIC-III)
+database (Johnson et al., 2016), a large open-access
+dataset of de-identiﬁed patient records. We col-
+lected data from 9 different clinical categories of
+MIMIC-III and randomly picked 200 clinical notes
+for each. There are nearly 1,000 section labels of
+these categories, and most of them contain very few
+sentence instances. To handle the sparsity, we only
+keep the section types of each category satisfying
+the following conditions:
+•The section is among the ten most frequent
+ones.6692
+•The number of sentences with this section
+label is more than 2% of the total instances.
+Table 1 shows the number of sentence instances
+and the lists of selected section types. The section
+list varies across categories, with only a few section
+labels in more than one domain. However, some
+sections in different categories are still related to
+each other. For example, sentences in the social
+history section of ‘Discharge Summary Reports’
+category are similar to the instances in the employ-
+ment status andprevious living situation section of
+‘Social Work’.
+4 Methods
+4.1 Meta-learning Approach
+We adopt Reptile, an optimization-based meta-
+learning algorithm, to be our baseline approach. As-
+sume we have a set of source tasks { T,T,...,T}
+from multiple open-resource clinical datasets. We
+perform the Reptile with these source tasks to learn
+the BERT model parameters to provide a good
+initialization for ﬁne-tuning the target task. For
+sampling batches of tasks, we use the same strategy
+proposed in Dou et al. (2019) that the probability
+of selecting a task is proportional to the size of its
+dataset. The training procedure of Reptile is de-
+scribed in Algorithm 1 where denotes learning
+rate. In the baseline meta-learning approach, we
+train the model with all the available datasets with-
+out data selection which might suffer from ‘outlier’
+tasks. In the next step, we leverage the task trans-ferability estimation for selecting the sources tasks
+bettering transferring knowledge to the target task.
+4.2 Normalized Negative Conditional
+Entropy
+Fig. 1 shows the general framework of NNCE. The
+motivation of the NNCE for estimating the task
+transferability is the idea of evaluating how well
+the decision boundaries of source labels distinguish
+the target labels.
+Algorithm 1 Reptile Approach
+Initialize model parameters with the pre-
+trained BERT
+foriteration in 1,2,... do
+Sample batch of tasks fTgproportional to
+the size of its dataset
+forallTdo
+Compute:ksteps of gradient descent
+Update=+P( )
+Consider a source task deﬁned on XY and
+a target task onXZ . We denote the target
+samples asD=f(x;z);(x;z);:::;(x;z)g
+and usey2Y =f1;2;:::;Lgandz2Z =
+f1;2;:::;Lgto represent the label variables of
+source and target data respectively. We train a clas-
+siﬁerfon the source task which maps the space X
+toY. By feeding the target samples into the source
+modelf, we assign the predicted source labels
+for the target samples so that ^Y=f^y;^y;:::;^yg.
+Thus, every target sample is attached with a ‘true6693
+label’ fromZand a predicted label from Ythat
+can be denoted as (x;^y;z).
+We compute the empirical joint distribution and
+the empirical marginal distribution by
+^P(y) =1
+nX1f^y=yg;
+^P(z) =1
+nX1fz=zg;
+^P(y;z) =1
+nX1f^y=y;z=zg:(1)
+To measure how the source and task labels are
+related, we handle the class imbalance issue of
+the target dataset by normalizing the target class
+frequency:
+eP(y;z) =^P(yjz) =^P(y;z)
+^P(z): (2)
+The value of eP(y;z)represents the ratio of the
+target samples in class zthat are assigned with the
+predicted label y. Then we compute:
+eP(zjy) =eP(y;z)PeP(y;z): (3)
+so thatPeP(zjy) = 1 . We suppose that a good
+source label y=lthat distinguishes the target
+labels well should have large values of eP(z=
+ljy)for some target classes as well as small values
+for other target classes. On the contrary, if the
+values of eP(z=ljy)for different target class z
+are approximately equal, this label is useless for
+classifying the target labels. Based on that, we
+deﬁne the NNCE to estimate the task transferability
+by:
+NNCE =X^P(y)XeP(zjy)logeP(zjy)
+=X^P(y)E(y)(4)
+where we use E(y) =PeP(zjy)logeP(zjy)
+to estimate how well the decision boundary of a
+source label classiﬁes the target classes and NNCE
+is the overall measurement weighted by the prior
+^P(y). NNCE score is always negative. For a de-
+termined target task, a larger score indicates better
+transferability between the source and target tasks.
+The advantage of NNCE over some other label cor-
+relation methods like LEEP is that it allows us to
+select the source labels better distinguishing the
+target class with respect to E(y). The NNCE is re-
+lated to the NCE proposed by Tran et al. (2019),
+and it is equal to NCE if we do not normalize the
+target class frequency in Equation (2). The proof is
+in the Appendix A.
+4.3 Task Selection for Clinical Section
+Classiﬁcation
+We suppose that selecting the source tasks with
+good task transferability can beneﬁt the meta-
+learning of the low-resource target task. In clinical
+section classiﬁcation tasks, the pattern of the data
+and the section types vary across categories. So we
+propose two approaches for choosing the source
+tasks - category selection and section selection.
+4.3.1 Category Selection
+The procedure of category selection is direct. Fig. 2
+shows a simple example of category selection. We
+compute the NNCE score for each of the source
+tasks from different clinical categories. Then we
+pick theN‘best’ categories whose task achieves6694
+the highest NNCE scores. This approach helps
+ﬁlter out the ‘outlier’ tasks by removing the clinical
+categories irrelevant to the target task.
+4.3.2 Section Selection
+Section selection is a process of searching for the
+optimal task for each of the clinical categories. It
+aims to make the best use of the section labels
+to beneﬁt transferring knowledge to the target task.
+We modify the list of the section classes by deleting
+the instances from the useless sections and merge
+similar ones. However, there are too many combi-
+nations for partitioning that lead to high computa-
+tional costs. To reduce the computational complex-
+ity, we propose a backward selection method with
+three operations for heuristic search.
+We perform a section selection procedure with
+NNCE measure and the following three operations
+that delete or merge sections to generate new tasks:
+Deleting the Minor
+We delete the section lof the source dataset with
+the smallest value of empirical marginal distribu-
+tion^P(y):
+l= argmin^P(y=l) (5)
+The motivation behind this operation is that the
+fewest target samples are tagged with source label
+lrepresenting this section is unrelated to the target
+category.
+Deleting the Worst
+We delete the section lsatisfying:
+l= argminE(y=l) (6)From the demonstration in Section 4.2 we can
+concludelhas the smallest value of E(y), which
+indicates the source section lis worst at distin-
+guishing the target sections.
+Merging the Closest
+This operation aims to ﬁnd the ‘closest’ pair of
+the source sections and merge them into one. To
+ﬁnd such sections i;j, we adopt the following
+equation:
+i;j= argminJSD (eP(zjy=i)keP(zjy=j))
+(7)
+whereJSD ()presents the Jensen–Shannon di-
+vergence (Lin, 1991). A small value of JSD ()
+indicates that the eP(zjy=i)andeP(zjy=j)
+distribute closely and the source sections iandj
+are similar. In this case, the decision boundary be-
+tween the source label iandjare trivially helpful
+for discriminating the target labels.
+Backward Selection
+We initialize the source task by including all the
+samples and sections labels, and perform a back-
+ward selection algorithm to reduce the section num-
+bers iteratively. Fig. 3 shows a single step of this
+process. We apply the NNCE measure with three
+operations introduced before to generate NNCE
+scores and produce no more than three new tasks.
+Then we compute the NNCE score for each of the
+new tasks. The ﬁnal picked task at this step is the
+one that achieves the highest scores among the orig-
+inal one and the newly generated ones. We keep6695
+performing this process until none of the produced
+tasks improves the NNCE score anymore.
+5 Experiment Results and Discussion
+We carry out the experiments with four target tasks
+of different clinical categories ‘Discharge Sum-
+mary Report’, ‘Nursing Progress’, ‘Recab Service
+Progress’ and ‘Social Work’ presented in Table 1.
+For the target task of ‘Social Work’, we utilize all
+the other eight categories for pre-training. For ‘Dis-
+charge Summary Report’, ‘Nursing Progress’ and
+‘Recab Service Progress’, we remove their close cat-
+egories - ‘Discharge Summary Addendum’, ‘Nurs-
+ing Generic’ and ‘Recab Service Evaluation’ cat-
+egories, respectively, and the pre-training is per-
+formed by the remaining seven categories.
+For each target categories, we split the samples
+into the training and testing set with a roughly
+3:1 ratio across the ‘SUBJECT_ID’ referring to
+a unique patient. We randomly pick 200/500/1000
+samples from each target datasets to simulate low-
+resource scenarios and perform BERT, MTL, and
+Reptile for the clinical section classiﬁcation.
+5.1 Implementation Details
+We adopt the PyTorch (version 1.3.0) implemen-
+tation of BERTfor our tasks and the model is
+initialized with BERT-base . The settings of MTL
+and Reptile are same as the ones described in (Dou
+et al., 2019). We threshold the word sequence
+length to 80, which covers more than 99% of the
+sentences. We use Adam (Kingman and Ba, 2015)
+for optimization and a batch size of 32 for all the
+experiments. For both MTL and Reptile, the learn-
+ing rate is 5e-5, and the number of pre-training
+epoch is 5. We set the inner update step kto be 5,
+the inner learning rate to be 5e-5 and the number
+of sampled tasks in each step to be 8 for Reptile.
+For BERT ﬁne-tuning, we train the model with the
+learning rate of 2e-5 for 25 epochs.
+5.2 Results of Baseline Approaches
+The classiﬁcation accuracy results of BERT, MTL,
+and Meta-learning for different tasks are shown
+in Table 2. From the table, we ﬁnd that both
+MTL and Reptile improve the performance of the
+low-resource target task while Reptile outperforms
+multi-task learning and achieves the best results.
+The comparison between BERT and Reptile demon-
+strates that the meta-learning approach can beneﬁt
+the ﬁne-tuning of the target task. The improvement
+is more signiﬁcant when we perform the classiﬁca-
+tion task with fewer target samples.
+Fig. 4 shows the convergence of accuracy of
+BERT ﬁne-tuning with and without Reptile pre-
+training. The curves in these ﬁgures suggest that
+meta-learning has the advantage of fast conver-
+gence and adapts to the new task more quickly. We
+also discover that after 15 epochs of ﬁne-tuning, the
+performance is not sensitive to the epoch number.
+5.3 Evaluation of NNCE
+For any selected target category, we pre-train the
+model for each of the remaining categories and ﬁne-
+tune with 200 target samples to obtain the transfer
+learning accuracies. We compute the NNCE scores
+for different source tasks and evaluate the NNCE by6696
+the Pearson correlation coefﬁcients between these
+scores and their accuracies of adaptation. We also
+report the correlations using the NCE scores for
+comparison. By comparing the correlation coef-
+ﬁcients presented in Table 3, we ﬁnd that NNCE
+receives higher correlations over NCE for all the
+tasks and is better at task transferability estimation.
+5.4 Results of Task Selection
+We set the target sample size to be 200 and explore
+how task selection strategies - category selection
+and section selection beneﬁt meta-learning.
+Table 4 shows the results of meta-learning ap-
+proach with category selection. We report the clas-
+siﬁcation accuracies of picking N= 2/4/6 categories
+with the highest NNCE scores and compare with
+including all the source categories. The results re-
+veal that the category selection improves the meta-
+learning performance, and there is an optimal value
+ofNfor each task. If Nis too large, it might in-
+clude ‘outlier’ tasks that degrade the performance.
+IfNis too small, it loses the beneﬁt of utilizing
+large amounts of source data. We also perform the
+category selection with NCE to compare it with
+NNCE. The underlined tasks in Table 4 indicate
+that different subsets of categories are selected if
+we replace NNCE with NCE. For all these tasks,
+NNCE achieves higher accuracies. Please see Ap-
+pendix C for detailed results for different target
+categories.
+We discuss whether the section selection beneﬁts
+the meta-learning in two scenarios. First, we com-
+pare the performances of Reptile with and without
+section selection using all the source categories. In
+the second scenario, we repeat the ﬁrst procedure
+but only use the best subset of the source categories
+determined in Table 4, and repeat the comparison
+method in the ﬁrst scenario. The comparisons pre-
+sented in Table 5 indicate that adopting section se-
+lection can improve the classiﬁcation performance
+of Reptile in both scenarios. However, the improve-
+ment is not statistically signiﬁcant for most tasks.
+The average relative gains to Reptile brought by the
+category selection and section selection are 1.5%
+and 0.8%, which indicates that category selection
+contributes more to improving the meta-learning.
+We also ﬁnd that combining both category and sec-
+tion selection results in better performance than
+using each of them independently for most tasks.
+We show an example in Table 6 to further il-
+lustrate section selection. The source and target
+categories are ‘Rehab Service Progress’ and ‘Nurs-
+ing Progress’, and the original section types are
+presented. The labels in blue are the selected sec-
+tions, and the merged ones are displayed inside
+the brackets. We observe that the common section
+types - plan andassessment are kept. Although the
+content of the same section type is different across
+categories, there are similarities between their ut-
+terance patterns. The source sections in black are
+irrelevant to any of the target sections, so they are
+removed. The merged sections balance andgait
+are of close concepts, both of which describe the
+patient’s progress of mobility. This example shows6697that the selection procedure extracts information
+of the source sections related to the target sections,
+which beneﬁts the knowledge transfer.
+6 Conclusion and Future Work
+In this paper, we explored the clinical section clas-
+siﬁcation with limited in-domain data. We applied
+a meta-learning algorithm utilizing multiple out-of-
+domain clinical datasets, improving the classiﬁca-
+tion accuracy and adaptation speed. We proposed a
+Normalized Negative Conditional Entropy measure
+to estimate the task transferability and leverage it to
+select the clinical categories and sections related to
+the target task that best improves knowledge trans-
+fer. In addition, we examined a backward selection
+method to reduce the computational complexity of
+section selection. Our study suggests that both cate-
+gory selection and section selection outperform the
+baseline meta-learning approach, and combining
+two strategies results in better performance than
+adopting each of them independently.
+Future work will look to develop a joint optimiza-
+tion of category selection and section selection. We
+also plan to apply our approach to other styles of
+text data. For example, section classiﬁcation on
+spoken utterances of doctor-patient conversations
+is an exciting extension of the present work, which
+we plan to explore (Krishna et al., 2021). Finally,
+we will continue to apply the proposed method to
+other text processing applications, e.g., medical
+information retrieval (Goeuriot et al., 2016).
+References669866996700Appendix
+A The Relationship between NNCE and
+NCE
+Proposition : NNCE is equal to NCE if we do not
+normalize the target class frequency in Equation
+(2).
+Without normalizing the target class frequency,
+we modify the empirical distributions in Equation
+(2) and Equation (3) by
+eP(y;z) =^P(y;z);
+eP(yjz) =^P(yjz):(8)
+Based on Equation (8) and the deﬁnition of
+NNCE in Equation (4) , we can achieve the new
+formula of NNCE:
+NNCE =X^P(y)XeP(zjy)logeP(zjy)
+=X^P(y)X^P(zjy)log^P(zjy)
+=XX^P(y)^P(zjy)log^P(zjy)
+=XX^P(y;z)log^P(y;z)
+^P(y):(9)
+which is equal to the deﬁnition of NCE in (Tran
+et al., 2019).
+B Data Preprocessing
+We considered a new line starting with ‘[A-Z][a-
+zA-Z ]+:’ as the ﬁrst line of a new label. Then,
+‘[A-Z][a-zA-Z ]+:’ in the line became the new
+label, while text after ‘:’ until another new label
+became the text data of the label. Then, we split the
+text data into sentence-level data by two sequential
+processes: (Step 1) Splitting it if starting with up-
+percase at the beginning of the newline or if it is an
+empty line, and then (Step 2) Splitting it further by
+SciSpacy sentencizer with en_core_sci_sm model
+(Neumann et al., 2019). The multi-label sentences
+(1.4% of 38326 instances) are ﬁltered out.
+For each collected sentences, we remove the
+punctuation marks and special characters like ==,
+–,*. We replace the de-identiﬁed brackets and timephrases like hh:mm:ss with the symbols "[phi]" and
+"[num]" that are added into the BERT vocabulary.
+C Category Selection Details
+Tables 7, 8, 9, and 10 show the category selection
+details for different target categories. We compare
+the NCE and NNCE by their selected categories
+and the classiﬁcation accuracy of Reptile. For all
+these tasks, we observe that NNCE achieves higher
+accuracies. However, the difference between the
+NCE and NNCE is not very evident, presumably
+because the number of the total source categories
+is small, making their subset of the selected cate-
+gories similar. A more standard way to compare
+these two metrics is the correlation coefﬁcients
+between the NNCE scores and transfer learning
+accuracy, shown in Table 3 in the main body.67016702

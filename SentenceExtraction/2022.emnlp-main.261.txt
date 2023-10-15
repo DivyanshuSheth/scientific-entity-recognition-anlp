@@ -1,1 +1,560 @@
-3944 Proceedings of the 2022 Conference on Empirical Methods in Natural Language Processing , pages 3944 3954 December 7 - 11 , 2022 © 2022 Association for Computational Linguistics 3945 3946 3947 3948 3949 3950 3951 3952 3953 3954 
+
+Julia White
+Electrical Engineering
+Stanford UniversityNoah D. Goodman
+Computer Science, Psychology
+Stanford UniversityRobert D. Hawkins
+Psychology
+Princeton University
+Abstract
+Language differs dramatically from context to
+context. To some degree, large language mod-
+els like GPT-3 account for such variation by
+conditioning on strings of initial input text, or
+prompts . However, prompting can be ineffec-
+tive when contexts are sparse, out-of-sample,
+or extra-textual. In this paper, we introduce the
+mixed-effects transformer (MET), a novel ap-
+proach for learning hierarchically-structured
+preﬁxes— lightweight modules prepended to
+an input sequence— to account for struc-
+tured variation in language use. Speciﬁcally,
+we show how the popular class of mixed-
+effects regression models may be extended to
+transformer-based architectures using a regu-
+larized preﬁx-tuning procedure with dropout.
+We evaluate this approach on several domain-
+adaptation benchmarks, ﬁnding that it learns
+contextual variation from minimal data while
+generalizing well to unseen contexts.
+1 Introduction
+While certain aspects of language use are nearly
+universal – such as basic grammatical acceptability
+(Warstadt et al., 2019; Linzen and Baroni, 2021)
+or simple lexical judgements (Wang et al., 2019)
+– these often seem to be the exception that proves
+the rule. Contextual variation is ubiquitous in lan-
+guage, where predictions may differ as a function
+of speaker identity (Blodgett et al., 2016; Yang
+and Eisenstein, 2017; Ostapenko et al., 2022), loca-
+tion (Hofmann et al., 2022), time (Lazaridou et al.,
+2021; Sawhney et al., 2020; Schlechtweg et al.,
+2019; Röttger and Pierrehumbert, 2021), or usage
+domain (Dai et al., 2020; Nguyen et al., 2020; Lee
+et al., 2020). Although such variation has long been
+recognized in psycholinguistics (Clark, 1998) and
+sociolinguistics (Nardy et al., 2013; Eckert, 2012),
+the dominant approach in modern NLP has been to
+train monolithic models (Flek, 2020; Hovy, 2015)
+and ﬁne-tune for individual domains if necessary
+(e.g. Daume III and Marcu, 2006).Figure 1: In the mixed-effects transformer (MET), pa-
+rameters of a pretrained transformer are frozen (solid
+border) while preﬁxes are adapted to different contex-
+tual features (dashed border).
+Recent large language models (LLMs) like
+GPT-3 (Brown et al., 2020; Bommasani et al.,
+2021) have begun to provide a more systematic
+approach for handling context-speciﬁc variance.
+By adding relevant contextual information to the
+text input (i.e. prompting), these models have been
+able to account for known demographic informa-
+tion such as the speaker’s age, gender, or country
+of origin (Ostapenko et al., 2022). However, it is
+less clear how to use prompting when context is
+extra-textual, contains multiple features, or lies out-
+side the training distribution. For example, LLMs
+trained prior to the COVID-19 pandemic failed
+catastrophically on the torrent of new tweets and
+medical papers (Feldman et al., 2021; Zeng et al.,
+2020; Luu et al., 2021).
+In these cases, some degree of online adaptation
+is required. One particularly promising adapta-
+tion technique is preﬁx-tuning , where a lightweight
+module is prepended to the input and ﬁne-tuned
+to modulate a downstream network that has been3944frozen (Li and Liang, 2021). To date, however,
+this technique has only been used to ﬁne-tune
+preﬁxes for distinct downstream tasks (see also
+Hambardzumyan et al., 2021; Zhou et al., 2021;
+Lester et al., 2021). In this paper, we suggest
+that the preﬁx-tuning approach is particularly well-
+suited for hierarchical adaptation in language mod-
+eling. Speciﬁcally, we show how a form of dropout
+may be used to implement random effects , yield-
+ing a mixed-effects transformer (MET; Figure 1).
+This approach allows the model to learn strong
+domain-speciﬁc predictions for frequently occur-
+ring preﬁxes while abstracting away generalizable
+inductive biases for sparser or unseen contexts.
+Our code is available at https://github.com/
+juliaiwhite/mixed-effects-transformers .
+2 Approach
+We begin by reviewing mixed-effects models in
+a classic hierarchical regression setting before ex-
+tending it to explicitly model contextual variation
+with modern language models.
+Mixed-effects regression. Mixed-effects mod-
+els, also known as multi-level models or partial
+pooling models, may be understood as a way of
+interpolating between two extremes which are each
+prevalent in machine learning (Gelman and Hill,
+2006; Baltagi, 2008; Hawkins et al., 2022), as illus-
+trated in Figure 2. On one hand, complete-pooling
+approaches learn a single monolithic model across
+multiple domains, thus generalizing well to out-of-
+distribution data. No-pooling approaches, on the
+other hand, learn separate models for each domain,
+enabling stronger in-distribution predictions.
+Mixed-effects models offer a balance between
+these approaches by combining ﬁxed effects (as-
+sumed to be independent) and random effects (as-
+sumed to be sampled from a shared distribution).
+For example, consider a simple regression model
+predicting a movie’s rating yas a linear combina-
+tion of features X(e.g. genre, title): ˆy∼N(βX,/epsilon1)
+where/epsilon1is an error term. If multiple ratings are pro-
+vided by each user j, they should not be treated
+as independent— some users may be more critical
+and give out lower ratings overall than other users.
+It is common to account for this clustered variance
+by ﬁtting random intercepts and slopes for each
+userj:
+ˆy∼ N (βX,/epsilon1)
+β∼ N (µ,σ)
+whereµrepresents the central tendency shared
+across the distribution of users, and σrepresents
+the population variability. This model effectively
+regularizes user-speciﬁc predictions as function of
+sample size by pulling estimates toward the high
+density regions of the population distribution. If
+a particular user is an outlier, then as more obser-
+vations are obtained from that user, the more the
+model will ignore the central tendency and use a
+user-speciﬁc model. However, if a new user is intro-
+duced from the same population, then the central
+tendency of the random effect provides the best
+initial guess for their parameters.
+Fixed effects via preﬁx-tuning. While mixed-
+effects models are straightforwardly generalized
+to non-linear linking functions and non-Gaussian
+distributions (Bates et al., 2014; Lindstrom and
+Bates, 1990) or cases with multiple nested or cross-
+cutting groups (Baayen et al., 2008), it has been
+less clear how they could be applied when natural
+language is the independent variable. We begin
+investigating this problem by considering how to
+implement a purely ﬁxed-effect language model,
+where independent group-speciﬁc parameters are
+learned. To represent language data sourced from
+movie scripts, parameters could be instantiated for
+each contextual feature to account for clustered
+variance (e.g. source corpus, genre, and title). Each
+feature would take different values corresponding
+to different parameters (e.g. “horror”, “action”, or
+“fantasy” for genre-level features).
+We generalize the scalar coefﬁcient βfrom the
+regression setting to the language model setting
+using a set of preﬁxes ,p= [p,...,p], which
+are prepended to the input and yield transformer
+blocks: h=f(p)whereθis a tuneable tensor3945
+ModelProduct Reviews Reddit Corpus Movie Corpus
+Seen Unseen Seen Unseen Seen Unseen
+Fine-tuning (No Pool) 3.78±.01 4.23±.01 4.03±.01 4.22±.01 3.83±.05 3.87±.01
+Fine-tuning (Comp. Pool) 3.72±.01 3.85±.01 4.01±.01 3.93±.01 3.83±.04 3.87±.01
+Conditional Fine-tuning 3.94±.01 4.19±.03 4.29±.01 4.26±.03 4.21±.03 4.29±.12
+Preﬁx-tuning (No Pool) 3.68±.01 3.97±.01 3.90±.01 3.95±.01 3.54±.05 3.68±.03
+Preﬁx-tuning (Comp. Pool) 3.79±.01 3.84±.02 4.08±.01 3.83±.03 3.53±.03 3.65±.11
+Mixed-effects (MET) 3.61±.01 3.78±.03 3.84±.01 3.80±.02 3.47±.03 3.61±.12
+of parameters. There are several ways of parame-
+terizing this function; for simplicity, we will take
+f:Z→Rto be an embedding layer W
+followed by a series of fully connected layers:
+h=f(p) =MLP(W·p)
+where the dimensionality of the resulting hten-
+sor matches the dimensionality of transformer ac-
+tivations across layers. Thus, the preﬁxes act as
+“virtual tokens” that, like a sequence of input text
+x, control downstream predictions of a language
+model with frozen parameters φ:
+ˆy∼LM(x;h)
+Because a single MLP is shared across the full se-
+quence of preﬁxes, it may be viewed as equivalent
+to learning interactions between groups in the re-
+gression framework (as opposed to a model where
+each preﬁxpwas embedded independently).
+Random effects via regularization. We are now
+prepared to introduce random effects into the trans-
+former via hierarchical preﬁx-tuning. Critically,
+instead of assuming that all values of a particular
+feature have independent ﬁxed effects (e.g. that the
+language associated with one genre is independent
+of other genres), we would like to assume they are
+drawn from a common distribution:
+h∼N(h,β)
+where we deﬁne hto be the activations yielded
+by a special preﬁx p= [p,...,p]representing
+the central tendency across known levels of each
+feature (see Figure 2). In other words, we wouldlike to be able to “share statistical strength,” such
+that our predictions for novel feature values reﬂect
+expectations from the entire dataset.
+In practice, it is intractable to do probabilistic in-
+ference over such a high-dimensional hierarchical
+neural network, but we may achieve a similar effect
+via dropout. During preﬁx-tuning, with probability
+/epsilon1= 0.1, we replace each feature preﬁx pwith the
+corresponding special token p, such thatpcomes
+to reﬂect the pooled data distribution. This shared
+token, likeµin a traditional mixed-effects model,
+represents the central tendency shared across all
+values of a particular feature. Feature-speciﬁc pre-
+dictions are then regularized toward this shared
+token by adding a term to the loss function:
+L(x;y) = logP(y|x;f(p)) +β||h−h||
+where the regularization parameter, β= 0.01is
+comparable to the standard deviation for random
+effects in a typical regression model.
+3 Datasets
+We examine language use across contexts in three
+distinct domains: product reviews, online posts,
+and movie dialogue. 100,000 sentences were sam-
+pled for training from 10 distinct product cat-
+egories within the Amazon Customer Reviews
+Dataset, a.k.a Product Reviews ; 100,000 sen-
+tences were sampled from 10 subreddits (sub-
+sidiary forums representing distinct topical com-
+munities) within the Reddit Corpus (Henderson
+et al., 2019); and, 10,000 sentences were sampled
+from 10 genres within the Cornell Movie-Dialogs
+Corpus (Danescu-Niculescu-Mizil and Lee, 2011),
+a.k.a Movie Corpus . Further information about3946
+Dataset Single-feature Multi-feature
+Amazon 3.47±.03 3.33±.03
+Reddit 3.40±.04 3.26±.05
+Movies 3.29±.03 3.07±.04
+these datasets and their contextual features can be
+seen in Appendix A.
+4 Results
+We evaluate the ability of the MET to capture lan-
+guage use within known and novel contexts. Fur-
+ther, we assess the data efﬁciency of our method
+and its ability to represent complex contexts with
+multiple relevant features. We compare the perfor-
+mance of our approach against several baselines.
+In the complete-pooling and no-pooling variants
+of preﬁx-tuning we ablate different components,
+only learning a single preﬁx shared across all fea-
+tures, or only learning independent preﬁxes, re-
+spectively. We also compare a traditional domain
+adaptation approach, where we omit preﬁxes and
+ﬁne-tune the transformer end-to-end either on the
+entire dataset (complete pooling) or for each fea-
+ture separately (no pooling). Finally, we compare
+our method against conditional ﬁne-tuning , where
+a string representing the preﬁx text (e.g. [corpus]
+movie_dialogue [genre] horror ) is prepended
+to the input and the model is ﬁne-tuned end-to-end.
+See Appendix B for additional details.
+4.1 Adaptation to known contexts
+We begin by evaluating MET on a standard cross-
+domain language modeling task. Examples from
+each contextual feature (e.g. genres) are seen dur-
+ing training and we assess the model’s predictions
+on held-out examples from those contexts. This
+task evaluates the extent to which explicitly model-
+ing multiple sources of extra-textual variance may
+improve a model’s ability to predict further lan-
+guage across those diverse sources. Table 1 (left
+column) shows the log perplexity of each method.
+First, replicating Li and Liang (2021), we ﬁnd
+that preﬁx-tuning generally outperforms end-to-
+end ﬁne-tuning. Second, as expected, pure no pool-
+ingmodels generally out-perform pure complete
+pooling models; the former is able to learn indepen-
+dent models for each sub-domain while the latteris constrained to learn a single model for the en-
+tire corpus. Third, the conditional ﬁne-tunining
+method performs particularly poorly, likely due to
+data sparsity with respect to feature values. Finally,
+METs outperform even the no-pooling baselines on
+all three datasets, suggesting that replacing ﬁxed ef-
+fects with random effects enables better adaptation
+to known domains. In other words, while massive
+language models may have difﬁculty tuning to indi-
+vidual contexts with few samples using traditional
+methods, mixed-effect preﬁx-tuning enables them
+to overcome this limitation by leveraging informa-
+tion gained about language use in other contexts.
+4.2 Generalization to novel contexts
+Next, we evaluate our method’s ability to gener-
+alize to novel, unseen contexts, where traditional
+domain adaptation methods typically do poorly.
+We evaluate on a test set containing examples with
+contextual feature values that were entirely held-
+out of the training set (Table 1, right column). We
+ﬁnd that the complete-pooling models typically
+generalize better to new features than no-pooling
+models; the former have seen more data across a
+broader spectrum of feature values during training,
+whereas conditional ﬁne-tuning is least success-
+ful. METs, which represent unseen feature values
+with the shared preﬁx token, attain the best perplex-
+ity on all three datasets, capturing feature-speciﬁc
+language without sacriﬁcing the ability to gener-
+alize. This performance is likely in part due to
+the method’s ability to discount individual “outlier”
+features from affecting the overall distribution, a
+key aspect of Bayesian hierarchical modelling. It
+is worth noting that models occasionally achieve
+better performance on unseen features likely due to
+a quirk of the split: the predictability of language
+can vary signiﬁcantly across feature values.
+4.3 Data efﬁciency
+A well-known beneﬁt of mixed-effects models
+in classical regression settings is their ability to
+ﬂexibly interpolate as a function of sample size.
+As more observations become available, they al-
+low domain-speciﬁc predictions to deviate more
+strongly from the central tendency of the popula-
+tion. To better evaluate performance as a function
+of sample size, we construct training sets of dif-
+ferent sizes, interpolating between settings where
+the model has only seen one example of a given
+feature up to cases where it sees many thousands
+of examples (Figure 3). In lower-data settings, the3947
+complete pooling approaches outperform no pool-
+ing approaches, as the no-pooling model is making
+predictions based on only a handful of examples.
+As the amount of data per feature increases, no-
+pooling method eventually achieve better perfor-
+mance. Meanwhile, the MET consistently outper-
+forms both pooling methods. Particularly in low-
+data settings, this approach is able to make feature-
+speciﬁc inferences without sacriﬁcing knowledge
+acquired from other features.
+4.4 Adaptation to multi-feature contexts
+Finally, one of the most intriguing properties of
+mixed-effects models is their ability to account
+for not just a single “domain” feature but multi-
+ple cross-cutting features in different combinations.
+We assess the ability of METs to represent lan-
+guage in complex contexts where multiple contex-
+tual features are available. More signiﬁcant per-
+formance improvements are realized in less sparse
+feature spaces, so we run this evaluation on a sub-
+set of the data with dense secondary contextual
+features (product, user, and movie) which are taken
+from the top 10 values occurring within each of the
+top 10 primary features (product category, subred-
+dit, and movie genre). In Table 2 we compare the
+change in log perplexity when observing only one
+contextual feature to observing a secondary feature
+and ﬁnd that including multiple feature preﬁxes
+improves performance.
+4.5 Comparison to ﬁne-tuned adapters
+In recent work, context-speciﬁc adapters—
+lightweight layers added after each transformer
+block— have been successfully utilized for hierar-
+chical adaptation. In Chronopoulou et al. (2022)
+Model Seen Unseen
+Fine-tuning (Comp. Pool) 3.89 4.00
+Mixed-effects (MET) 3.76 3.92
+Hierarchical Adapters 3.76 4.34
+internet domains from Common Crawl’s colossal,
+cleaned web crawl corpus, C4(Henderson et al.,
+2019), are modelled as a tree structure with
+individual adapters associated to each node. In Ta-
+ble 3, we compare this method with our approach
+after training on 100,000 sentences from 10 web
+domainseach. While both models demonstrate
+similar performance boosts for in-distribution lan-
+guage data, the MET sees improved performance
+modelling out-of-distribution language— offering
+an effective alternative solution to hierarchical
+adaptation in low resource settings.
+5 Conclusion
+Human language is ﬂexible, and people are able to
+adapt their expectations to many aspects of context,
+from speaker identity to the conversational setting.
+In this paper, we introduce mixed-effects transform-
+ers (METs) as an effective method of adapting to
+hierarchically structured domains of language use
+across labeled contextual features. Beyond lan-
+guage modeling, this approach may be useful for
+controlled generation and more qualitative analy-
+ses of what makes certain features distinctive (see
+Appendix D for preliminary analysis).39486 Limitations
+We were not able to investigate how our method
+scales to larger feature sets (e.g. the tens of thou-
+sands of product IDs in Product Reviews), due to
+constraints on compute (we use an NVIDIA TI-
+TAN X GPU for all experiments). We expect there
+is a point where the parameter budget of the pre-
+ﬁxes and MLP grows larger than the frozen model,
+which would require alternative parameterizations.
+Additionally, our regularization technique only af-
+fects preﬁxes within batches, so batch size and
+composition may affect the learning of pcentral
+tendencies.
+7 Acknowledgements
+This research was supported in part by the Stan-
+ford HAI Hoffman–Yee project ‘Towards grounded,
+adaptive communication agents’. RDH was funded
+by a C.V . Starr Postdoctoral Fellowship and NSF
+SPRF award 1911835. We are also grateful for
+helpful conversations and feedback from members
+of the Computation Cognition Lab, the Princeton
+NLP Group, and our review committee.
+References394939503951A Datasets
+We assess the performance of the MET on three
+datasets: the Amazon Customer Reviews Dataset,
+Reddit Corpus, and the Cornell Movie-Dialogs Cor-
+pus.
+The Amazon Customer Reviews Dataset
+(Product Reviews ) compiles reviews across prod-
+uct categories. We sampled 100,000 sentences
+from reviews in 11 product categories: video
+games, pet products, grocery, home, electronics,
+beauty, baby, automotive, apparel, books, and
+sports (which was held-out during training). In
+addition to product category, the metadata for Prod-
+uct Reviews also includes a product id.
+TheReddit Corpus is a collection of posts and
+comments from different subreddits (subsidiary fo-
+rums representing distinct topical communities)
+from the popular social media site Reddit. We
+sampled 100,000 sentences from posts and com-
+ments in 11 subreddits: aww, todayilearned, apple,
+pokemontrades, relationship_advice, DebateReli-
+gion, worldnews, nba, Naruto, hiphopheads, and
+AskReddit (which was held-out during training).
+The metadata for Reddit posts also the username
+of the poster.
+The Cornell Movie-Dialogs Corpus ( Movie Cor-
+pus) is a dataset of movie dialogue for a number
+of genres. We sampled 10,000 sentencesof di-
+alogue from 11 genres: action, adventure, com-
+edy, crime, drama, horror, mystery, romance, sci-ﬁ,
+thriller, and fantasy (which was held-out during
+training). The metadata for this dataset also in-
+cludes the movie title.
+We used a 80/10/10 train-val-test split in addition
+to the test sentences sampled from the aforemen-
+tioned held-out feature values (e.g., movie dialogue
+from the fantasy genre) which were used in the
+evaluation of our models for unseen contexts.
+B Experimental setup
+We assigned each individual contextual feature
+value a unique preﬁx token, which could take on
+128 values. In all experiments, the ﬁrst preﬁx rep-
+resents the overall corpus or task (e.g., Movie Cor-
+pus), and the following preﬁxes represent succes-
+sively more ﬁne-grained contextual features (e.g.
+genre and movie title).
+The MLPs used to recover preﬁxes from feature
+values consisted of 2 layers with a hidden dimen-sion of 512 and took input from an embedding layer
+with an embedding size of 512. The dimensionality
+of the MLP’s output tensor matches the dimension-
+ality of the language model’s transformer activa-
+tions across layers. For the language model we use
+GPT-2, where each input token yields an l×[k,v]
+tensor with l= 12 layers and the dimension of
+each key and value is 1024.
+Our implementations are based on the Hugging
+Face Transformer models (Wolf et al., 2019). Our
+models were trained with a learning rate of 0.00001
+using the AdamW optimizer and a batch size of 4
+when sampling utterances.
+C Shared vs. independent preﬁx MLP
+Architecture Log Perplexity
+Shared Preﬁx MLP 3.61 (3.61, 3.62)
+Independent Preﬁx MLP 3.61 (3.60, 3.62)
+We tested two hierarchical preﬁx architectures on
+Product Reviews for models containing two pre-
+ﬁxes: a corpus-level preﬁx and a product-category-
+level preﬁx. The ﬁrst, the shared preﬁx MLP archi-
+tecture, uses one MLP to produce all feature pre-
+ﬁxes and thereby allows information to be shared
+across features. The second, the independent pre-
+ﬁx MLP architecture, uses multiple independent
+MLPs to produce a preﬁx for each feature. Assess-
+ment of the log perplexity of both methods reveals
+negligible difference in performance (see Table 4).
+Ultimately, the shared preﬁx MLP architecture was
+chosen for our MET approach as this method re-
+quires less resources during training.
+D Characterization of the preﬁx space
+D.1 Distinctive utterances sampled from
+feature preﬁxes
+To better understand the speciﬁc linguistic differ-
+ences that our model uses to make better predic-
+tions, we queried the model for distinctive sen-
+tences. Speciﬁcally, we searched the training data
+for sentences with the highest difference in perplex-
+ity for a given feature compared to other features.
+We expected distinctive utterances to contain lan-
+guage that is common for the given feature value3952
+Product Category Sentence
+Apparel Great shirt
+Automotive Good ﬁt
+Baby Great crib
+Beauty Great scent
+Books good autobiography
+Electronics good sound
+Grocery Excellent coffee
+Home Love this vacuum!!
+Pet Products fun toy
+Video Games great game
+Subreddit Sentence
+apple I love the iPhone
+aww I love the way he looks.
+naruto I love Izumi
+nba I love the way he’s playing.
+while being uncommon for other feature values. In
+Table 5, we show the most distinctive utterances
+found to correspond to the different product cate-
+gory preﬁxes for Product Reviews. We see that the
+preﬁxes have successfully learned to represent dis-
+tinctive language used in each domain (e.g. “shirt”
+for apparel and “autobiography” for books). In
+this case, the product category features are already
+easily interpretable, so these utterances may be un-surprising. However, we believe that this method
+may enable interpretation of less legible features in
+other datasets (e.g. identifying different subcom-
+munities in social networks by clustering preﬁxes.)
+D.2 Prompted generations from feature
+preﬁxes
+To directly observe the linguistic trends our model
+picks up on within speciﬁc contexts, we prompted
+our model generate utterances corresponding to
+speciﬁc feature values. We expect generated utter-
+ances to contain language typical of the domains
+invoked in preﬁx selection. In Table 6, we show
+generated utterances for a handful of subreddit pre-
+ﬁxes trained on Reddit Corpus. We ﬁnd that these
+preﬁxes contain enough contextual signal to cater
+the generated utterances to their respective domains
+(e.g. the mention of “iPhone” within the apple sub-
+reddit generation).
+D.3 t-SNE analysis of feature preﬁxes
+We perform a dimensionality reduction on the sec-
+ondary contextual feature (movie title, username,
+product id) preﬁx embeddings to reveal the learned
+structure of our datasets. Speciﬁcally, we use t-
+distributed stochastic neighbor embedding (t-SNE)
+to map the high-dimensionality preﬁx embeddings
+to a location in a two-dimensional map. After color
+coding the resulting two-dimensional points ac-
+cording to their primary feature (genre, subreddit,
+product category), we observe that preﬁx embed-
+dings cluster differently in accordance with each
+dataset’s underlying structure (see Figure 4). Red-
+dit and Movie Corpus do not have strongly corre-
+lated clusters of features because the underlying
+structure of the data is cross-cut with respect to
+the features represented: users frequently post in3953multiple subreddits and movie titles often simul-
+taneously belong to many genres. This behavior
+is expected as a mixed-effects model should effec-
+tively partition off correlations between cross-cut
+features. On the other had, when features are per-
+fectly nested, as in Product Reviews where a spe-
+ciﬁc product belongs to only one product category,
+we see an expected clustering of product preﬁxes
+according to their category.3954

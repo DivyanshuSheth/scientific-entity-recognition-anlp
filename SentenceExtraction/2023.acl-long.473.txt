@@ -1,1 +1,867 @@
-8488 Proceedings of the 61st Annual Meeting of the Association for Computational Linguistics Volume 1 : Long Papers , pages 8488–8505 July 9 - 14 , 2023 © 2023 Association for Computational Linguistics 8489 8490 8491 8492 8493 8494 8495 8496 8497 8498 8499 8500 8501 8502 8503 8504 8505 
+
+Tom Hosking Hao Tang Mirella Lapata
+Institute for Language, Cognition and Computation
+School of Informatics, University of Edinburgh
+10 Crichton Street, Edinburgh EH8 9AB
+tom.hosking@ed.ac.uk hao.tang@ed.ac.uk mlap@inf.ed.ac.uk
+Abstract
+We propose a method for unsupervised opin-
+ion summarization that encodes sentences from
+customer reviews into a hierarchical discrete
+latent space, then identifies common opinions
+based on the frequency of their encodings. We
+are able to generate both abstractive summaries
+by decoding these frequent encodings, and ex-
+tractive summaries by selecting the sentences
+assigned to the same frequent encodings. Our
+method is attributable, because the model iden-
+tifies sentences used to generate the summary
+as part of the summarization process. It scales
+easily to many hundreds of input reviews, be-
+cause aggregation is performed in the latent
+space rather than over long sequences of to-
+kens. We also demonstrate that our appraoch
+enables a degree of control, generating aspect-
+specific summaries by restricting the model to
+parts of the encoding space that correspond to
+desired aspects (e.g., location or food). Auto-
+matic and human evaluation on two datasets
+from different domains demonstrates that our
+method generates summaries that are more in-
+formative than prior work and better grounded
+in the input reviews.
+1 Introduction
+Online review websites are a useful resource when
+choosing which hotel to visit or which product to
+buy, but it is impractical for a user to read hundreds
+of reviews. There has been significant interest in
+methods for automatically generating summaries
+or meta-reviews that aggregate the diverse opinions
+contained in a set of customer reviews about an
+entity (e.g., a product, hotel or restaurant) into a
+single summary.
+Early work on opinion summarization extracted
+reviewers’ sentiment about specific features (Hu
+and Liu, 2004) or selected salient sentences from re-
+views based on centrality (Erkan and Radev, 2004),
+while more recent methods based on neural mod-
+els have used sentence selection in learned featurespaces (Angelidis et al., 2021; Basu Roy Chowd-
+hury et al., 2022) or abstractive summarizers that
+generate novel output (Bražinskas et al., 2020,
+2021; Amplayo et al., 2021a,b; Iso et al., 2021;
+Coavoux et al., 2019).
+Following Ganesan et al. (2010), we define opin-
+ion summarization, or review aggregation , as the
+task of generating a textual summary that reflects
+frequent or popular opinions expressed in a large
+number of reviews about an entity. Systems are
+extractive if they select sentences or spans from
+the input reviews to use as the summary, or ab-
+stractive if they generate novel output. Review
+aggregation is challenging for a number of reasons.
+Firstly, it is difficult to acquire or create reference
+summaries, so models are almost always trained
+without access to gold standard references (Ange-
+lidis et al., 2021; Amplayo et al., 2021b, inter alia .).
+Secondly, popular entities may have hundreds of
+reviews, which can cause computational difficul-
+ties if the approach is not scalable . Finally, good
+summaries should be abstractive and not contain
+unnecessary detail, but should also not hallucinate
+false information. Ideally, a summarization system
+should be attributable , offering some evidence to
+justify its output.
+Previous work has either been exclusively ex-
+tractive (which is inherently attributable and of-
+ten scalable but leads to unnecessarily specific
+summaries) or exclusively abstractive (which of-
+ten scales poorly and hallucinates, e.g., Bražinskas
+et al., 2020) . We propose a hybrid method, that
+produces abstractive summaries accompanied by
+references to input sentences which act as evidence
+for each output sentence, allowing us to verify
+which parts of the input reviews were used to pro-
+duce the output. Depicted in Figure 1, we first
+learn to encode natural language sentences from re-
+views as paths through a hierarchical discrete latent
+space. Then, given multiple review sentences about
+a specific entity, we identify common subpaths that8488
+are shared among many inputs, and decode them
+back to natural language, yielding the output sum-
+mary. The sentences whose encodings contain the
+selected subpaths (shown in red in Figure 1) act as
+evidence for that generated sentence.
+Our approach, H , is unsupervised and
+does not need reference summaries during train-
+ing, instead relying on properties of the encoding
+space induced by the model. Since the aggregation
+process occurs in encoding space rather than over
+long sequences of tokens, H is highly
+scalable. Generated summaries are accompanied
+by supporting evidence from input reviews, making
+H attributable. It also offers a degree of
+controllability: we can generate summaries that fo-
+cus on a specific aspect of an entity (e.g., location)
+or sentiment by restricting aggregation to subpaths
+that correlate with the desired property.
+Our contributions are as follows:
+•We propose a method for representing natural
+language sentences as paths through a hierar-
+chical discrete latent space (Section 2).
+•We exploit the properties of the learned hierar-
+chy to identify common opinions from input
+reviews, and generate abstractive summaries
+alongside extractive evidence sets (Section 3).
+•We conduct extensive experiments on two En-
+glish datasets covering different domains, andshow that our method outperforms previous
+state-of-the-art approaches, while offering the
+additional advantages of attributability and
+scalability (Sections 4 and 5).
+2 Hierarchical Quantized Autoencoders
+A good review aggregation system should identify
+frequent or common opinions, while abstracting
+away the details unique to a specific review. This
+joint requirement motivates our choice of a hierar-
+chical discrete encoding: the discretization allows
+us to easily identify repeated opinions by counting
+them, while the hierarchy allows the model to en-
+code high-level information (aspect, sentiment etc.)
+separately to specific details and phrasings.
+2.1 Probabilistic Model
+Letybe a sentence, represented as a sequence of
+tokens. We assume that the semantic content of y
+may be encoded as a set of discrete latent variables
+orcodes q∈[1, K]. Further, we assume that the
+qare ordered hierarchically , such that qrep-
+resents high level information about the sentence
+(e.g., the aspect or overall sentiment) whereas q
+represents fine-grained information (e.g., the spe-
+cific phrasing or choice of words used). The codes
+qcan be viewed as a single path through a hier-
+archy or tree as depicted in Figure 1, where each
+intermediate and leaf node in the tree corresponds
+to a sentence y.
+Thus, our generative model factorises as
+p(y) =/summationdisplayp(y|q)×/productdisplayp(q)(1)
+and the posterior factorises as
+ϕ(q|y) = ϕ(q|y)×/productdisplayϕ(q|q,y).(2)
+The training objective is given by
+ELBO =E/bracketleftbig
+−logp(y|q)/bracketrightbig
++β/summationdisplayD/bracketleftbig
+ϕ(q|y)∥p(q)/bracketrightbig
+(3)
+where q∼ϕ(q|y)andβdetermines the
+weight of the KL term. We choose a uniform prior
+forp(q).84892.2 Neural Parameterization
+The latent codes qare discrete, but most neural
+methods operate in continuous space. We therefore
+need to define a mapping from the output z∈Rof
+an encoder network ϕ(z|y)toq, and vice versa
+for a decoder p(y|z). Similiar to Vector Quantiza-
+tion (VQ, van den Oord et al., 2017), we learn a
+codebook C∈R, which maps each discrete
+code to a continuous embedding C(q)∈R.
+Similar to HRQ-V AE (Hosking et al., 2022),
+since the qare intended to represent hierarchi-
+cal information, the distribution over codes at each
+level is a softmax distribution with scores sgiven
+by the L2 distance from each of the codebook em-
+beddings to the residual error between the input
+and the cumulative embedding from all previous
+levels,
+s(q) =−/parenleftigg/bracketleftigg
+x−/summationdisplayC(q)/bracketrightigg
+−C(q)/parenrightigg
+.(4)
+During inference, we set q= arg max( s).
+Given a path q, the input to the decoder zis
+given by the inverse of the decomposition process,
+z=/summationdisplayC(q). (5)
+The embeddings at each level can be viewed as
+refinements of the (cumulative) embedding so far,
+or alternatively as selecting the centroid of a sub-
+cluster within the current cluster. Importantly, it
+is not necessary to specify a path to the complete
+depth D; asubpath q(d < D ) still results in a
+valid embedding z. We can therefore control the
+specificity of an encoding by varying its depth.
+2.3 Training Setup
+We use the Gumbel reparameterization (Jang et al.,
+2017; Maddison et al., 2017; Sønderby et al., 2017)
+to sample from the distribution over q. To en-
+courage the model to explore the full codebook, we
+decay the Gumbel temperature τaccording to the
+schedule given in Appendix A. We approximate
+the expectation in Equation (3) by sampling from
+the training set and updating via backpropagation
+(Kingma and Welling, 2014).
+Initialization Decay and Norm Loss Smaller
+perturbations in encoding space should result in
+more fine-grained changes in the information theyencode. Therefore, we encourage ordering be-
+tween the levels of hierarchy (such that lower levels
+encode more fine-grained information) by initialis-
+ing the codebook with a decaying magnitude, such
+that deeper embeddings have a smaller norm than
+those higher in the hierarchy. Specifically, the norm
+of the embeddings at level dis weighted by a fac-
+tor(α). We also include an additional loss
+Lto encourage deeper embeddings to remain
+fine-grained during training,
+L=β
+D/summationdisplay/bracketleftbig
+max/parenleftbig
+γ||C||
+||C||,1/parenrightbig
+−1/bracketrightbig,
+where γdetermines the relative scale between
+levels and βcontrols the strength of the loss.
+Depth Dropout To encourage the hierarchy
+within the encoding space to correspond to hierar-
+chical properties of the output, we truncate at each
+level during training with some probability p
+(Hosking et al., 2022; Zeghidour et al., 2022). The
+output of the quantizer is then given by
+z=/summationdisplay/parenleftigg
+C(q)/productdisplayγ/parenrightigg
+, (6)
+where γ∼Bernoulli (1−p). This means
+that the model is sometimes trained to reconstruct
+the output based only on a partial encoding of the
+input, and should learn to cluster similar outputs
+together at each level in the hierarchy.
+Denoising Objective To encourage the model to
+group sentences according to their meaning rather
+than their syntactic structure, we use a denoising
+objective as a form of weak supervision. The model
+is trained to generate a target sentence from a differ-
+ent source sentence that has similar meaning but dif-
+ferent surface form. For example, given the target
+sentence “We chose this hotel for price/location.”,
+a source might be “I chose this hotel for its price
+and location.”. The source sentences are retrieved
+automatically from other reviews in the training
+data using tf-idf (Jones, 1972) over bigrams; we
+select the top 5 most similar sentences for each tar-
+get sentence with a minimum similarity of 0.6, and
+restrict to retrieving from reviews that have ratings
+equal to the target.
+3Aggregating Reviews in Encoding Space
+So far, we have described a method for mapping
+from a sentence yto a path qand vice versa.8490We can now exploit the hierarchical property of the
+latent space to generate summaries.
+Recall that the goal of review aggregation is to
+identify the majority or frequent opinions from a
+set of diverse inputs. This corresponds to identify-
+ing paths (or subpaths) in encoding space that are
+shared among many inputs. A simplified version
+of this process is depicted in the lower block of
+Figure 1; each sentence yin the input reviews
+is mapped to a path qthrough the latent space.
+Summarizing these sentences is then reduced to the
+task of selecting a set of common subpaths, e.g.,
+the subpath highlighted in red in Figure 1, which is
+shared between two out of three inputs.
+Subpath Selection A simple approach would
+be to select the most frequent subpaths, but this
+would almost always result in high-level paths
+with d= 1 being selected (since every occur-
+rence of a path qentails an occurrence of all
+subpaths q, d< d). In practice there is a trade-
+off between frequency and specificity. Additionally,
+good summaries often exhibit structure; they gener-
+ally include high-level comments, alongside more
+specific comments about details that particularly
+differentiate the current entity from others. Indeed,
+some datasets (e.g., AmaSum, Bražinskas et al.,
+2021, Section 4.1) were constructed by scraping
+overall ‘verdicts’ and specific ‘pros and cons’ from
+review websites. We therefore reflect this structure
+and propose both a ‘generic’ and ‘specific’ method
+for selecting subpaths.
+To select generic subpaths, we construct a proba-
+bility tree from the set of input sentence encodings,
+with the node weights set to the observed path fre-
+quency p(q). Then, we iteratively prune the tree,
+removing the lowest probability leaves until all leaf
+weights exceed a threshold, min/parenleftbig
+p(q)/parenrightbig
+>0.01.
+Finally, we select the leaves with the top kweights
+to use for the summary. Empirically, this approach
+often selects paths with depth d= 1, but allows
+additional flexibility when a deeper subpath is par-
+ticularly strongly represented.
+Similar to Iso et al. (2022) we argue that the
+specific parts of the summary should also be com-
+parative, highlighting details that are unique to the
+current entity. Thus, tf-idf (Jones, 1972) is a natural
+choice; we treat each path (and all its parent sub-
+paths) as terms. We assign scores to each subpath
+qproportional to its frequency within the current
+entity, and inversely proportional to the number ofentities in which the subpath appears,
+score (q) = tf( q)×log/parenleftbig
+idf(q)/parenrightbig
+.(7)
+Again, we select the subpaths with the top kscores
+to use for the summary.
+The overall summary is the combination of the
+selected generic and specific subpaths. The abstrac-
+tive natural language output is generated by passing
+the selected subpaths as inputs to the decoder.
+Attribution Each sentence in the generated sum-
+mary has an associated subpath. By identifying all
+inputs which share that subpath, we can construct
+anevidence set of sentences that act as an explana-
+tion or justification for the generated output.
+Scalability Since the aggregation is performed in
+encoding space, our method scales linearly with the
+number of input sentences (compared to quadratic
+scaling for Transformer methods that take a long
+sequence of all review sentences as input, e.g.,
+Ouyang et al. (2022)), and can therefore handle
+large numbers of input reviews. In fact, since
+we identify important opinions using a frequency-
+based method, our system does not perform well
+when the number of input reviews is small, since
+there is no strong signal as to which opinions are
+common.
+Controlling the Output Given an aspect a
+(e.g., ‘service’) we source a set of keywords K
+(e.g., ‘staff, friendly, unhelpful, concierge’) associ-
+ated with that aspect (Angelidis et al., 2021). We
+label each sentence in the training data with aspect
+aif it contains any of the associated keywords K,
+then calculate the probability distribution over as-
+pects for each encoding path, p(a|q). We can
+modify the scoring function in Equation (7), mul-
+tiplying the subpath scores during aggregation by
+the corresponding likelihood of a desired aspect,
+thereby upweighting paths relevant to that aspect,
+score(q) = tf( q)×log/parenleftbig
+idf(q)/parenrightbig
+×p(a|q).(8)
+We can also control for the sentiment of the sum-
+mary; for the case where reviews are accompanied
+by ratings, we can label each review sentence (and
+its subpath) with the rating rof the overall review,
+and reweight the subpath scores during aggregation
+by the likelihood of the desired rating p(r|q).84914 Experimental Setup
+4.1 Datasets
+We perform experiments on two datasets from two
+different domains. S (Angelidis et al., 2021)
+consists of hotel reviews from TripAdvisor, with
+100 reviews per entity. It includes reference sum-
+maries constructed by human annotators, with mul-
+tiple references for each entity. It also includes
+reference aspect-specific summaries, which we use
+to evaluate the controllability of H .
+AmaSum (Bražinskas et al., 2021) consists of
+reviews of Amazon products from a wide range
+of categories, with an average of 326 reviews per
+entity. The reference summaries were collected
+from professional review websites, and therefore
+arenot grounded in the input reviews. The refer-
+ences in the original dataset are split into ‘verdict’,
+‘pros’ and ‘cons’; we construct single summaries
+by concatenating these three. We filter the original
+dataset down to four common categories (Electron-
+ics, Shoes, Sports & Outdoors, Home & Kitchen),
+and evaluate on a subset of 50 entities, training
+separate models for each. All systems were trained
+and evaluated on the same subsets.
+4.2 Comparison Systems
+We compare with a range of baseline and compar-
+ison systems, both abstractive and extractive. For
+comparison, we construct extractive summaries us-
+ingH by selecting the centroid from each
+evidence set based on ROUGE-2 F1 score.
+We select a random review from the inputs as a
+lower bound. We also select the centroid of the set
+of reviews, according to ROUGE-2 F1 score. We
+include an extractive oracle as an upper bound, by
+selecting the input sentence with highest ROUGE-2
+similarity to each reference sentence.
+Lexrank (Erkan and Radev, 2004) is an unsu-
+pervised extractive method using graph-based cen-
+trality scoring of sentences.
+QT(Angelidis et al., 2021) uses vector quantiza-
+tion to map sentences to a discrete encoding space,
+then generates extractive summaries by selecting
+representative sentences from clusters.
+SemAE (Basu Roy Chowdhury et al., 2022) is
+an extractive method that extends QT, relaxing the
+discretization and encoding sentences as mixtures
+of learned embeddings.
+CopyCat (Bražinskas et al., 2020) is an abstrac-
+tive approach that models sentences as observations
+of latent variables representing entity opinions.InstructGPT (Ouyang et al., 2022) is a Large
+Language Model that generates abstractive sum-
+maries via prompting. We use the variant ‘text-
+davinci-002’; training details are not public, but it
+is likely that it was tuned on summarization tasks,
+and potentially had access to the evaluation data
+for both S and AmaSum during training.
+BiMeanV AE and COOP (Iso et al., 2021)
+are abstractive methods that encode full reviews
+as continuous latent vectors, and take the aver-
+age (BiMeanV AE) or an optimised combination
+(COOP) of review encodings.
+Finally, for aspect specific summarization we
+compare to AceSum (Amplayo et al., 2021a). Ace-
+Sum uses multi-instance learning to induce a syn-
+thetic dataset of review/summary pairs with asso-
+ciated aspect labels, which is then used to train an
+abstractive summarization model.
+Most of the abstractive methods are not scalable
+and have upper limits on the number of input re-
+views. CopyCat and InstructGPT have a maximum
+input sequence length, while COOP exhaustively
+searches over combinations of input reviews. We
+use 8 randomly selected reviews as input to Copy-
+Cat and COOP, and 16 for InstructGPT.
+4.3 Automatic Metrics
+We use ROUGE F1 (Lin, 2004, R-2/R-L in Tables 1
+and 2) to compare generated summaries to the refer-
+ences, calculated using the ‘jackknifing’ method for
+multiple references as implemented for the GEM
+benchmark (Gehrmann et al., 2021). To evaluate
+the faithfulness of the summaries, we use an auto-
+matic Question Answering (QA) pipeline inspired
+by Fabbri et al. (2022) and Deutsch et al. (2021):
+we use FlairNLP (Akbik et al., 2019) to extract
+adjectival- and noun-phrases from the reference
+summaries to use as candidate answers; we gener-
+ate corresponding questions with a BART question
+generation model fine tuned on SQuAD (Lewis
+et al., 2020; Rajpurkar et al., 2016); finally, we at-
+tempt to answer these generated questions from the
+predicted summaries, using a QA model based on
+ELECTRA (Clark et al., 2020; Bartolo et al., 2021).
+We report the token F1 score of the QA model on
+the generated questions as ‘QA’.
+We also evaluate the extent to which the gener-
+ated summaries are entailed by both the reference
+summaries and the input reviews using SummaC
+(Laban et al., 2022), reported as SCand SC
+respectively. SummaC segments input reviews into8492
+sentence units and aggregates NLI scores between
+pairs of sentences to measure the strength of en-
+tailment between the source reviews and generated
+summary. SCis the only reference free metric
+we use, and directly measures how well the gener-
+ated summaries are supported by the input reviews.
+Since the references for AmaSum were constructed
+independently from the input reviews, we consider
+SCto be our primary metric for AmaSum.
+4.4 Model Configuration
+We use a Transformer architecture (Vaswani
+et al., 2017) for our encoder ϕ(z|x)and de-
+coder p(y|z). Token embeddings were initialized
+from BERT (Devlin et al., 2019). We set thecodebook size K= 12 , with the number of lev-
+elsD= 12 , based on development set perfor-
+mance. Other hyperparameters are given in Ap-
+pendix A. Our code and dataset splits are available
+at .
+ForS , we generate summaries using 5
+generic and 5 specific paths (Section 3). For Ama-
+Sum, which was constructed from a single verdict
+sentence followed by more specific pros and cons,
+we use 1 generic path and 13 specific paths.
+5 Results
+Automatic Evaluation The results in Table 1
+show that H outperforms previous ap-
+proaches on both datasets. On S ,H-achieves the highest ROUGE scores by
+some distance, and performs very well on all faith-
+fulness metrics.
+On AmaSum, Hachieves higher
+ROUGE scores than H; since the ab-
+stractive summaries are generated solely from the
+encodings, the decoder can sometimes mix up
+product types with similar descriptions (e.g., head-
+phones and speakers) and is penalized accordingly.
+Since the references were not created from the
+input reviews, ROUGE scores are very low for
+all systems, and SCis the most informative met-
+ric; both variants of H achieve the high-
+est scores. Surprisingly, a number of the systems
+achieve SCscores higher than the references, in-
+dicating that they are generating summaries that are8493
+more grounded in the inputs than the gold standard.
+Systems that model the summary as a single se-
+quence, like InstructGPT and COOP, achieve high
+ROUGE-L scores because they generate very fluent
+output, but are less informative and less grounded
+in the input reviews according to SC, with In-
+structGPT scoring lowest on both datasets. Ta-
+ble 3 shows an example of a summary generated
+byH for an entity from S . It covers
+a wide range of aspects, conveying useful informa-
+tion without being overly specific or verbose. We
+report additional examples in Appendix D.To evaluate the controllability of H ,
+we report the results of aspect-specific summariza-
+tion on S in Table 2 averaged across ‘rooms’,
+‘location’, ‘cleanliness’, ‘building’, ‘service’ and
+‘food’, with some example output shown in Table 4.
+Despite not being specifically trained or designed to
+generate aspect-specific summaries, H
+achieves reasonable scores across the range of met-
+rics, and achieves comparable SCscores to Ace-
+Sum. Table 4 shows examples of aspect-specific
+summaries generated by H, for the
+same entity. No sentiment-controlled reference
+summaries are available, but we show examples
+of sentiment-controlled output in Table 13. We
+conclude that H allows us to control the
+output of the model and generate summaries which
+focus on a specific aspect.
+Human Evaluation Our goal is to generate sum-
+maries of hundreds of user reviews, but this makes
+human evaluation very difficult; it is not feasible
+to ask humans to keep track of the opinions ex-
+pressed in hundreds of reviews. We are therefore
+limited to evaluation based on the references, but
+this is highly dependent on the reference quality.
+For AmaSum in particular the references are not
+grounded in the input reviews, and so the human
+evaluation is only indicative.
+We recruited crowdworkers through Amazon
+Mechanical Turk, showed them a reference sum-8494
+mary alongside two generated summaries, and so-
+licited pairwise preferences along three dimensions:
+Informativeness, Conciseness & Non-Redundancy,
+and Coherence & Fluency. The full instructions
+are reproduced in Appendix B. We gathered an-
+notations for all 25 entities in the S test set
+and 10 entities from each AmaSum domain, with
+3 annotations for each. Extractive and abstractive
+systems were evaluated separately. The results in
+Table 5 show that both variants of H pro-
+duce summaries that are considered to be more in-
+formative than other systems, although this comes
+at the cost of slightly lower coherence.
+Attribution Since our approach is attributable
+and produces evidence sets alongside each abstrac-
+tive summary sentence, we can evaluate the degree
+to which the generated sentences are supported by
+the evidence they cite. We used SummaC to mea-
+sure the strength of entailment between each gen-
+erated sentence and its evidence set, giving scores
+of 71.2 for S and 46.8 for AmaSum. We also
+performed a human evaluation on a random sample
+of 150 output sentences, and found that generated
+sentences were supported by the majority of the
+associated evidence set 65% of the time for S
+and 57.3% for AmaSum. We invite future work to
+facilitate this kind of evaluation and to improve on
+our level of factuality.
+Ablations To evaluate to the contribution of each
+component towards the overall performance, we
+perform a range of ablation studies. Table 6 shows
+the changes in key metrics for models trained with-
+out the norm loss and without the denoising ob-
+jective. We also evaluate summaries generated us-
+ing only the generic and specific subpath selection
+methods, rather than a combination of both. Finally,
+we evaluate the importance of learning the clusters
+at the same time as the model, rather than post-hoc:
+we train a model with the same training data and
+hyperparameters as H but a continuous
+encoding; use k-means clustering over sentence
+encodings to identify a set of centroids for each
+entity; and finally generate a summary by passing
+the centroids to the decoder. The results show that
+all components lead to improved summary quality.
+The centroids extracted from a continuous V AE
+using k-means may not necessarily correspond to a
+valid sentence, leading to poor quality output.
+Analysis Table 7 shows examples of evidence
+sets, illustrating how H is able to gen-
+erate output that retains key information from the
+inputs, while discarding unnecessary detail. Ta-
+ble 8 shows a breakdown of generated output at
+different granularities. Given the input sentence,
+we show the output of the decoder with subpaths of
+varying granularities, demonstrating how subpaths
+of increasing depth lead to more detailed output.
+Figure 2 shows a t-SNE (van der Maaten and8495
+Hinton, 2008) plot of the embeddings of all review
+sentences for a single entity from S , with the
+summary subpaths overlaid on top in blue. We
+include a more detailed view of two summary sub-
+paths (left and right panels), showing the increasing
+level of detail as more levels are specified. We also
+highlight sample input sentences from the evidence
+set (circled in red), demonstrating how the gen-
+erated output can be attributed to input sentences
+conveying similar opinions.
+H is trained to reconstruct a target sen-
+tence from a source retrieved using tf-idf, but tf-idf
+is not sensitive to negation and does not distinguish
+between syntax and semantics. We observe that the
+model sometimes clusters sentences with superfi-
+cially similar surface forms but different meanings.
+For example, “The breakfast buffet was very good”
+and “The breakfast buffet was not very good either”
+are assigned to the same path by our model.
+The model is trained to generate output sen-
+tences based solely on the latent encoding: this
+is required to ensure that the model learns a useful
+encoding space. However, it also makes the model
+susceptible to some types of hallucination. Sen-
+tences about similar topics are likely to be assigned
+to the same paths, so the model may generate out-
+put that mentions a different entity of similar type
+(e.g., headphones instead of speakers).
+6 Related work
+Previous work has investigated aggregating user
+opinions in a latent space, but these approaches
+have generally been purely extractive for discrete
+spaces (Angelidis et al., 2021; Basu Roy Chowd-
+hury et al., 2022) or purely abstractive for continu-
+ous spaces (Iso et al., 2021). Other approaches have
+either been supervised (Bražinskas et al., 2021) or
+have selected ‘central’ reviews to use as proxy sum-
+maries for training (Amplayo et al., 2021a,b), but
+they do not explicitly model the aggregation pro-cess. Iso et al. (2022) propose a method for that
+highlights both common and contrastive opinions.
+Hierarchical VQ was introduced by Juang and
+Gray (1982) as ‘multistage VQ’, with a set of code-
+books fitted post-hoc to a set of encoding vectors,
+and further developed as ‘Residual VQ’ by Chen
+et al. (2010) and Xu et al. (2022). More recently,
+Zeghidour et al. (2022) and Hosking et al. (2022)
+concurrently proposed methods for learning the
+codebook jointly with an encoder-decoder model.
+A form of hierarchical VQ has also been proposed
+in computer vision (Razavi et al., 2019), but in their
+context the hierarchy refers to a stacked architec-
+ture rather than to the latent space. A separate line
+of work has looked at learning hierarchical latent
+spaces using hyperbolic geometry (Mathieu et al.,
+2019; Surís et al., 2021), but the encodings are still
+continuous and not easily aggregated.
+The recent surge in performance of language
+models has led to a desire to evaluate whether the
+information they output is verifiable. Rashkin et al.
+(2021) propose a framework for post-hoc annota-
+tion of system output to evaluate attributability; we
+argue that it is better to have systems that justify
+their output as part of the generation process.
+7 Conclusion
+We propose H , a method for aggregating
+user reviews into textual summaries by identifying
+frequent opinions in a discrete latent space. Com-
+pared to previous work, our approach generates
+summaries that are more informative, while also
+scaling to large numbers of input reviews and pro-
+viding evidence to justify its output.
+Future work could combine the improvements
+in attributability and scalability of our model with
+the fluency of systems that model summaries as
+a single sequence. Allowing the model to access
+the evidence sets during decoding could lead to
+improved output quality with less hallucination.8496Limitations
+Since our approach identifies common opinions
+based on frequency of sentence encodings, we re-
+quire a relatively large number of input sentences.
+We were not able to experiment with other popular
+datasets like Amazon (He and McAuley, 2016),
+Yelp (Chu and Liu, 2019) or Rotten Tomatoes
+(Wang and Ling, 2016) since these datasets only in-
+clude a small number (usually 8) of input reviews.
+The abstractive summaries are generated solely
+based on the latent encoding, and our model does
+not include a copy mechanism or attend to the orig-
+inal inputs when decoding. It therefore does not
+always generalize well to new domains. However,
+this limitation is mitigated by not requiring any la-
+belled data during training: H can easily
+be retrained on a new domain.
+Generating output based only on latent encod-
+ings means that the model is also susceptible to hal-
+lucinating, since the output is less directly linked to
+the inputs. However, unlike other methods, H- provides evidence sets alongside the gener-
+ated summaries, making it easier to check whether
+the output is faithful.
+Finally, H generates summary sen-
+tences independently, leading to summaries that
+are less coherent than approaches that model the
+summary as a single sequence. We welcome future
+work on combinining the relative strengths of each
+approach. We do not anticipate any significant risks
+resulting from this work.
+Acknowledgements
+We thank our anonymous reviewers for their feed-
+back. This work was supported in part by the
+UKRI Centre for Doctoral Training in Natural
+Language Processing, funded by the UKRI (grant
+EP/S022481/1) and the University of Edinburgh.
+Lapata acknowledges the support of the UK Engi-
+neering and Physical Sciences Research Council
+(grant EP/W002876/1).
+References849784988499
+A Replication details
+Models were trained on a single A100 GPU, with
+training taking roughly 24 hours for S and 6
+hours for each AmaSum domain.
+The prompt used for InstructGPT evaluation was
+as follows:
+Review:
+[Review 1 text]
+Review:
+[Review 2 text]
+[...]
+Summarize these reviews:
+Table 9 show the hyperparameters used for our
+experiments. The Gumbel temperature was de-
+cayed from τtoτaccording to
+τ= max/parenleftbig
+τ×exp(−t
+γ), τ/parenrightbig
+,(9)
+in line with Jang et al. (2017).
+The model is sensitive to the initialization of the
+codebook; the initial embeddings should be located
+in roughly the same region of space as the output
+of the encoder, but should have sufficient variation
+so as to be informative for the decoder. Following
+Ła´ncucki et al. (2020) we initialize the codebookParameter Value
+Embedding dim. D 768
+Encoder layers 5
+Decoder layers 5
+Feedforward dim. 2048
+Transformer heads 8
+Depth D 12
+Codebook size K 12
+Optimizer Adam (Kingma and Ba,
+2015)
+Learning rate 5e-4
+Batch size 200
+Token dropout 0.2 (Xie et al., 2017)
+Decoder Beam search
+Beam width 4
+α 0.5
+τ 1.0
+τ 0.5
+γ 33333
+β 0.0025
+β 0.05
+γ 1.5
+on a unit hypersphere, to avoid the radial distance
+component dominating the angular component.
+We used the default settings for SummaC (La-
+ban et al., 2022) as given on the project GitHub,
+using the SummaCConv variant trained on Vitam-
+inC (Schuster et al., 2021) and mean aggregation.
+B Human Evaluation
+The instructions given to crowdworkers were as
+follows:
+In this task you will be presented with a
+number of summaries produced by dif-
+ferent automatic systems based on user
+reviews. Your task is to select the best
+system summary based on the criteria
+listed below.
+Please read the human summary first and
+try to get an overall idea of what opinions
+it expresses.
+Please read the criteria descriptions and
+system summaries carefully, and when-
+ever is necessary re-read the human sum-
+mary.8500Remember that you are being asked to
+rate the system, not the human summary.
+Informativeness Which system sum-
+mary gives useful information that is con-
+sistent with the opinions in the human
+summary?
+Conciseness & Non-Redundancy
+Which system summary includes useful
+information in a concise manner and
+avoids repetitions?
+Coherence & Fluency Which system
+summary is easy to read and avoids con-
+tradictions?
+Crowdworkers were recruited from the UK and
+US, and were supplied with a Participant Infor-
+mation Sheet before being asked for their consent
+to participate. Crowdworkers were compensated
+$0.30 per annotation which took approximately
+1.5 minutes, corresponding to an hourly wage of
+$12.00/hour. This exceeds the US federal mini-
+mum wage ($7.25) at time of writing.
+C Breakdown of Results
+We report the automatic evaluation scores broken
+down by AmaSum domains in Table 10 and Ta-
+ble 11, and the human evaluation results broken
+down by dataset in Appendix C.
+D Example Output
+Table 13 shows an example of generated summaries
+with sentiment control. We report additional exam-
+ples of output summaries in Table 14.850185028503ACL 2023 Responsible NLP Checklist
+A For every submission:
+/squareA1. Did you describe the limitations of your work?
+Limitations section at end
+/squareA2. Did you discuss any potential risks of your work?
+Limitations section at end
+/squareA3. Do the abstract and introduction summarize the paper’s main claims?
+Abstract/1
+/squareA4. Have you used AI writing assistants when working on this paper?
+Left blank.
+B/squareDid you use or create scientiﬁc artifacts?
+4.4
+/squareB1. Did you cite the creators of artifacts you used?
+Throughout
+/squareB2. Did you discuss the license or terms for use and / or distribution of any artifacts?
+License will be distributed on Github
+/squareB3. Did you discuss if your use of existing artifact(s) was consistent with their intended use, provided
+that it was speciﬁed? For the artifacts you create, do you specify intended use and whether that is
+compatible with the original access conditions (in particular, derivatives of data accessed for research
+purposes should not be used outside of research contexts)?
+Not applicable. Left blank.
+/squareB4. Did you discuss the steps taken to check whether the data that was collected / used contains any
+information that names or uniquely identiﬁes individual people or offensive content, and the steps
+taken to protect / anonymize it?
+Not applicable. Left blank.
+/squareB5. Did you provide documentation of the artifacts, e.g., coverage of domains, languages, and
+linguistic phenomena, demographic groups represented, etc.?
+Not applicable. Left blank.
+/squareB6. Did you report relevant statistics like the number of examples, details of train / test / dev splits,
+etc. for the data that you used / created? Even for commonly-used benchmark datasets, include the
+number of examples in train / validation / test splits, as these provide necessary context for a reader
+to understand experimental results. For example, small differences in accuracy on large test sets may
+be signiﬁcant, while on small test sets they may not be.
+Not applicable. Left blank.
+C/squareDid you run computational experiments?
+4.4
+/squareC1. Did you report the number of parameters in the models used, the total computational budget
+(e.g., GPU hours), and computing infrastructure used?
+Appendix A8504/squareC2. Did you discuss the experimental setup, including hyperparameter search and best-found
+hyperparameter values?
+4.4/Appendix A
+/squareC3. Did you report descriptive statistics about your results (e.g., error bars around results, summary
+statistics from sets of experiments), and is it transparent whether you are reporting the max, mean,
+etc. or just a single run?
+5
+/squareC4. If you used existing packages (e.g., for preprocessing, for normalization, or for evaluation), did
+you report the implementation, model, and parameter settings used (e.g., NLTK, Spacy, ROUGE,
+etc.)?
+Appendix A
+D/squareDid you use human annotators (e.g., crowdworkers) or research with human participants?
+5
+/squareD1. Did you report the full text of instructions given to participants, including e.g., screenshots,
+disclaimers of any risks to participants or annotators, etc.?
+Appendix B
+/squareD2. Did you report information about how you recruited (e.g., crowdsourcing platform, students)
+and paid participants, and discuss if such payment is adequate given the participants’ demographic
+(e.g., country of residence)?
+Appendix B
+/squareD3. Did you discuss whether and how consent was obtained from people whose data you’re
+using/curating? For example, if you collected data via crowdsourcing, did your instructions to
+crowdworkers explain how the data would be used?
+Appendix B
+/squareD4. Was the data collection protocol approved (or determined exempt) by an ethics review board?
+Not applicable. Left blank.
+/squareD5. Did you report the basic demographic and geographic characteristics of the annotator population
+that is the source of the data?
+Appendix B8505

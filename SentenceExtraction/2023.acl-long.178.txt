@@ -1,1 +1,810 @@
-3171 Proceedings of the 61st Annual Meeting of the Association for Computational Linguistics Volume 1 : Long Papers , pages 3171–3185 July 9 - 14 , 2023 © 2023 Association for Computational Linguistics 3172 3173 3174 3175 3176 3177 3178 3179 3180 3181 3182 3183 3184 3185 
+
+Anwen Hu, Shizhe Chen, LiangZhang, Qin JinSchool of Information, Renmin University of ChinaINRIA
+{anwenhu,zhangliang00,qjin}@ruc.edu.cn
+shizhe.chen@inria.fr
+Abstract
+Automatic image captioning evaluation is criti-
+cal for benchmarking and promoting advances
+in image captioning research. Existing metrics
+only provide a single score to measure caption
+qualities, which are less explainable and infor-
+mative. Instead, we humans can easily iden-
+tify the problems of captions in details, e.g.,
+which words are inaccurate and which salient
+objects are not described, and then rate the
+caption quality. To support such informative
+feedback, we propose an Informative Metric
+for Reference-free Image Caption evaluation
+(InfoMetIC). Given an image and a caption,
+InfoMetIC is able to report incorrect words
+and unmentioned image regions at fine-grained
+level, and also provide a text precision score, a
+vision recall score and an overall quality score
+at coarse-grained level. The coarse-grained
+score of InfoMetIC achieves significantly better
+correlation with human judgements than exist-
+ing metrics on multiple benchmarks. We also
+construct a token-level evaluation dataset and
+demonstrate the effectiveness of InfoMetIC in
+fine-grained evaluation. Our code and datasets
+are publicly available at https://github.
+com/HAWLYQ/InfoMetIC .
+1 Introduction
+Image captioning aims to automatically gener-
+ate natural language sentences to describe image
+contents. Recently, there are significant break-
+throughs in image captioning such as attention-
+based model architectures (Anderson et al., 2018;
+Pan et al., 2020; Hu et al., 2020, 2021) and vision-
+and-language pretraining (VLP) (Zhou et al., 2020;
+Xia et al., 2021; Li et al., 2022b; Xu et al., 2021;
+Li et al., 2022a). However, as groundtruth image
+descriptions are extremely diverse and subjective,
+evaluating the image captioning performance re-
+mains a considerable challenge.
+The most widely used image captioning met-
+rics such as (Banerjee and Lavie, 2005),Figure 1: Comparison of existing metrics and our infor-
+mative metric (InfoMetIC). ‘w/ ref’ and ‘w/o ref’ mean
+using references or not. (Vedantam et al., 2015a) and (Ander-
+son et al., 2016) utilize human-written descriptions
+of images as references and measure similarities
+between generated captions and references for eval-
+uation. Such reference-based approaches suffer
+from two major limitations. Firstly, these metrics
+mainly evaluate caption quality by n-gram overlaps
+which fail to measure genuine semantic similari-
+ties. Secondly, references require time-consuming
+annotations and thus there are only a few annotated
+captions (typically 5) for each image. The limited
+number of references cannot fully capture image
+contents, resulting in incorrect penalties when gen-
+erated captions describe correct novel things that
+are not mentioned in the references.
+To alleviate the above limitations, recent works
+are more focusing on reference-free metrics, which
+directly use images instead of reference captions in
+evaluation. Benefited from the success of VLP on
+large-scale web data, UMIC (Lee et al., 2021) and
+CLIP-S (Hessel et al., 2021) leverage VLP mod-
+els UNITER (Chen et al., 2020) and CLIP (Rad-
+ford et al., 2021) respectively to calculate relevance
+scores between generated captions and images. Al-
+though they have achieved promising correlations
+with human judgments, they can only produce an
+overall score as quality measurement. We humans3171instead tend to evaluate captions considering two
+aspects: 1) whether the caption correctly describes
+the image content (named text precision ); and 2)
+whether the image content is comprehensively de-
+scribed in the caption (named vision recall ). For
+example, as shown Figure 1, we can easily tell
+the “hat” in the second candidate is incorrect, and
+some salient contents such as “the bag” are not
+mentioned, and thus form our final evaluation to
+the caption.
+For the purpose of providing explainable and de-
+tailed feedbacks, we propose a Informative Metric
+for Reference-free Image Caption evaluation (In-
+foMetIC). It is built on top of pretrained VLP mod-
+els to measure fine-grained cross-modal similari-
+ties. InfoMetIC is able to point out incorrect seman-
+tic words in the caption and unmentioned regions
+in the image. Based on fine-grained evaluation, it
+derives text precision and vision recall scores to
+measure captioning accuracy and completeness re-
+spectively. We take a summation of the two scores
+to rate overall quality of the caption.
+Our contributions in this work are three-fold:
+•We propose a reference-free informative im-
+age captioning metric InfoMetIC. It can pro-
+vide both coarse-grained scores and detailed
+token-level scores.
+•We automatically construct training exam-
+ples based on annotations in image caption
+datasets and design coarse- and fine-grained
+tasks to train the evaluation model.
+•InfoMetIC achieves better correlation with hu-
+man judgements on multiple benchmarks, as
+well as on our newly constructed fine-grained
+caption evaluation benchmark CapTokenEval.
+2 Related Work
+Reference-only caption evaluation. This type
+of evaluation only employs human-written cap-
+tions as references and measures text similarity
+as the evaluation score. Most widely used met-
+rics such as (Papineni et al., 2002),(Lin, 2004), (Banerjee and Lavie, 2005), (Vedantam et al., 2015a) and (An-
+derson et al., 2016) all fall into this category. calculates the precision of n-gram matches; measures the recall of the longest com-
+mon subsequence; utilizes wordnet-based
+synonym matching to relieve the shortage of exact
+word matching; introduces tf-idf to re-weight
+the importance of different n-grams; convertscaptions into scene graphs for similarity compari-
+son. One major limitation of the above metrics is
+that they cannot properly count synonym matches.
+To overcome this deficiency, (Zhang et al.,
+2020) leverages learned embeddings from a pre-
+trained language model BERT (Devlin et al., 2019)
+to better measure semantic similarities.
+(Yi et al., 2020) further improves by taking
+into account the variance of multiple references.
+Reference+image caption evaluation. As an im-
+age is worth a thousands of words, a limited num-
+ber of references cannot fully cover image con-
+tents, making the reference-only caption evaluation
+less reliable. Therefore, some works combine both
+references and images to evaluate generated cap-
+tions. REO (Jiang et al., 2019a) uses a pretrained
+image-text retrieval model SCAN (Lee et al., 2018)
+to extract image contextualized caption features
+for computing relevance, extraness and omission
+scores. TIGER (Jiang et al., 2019b) calculates
+grounding vectors for captions via SCAN to mea-
+sure similarity, which represent how much captions
+are grounded in an image. ViLBERTScore (Lee
+et al., 2020) is similar to BERT-S except that it gen-
+erates visually-grounded features for each caption
+token by ViLBERT (Lu et al., 2019). FAIEr (Wang
+et al., 2021) fuses scene graphs of the image and
+references as a union scene graph and compares it
+with the scene graph of generated captions.
+Reference-free caption evaluation. To alleviate
+the annotation burden of obtaining references, a
+few works propose to evaluate image captions with-
+out references. UMIC (Lee et al., 2021) fine-tunes a
+pretrained multimodal transformer UNITER (Chen
+et al., 2020) by contrastive learning to compute an
+image-text matching score. CLIP-S (Hessel et al.,
+2021) directly utilizes image-text similarity from
+CLIP (Radford et al., 2021) - an image-text match-
+ing model trained on large-scale open-domain data.
+CLIP-S has achieved state-of-the-art evaluation per-
+formance. However, these methods only provide
+single scores which are less informative to evaluate
+image captions. In this work, we aim to provide
+more fine-grained feedbacks, not only indicating
+the captioning quality from precision and recall as-
+pects, but also pointing out detailed mistakes such
+as incorrect words and unmentioned regions.
+3 Method
+We first introduce our model architecture in Sec 3.1
+and then describe the training and inference ap-3172
+proaches in Sec 3.2 and Sec 3.3 respectively.
+3.1 Model Architecture
+Figure 2 illustrates the overall framework of our
+informative evaluation model, which consists of
+three modules: Token-level Encoding ,Intra&Inter
+Modality Fusion andFine-grained Scoring . Given
+an image Iand a caption Cas inputs, the Token-
+level Encoding module firstly generates a sequence
+of token-level features to represent the image and
+caption respectively. Then the Intra&Inter Modal-
+ity Fusion module captures the intra- and inter-
+modality relationships. Finally, the Fine-grained
+Scoring module produces token-level scores for
+each visual and textual token and derives vision
+recall, text precision, and overall scores based on
+the token-level scores.
+3.1.1 Token-level Encoding
+VLP models have shown superior performance and
+generalization ability in many vision-and-language
+tasks (Chen et al., 2020). Therefore, we utilize a
+state-of-the-art VLP model CLIP to extract token-
+level image and caption features. To be noted, our
+method can be adapted to different VLP models.
+Image Token Features. In order to obtain semanti-
+cally meaningful image tokens, we use a pretrained
+object detector to detect region bounding boxes
+in image I. We encode each cropped region via
+CLIP vision encoder to get fine-grained token-level
+features (v, ..., v), where mis the number of de-
+tected regions. The whole image is encoded as a
+global vision feature v. We further utilize a zero
+vector to represent a vision null token v, which
+aims to align with any texts irrelevant to the image.
+Caption Token Features. For a caption C, CLIPtext encoder can generate a global feature tto
+capture overall semantics of the whole sentence.
+Although it could also generate a sequence of text
+token features, these features can overuse the sen-
+tence context, which harms fine-grained evaluation.
+An illustration about the context overuse can be
+found in Appendix A. Therefore, we encode each
+token in Cseparately as shown in Figure 2 to ob-
+tain independent token-level features (t, ..., t),
+where nis the number of text tokens.
+3.1.2 Intra&Inter Modality Fusion
+In order to learn intra-modal relationships, we uti-
+lize two multi-layer transformers (Vaswani et al.,
+2017) to encode image and text tokens separately.
+As spatial information is essential to infer relation-
+ships across image regions, we apply a linear layer
+to convert normalized bounding boxes as position
+features and add them to the initial image token fea-
+tures before fed into the intra-modal transformer.
+Likewise, we add learnable position features for the
+text tokens. For visual intra-modal encoding, we
+concatenate vwith(v,···, v, v)to alleviate
+possible vision context loss in fine-grained image
+tokens due to imperfect detection. For textual intra-
+modal encoding, we directly utilize (t,···, t)
+tokens as inputs.
+We concatenate the image and text token-level
+features after intra-modal encoding and utilize an
+inter-modal encoder to learn correlation between
+vision and text modalities. The inter-modal encoder
+is implemented as a multi-layer cross-modal trans-
+former (Chen et al., 2020). We denote the output
+features for image tokens as ˆV= (ˆv...,ˆv,ˆv),
+output features for text tokens as ˆT= (ˆt, ...,ˆt).31733.1.3 Fine-grained Scoring
+The Fine-grained Scoring module aims to predict
+which text tokens are incorrect and which image
+tokens are not mentioned. It consists of two cross-
+modal attention layers, namely Text-filterd Vision
+Encoder and Vision-filterd Text Encoder as shown
+in the right of Figure 2. To identify which image
+tokens are mentioned, we use global text feature t
+as query and token-level vision features ˆVas key
+in the cross-modality attention layer to calculate
+visual token-level scores α:
+s= (tW)ˆvW, (1)
+α= Softmax([ s, ..., s, s]). (2)
+Similarly, to identify which text tokens are in-
+correct, we use global vision feature vas query
+and token-level text features ˆTas key to calcu-
+late textual token-level scores αby another cross-
+modality attention layer.
+Based on token-level scores, we derive vision
+recall score and text precision scores to measure
+the comprehensiveness and accuracy of generated
+captions respectively. We take visual token-level
+scores αand token-level vision features ˆVto ob-
+tain a text-conditioned vision feature ˆvby weighed
+average as follows:
+ˆv=/summationdisplayαˆv. (3)
+The more image regions are mentioned in a cap-
+tion, the closer its text-conditioned vision feature
+should be to the global vision feature v. Thus,
+we compute the vision recall score as the co-
+sine similarity between ˆvandv, represented as
+f(I, C) = cos(ˆ v, v)/τ, where τis a learnable
+temperature parameter. Taking the untrained global
+vision feature vas the comparison object, our vi-
+sion recall score implicitly considers the salience of
+visual information, as illustrated in Appendix B. In
+a similar way, we can obtain a vision-conditioned
+text feature ˆtand compute a text precision score
+f(I, C) = cos( ˆt, t)/τ. Our overall score is the
+summation of precision score and recall score:
+f(I, C) =f(I, C) +f(I, C). (4)
+3.2 Multi-task Learning
+To learn fine-grained token-level predictions as
+well as coarse-grained text precision and vision
+recall scores, we propose multiple training tasks to
+jointly optimize our evaluation model.3.2.1 Coarse-grained Score Learning
+Given an aligned image-caption pair (I, C), we
+construct negative samples by pairing Iwith other
+captions in the training batch or pairing Cwith
+other images in the batch. Then, we calculate Noisy
+Contrastive Learning (NCE) loss lbased on vision
+recall scores and lbased on text precision scores.
+The NCE loss lis calculated as follows:
+l= (l+l)/2, (5)
+l=−Eloge
+/summationtexte,(6)
+l=−Eloge
+/summationtexte,(7)
+whereNmeans a set of negative captions for im-
+ageIwithin the batch B,Nmeans negative im-
+ages for caption C. The NCE loss lis similar to
+Eq (5) but utilizes f(I, C)scores in computation.
+Hard Textual Negatives. In the above coarse-
+grained score learning, negative captions for an im-
+age are randomly selected from the dataset and usu-
+ally contains many irrelevant contents with the im-
+age. These textual negatives are not hard enough to
+learn a good vision recall score. Because the model
+could compute a high recall score for positive pairs
+by putting high weight to only one rather than all
+mentioned regions. To address this problem, we
+further design Hard Textual Negatives (HTN) dur-
+ing coarse-grained score learning. For multiple
+annotated captions of an image, we consider the
+one with more semantic words (nouns, verbs, adjec-
+tives and adverbs) should get higher vision recall
+score than the others. Therefore, we treat the other
+ones as hard textual negatives. The HTN loss lis
+calculated as follows:
+l=−Eloge
+e+e,(8)
+where Cis a hard textual negative for caption C.
+3.2.2 Fine-grained Score Learning
+To improve fine-grained evaluation, we design a
+sequence labeling task called Fine-grained Score
+learning. We automatically generate supervision
+signals to learn token-level predictions. For the text
+part, we prepare labels in a self-supervised manner.
+Given an image Iand its groundtruth caption C,
+we generate a polluted caption Cby randomly
+replacing a semantic word with a frequent word3174of the same part-of-speech tag. The text sequence
+label Yfor(I, C)is constructed by setting the
+polluted word as 0 (incorrect) and other semantic
+words as 1 (correct). Non-semantic words such as
+adpositions, conjunctions are excluded in training.
+For the image part, we make use of existing phrase
+grounding annotations which align each phrase in
+a caption with its corresponding bounding boxes in
+the image. The vision sequence label Yfor(I, C)
+is constructed by setting all regions mentioned by
+the caption as 1 and otherwise 0.
+We use cross-entropy losses for both textual and
+visual fine-grained score learning tasks:
+l =−1
+n/summationdisplay
+Ylog(α), (9)
+l =−1
+m/summationdisplay
+Ylog(α), (10)
+where l andl refer to the text-part and
+vision-part loss respectively, αandαare textual
+token-level scores and visual token-level scores in
+Eq (2), nis the number of semantic words.
+3.3 Inference
+Given input pair (I, C), we first compute token-
+level scores αandαfor fine-grained prediction
+with a threshold β. Considering that a caption
+hardly contains more than 10 semantic words, we
+setβas 0.1. For the text part, semantic tokens with
+a score greater than βare judged as correct ones.
+For the image part, regions with a score greater
+thanβare identified as mentioned ones.
+Then we calculate the vision recall, text preci-
+sion, and overall scores as in Eq (4). We denote our
+vision recall score f(I, C)as InfoMetIC, text
+precision score f(I, C)as InfoMetIC, and over-
+all score f(I, C)as InfoMetIC. Furthermore, we
+combine our overall score with the CLIP similarity:
+InfoMetIC= InfoMetIC +cos(v, t)
+τ(11)
+where τis the temperature of CLIP.
+4 Experiment
+4.1 Experimental Setting
+Training Datasets. With the training splits of
+Flickr30k (Young et al., 2014) and MSCOCO (Lin
+et al., 2014) datasets, we construct 715,662 image-
+caption pairs for general coarse-grained score learn-
+ing, and 611,105 triplets with hard textual nega-
+tives. For fine-grained score leaning, we construct512,000 samples from MSOCO and Flick30k for
+the text part training and 178,689 samples from
+Flickr30k for the vision part training.
+Implementation Details. We use CLIP(ViT-B/32)
+for token-level encoding. The image regions are
+detected by the bottom-up model (Anderson et al.,
+2018). To remove redundant bounding boxes,
+we use k-means algorithm to generate 20 clusters
+among 100 detected regions and select one region
+per cluster. The details can be found in Appendix
+C. The maximum length for textual tokens is set as
+32. In the intra&inter modality fusion, intra- and
+inter-modal encoders contain 4 and 2 transformer
+layers respectively. During training, the batch size
+is set as 32 and the initial learning rate is set as
+1e-4. We iteratively train our model on multiple
+tasks for 32,000 iterations. The training ratio of
+coarse- and fine-grained tasks is 3:1. The training
+takes 5 hours on 4 V100 GPUs.
+4.2 Coarse-grained Score Evaluation
+4.2.1 Evaluation Datasets
+Flickr8k-Expert (Hodosh et al., 2013a) contains
+5,644 pairs of images and machine-generated cap-
+tions. Each pair is scored from 1 (irrelevant) to 4
+(well related) by 3 expert annotators.
+Flickr8k-CF (Hodosh et al., 2013a) consists of
+47,830 image-captions pairs. Each pair is judged
+"yes" or "no" by at least 3 annotators, where "yes"
+is for good captions. The final score of each pair is
+determined by the proportion of "yes".
+Composite (Aditya et al., 2018) contains 3,995
+images from MSCOCO, Flickr30K and Flickr8k
+(Hodosh et al., 2013b). For each image, there are
+two machine-generated captions and one human-
+written caption. Every image-caption pair is scored
+from 1 (irrelevant) to 5 (perfectly related).
+Pascal-50S (Vedantam et al., 2015b) contains
+4,000 triplets, each of which contains an image
+and two captions. Annotators are asked to judge
+which caption is better. According to caption
+types, Pascal-50S is evenly split into 4 subsets:
+‘HC’ means two correct human-written captions;
+‘HI’ means two human-written captions but one is
+wrong; ‘HM’ means one human-written caption
+and one machine-generated caption; ‘MM’ means
+two machine-generated captions.
+THumB 1.0 (Kasai et al., 2022) contains 500
+images from MSCOCO. Each image is paired
+with one human-written caption and four machine-
+generated captions. For each image-caption pair,3175
+there are a precision score measuring the accuracy
+of the caption, a recall score assessing how much
+of the salient information is covered, and a total
+score measuring the overall quality.
+4.2.2 Evaluation Metrics
+We follow previous works (Hessel et al., 2021;
+Vedantam et al., 2015b; Kasai et al., 2022) to eval-
+uate captioning metrics. We use kendall-c correla-
+tion (τ) on Flickr8k-Expert, kendall-b correlation
+(τ) on Flickr8k-CF, kendall-c correlation ( τ) on
+Composite, classification accuracy on Pascal-50s
+and Pearson correlation ( ρ) on THumB 1.0.
+4.2.3 Comparison with State of the Arts
+We compare InfoMetIC with SOTA methods as
+well as three strong baselines: CLIP-S, Info-
+CLIP and InfoCLIP. CLIP-Scalculates an
+overall score as CLIP-S (Hessel et al., 2021) but is
+fine-tuned on MSCOCO and Flickr30k. InfoCLIP
+directly uses CLIP to perform fine-grained scoring
+like InfoMetIC but removes the Intra&Inter Modal-
+ity Fusion and parameters in Fine-grained Scoring.
+InfoCLIPis a fine-tuned version of InfoCLIP.
+More details can be found in the Appendix D.
+Table 1 shows the overall score compari-
+son on Flickr8k-Expert, Flickr8k-CF, Compos-
+ite and Pascal-50S. Our reference-free metric In-
+foMetIC achieves state-of-the-art correlation with
+human judgements on Composite and Pascal-5OS.
+It is on par with the strong baseline CLIP-Son Flickr8k-Expert and Flickr8k-CF. To be noted,
+InfoMetIC performs much better than InfoCLIP,
+which proves the necessity of our model architec-
+ture upon CLIP backbones. After combined with
+CLIP similarity, InfoMetICfurther improves per-
+formances on all benchmarks.
+To separately evaluate the performance of our
+vision recall score InfoMetICand text precision
+score InfoMetIC, we further conduct experiments
+on THumB 1.0 in Table 3. First , by compar-
+ing InfoMetICand InfoMetIC, InfoMetIC
+achieves better correlation with human-labeled re-
+call score and InfoMetICachieves better corre-
+lation with human-labeled precision score. This
+indicates that our InfoMetICand InfoMetICin-
+deed evaluates the recall of image contents and the
+precision of caption respectively. Besides, both
+InfoMetICand InfoMetICsurpass the state-
+of-the-art reference-free metric CLIP-S on total
+score correlation. Second , our overall score In-
+foMetIC achieves significant boost on total score,
+which demonstrates that precision and recall are
+complementary in human’s final evaluation for cap-
+tions. InfoMetICslightly improves the total score
+performance. Third , compared with the state-of-
+the-art reference-based metric RefCLIP-S (Hessel
+et al., 2021), our InfoMetICachieves much better
+recall correlation but lower precision correlation
+with humans. This is because text-text semantic
+comparison is much easier than cross-modal seman-3176
+tic comparison, making the precision correlation of
+reference-based metrics higher. However, limited
+textual references cannot fully capture image con-
+tents, which is harmful for vision recall. Finally ,
+InfoMetIC achieves much better performance than
+InfoCLIP, which shows the effectiveness of our
+proposed modules on top of CLIP.
+4.2.4 Ablation Study
+We first validate the effectiveness of our model
+architecture. As shown in Table 2, removing Intra-
+modal encoders (r2 vs r4) or Inter-modal encoder
+(r1 vs r4) results in performance drop on Flickr8k-
+Expert, Composite and Pascal-50S. Besides, re-
+moving global vision feature vfrom Intra&Inter
+encoding (r3 vs r4) leads to slight performance drop
+on Flickr8k-Expert, Pascal-50S and THumB1.0.
+We then carry out ablation study to verify the ef-
+fectiveness of our training strategy in Table 2. Our
+proposed hard textual negatives (r4 vs r5) achieves
+significant improvements on HC subset of Pas-
+cal50s and THumB 1.0 Recall. This shows that
+constructing hard negatives indeed helps model
+better evaluate the vision content recall. Adding
+fine-grained score learning task (r4 vs r6) is also
+beneficial to the performance of coarse-grained
+score, which performs better on Pascal-50S and is
+comparable on other datasets. When trained with
+all tasks together (r7), InfoMetIC further improves
+on Pascal-50S and THumB 1.0, and achieves state-
+of-the-art performance on all datasets.
+4.3 Generalization Ability
+InfoMetIC are trained with image-captions of
+Flick30k and MSCOCO. To evaluate its gener-
+alization ability, we further conduct experiments
+on NoCaps (Agrawal et al., 2019), whose objects
+are greatly different from Flick30k and MSCOCO.
+Since there are no human-labeled scores for image-
+caption pairs, we perform text-image cross-modal
+retrieval to validate the effectiveness of our metric.
+As shown in Table 4, InfoMetIC performs worse
+than CLIP-S on image-to-text retrieval but better
+on text-to-image retrieval. After combining with
+CLIP similarity, InfoMetICachieves the state-of-
+the-art performance on both two retrieval tasks. It
+indicates our overall score can also perform well
+on instances with unseen objects.3177
+4.4 Fine-grained Score Evaluation
+Dataset. To validate the token-level evaluation
+performance of InfoMetIC, we collect a fine-
+grained caption evaluation benchmark called Cap-
+TokenEval. CapTokenEval is built upon a subset
+of THumB 1.0. We select 700 image-caption pairs
+whose precision scores are not perfect (< 5.0). For
+the text part, annotators are asked to judge which
+words are irrelevant with the image. For the image
+part, we collect 20 bounding boxes and ask anno-
+tators to identify mentioned regions. More details
+about the annotation can be found in Appendix E.
+Quantitative Results. Given each image-caption
+pair, InfoMetIC produces sequence of prediction
+for both image regions and caption tokens. To quan-
+tify token-level evaluation performance, for the text
+part, we only calculate the accuracy of semantic
+tokens (nouns, verbs, adjectives and numbers). As
+shown in Table 5, without extra parameters, In-
+foCLIP achieves promising performance for fine-
+grained visual evaluation but poor performance in
+the text part. Consistent with the result shown in
+Table 3 that InfoCLIPourperforms InfoCLIP, it
+further shows the importance of context fusion for
+text precision evaluation. With multi-task learning,
+InfoMetIC achieves promising prediction accuracy
+on both vision and text sequence. Both hard tex-
+tual negatives and fine-grained score learning task
+contribute to token-level evaluation performance.
+Notably, fine-grained score learning task greatly
+boosts the text-part accuracy. Coarse-grained con-
+trastive learning for text precision score within a
+batch can result in the model only putting relatively
+higher weights on a few correct text tokens. Our
+fine-grained score learning task could effectively
+alleviate this lazy behavior by teaching the model
+to put high weights on all correct tokens.
+Qualitative Results. We show some qualita-
+tive results of token-level evaluation in Figure 3.
+Firstly, InfoMetIC is able to identify various mis-
+takes made in captions, including wrong actions
+(e.g.“running” in case a), wrong objects (e.g.“ramp”
+in case b), and wrong modifiers (e.g.“couple” in
+case c). Secondly, InfoMetIC could report men-
+tioned image regions (e.g. the “skateboard” region
+in case b) and unmentioned regions (e.g. the “build-
+ing” region in case b). Especially, when the caption
+is totally irrelevant with the image, as shown in case
+d, InfoMetIC could not only judge the wrong se-
+mantic words but also inform that all image regions
+are not mentioned by putting a very high score to
+the vision null token. One limitation of current
+metric is that although we perform region filtering
+by clustering, we still find some similar regions as
+shown in Figure 3(c). Better ways to de-duplicate
+image regions could bring further improvement.31785 Conclusion
+To provide feedbacks on detailed mistakes of image
+captions, we propose a reference-free informative
+metric InfoMetIC based on a state-of-the-art vision-
+language model. InfoMetIC not only points out in-
+correct descriptions, but also tells which regions are
+not mentioned. Based on these fine-grained evalu-
+ation, InfoMetIC derives a text precision score, a
+vision recall score, and an overall score. We de-
+sign both coarse- and fine-grained training tasks
+to optimize our metric. The overall score given
+by our metric achieves state-of-the-art correlation
+with human judgement on multiple benchmarks.
+We further build a token-level caption evaluation
+benchmark CapTokenEval to prove the effective-
+ness of our fine-grained evaluation.
+Limitations
+This work focuses on informative image captioning
+evaluation, including an overall score, vision recall,
+text precision and token-level scores. The effective-
+ness of our metric is validated on standard image
+captioning benchmarks. InfoMetIC in this work
+may not perform well in other captioning tasks
+due to domain gap, but we contend that our general
+framework can be adapted to other domains such as
+text-aware image captioning. For example, for text-
+aware image captioning which focuses more on
+scene texts in images, we could further encode text
+regions besides the existing object regions for bet-
+ter comparison with captions. In the future, we will
+comprehensively explore how to adapt our metric
+to other captioning tasks, such as text-aware image
+captioning and video captioning.
+Acknowledgements
+This work was partially supported by the
+National Key R&D Program of China
+(No.2020AAA0108600) and the National
+Natural Science Foundation of China (No.
+62072462).
+References31793180
+A Context Overuse Issue
+CLIP (Radford et al., 2021) is trained to well align
+global image representations and sentence repre-
+sentation. Thus it applies a triangle masking dur-
+ing text encoding and treats the representation of
+the last text token [e] as the sentence representa-
+tion. Due to the training objective and text masking
+mechanism, the text context information is accumu-
+lated with the sequence order, which is unfavorable
+for text-part fine-grained evaluation. As shown in
+Figure 4, the third ‘a’ is a meaningless indefinite
+article but gets a higher relevance score than the
+correct noun ‘man’.
+B Salience of Visual Information
+Our vision recall score is calculated by compar-
+ing the text-conditioned vision features (the CLIP’s
+global vision feature) rather than the sum or aver-
+age of all regions features. CLIP is trained with
+massive image-caption pairs and achieves promis-
+ing performance on multiple Vision-Language
+tasks. Thus it’s convincing that the global vision
+feature produced by CLIP could well represent the
+salient information in an image. As illustrated in
+Figure 5, both ‘cloud’ and ‘grass’ are objects in
+the image, but InfoMetIC gives the second caption
+higher vision recall score because ‘grass’ is more
+salient than ‘clouds’ in the image.
+C Cluster Number Setting Details
+Similar image regions can cause confusion dur-
+ing fine-grained evaluation. In this work, redun-
+dant regions are removed by K-means clustering
+algorithm. Concretely, with 100 bounding boxes
+given by the object detection model, we perform
+K-means to generate Nclusters. For each cluster,
+the region with highest confidence score given by
+the object detection model is maintained. The eval-
+uation performance of InfoMetIC with different N
+settings is shown in Table 6. With the cluster num-
+ber ranging from 10 to 50, the overall evaluation
+performance of InfoMetIC shows minor difference
+on these benchmarks. Taking into account both
+performance and complexity, we finally set Nas
+20.
+D Baseline Details
+To verify the effectiveness of InfoMetIC, besides
+state-of-the-art caption metrics, we set extra three
+baselines CLIP-S, InfoCLIP and InfoCLIP.
+As shown in Figure 6(a), CLIP-S (Hessel et al.,
+2021) directly uses the global representations given
+by CLIP(Radford et al., 2021) to calculate a co-
+sine similarity as the overall score. CLIP-S
+follows the same calculation manner but uses a
+CLIP fine-tuned on MSCOCO and Flickr30k as the
+backbone. Previous metrics can’t do fine-grained
+caption evaluation. Therefore, we set a fine-grained
+evaluation baseline InfoCLIP, as shown in Figure
+6(b). InfoCLIP performs fine-grained scoring as
+InfoMetIC without Intra&Inter Modality Fusion
+and parameters in Fine-grained Scoring, e.g. W
+andWin Eq (1). InfoCLIP means using a
+fine-tuned CLIP as the backbone.
+E CapTokenEval Annotation Details
+To quantify caption evaluation performance at to-
+ken level, we collect a fine-grained caption evalua-
+tion benchmark called CapTokenEval. The details
+of our annotation are introduced in following sub-
+sections.
+E.1 Data Preparation
+We prepare image-caption pairs for annotation
+based on the publicly released dataset THumB 1.03181
+(Kasai et al., 2022). THumB 1.0 collects 500 im-
+ages from MSCOCO (Lin et al., 2014) and pairs
+each image with 4 captions generated by state-of-
+the-art image captioning models, including UP-
+Down (Anderson et al., 2018), Unified-VLP (Zhou
+et al., 2020), VinVL-base and VinVL-large (Zhang
+et al., 2021). There are a precision score, a re-
+call score and a total score for each image-caption
+pair. To ensure that textual token-level evaluation
+in our benchmark is hard enough, we select image-
+caption pairs whose precision score is not perfect
+(<5.0). We finally collect 700 image-captions pairs
+from ThumB 1.0. As the data used in our annota-
+tion all come from publicly released datasets, there
+are no ethic issues.
+For each image, we extract 100 bounding boxes
+with pre-trained object detection model Bottom-
+Up (Anderson et al., 2018). To filter similar im-
+age regions, we apply K-means clustering on these
+bounding boxes. We generate 20 clusters for each
+image and choose a bounding box with highest con-
+fidence score of object classification from each clus-
+ter. Thus, for each image-caption pair, we provide
+20 image regions to annotators, who will choose
+which regions are mentioned by the caption. For
+the text part, we tokenize the caption with Spacy.E.2 Annotation Platform
+We build a platform to support the fine-grained
+annotation. Figure 7 presents the annotation inter-
+face on our platform, which consists of three major
+parts. The middle part contains an image-caption
+pair to be annotated. The left part is the textual
+token-level annotation area, which lists all tokens
+in the caption. The right part is the visual token-
+level annotation area, which places 20 images with
+bounding boxes indicating different image regions.
+E.3 Annotation Instruction
+Given an image-caption pair, we ask annotators to
+identify which tokens in the caption are incorrect
+and which regions are mentioned by the caption.
+Besides, we require that if the caption mentions
+an object without descriptions about details, the
+image regions of detailed components shouldn’t
+be classified as ‘Mentioned’. For example, for the
+caption ‘a group of people riding on the back of
+an elephant’, the image region of the elephant nose
+shouldn’t be judged as ‘Mentioned’.
+We invite 20 college students as annotators.
+They all have sufficient English proficiency to un-
+derstand image captions in English. We provide
+a document to inform annotators the goal of our
+annotation and detailed instructions about the us-
+age of the annotation platform. Each annotator is
+assigned 35 image-caption pairs for annotation.31823183ACL 2023 Responsible NLP Checklist
+A For every submission:
+/squareA1. Did you describe the limitations of your work?
+Left blank.
+/squareA2. Did you discuss any potential risks of your work?
+Left blank.
+/squareA3. Do the abstract and introduction summarize the paper’s main claims?
+Left blank.
+/squareA4. Have you used AI writing assistants when working on this paper?
+Left blank.
+B/squareDid you use or create scientiﬁc artifacts?
+Left blank.
+/squareB1. Did you cite the creators of artifacts you used?
+Left blank.
+/squareB2. Did you discuss the license or terms for use and / or distribution of any artifacts?
+Left blank.
+/squareB3. Did you discuss if your use of existing artifact(s) was consistent with their intended use, provided
+that it was speciﬁed? For the artifacts you create, do you specify intended use and whether that is
+compatible with the original access conditions (in particular, derivatives of data accessed for research
+purposes should not be used outside of research contexts)?
+Left blank.
+/squareB4. Did you discuss the steps taken to check whether the data that was collected / used contains any
+information that names or uniquely identiﬁes individual people or offensive content, and the steps
+taken to protect / anonymize it?
+Left blank.
+/squareB5. Did you provide documentation of the artifacts, e.g., coverage of domains, languages, and
+linguistic phenomena, demographic groups represented, etc.?
+Left blank.
+/squareB6. Did you report relevant statistics like the number of examples, details of train / test / dev splits,
+etc. for the data that you used / created? Even for commonly-used benchmark datasets, include the
+number of examples in train / validation / test splits, as these provide necessary context for a reader
+to understand experimental results. For example, small differences in accuracy on large test sets may
+be signiﬁcant, while on small test sets they may not be.
+Left blank.
+C/squareDid you run computational experiments?
+Left blank.
+/squareC1. Did you report the number of parameters in the models used, the total computational budget
+(e.g., GPU hours), and computing infrastructure used?
+Left blank.3184/squareC2. Did you discuss the experimental setup, including hyperparameter search and best-found
+hyperparameter values?
+Left blank.
+/squareC3. Did you report descriptive statistics about your results (e.g., error bars around results, summary
+statistics from sets of experiments), and is it transparent whether you are reporting the max, mean,
+etc. or just a single run?
+Left blank.
+/squareC4. If you used existing packages (e.g., for preprocessing, for normalization, or for evaluation), did
+you report the implementation, model, and parameter settings used (e.g., NLTK, Spacy, ROUGE,
+etc.)?
+Left blank.
+D/squareDid you use human annotators (e.g., crowdworkers) or research with human participants?
+Left blank.
+/squareD1. Did you report the full text of instructions given to participants, including e.g., screenshots,
+disclaimers of any risks to participants or annotators, etc.?
+Left blank.
+/squareD2. Did you report information about how you recruited (e.g., crowdsourcing platform, students)
+and paid participants, and discuss if such payment is adequate given the participants’ demographic
+(e.g., country of residence)?
+Left blank.
+/squareD3. Did you discuss whether and how consent was obtained from people whose data you’re
+using/curating? For example, if you collected data via crowdsourcing, did your instructions to
+crowdworkers explain how the data would be used?
+Left blank.
+/squareD4. Was the data collection protocol approved (or determined exempt) by an ethics review board?
+Left blank.
+/squareD5. Did you report the basic demographic and geographic characteristics of the annotator population
+that is the source of the data?
+Left blank.3185

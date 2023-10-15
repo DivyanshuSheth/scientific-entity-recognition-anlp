@@ -1,1 +1,671 @@
-9781 Proceedings of the 2022 Conference on Empirical Methods in Natural Language Processing , pages 9781 9792 December 7 - 11 , 2022 © 2022 Association for Computational Linguistics 9782 9783 9784 9785 9786 9787 9788 9789 9790 9791 9792 
+
+Dongkyu LeeKa Chun CheungNevin L. ZhangDepartment of Computer Science and Engineering, HKUSTNVIDIA AI Technology Center, NVIDIA
+dleear@cse.ust.hk chcheung@nvidia.com lzhang@cse.ust.hk
+Abstract
+Overconfidence has been shown to impair gen-
+eralization and calibration of a neural network.
+Previous studies remedy this issue by adding
+a regularization term to a loss function, pre-
+venting a model from making a peaked dis-
+tribution. Label smoothing smoothes target
+labels with a pre-defined prior label distribu-
+tion; as a result, a model is learned to maxi-
+mize the likelihood of predicting the soft la-
+bel. Nonetheless, the amount of smoothing
+is the same in all samples and remains fixed
+in training. In other words, label smoothing
+does not reflect the change in probability dis-
+tribution mapped by a model over the course
+of training. To address this issue, we propose
+a regularization scheme that brings dynamic
+nature into the smoothing parameter by tak-
+ing model probability distribution into account,
+thereby varying the parameter per instance. A
+model in training self-regulates the extent of
+smoothing on the fly during forward propaga-
+tion. Furthermore, inspired by recent work in
+bridging label smoothing and knowledge dis-
+tillation, our work utilizes self-knowledge as
+a prior label distribution in softening target la-
+bels, and presents theoretical support for the
+regularization effect by knowledge distillation
+and the dynamic smoothing parameter. Our
+regularizer is validated comprehensively, and
+the result illustrates marked improvements in
+model generalization and calibration, enhanc-
+ing robustness and trustworthiness of a model.
+1 Introduction
+In common practice, a neural network is trained to
+maximize the expected likelihood of observed tar-
+gets, and the gradient with respect to the objective
+updates the learnable model parameters. With hard
+targets (one-hot encoded), the maximum objective
+can be approached when a model assigns a high
+probability mass to the corresponding target labelover the output space. That is, due to the normaliz-
+ing activation functions (i.e. softmax ), a model is
+trained in order for logits to have a marked differ-
+ence between the target logit and the other classes
+logits (Müller et al., 2019).
+Despite its wide application and use, the max-
+imum likelihood estimation with hard targets has
+been found to incur an overconfident problem; the
+predictive score of a model does not reflect the ac-
+tual accuracy of the prediction. Consequently, this
+leads to degradation in model calibration (Pereyra
+et al., 2017), as well as in model performance
+(Müller et al., 2019). Additionally, this problem
+stands out more clearly with a limited number of
+samples, as a model is more prone to overfitting. To
+remedy such phenomenon, Szegedy et al. (2016)
+proposed label smoothing, in which one-hot en-
+coded targets are replaced with smoothed targets.
+Label smoothing has boosted performance in com-
+puter vision (Szegedy et al., 2016), and has been
+highly preferred in other domains, such as Natural
+Language Processing (Vaswani et al., 2017; Lewis
+et al., 2020).
+However, there are several aspects to be dis-
+cussed in label smoothing. First, it comes with
+certain downsides, namely the static smoothing
+parameter. The smoothing regularizer fails to ac-
+count for the change in probability mass over the
+course of training. Despite the fact that a model
+can benefit from adaptive control of the smoothing
+extent depending on the signs of overfitting and
+overconfidence, the smoothing parameter remains
+fixed throughout training in all instances.
+Another aspect of label smoothing to be con-
+sidered is its connection to knowledge distillation
+(Hinton et al., 2015). There have been attempts to
+bridge label smoothing and knowledge distillation,
+and the findings suggest that the latter is an adap-
+tive form of the former (Tang et al., 2021; Yuan
+et al., 2020). However, the regularization effect
+on overconfidence by self-knowledge distillation is9781still poorly understood and explored.
+To tackle the issues mentioned above, this
+work presents adaptive label smoothing with self-
+knowledge as a prior label distribution. Our reg-
+ularizer allows a model to self-regulate the extent
+of smoothing based on the entropic level of model
+probability distribution, varying the amount per
+sample and per time step. Furthermore, our theo-
+retical analysis suggests that self-knowledge distil-
+lation and the adaptive smoothing parameter have
+a strong regularization effect by rescaling gradients
+on logit space. To the best of our knowledge, our
+work is the first attempt in making both smooth-
+ing extent and prior label distribution adaptive .
+Our work validates the efficacy of the proposed
+regularization method on machine translation tasks,
+achieving superior results in model performance
+and model calibration compared to other baselines.
+2 Preliminaries & Related Work
+2.1 Label Smoothing
+Label smoothing (Szegedy et al., 2016) was first in-
+troduced to prevent a model from making a peaked
+probability distribution. Since its introduction, it
+has been in wide application as a means of regular-
+ization (Vaswani et al., 2017; Lewis et al., 2020). In
+label smoothing, one-hot encoded ground-truth la-
+bel (y) and a pre-defined prior label distribution ( q)
+are mixed with the weight, the smoothing param-
+eter ( α), forming a smoothed ground-truth label.
+A model with label smoothing is learned to max-
+imize the likelihood of predicting the smoothed
+label distribution. Specifically,
+L=−/summationdisplay(1−α)ylogP(y|x)
++αqlogP(y|x)(1)
+|C|denotes the number of classes, (n)the index of
+a sample in a batch, and Pthe probability distribu-
+tion mapped by a model. αis commonly set to 0.1,
+and remains fixed throughout training (Vaswani
+et al., 2017; Lewis et al., 2020). A popular choice
+ofqis an uniform distribution ( q∼U(|C|)), while
+unigram distribution is another option for dealing
+with an imbalanced label distribution (Vaswani
+et al., 2017; Szegedy et al., 2016; Müller et al.,
+2019; Pereyra et al., 2017). The pre-defined prior
+label distribution remains unchanged, hence the
+latter cross-entropy term in Equation 1 is equiva-
+lent to minimizing the KL divergence between themodel prediction and the pre-defined label distri-
+bution. In line with the idea, Pereyra et al. (2017)
+proposed confidence penalty (ConfPenalty) that
+adds negative entropy term to the loss function,
+thereby minimizing the KL divergence between the
+uniform distribution and model probability distribu-
+tion. Ghoshal et al. (2021) proposed low-rank adap-
+tive label smoothing (LORAS) that jointly learns a
+noise distribution for softening targets and model
+parameters. Li et al. (2020); Krothapalli and Ab-
+bott (2020) introduced smoothing schemes that are
+data-dependent.
+2.2 Knowledge Distillation
+Knowledge distillation (Hinton et al., 2015) aims to
+transfer the dark knowledge of (commonly) a larger
+and better performing teacher model to a student
+model (Buciluundefined et al., 2006). The idea is
+to mix the ground-truth label with the model prob-
+ability distribution of a teacher model, resulting in
+an adaptive version of label smoothing (Tang et al.,
+2021).
+L=−/summationdisplay(1−α)ylogP(y|x)
++α¯P(y|x) log ¯P(y|x)(2)
+ϕandθdenote the parameters of a teacher model
+and a student model respectively. ¯Pindicates a
+probability distribution smoothed with a temper-
+ature. Similar to label smoothing, ϕremains un-
+changed in training; thus a student model is learned
+to minimize the KL divergence between its prob-
+ability distribution and that of the teacher model.
+When ¯Pfollows a uniform distribution with the
+temperature set to 1, the loss function of knowl-
+edge distillation is identical to that of uniform label
+smoothing.
+Training a large teacher model can be computa-
+tionally expensive; for this reason, there have been
+attempts to replace the teacher model with the stu-
+dent model itself, called self-knowledge distillation
+(Zhang et al., 2019; Yuan et al., 2020; Kim et al.,
+2021; Zhang and Sabuncu, 2020). TF-KD (Yuan
+et al., 2020) trains a student with a pre-trained
+teacher that is identical to the student in terms of
+structure. SKD-PRT (Kim et al., 2021) utilizes
+the previous epoch checkpoint as a teacher with
+linear increase in α. (Zhang and Sabuncu, 2020)
+incorporates beta distribution sampling (BETA)
+and self-knowledge distillation (SD), and intro-
+duce instance-specific prior label distribution. (Yun9782et al., 2020) utilizes self-knowledge distillation to
+minimize the predictive distribution of samples
+with the same class, encouraging consistent proba-
+bility distribution within the same class.
+3 Approach
+The core components of label smoothing are two-
+fold: smoothing parameter ( α) and prior label dis-
+tribution. The components determine how much
+to smooth the target label using which distribu-
+tion, a process that requires careful choice of se-
+lection. In this section, we illustrate how to make
+the smoothing parameter adaptive. We also demon-
+strate how our adaptive smoothing parameter and
+self-knowledge distillation as a prior distribution
+act as a form of regularization with theoretical anal-
+ysis on the gradients.
+3.1 Adaptive α
+An intuitive and ideal way of softening the hard
+target is to bring dynamic nature into choosing α;
+a sample with low entropic level in model predic-
+tion, an indication of peaked probability distribu-
+tion, receives a high smoothing parameter to fur-
+ther smooth the target label. In another scenario, in
+which high entropy of model prediction (flat distri-
+bution) is seen, the smoothing factor is decreased.
+With the intuition, our method computes the
+smoothing parameter on the fly during the forward
+propagation in training, relying on the entropic
+level of model probability distribution per sample,
+and per time step in case of sequential classifica-
+tion.
+H(P(y|x)) =−/summationdisplayP(y|x)
+logP(y|x)(3)
+The entropy quantifies the level of probability mass
+distributed across the label space; therefore, low
+entropy is an indication of overfitting and overcon-
+fidence (Pereyra et al., 2017; Meister et al., 2020).
+Since entropy does not have a fixed range be-
+tween 0 and 1, one simple scheme is to normal-
+ize the entropy with maximum entropy ( log|C|).
+Hence, the normalization is capable of handling
+variable size of class set among different datasets.
+α= 1−H(P(y|x))
+log|C|(4)With this mechanism, a sample with high entropy is
+trained with low α, and a sample with low entropy
+receives high α. The computation for αis excluded
+from the computation graph for the gradient calcu-
+lation, hence, the gradient does not flow through
+adaptive α.
+There are two essential benefits of adopting the
+adaptive smoothing parameter. As the smooth-
+ing extent is determined by its own probability
+mass over the output space, the hyperparameter
+search for αis removed. Furthermore, it is strongly
+connected to the gradient rescaling effect on self-
+knowledge distillation, which will be dealt in Sec-
+tion 3.3 in detail.
+3.2 Self-Knowledge As A Prior
+Similar to (Kim et al., 2021; Liu et al., 2021), our
+regularizer loads a past student model checkpoint
+as teacher network parameters in the course of
+training, though with a core difference in the se-
+lection process. The intuition is to utilize past self-
+knowledge which generalizes well, thereby hinder-
+ing the model from overfitting to observations in
+the training set.
+ϕ= argmaxg(f(X;θ), Y) (5)
+Θis a set of past model checkpoints up to the
+current epoch tin training, and function fis a spe-
+cific task, which in our work is machine translation.
+XandYare sets of input and ground-truth sam-
+ples from a validation dataset, and the function g
+could be any proper evaluation metric for model
+generalization (i.e. accuracy).Our work utilizes
+then-gram matching score, BLEU (Papineni et al.,
+2002) being the function gfor finding the suitable
+prior label distribution.
+Equation 5 depicts how the selection process
+of a self-teacher depends on the generalization of
+each past epoch checkpoint. In other words, a past
+checkpoint with the least generalization error is uti-
+lized as the self-teacher, a source of self-knowledge,
+to send generalized supervision. Furthermore, at
+every epoch, with Equation 5, the proposed ap-
+proach replaces the self-teacher with the one with
+the best generalization.
+Combining the adaptive smoothing parameter
+and self-knowledge as a prior distribution, our loss9783
+function is as follows:
+L=−/summationdisplay(1−α)ylogP(y|x)
++αP(y|x) logP(y|x)(6)
+The core differences to the previous approaches are
+the introduction of 1) instance-specific αand 2)
+self-teacher with the least generalization error in
+training.
+3.3 Gradient Analysis
+Tang et al. (2021); Kim et al. (2021) theoretically
+find that the success of knowledge distillation is
+related to the gradient rescaling in the logit space;
+the difficulty of a sample determines the rescaling
+factor, and difficult-to-learn samples receive higher
+rescaling factors than those of the easy-to-learn
+samples.We further extend the gradient analysis
+in the perspective of regularization effect and the
+direction of the gradient , and discuss the impor-
+tance of the adaptive smoothing parameter.
+Before dissecting the gradients, we first set a
+hypothesis: teacher network makes a less confi-
+dent prediction than that of the student. In self-
+knowledge distillation with a past checkpoint as the
+teacher, the assumption is valid. The expected pre-
+dictive score on target label by the teacher model islower than that of the current checkpoint in train-
+ing(Kim et al., 2021).
+The gradient with respect to the logit ( z) by the
+cross entropy loss ( L) is as follows:
+∂L
+∂z=P(y)−y (7)
+With knowledge distillation ( L), the gradient on
+the logit is
+∂L
+∂z= (1−α)(P(y)−y)+α(P(y)−P(y))
+(8)
+The following compares the ratio of the gradient
+from knowledge distillation and with that of the
+cross entropy.
+∂L/∂z
+∂L/∂z= (1−α) +αP(y)−P(y)
+P(y)−y(9)
+When i=j, with jbeing the index of the ground
+truth, it is worth noting that the denominator of the
+second term in Equation 9 has range P(y)−1∈
+[−1,0], and the range of the numerator is confined
+toP(y)−P(y)∈[0,1]. Therefore, the equation
+can be written as
+∂L/∂z
+∂L/∂z= (1−α)−α|P(y)−P(y)
+P(y)−1|(10)9784The norm of the gradient drastically diminishes
+when there is a large difference between the pre-
+dictions by the models, and when the predictive
+score of a student model is high, which is a sign
+of overconfidence. In terms of the direction of the
+gradient, when the following is seen,
+(1−α)< α|P(y)−P(y)
+P(y)−1| (11)
+the direction of the gradients with respect to knowl-
+edge distillation becomes the opposite to that of
+the cross entropy, pushing parameters to lower the
+likelihood of the target index.
+The same applies when iis the index of an incor-
+rect class ( i̸=j). From Equation 9, the following
+can be derived.
+∂L/∂z
+∂L/∂z= 1−αP(y)
+P(y)(12)
+With the generalized teacher, the expected predic-
+tive score on the incorrect labels by the teacher
+model is higher than that of the student model.
+Therefore, in addition to the shrinking norm ef-
+fect, the direction of the gradient can be reversed
+when 1< α, similar to Equation 11; as a
+result, it leads to updating model parameters to in-
+crease the likelihood on the incorrect classes , an
+opposite behavior to that of the cross entropy with
+hard targets. Overall, in either case, the theoretical
+support depicts strong regularization effects with
+the generalized supervision by the teacher.
+Connection to Label Smoothing As label
+smoothing is also closely linked to knowledge dis-
+tillation, the theoretical support can be easily ex-
+tended to label smoothing if P(y)is replaced
+within case of uniform label smoothing, and
+P(c)in unigram label smoothing.
+Importance of Adaptive αThe adaptive αis an-
+other factor to be discussed regarding the gradient
+analysis. As clearly demonstrated in Equation 11
+and 12, a high α, an indication of peak probabil-
+ity distribution, not only leads to drastic decrease
+in the gradient norm, but it is likely to make the
+gradient go the opposite direction to that of the
+cross entropy. It enforces a student to distribute the
+probability mass more evenly on output space, as
+opposed to the effect of the cross entropy with hard
+targets. Furthermore, as the parameters updates are
+performed by aggregating the losses of samples,
+adaptive smoothing acts as a gradient rescalingmechanism. Hence, the following proposition can
+be made.
+Proposition 1. Given any two samples (x,y),
+(x,y)∈ X × Y andP(y|x) =
+P(y|x), the average gradient rescaling fac-
+torwfor all classes is greater on sample with high
+probability entropy than that of the one with low
+probability entropy.
+For details, please refer to Appendix A. The gra-
+dient rescaling by adaptive αreweights the gradi-
+ents in aggregating the losses, hence, the proposed
+method prioritizes on learning samples with high
+entropy, less confident instances. The use of adap-
+tiveαis not only intuitive in terms of tackling
+overconfidence, but it also serves as an important
+aspect in the theoretical support.
+4 Experiment
+4.1 Dataset & Experiment Setup
+We validate the proposed regularizer on three
+popular translation corpora: IWSLT14 German-
+English ( DE-EN ) (Cettolo et al., 2014), IWSLT15
+English-Vietnamese ( EN-VI ) (Cettolo et al., 2015),
+and Multi30K German-English pair (Elliott et al.,
+2016). The details can be found in Appendix C.
+The core reason for conducting experiments on
+translation comes from one aspect of natural lan-
+guage: the presence of intrinsic uncertainty (Ott
+et al., 2018). In a natural language, synonyms can
+be used interchangeably in a sentence as they de-
+note the same meaning. Such uncertainty is not
+reflected in one-hot encoded form. Hence, a model
+in a natural language generation task can benefit
+from inter-class relations held within a knowledge
+(Hinton et al., 2015).
+All of the experiments are conducted with trans-
+former architecture (Vaswani et al., 2017) on a
+Telsa V100. For generation, beam size is set to 4 in
+the inference stage. The training configuration fol-
+lows the instruction of fairseq (Ott et al., 2019)..
+For the quality of the generated outputs, we report
+the popular metrics for machine translation: BLEU
+(Papineni et al., 2002), METEOR (Banerjee and
+Lavie, 2005), Word Error Rate (WER), ROUGE-L
+(Lin, 2004), and NIST (Doddington, 2002).9785
+4.2 Experimental Result & Analysis
+Automatic evaluation results on the three test
+datasets are shown in Table 1. Though most of
+the methods achieve meaningful gains, the most
+noticeable difference is seen with our method. Our
+regularization scheme shows solid improvements
+on all of the metrics on the datasets without any ad-
+ditional learnable parameter. For example, the ab-
+solute gain in BLEU compared to the base method
+in Multi30K dataset is around 3.75, which is 9.2%
+relative improvement. Not only does our method
+excel in n-gram matching score, but it shows su-
+perior performance in having the longest common
+subsequence with the reference text, as well as in
+the informativeness of the n-grams. The empirical
+result demonstrates that our regularizer improves
+the base method across all the metrics by a large
+margin.In Figure 2, the changes in αduring training are
+visualized. As expected, the smoothing parame-
+ters start with a very small number, as the entropic
+level must be high due to the under-fitted models.
+As training continues, the predictive scores of the
+models increase, and accordingly, adaptive αin-
+creases to prevent overconfidence. One notable
+aspect is the convergence at a certain level. Each
+training of the corpora ends up with a different α,
+and the model in training self-regulates the amount
+of smoothing and the value converges.
+Furthermore, our adaptive αaffects the norm of
+the gradients as depicted in Figure 3. The gradient
+norm of our regularizer is considerably smaller
+than that of the other methods. This empirical
+finding mainly conforms with the gradient analysis
+in Section 3.3, where the importance of adaptive α
+and generalized teacher model are discussed.9786
+4.2.1 Model Calibration
+In addition to the automatic evaluation, in which
+the improved generalization is seen through the per-
+formance gains, we look into the calibrations of the
+models trained with the methods. Figure 4(a) de-
+picts how the cross entropy with hard targets tends
+to make a model overconfident in prediction. In the
+reliability diagram, the confidence score in each
+bin is larger than the corresponding accuracy, the
+gap of which is fairly noticeable. Label smooth-
+ing mitigates the problem to some extent, yet the
+gap between the accuracy and the confidence score
+still remains clear. We empirically find that models
+trained with the baseline methods suffer from either
+overconfidence or underconfidence. On the other
+hand, the proposed regularizer significantly reduces
+the gap, showing the enhanced model calibration.
+As clearly depicted in Figure 4(c), the confidence
+level of each bin mainly conforms with the accu-
+racy, demonstrating reliable predictions made by
+the model trained with the proposed approach.
+The improvement in calibration is more clear
+with expected calibration error (ECE) and maxi-
+mum calibration error (MCE) reported in Table
+2. For instance, on the IWSLT14 dataset, the er-
+rors with label smoothing drop significantly in both
+metrics, which is around 6% absolute decrease in
+ECE and 10% in MCE. Nonetheless, ECE of the
+proposed method results in 1.76% which is around
+11% absolute decrease and 86% relative improve-
+ment. In addition, our method achieves 3.64% in
+MCE, which is 81% relative improvement over the
+base method. The improved calibration with our
+method is seen across the datasets, confirming the
+effectiveness of our system in enhancing model
+calibration.
+One important finding is the gap between the
+performance in model generalization and the cal-9787
+ibration error. Confidence penalty (Pereyra et al.,
+2017) is highly competitive in n-gram matching
+scores (BLEU) on all of the dataset tested. Never-
+theless, the calibration error is the highest among
+the methods due to underconfidence . Similar to
+the finding in (Guo et al., 2017), the discrepancy
+between the performance and model calibration
+exists, and it calls for caution in training a neural
+network when considering model calibration.
+4.3 Ablation Study
+Table 3 shows the change in performance when
+adding our core components to the base method
+on the IWSLT14 dataset. When using the fixed
+smoothing parameter with self-knowledge as a
+prior, the BLEU score increases by a small margin,
+and the ECE does not drop significantly. In another
+case where the smoothing parameter is adaptive,
+and the prior label distribution is set to uniform dis-
+tribution, there is a meaningful increase in BLEU
+score. However, it impairs the ECE score notice-ably. We empirically find that the result mainly
+comes from underconfidence of a model. The con-
+fidence score is largely lower than that of the ac-
+curacy. In an experiment with linearly increasing
+smoothing parameter αwith self-knowledge prior,
+the BLEU score improves by around 1.6 score, yet
+the ECE score still shows room for improvement.
+Since αvalue is shared among samples in the ex-
+periment, there is no gradient rescaling by adaptive
+αwhich may explain ECE score being high com-
+pared to that of our adaptive α. We also look into a
+case with a different gfunction: BLEU and Nega-
+tive Log Likelihood (NLL). We observe that both
+g andggreatly enhance the scores. As g
+has the purpose of selecting a self-teacher with the
+least generalization error from the set of past check-
+points, a proper metric would serve the purpose. In
+conclusion, while the adaptive αplays an impor-
+tant role in regularizing a model, both the adaptive
+αand the choice of prior label distribution greatly
+affect model calibration.
+5 Conclusion & Future Work
+In this work, we propose a regularization scheme
+that dynamically smooths the target label with
+self-knowledge. Our regularizer self-regulates the
+amount of smoothing with respect to the entropic
+level of the model probability distribution, making
+the smoothing parameter dynamic per sample, and
+per time step. The given idea is theoretically sup-
+ported by gradient rescaling and direction, and the
+finding is backed up by the empirical results, both
+in model performance and calibration.9788Limitation
+The proposed regularization method is model
+driven, and hence it adds additional computation
+cost when self-knowledge is computed. This limi-
+tation, however, does not pertain to our work but is
+shared in KD training. This issue can be mitigated
+to some extent when self-knowledge is obtained
+and saved before training a model. In addition, the
+smoothing technique requires additional computa-
+tion for computing the instance-specific smoothing
+term (normalized entropy).
+Acknowledgement
+Research on this paper was supported by Hong
+Kong Research Grants Council (Grant No.
+16204920).
+References9789
+A Gradient Rescaling by α
+Proposition 1. Given any two samples (x,y),
+(x,y)∈ X × Y andP(y|x) =
+P(y|x), the average gradient rescaling fac-
+torwfor all classes is greater on sample with high
+probability entropy than that of the one with low
+probability entropy.
+This proposition is built on the basis of Propo-
+sition 2 in (Tang et al., 2021), where the work dis-
+cusses the gradient rescaling effect on logit space
+by KD. However, there are a few differences, of
+which the first is the assumption made. In (Tang
+et al., 2021), the paper assumes that a teacher
+makes more confident prediction than a student.
+This is in opposition to our setting, where a teacher
+makes less confident prediction than a student; this
+assumption is valid as a teacher is set to be the
+previous checkpoint of a student. In addition, our
+work further extends the proposition in terms of α.
+The proposition only holds as the proposed work
+employs instance-specific α.
+Proof. We rewrite the Equation 9 for readers’ bet-
+ter understanding/comprehension.
+w=∂L/∂z
+∂L/∂z= (1−α) +αP(y)−P(y)
+P(y)−y
+The gradient rescaling factor on target index is as
+follows:
+w= (1−α) +αP(y)−P(y)
+P(y)−1
+Now, the gradient rescaling factor on the remaining9790classes is computed as the following.
+/summationdisplay∂L/∂z=/summationdisplay[(1−α)P(y)
++αP(y)−P(y)]
+= (1−α)(1−P(y))
++α(P(y)−P(y))
+/summationdisplay∂L/∂z=/summationdisplayP(y)
+= (1−P(y))
+/summationtext∂L/∂z/summationtext∂L/∂z= (1−α) +αP(y)−P(y)
+P(y)−1
+w=∂L/∂z
+∂L/∂z=/summationtext∂L/∂z/summationtext∂L/∂z(13)
+Assuming we are given two samples (x,y),
+(x,y)andP(y|x) = P(y|x),
+when the conditional entropy of the probability
+distributions differ such that H(P(Y|x))>
+H(P(Y|x)), the average gradient rescaling fac-
+tor over all classes is smaller on a sample with low
+entropy than that with a high entropy.
+Ew>Ew(14)
+(1−α) +αP(y)−P(y)
+P(y)−1>
+(1−α) +αP(y)−P(y)
+P(y)−1(15)
+asis a negative value and α< α;
+hence the proof.
+B Baselines
+B.1 Confidence Penalty
+Confidence penalty (Pereyra et al., 2017) adds a
+negative entropy term to the loss function, hence
+the model is encouraged to maintain entropy at
+certain level.
+L=−/summationdisplayylogP(y|x)
+−βH(P(y|x))(16)
+For the regularization-specific hyperparameter, fol-
+lowing (Meister et al., 2020), βwas set to 0.78.B.2 TF-KD
+TF-KD (Yuan et al., 2020), similar to conventional
+knowledge distillation, trains a teacher model prior
+to training a student; but it is different in that the
+model architecture is same with that of the student.
+For the hyperparameters used in this paper, we em-
+pirically find that high smoothing parameter leads
+to better performance. Thus, we set the smoothing
+parameter to 0.9 and temperature scaling to 20 as
+reported in the original paper.
+B.3 SKD-PRT
+SKD-PRT (Kim et al., 2021) is a self-knowledge
+distillation method, where a student model (epoch
+t) is trained with its own last epoch checkpoint
+(epoch t−1) in the course of training. Though the
+idea is similar to ours, yet there are two core differ-
+ences. The first is that we find the teacher model
+that generalizes well with a function g. Another
+difference is that SKD-PRT linearly increases α
+throughout the training, and this practice inevitably
+adds two hyperparameters ( maxαandmaxepoch).
+Following the original work (Kim et al., 2021), we
+set that maximum αto 0.7 and maximum epoch to
+150 in our experiments.
+B.4 LORAS
+LORAS (Ghoshal et al., 2021) jointly learns a soft
+target and model parameters in training in the aim
+of increasing model performance and model cali-
+bration, with low rank assumption. For hyperpa-
+rameters, η,α, rank and dropout probability are set
+to 0.1, 0.2, 25 and 0.5 respectively.
+B.5 BETA & SD
+Zhang and Sabuncu (2020) propose amortized
+MAP interpretation of teacher-student training, and
+introduce Beta smoothing which is an instance-
+specific smoothing technique that is based on the
+prediction by a teacher network. For SD-specific
+hyperparameters, this work sets αto 0.3 and tem-
+perature to 4.0. For BETA-specific hyperparame-
+ters,αandaare set to 0.4, 4.0 respectively.
+C Dataset Details
+IWSLT14 DE-EN contains 160K sentence pairs
+in training, 7K in validation, and 7K in testing.
+IWSLT15 EN-VI has 133K, 1.5K and 1.3K in train-
+ing, validation, and testing dataset respectively.
+Lastly, 28K training, 1K validation, and 1K testing
+sentences are used in Multi30K dataset. Byte pair9791encoding (Sennrich et al., 2016) is used to process
+words into sub-word units.
+D Reproducibility Statement
+For reproducibility, we report the three random
+seeds tested: { 0000, 3333, 5555 }. For all of the
+experiments, this work utilizes the transformer ar-
+chitecture (Vaswani et al., 2017). Both the encoder
+and the decoder are composed of 6 transformer
+layers with 4 attention heads. The hidden dimen-
+sion size of the both is 512. For training config-
+uration, the maximum tokens in a batch is set to
+4,096. For optimization, Adam (Kingma and Ba,
+2015) is used with beta 1 and beta 2 set to 0.9 and
+0.98 respectively. We slowly increase the learning
+rate up to 0.005 throughout the first 4,000 steps,
+and the learning rate decreases from then on. The
+source code and training script are included in the
+supplementary materials.9792

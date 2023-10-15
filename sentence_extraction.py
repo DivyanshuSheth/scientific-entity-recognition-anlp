@@ -9,6 +9,7 @@ from pdfminer.layout import LTTextContainer, LTChar, LTRect, LTFigure
 import pdfplumber
 import os
 import json
+import glob
 
 from tokenizer import tokenize_sentences
 
@@ -35,20 +36,16 @@ def text_extraction(element):
     # Return a tuple with the text in each line along with its format
     return (line_text, format_per_line)
 
-for pdf_path in os.listdir('PaperPDF'):
-    pdfFileObj = open(f'PaperPDF/{pdf_path}', 'rb')
-    pdfRead = PyPDF2.PdfReader(pdfFileObj)
+def parse_file(pdf_path):
+    print(pdf_path)
 
     text_per_page = {}
-    for pagenum, page in enumerate(extract_pages(f'PaperPDF/{pdf_path}')):
-
-        pageObj = pdfRead.pages[pagenum]
+    for pagenum, page in enumerate(extract_pages(f'{pdf_path}')): 
         page_text = []
         line_format = []
         page_content = []
         first_element = True
         table_extraction_flag = False
-        pdf = pdfplumber.open(f'PaperPDF/{pdf_path}')
 
         page_elements = [(element.y1, element) for element in page._objs]
         page_elements.sort(key=lambda a: a[0], reverse=True)
@@ -72,8 +69,6 @@ for pdf_path in os.listdir('PaperPDF'):
         # Add the list of list as the value of the page key
         text_per_page[dctkey] = page_content
 
-    # Closing the pdf file object
-    pdfFileObj.close()
     paper_text = ''
     for v in text_per_page.values():
         sentences = tokenize_sentences(''.join(v).replace('\n', ' ').replace('- ', ''))
@@ -81,5 +76,17 @@ for pdf_path in os.listdir('PaperPDF'):
         if 'References' in sentences:
             break
         paper_text += sentences + ' '
-    with open(f'SentenceExtraction/{pdf_path[:-4]}.txt', 'w') as f:
+    
+    with open(f'./{pdf_path[:-4]}.txt', 'w') as f:
         f.write(paper_text)
+
+#multiprocessing
+from multiprocessing import Pool
+
+if __name__ == '__main__':
+    # pool = Pool()
+    # pool.map(parse_file, glob.glob('PaperPDF/*.pdf'))  
+    paths = glob.glob('SamplePDFs/*.pdf')  
+    paths = sorted(paths)
+    sample_path = paths[0]
+    parse_file(sample_path)

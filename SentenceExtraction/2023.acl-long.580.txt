@@ -1,1 +1,824 @@
-10406 Proceedings of the 61st Annual Meeting of the Association for Computational Linguistics Volume 1 : Long Papers , pages 10406–10420 July 9 - 14 , 2023 © 2023 Association for Computational Linguistics 10407 10408 10409 10410 10411 10412 10413 10414 10415 10416 10417 10418 10419 10420 
+
+Ariel Gera, Roni Friedman, Ofir Arviv, Chulaka Gunasekara,
+Benjamin Sznajder, Noam Slonim, Eyal Shnarch
+IBM Research
+{ariel.gera1, ofir.arviv, chulaka.gunasekara}@ibm.com,
+{roni.friedman-melamed, benjams, noams, eyals}@il.ibm.com
+Abstract
+Applying language models to natural language
+processing tasks typically relies on the repre-
+sentations in the final model layer, as inter-
+mediate hidden layer representations are pre-
+sumed to be less informative. In this work,
+we argue that due to the gradual improvement
+across model layers, additional information can
+be gleaned from the contrast between higher
+and lower layers during inference. Specifically,
+in choosing between the probable next token
+predictions of a generative model, the predic-
+tions of lower layers can be used to highlight
+which candidates are best avoided. We propose
+a novel approach that utilizes the contrast be-
+tween layers to improve text generation outputs,
+and show that it mitigates degenerative behav-
+iors of the model in open-ended generation, sig-
+nificantly improving the quality of generated
+texts. Furthermore, our results indicate that
+contrasting between model layers at inference
+time can yield substantial benefits to certain
+aspects of general language model capabilities,
+more effectively extracting knowledge during
+inference from a given set of model parameters.
+1 Introduction
+For a wide range of natural language processing
+tasks, the standard practice is to rely on deep neu-
+ral networks with a transformer-based architecture
+(Vaswani et al., 2017). Such models are composed
+of multiple transformer layers, where typically the
+representations of the final layer are used for the
+downstream task. As shown in prior works, some
+of the representational knowledge required for per-
+forming downstream tasks can already be found
+within intermediate layers of the model (Geva et al.,
+2021, 2022); at the same time, relying on the rep-
+resentations of lower model layers does result in
+decreased performance, specifically for inputs that
+are more challenging (Schwartz et al., 2020; Xin
+et al., 2020; Elbayad et al., 2020; Sun et al., 2022;
+Schuster et al., 2022; Din et al., 2023).Figure 1: An example of auto-contrastive decoding
+(ACD ) with GPT2 , where the top layer ( 24) is taken
+as the expert and contrasted with layer 12, the amateur.
+As decoding is done token by token, we can only see
+the direct effect on the first token, where ACD leads to
+selecting an alternative high probability token - "In".
+Recently, Li et al. (2022) considered a scenario
+involving two language models; one is a very large
+pre-trained model, termed the expert , and the other
+is a much smaller version of the same architecture,
+termed the amateur . Importantly, whereas these
+models share some failure modes and undesirable
+behaviors, the expert model clearly outperforms
+the amateur model in language model tasks. Focus-
+ing on an open-ended auto-regressive text gener-
+ation task, they show that it is possible to exploit
+the contrast between the predictions of the expert
+and amateur to obtain an improved generated out-
+put. They term this method Contrastive Decoding .
+Specifically, they demonstrate that it is sometimes
+beneficial to prefer predictions to which only the
+expert model assigns a high probability, versus pre-
+dictions to which both the expert and the amateur
+assign high probabilities. Intuitively, since the ama-
+teur model has a stronger propensity than the expert
+for problematic behaviors (e.g., repetitiveness in
+the case of text generation), we may be able to
+diminish such behaviors by demoting predictions
+that are strongly supported by the amateur model.
+This scenario relies on a delicate balance: on the
+one hand, when making a prediction in a relatively10406simpler context, one would expect both the expert
+and amateur models to be highly confident about
+the prediction, and justifiably so; in contrast, where
+both of them assign very low likelihoods to a cer-
+tain prediction, these prediction probabilities may
+be uninformative. Thus, the aim of considering
+the amateur’s predictions during generation is to
+better inform a choice between a set of relatively
+plausible predictions given an input; in other words,
+the predictions of the amateur can serve as a tie-
+breaker of sorts, helping to highlight which out of
+a set of plausible alternative predictions is more
+“expert-like” and less “amateur-like”.
+Inspired by Li et al. (2022), in this work we
+ask whether within a single language model, in-
+termediate hidden layers can similarly be viewed
+as “amateur” versions of the final “expert” output
+layer. Given indications that model representations
+gradually improve as an input progresses through
+its layers (Elbayad et al., 2020; Geva et al., 2022),
+we aim to examine whether the contrast or gap be-
+tween the outputs at different model layers can be
+harnessed to obtain better generation predictions.
+In other words, we posit that the sub-optimal predic-
+tions of intermediate hidden layers carry additional
+information, which can be utilized during inference
+to obtain more desirable next-token predictions.
+Our approach, which we term Auto-contrastive
+Decoding (ACD) , redistributes a given model’s
+probability distribution for the next token, by maxi-
+mizing the difference between the log-probabilities
+of the final layer and those of an intermediate hid-
+den layer. This setting, where the expert and ama-
+teur are situated within the same language model,
+and their predictions can be carefully contrasted
+at inference, is a highly practical one and can be
+easily applied to language models of different sizes.
+Our results show that ACD enables getting sig-
+nificantly better predictions out of a given language
+model, without changing its pre-trained weights.
+Figure 1 illustrates an example of ACD applied
+to GPT2, considering layer 12as the amateur and
+layer 24as the expert. Both layers exhibit repeti-
+tiveness, but applying ACD generates a much im-
+proved output altogether.
+The main contributions of this work are as fol-
+lows:
+1. We reproduce the findings of Li et al. (2022)
+using a single medium-size model, by suggesting a
+novel intra-model auto-contrastive setting.
+2. We demonstrate that ACD improves someaspects of language generation capabilities of pre-
+trained language models, in essence extracting
+more knowledge from the model at inference time.
+We present human evaluation results showing that
+this brings it to par with larger language models.
+3. We release our code and the pre-trained model
+checkpoints used for experiments in this paper, in
+order to facilitate further research in this area.
+2 Related Work
+There have been a number of studies on analyz-
+ing the characteristics of different layers of trans-
+former models. Rogers et al. (2020); Van Aken et al.
+(2019) used probing to report that in BERT models
+the lower layers carry the most information about
+linear word order, syntactic information is most
+prominent in the middle layers, and the final layers
+of BERT are the most task-specific. Van Aken et al.
+(2019) also show that similar behavior is observed
+in other transformer models such as GPT2. Geva
+et al. (2021, 2022) studied the role of feed-forward
+layers in transformer models. They demonstrate
+that representations across different layers capture
+meaningful semantic and syntactic patterns, and de-
+scribe how model predictions are gradually refined
+as they progress across the different layers.
+Aiming to reduce the computational load of
+transformers, multiple works have explored early-
+exiting, i.e., performing some calculations with-
+out passing through all of the model layers. Such
+works allow for an early (fast) ‘exit’ from neural
+network calculations – for simple instances that
+can be solved with high accuracy by lower layers –
+while using a late (slow) ‘exit’ for more challenging
+instances (Simoulin and Crabbé, 2021; Schwartz
+et al., 2020; Xin et al., 2020; Elbayad et al., 2020;
+Sun et al., 2022; Schuster et al., 2022).
+Decoding algorithms are commonly classified
+as search-based and sampling-based. Search-based
+methods (Steinbiss et al., 1994) optimize for the
+language model log-probabilities, while sampling
+methods (Holtzman et al., 2019; Fan et al., 2018)
+draw the next token from a truncated distribution.
+The idea of using contrast during decoding has
+been explored in several studies. Liu et al. (2021)
+combine a pretrained LM with ‘expert’ LMs and
+‘anti-expert’ LMs, where tokens only get high prob-
+ability if they are considered likely by the experts
+and unlikely by the anti-experts. Su et al. (2022)10407propose constrastive search for decoding, where
+the generated output is selected from the set of
+most probable candidates predicted by the model
+while being discriminative with respect to the con-
+text. More recently, Li et al. (2022) suggested to
+contrast between the likelihood under a large LM
+(expert) and a small LM (amateur) during decod-
+ing. The present work differs significantly from the
+aforementioned contrastive approaches, in that we
+contrast the next-token distributions within a single
+LM, across expert and amateur layers.
+3 Auto-contrastive Decoding
+We set the goal of applying the Contrastive De-
+coding (CD) method, from Li et al. (2022), using
+asingle model rather than two different models
+(in their setting, a large and a small model of the
+same model architecture). Thus, we generally fol-
+low the CD approach to calculate the next-token
+predictions, by contrasting the predictions of the
+expert with those of the amateur. However, in our
+setting, both the expert and the amateur are situated
+in the same model, and are defined by two different
+layers of that model. We term this new method
+Auto-contrastive Decoding (ACD). Note that this
+setting is more practical and less computationally
+demanding, as it does not require passing every
+input through two different models in parallel.
+Next, we describe how we obtain the expert and
+the amateur from a single model; and in §3.2, we
+define the auto-contrastive next-token distribution,
+given the probability distributions of the expert and
+the amateur.
+3.1 Expert and Amateur in One Model
+Given a pre-trained language model, LM, we
+take its final output layer as the expert . Similar to
+Li et al. (2022), we denote p(x|x)as the next-
+token probability distribution of this layer, condi-
+tioned on the preceding context ( xbeing the next
+token to predict, and xis the context that pre-
+cedes it).
+To obtain the amateur from the same model, we
+add a linear head to one of its intermediate hidden
+layers, making LMa multi-exit model (Scarda-
+pane et al., 2020; Liu et al., 2022). This new head
+maps the output of the intermediate layer, given
+a preceding context, to a probability distribution
+over the vocabulary for the next token, denoted
+p(x|x).
+To train only this new head, we freeze all ofthe existing pre-trained weights of LM; we then
+train the model, applying the same self-supervised
+objective that was used to pre-train LM.
+In this training we do not aim to fully reproduce
+the original pre-training of LM; note that we are
+training a relatively small number of parameters,
+and thus can use less data and perform fewer train-
+ing steps. This reduced training is likely to lead to
+certain disparities between the amateur head and
+the expert head, as the latter was trained as part of
+the original LMpre-training. Thus, we also train
+a new expert head, using an identical procedure as
+the one used to train the amateur head.
+To amplify the performance gap between the ex-
+pert and the amateur, Li et al. (2022) introduced an-
+other limitation on the amateur model (apart from
+it being a small version of the expert model) – the
+preceding context given to the amateur model is
+restricted, notably shorter than the one provided to
+the expert model. In ACD we opt to abstain from
+this additional (and somewhat arbitrary) limitation,
+and both p(x|x)andp(x|x)are con-
+ditioned on the same full context.
+3.2 Auto-contrastive Next-token Distribution
+Next, we describe the auto-contrastive decoding,
+ACD. This method outputs a token-level probabil-
+ity distribution by contrasting the next-token distri-
+bution of the expert, p(x|x), with that of the
+amateur, p(x|x).
+Following Li et al. (2022), we first implement
+the CD adaptive plausibility constraint, V(x),
+defined by:
+V(x) = (1)
+{x∈V:p(x|x)≥αmaxp(x|x)}
+Given a preceding context x, this constraint se-
+lects a subset of plausible next tokens, out of the vo-
+cabulary V, whose probabilities are above a thresh-
+old. The threshold is a fraction αof the probability
+of the token with the highest probability in the vo-
+cabulary. The hyperparameter αis in the range
+[0,1], and it is set to 0.1in all our experiments, as
+done by Li et al. (2022).
+The score for a plausible x, i.e., x∈
+V(x), indicating its likelihood to be the next10408token given the context x, is calculated by con-
+trasting the probabilities given to it by the expert
+and by the amateur:
+S(x|x) = log p(x|x)−logp(x|x)
+(2)
+Note that this contrastive score is only applied to
+the tokens in V(x). This constraint serves an
+important purpose in that it helps avoid assigning
+high probabilities to very unlikely tokens, namely
+those for which pis very low; at the same time,
+where the expert is highly confident about a single
+top prediction, it helps ensure that pdoes not
+alter the final outcome.
+Li et al. (2022) set the score of the rest of the
+tokens in the vocabulary – those not included in
+V(x)– to minus infinity. We argue that this
+design decision has the disadvantage of practically
+ignoring a large portion of the vocabulary, and thus
+losing information that can be useful.
+For instance, search-based decoding algorithms
+that rely on S(x|x)will be limited to consid-
+ering a small subset of the possible next tokens.
+Additionally, applications that require comparing
+the probabilities of a predefined and closed set of
+token options (See Liu et al., 2023), will similarly
+lose valuable and pertinent information that was
+initially available in the LMprobability distri-
+bution.
+Thus, in ACD we retain the probabilities of the
+tokens not included in V(x), keeping the dis-
+tribution of the expert head:
+S(x|x) = (3)/braceleftigg
+S(x|x) ifx∈V(x)
+p(x|x)otherwise
+We further transform this score function into a
+probability distribution. The distribution of the
+expert head is split into two probability masses;
+one for the tokens in V(x), and another for
+the tokens not included in it. We redistribute the
+former probability mass, weighted by the scoresgiven to each token by Eq. 2:
+S(x|x) = (4)
+softmax/parenleftig
+S(x|x)/parenrightig
+·/summationdisplayp(x|x)
+Replacing S(x|x)with S(x|x)in
+Eq. 3, we obtain our auto-contrastive decoding
+probability distribution:
+p(x|x) = (5)/braceleftigg
+S(x|x)ifx∈V(x)
+p(x|x) otherwise
+To summarize, auto-contrastive decoding, ACD,
+is a method to apply contrastive decoding over a
+single model. In §3.1 we explain how to create the
+amateur by adding and training a new head over
+an intermediate layer. In §3.2 we describe how to
+obtain a new probability distribution for the next
+token by contrasting the expert and the amateur.
+4 Experimental Setup
+To test our approach, we conduct experiments on
+open-ended text generation, as well as on general
+language modeling benchmarks, comparing vari-
+ous performance metrics with and without applying
+auto-contrastive decoding.
+In order to analyze changes in performance
+across model layers, we add multiple new linear
+exit heads; thus, we also report and compare the
+baseline model behavior at different exit layers.
+4.1 Models
+We use pre-trained auto-regressive language mod-
+els from the GPT family – GPT-2 (Radford et al.,
+2019) and GPT-Neo– as test models for explor-
+ing multi-exit performance and the effects of ACD .
+Specifically, we use the GPT-2 Medium ( 355M pa-
+rameters, 24layers) and GPT-Neo-125M ( 125M
+parameters, 12layers) pre-trained model check-
+points.
+As outlined in §3.1, we create multi-exit vari-
+ants of these models, that are identical to the origi-
+nal pre-trained checkpoints, other than the newly-
+added parameters for several new linear exit heads.
+To present a more comprehensive analysis, we add
+multiple heads, one connected to each of the even-
+numbered layers; thus, we add a total of 12and610409
+exit heads to GPT2-Medium andGPT-Neo-125M ,
+respectively. Each head uses the same configura-
+tion as the original language modeling head, with
+outputs for the 50257 tokens in the vocabulary and
+an input size of 1024 (GPT-2 ) or768(GPT-Neo-
+125M ).
+We train these heads on language modeling using
+self-supervision over the CC- 100(Conneau et al.,
+2020) corpus, following a standard pre-training ap-
+proach (see Appendix A for further details), keep-
+ing the original model parameters frozen. As de-
+scribed in §3.1, when training the heads we do not
+precisely replicate the original pre-training regime;
+specifically, we use different pre-training data and
+train for a smaller number of training steps. Never-
+theless, we verify the quality of the training process
+by comparing the performance of a newly-trained
+final layer exit head to that of the original exit head
+of the pre-trained model (cf. App. C).
+The pre-trained multi-exit base models are used
+as-is for open-ended text generation and for the
+benchmarks reported in §5.2. Model training and
+text generation were performed using the Hugging
+Face transformers library (v4.22.2) with the py-
+torch machine learning framework (v1.11.0).
+4.2 Tasks and Metrics
+4.2.1 Open-ended generation
+Following Li et al. (2022), we evaluate open-ended
+text generation in 3domains: books, Wikipedia,and news, using the BookCorpus (Zhu et al., 2015),
+WikiText- 103(Merity et al., 2017), and Wikinews
+text corpora, respectively. We test open-ended pas-
+sage continuation by using the first 32words of a
+passage as a prompt, and using the multi-exit vari-
+ant of the pre-trained model to decode up to 100
+tokens.
+Since ACD outputs a full probability distribu-
+tion (see §3.2), it can more naturally be combined
+with various existing decoding strategies. In this
+study we combine ACD with the following decod-
+ing methods: Greedy search ,Beam search (Fre-
+itag and Al-Onaizan, 2017; beam= 5),Top-k sam-
+pling (Fan et al., 2018, k=50), and Nucleus (top-p)
+sampling (Holtzman et al., 2019; p=0.95).
+Generation quality is evaluated using automatic
+metrics focusing on different axes: aggregated n-
+gram diversity measures the repetitiveness within
+the generated continuations; semantic coherence
+estimates topic drift by calculating similarity be-
+tween the prompt and continuation. For further
+details on these metrics, refer to Su et al. (2022).
+We also report results of human evaluation of the
+generation quality, comparing a sample of genera-
+tion results across different settings, as explained
+below in §5.1.
+4.2.2 Language modeling benchmarks
+We consider the pre-trained multi-exit model,
+which applies ACD at inference time and outputs
+complete next-token probability distributions (see10410
+§3.2), to be a fully functional language model.
+This model contains the same parameters as LM
+(apart from the added linear exit heads), but differs
+in its characteristics.
+We therefore evaluate the ACD -enhanced model
+as a pre-trained language model, according to
+benchmarks that are commonly used (e.g., Black
+et al., 2022; Zhang et al., 2022) to measure lan-
+guage modeling capabilities.
+LAMBADA (Paperno et al., 2016) is a popular
+benchmark that was proposed to encourage com-
+putational language models to keep track of infor-
+mation in the broader discourse, rather than paying
+attention to local context only. It has been shown
+that language models which exploit the context in a
+shallow manner perform poorly on this benchmark
+(Paperno et al., 2016). It is thus a relevant measure
+of more advanced language understanding abilities.
+The typical measure used for reporting progress
+in language modeling is Perplexity (Jelinek et al.,
+1977), the inverse of the (geometric) average prob-
+ability assigned to each word in the test set by the
+model. Perplexity is commonly used as a measure
+of model quality, due in part to its simplicity and
+its relation to the maximum likelihood framework.
+For running the benchmark tests, we use the Lan-
+guage Model Evaluation Harness library(v0.3.0).5 Results and Analysis
+5.1 Open-ended generation
+Results for open-ended text generation for the
+GPT2-Medium model are shown in Table 1. For the
+greedy andbeam-search strategies, which exhibit
+low diversity of generated texts, we see a signif-
+icant improvement in diversity when combining
+them with ACD . At the same time, semantic co-
+herence scores with ACD are higher in almost all
+settings tested. Similar effects of ACD can be ob-
+served for the smaller GPT-Neo-125M model (App.
+Table 5).
+The gains in text diversity highlight one major
+effect of ACD , which is that of reducing repetitive-
+ness in generation. This is true both to short loops,
+such as two tokens being generated again and again,
+as well as longer ones. Also, in some cases texts
+generated by the top layer simply repeat/variate the
+prompt. See Table 2 for examples of the above
+failures and their mitigation.
+Given the dramatic performance boost given by
+ACD , as seen in Tables 1 and 5, we further ask how
+ACD -enhanced generation outputs would compare
+to those of a larger model with more advanced
+capabilities. To this end, we perform open-ended
+generation using the GPT2-XL model (1.5B param-
+eters). As can be seen in Table 3, GPT2-Medium
+(355M parameters) that is enhanced by ACD sig-
+nificantly outperforms its larger scale counterpart.
+To verify that these results are robust and not an
+artifact of the automatic measures used, we conduct
+human evaluation of a sample of generation outputs
+from the results in Table 3, presenting the prompt
+and pairs of generated texts to human annotators
+and asking them to compare the quality of outputs.
+Results indicate that outputs from GPT2-XL were
+twice as likely to be judged as better compared to
+the baseline GPT2-Medium ; but strikingly, GPT2-
+Medium outputs obtained using ACD were overall
+judged as slightly better than those of the much
+larger GPT2-XL . For details on the human evalua-
+tion task, refer to App. D.
+In Fig. 2a we portray the behavior of the au-
+tomatic coherence measure when relying on the
+outputs of different GPT2-Medium exits. It appears
+that the generation coherence, i.e., the semantic
+relatedness between the prompt and generated con-
+tinuation, rises consistently as progressing from
+lower to higher layers. Presumably, this reflects
+a gradual decrease in topic drift behaviors and an
+increased ability to generate longer sequences that10411
+Diversity Coherence
+GPT2-Medium 0.22 0.63
+GPT2-XL 0.31 0.63
+GPT2-Medium + ACD 0.75 0.63
+remain semantically coherent.
+Fig. 2b depicts the diversity of open-ended gen-
+eration across layers. Interestingly, this measure
+exhibits more complex patterns, rising and falling
+as we progress from lower to higher layers. As is
+common with automatic quality metrics for text
+generation, we see this as an indication that n-gram
+repetition provides only a partial window into the
+generation quality, particularly where the diversity
+is overall quite low. Moreover, the nature of out-
+puts may undergo phase shifts as they improve. For
+instance, generated sequences may shift from being
+diverse but unrelated to the inputs in lower layers,
+to texts that are semantically related to the prompt
+but highly repetitive, and so on.
+5.2 Language modeling benchmarks
+Results for the LAMBADA benchmark task, for
+individual exit layers of GPT2-Medium and for
+ACD generation, are shown in Figure 3. The ac-
+curacy and the perplexity metrics of this bench-
+mark dataset both improve as progressing along
+the model layers. In both cases, performance is fur-
+ther improved by applying ACD , with substantial
+gains in accuracy. Similar gains are obtained fortheGPT-Neo-125M model (App. Figure 5).
+This is a non-trivial finding, in that it provides an
+indication that by using ACD we enable the model
+to more accurately take into account the broader
+context and long-range dependencies in the text.
+As in §5.1, one may further ask how these gains
+compare to the performance reached by a larger
+pre-trained model. Indeed, as shown in Table 4,
+GPT2-Medium enhanced by ACD is on par with
+the larger GPT2-XL model (1.5B parameters) on
+the LAMBADA benchmark, achieving improved
+accuracy but also somewhat inferior perplexity.
+Figure 4 depicts the word-level perplexity over
+the general WikiText- 2dataset. As can be seen,
+perplexity behaves as expected across model layers.
+For this general corpus, ACD does not improve the
+overall perplexity beyond that of the final exit layer.
+Thus, we see that ACD provides a substantial
+benefit for the challenging LAMBADA data, that
+specifically measures a model’s advanced ability
+to look at broader context windows, but not for the
+overall perplexity over a general text corpus. While
+this is an initial finding that deserves further explo-
+ration, one interpretation is that ACD specifically
+strengthens “higher-layer behaviors”, such as those
+measured by the challenging LAMBADA task, but
+also induces other types of biases into the model’s
+output probability distributions.
+6 Discussion
+In this work we develop an approach that contrasts
+different model layers, improving the output proba-
+bilities of a generative model. Applying it to exist-
+ing pre-trained language models, we demonstrate
+that intermediate low-performing model layers can
+in some cases inform the predictions of the high-
+performance final layer. This setting is of particular
+interest due to its practicality and flexibility, as it
+can be applicable to models of different sizes and is10412
+utilized during inference via a single forward pass.
+But more broadly, our findings bring forth an en-
+ticing notion, that one would be able to make more
+out of an existing model simply by considering
+the predictions of intermediate layers (which are
+typically ignored). This idea is somewhat counter-
+intuitive, as language models are in a sense opti-
+mized – and often in a long pretraining process over
+massive corpora – for the quality of their final layer
+representations. At the same time, thematically
+this notion is in line with works that describe the
+computations in transformer models as a linear-like
+progression, where each layer refines the represen-
+tations of the previous ones, and where even the
+representations of specific tokens can shift in a con-
+sistent direction along with the progression across
+layers (Geva et al., 2021, 2022). Loosely speak-
+ing, if the changes from one layer to the next can
+sometimes track a vector of improvement with a
+discernible direction, then in theory one could try
+and “extend” this vector; and doing so may help
+estimate what a larger model, one with additional
+layers, would have said about a particular instance.
+We see these as interesting avenues both for theo-
+retical study, and for empirical explorations as to
+whether surprising findings such as those presented
+here can be applied to real-world use-cases.
+Here we present an initial, and relatively simple,
+algorithm for performing the ACD contrast between
+layers. As in Li et al. (2022), our formulation still
+relies on a somewhat arbitrary hyperparameter α;
+also, contrast is always done with respect to a single
+particular exit layer, and choosing the most appro-
+priate layer for contrast may not be trivial. Here,
+for simplicity and robustness, we did not attempt
+to optimize these two important hyperparameters,10413and used a single configuration throughout our ex-
+periments. However, we see much room for future
+work on improving these details, and finding ways
+to intelligently choose which layers to contrast and
+how to combine between them.
+An interesting avenue for future work concerns
+the effect of ACD when applied not just to a pre-
+trained model, but to one fine-tuned for a particular
+downstream task. Specifically, it may be that spe-
+cific types of generation tasks may derive more
+benefit from ACD , depending on their reliance on
+more “high-level” model capabilities, and also on
+the importance of diversity in generated outputs.
+The present work focuses specifically on gen-
+erative models, and on improving the quality of
+text generation outputs and next-token predictions.
+However, the basic approach of looking at the out-
+puts of intermediate layers and using them to in-
+form model predictions is a general one, and is
+thus also worth exploring in other contexts, such as
+classification tasks.
+To sum, our findings indicate that our proposed
+approach, ACD , can be of great practical value, in
+that it significantly boosts the performance of a
+generative language model with a minimal compu-
+tational cost. This approach suggests new avenues
+on how to best extract knowledge from a language
+model and more efficiently utilize its parameters.
+Limitations
+One of the primary limitations of this work is that
+this is essentially an empirical study. Although we
+provide extensive experiments to show that the pro-
+posed approach demonstrates significantly better
+results in different settings, currently we do not pro-
+vide any theoretical guarantees for this approach.
+Second, many of our experiments would not be
+easily reproduced in languages other than English,
+that lack sufficient linguistic resources. During this
+study we used the GPT-2 andGPT-Neo language
+models, which have been trained on large amounts
+of English text. Finally, anecdotally we observed
+that this approach can also increase hallucination
+behaviors, which are a common issue with many
+text generation models. During application, one
+would have to take necessary measures to monitor
+the hallucinations produced by the model.
+Acknowledgements
+We thank our many colleagues for their valuable
+input on this research effort, and owe particularthanks to Liat Ein-Dor and Leshem Choshen for
+their advice and assistance.
+References1041410415
+A Pre-training details
+For training the additional linear heads in our
+multi-exit versions of GPT2-Medium andGPT-Neo-
+125M , we apply a training regime to the pre-trained
+models, while freezing the parameters of the origi-
+nal pre-trained model checkpoints (see §3.1).
+For runtime considerations, we train all the
+added linear heads ( 12and6heads in total for
+GPT2-Medium andGPT-Neo-125M , respectively)
+within a single training run, where a cross-entropy
+loss is calculated for the outputs of each individ-
+ual linear head with respect to the labels, and the
+total training loss is calculated as the sum of these
+losses. Note that since each head is only connected
+to its exit layer m, and the shared pre-trained model
+parameters are kept frozen, this setup is roughly
+equivalent to training each of the linear heads sepa-
+rately.
+Training was conducted with self-supervision
+over the English portion of the CC- 100(Conneau
+et al., 2020) corpus. We used 20M instances out
+of the full dataset. Each text was tokenized, and
+the different tokenized instances were then joined
+together into chunks with a maximum sequence
+length of 512. Thus, no padding was applied to the
+examples. Following the tokenization and chunk-
+ing, the training data consisted of ∼1.3M training
+examples ( ∼650M tokens). Training was per-
+formed using a causal language modeling objec-
+tive, where the cross-entropy loss is calculated be-
+tween the autoregressively generated outputs of the
+language modeling head and the input tokens (of
+length 512), which serve as the label.
+The linear heads of each model were trained for
+3epochs over the chunked texts, using the AdamW
+optimizer, a learning rate of 2×10with a lin-
+ear decay scheduler, and a train batch size of 64.
+Training runs totalled approximately 24/55GPU
+hours for GPT-Neo /GPT2-Medium , respectively,
+on Nvidia A100 GPUs.
+BGPT-Neo-125M results
+The open-generation results for the GPT-Neo-125M
+model are shown in Table 5. The results for this
+model over the LAMBADA benchmark are de-
+picted in Fig. 5.
+C Comparison to the original LM heads
+As noted in §3.1, in order to reduce training dispar-
+ities between the expert and the amateur we train
+a new expert head, rather than using the model’s
+original exit head as the expert. Here, we compare
+the performance of the newly-trained expert heads
+to that of the original language modeling heads. In
+addition, we report the effects of ACD when us-
+ing the original expert head for the ACD contrast
+procedure.
+As can be seen in Table 6, our newly-trained
+expert heads are slightly inferior to the original lan-
+guage modeling heads, presumably due to the more
+limited pre-training regime of the new heads. Nev-
+ertheless, ACD that relies on the newly-trained ex-
+pert head clearly outperforms the original language
+modeling head in open-generation and LAMBADA
+metrics (as also shown in Tables 3 and 4).
+The results of ACD when contrasting between
+theoriginal LM head and our newly-trained ama-
+teur head are overall rather similar. Thus, despite10416
+the more noisy or unpredictable nature of the dis-
+parities between the exit heads in this case (given
+that they were trained in a different pre-training
+regime over different training examples), it appears
+the effects of applying ACD are relatively robust to
+such a scenario.
+D Human evaluation
+We conducted two evaluations for open-ended gen-
+eration quality of the models:
+•Comparing greedy decoding outputs of GPT2-
+XLandGPT2-Medium
+•Comparing greedy decoding outputs of GPT2-
+XLtoGPT2-Medium with ACD
+As input for inference, we randomly sampled
+40texts from the WikiText- 103dataset. Following
+the setting described in §4.2.1, we used the first
+32words of those texts as prompts and for each
+evaluated model extracted up to 100tokens of the
+decoded text. The same prompts were used for
+the two sets of evaluations, and thus also identical
+generation outputs of the GPT2-XL Greedy setting.
+3NLP experts labeled the 80resulting instances,
+consisting of a prompt and inferences from two
+models. For each instance, they were asked to
+select the better model on 3different aspects, in
+separate questions: fluency ,coherence andoverall
+quality (Figure 6). For each question they could
+select either ‘model A’, ‘model B’ or a tie. The in-
+ferences were shuffled such that ’model A’ for each
+displayed instance was randomly selected from ei-
+ther the GPT2-XL Greedy model or its counterpart.The sets of evaluations (i.e., GPT2-XL vs.GPT2-
+Medium andGPT2-XL vs.GPT2-Medium +ACD )
+were also shuffled, such that annotators did not
+know which pair of models they are annotating.
+The final label for each instance is obtained by
+the majority choice of the annotators. A tiemajor-
+ity label is achieved either when the majority of
+annotations is tieor when no majority is obtained
+(which in this setting can only occur when annota-
+tions are equally distributed - one for each model
+and one tie).
+Label distributions are shown in Figures 7, 8.
+Inter-annotator agreement for those tasks, obtained
+by averaging Cohen’s Kappa for all annotator pairs,
+in each task, for each question is as follows - 0.15
+for the fluency question, 0.34for the coherence
+question and 0.42for the overall quality question.
+An image of the task is shown in Figure 6.10417Diversity ↑Coherence ↑LAMBADA acc. ↑Perplexity ↓
+GPT2-Medium L- 24 0.22 0.63 0.43 26.8
+GPT2-Medium L- 24 0.21 0.59 0.39 30.0
+GPT2-Medium L- 24+ACD 0.62 0.64 0.56 71.3
+GPT2-Medium L- 24+ACD 0.75 0.63 0.55 57.2
+GPT-Neo-125M L- 12 0.12 0.60 0.37 32.3
+GPT-Neo-125M L- 12 0.09 0.57 0.31 38.5
+GPT-Neo-125M L- 12+ACD 0.30 0.62 0.53 68.1
+GPT-Neo-125M L- 12+ACD 0.32 0.62 0.50 71.810418ACL 2023 Responsible NLP Checklist
+A For every submission:
+/squareA1. Did you describe the limitations of your work?
+Limitations section
+/squareA2. Did you discuss any potential risks of your work?
+Limitations section
+/squareA3. Do the abstract and introduction summarize the paper’s main claims?
+Abstract and Section 1
+/squareA4. Have you used AI writing assistants when working on this paper?
+Left blank.
+B/squareDid you use or create scientiﬁc artifacts?
+Sections 3, 4
+/squareB1. Did you cite the creators of artifacts you used?
+Section 4
+/squareB2. Did you discuss the license or terms for use and / or distribution of any artifacts?
+Section 4
+/squareB3. Did you discuss if your use of existing artifact(s) was consistent with their intended use, provided
+that it was speciﬁed? For the artifacts you create, do you specify intended use and whether that is
+compatible with the original access conditions (in particular, derivatives of data accessed for research
+purposes should not be used outside of research contexts)?
+All artifacts, existing and created, are under permissive licenses.
+/squareB4. Did you discuss the steps taken to check whether the data that was collected / used contains any
+information that names or uniquely identiﬁes individual people or offensive content, and the steps
+taken to protect / anonymize it?
+While the data used does contain some unique identiﬁers and offensive content, all of it comes from
+publicly available sources, and was only used for quantitative and qualitative analysis.
+/squareB5. Did you provide documentation of the artifacts, e.g., coverage of domains, languages, and
+linguistic phenomena, demographic groups represented, etc.?
+As stated in the Limitations section, the models and data are limited to English corpora (both general
+and domain-speciﬁc).
+/squareB6. Did you report relevant statistics like the number of examples, details of train / test / dev splits,
+etc. for the data that you used / created? Even for commonly-used benchmark datasets, include the
+number of examples in train / validation / test splits, as these provide necessary context for a reader
+to understand experimental results. For example, small differences in accuracy on large test sets may
+be signiﬁcant, while on small test sets they may not be.
+Appendix A
+C/squareDid you run computational experiments?
+Section 4
+/squareC1. Did you report the number of parameters in the models used, the total computational budget
+(e.g., GPU hours), and computing infrastructure used?
+Section 4, Appendix A10419/squareC2. Did you discuss the experimental setup, including hyperparameter search and best-found
+hyperparameter values?
+Section 4
+/squareC3. Did you report descriptive statistics about your results (e.g., error bars around results, summary
+statistics from sets of experiments), and is it transparent whether you are reporting the max, mean,
+etc. or just a single run?
+Section 4, 5
+/squareC4. If you used existing packages (e.g., for preprocessing, for normalization, or for evaluation), did
+you report the implementation, model, and parameter settings used (e.g., NLTK, Spacy, ROUGE,
+etc.)?
+Section 4; Our full implementation is released on GitHub
+D/squareDid you use human annotators (e.g., crowdworkers) or research with human participants?
+Section 5.1, Appendix D
+/squareD1. Did you report the full text of instructions given to participants, including e.g., screenshots,
+disclaimers of any risks to participants or annotators, etc.?
+Appendix D
+/squareD2. Did you report information about how you recruited (e.g., crowdsourcing platform, students)
+and paid participants, and discuss if such payment is adequate given the participants’ demographic
+(e.g., country of residence)?
+The annotators are part of the research group that authored the paper.
+/squareD3. Did you discuss whether and how consent was obtained from people whose data you’re
+using/curating? For example, if you collected data via crowdsourcing, did your instructions to
+crowdworkers explain how the data would be used?
+The annotators are part of the research group that authored the paper.
+/squareD4. Was the data collection protocol approved (or determined exempt) by an ethics review board?
+Appendix D
+/squareD5. Did you report the basic demographic and geographic characteristics of the annotator population
+that is the source of the data?
+Appendix D10420

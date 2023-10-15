@@ -1,1 +1,705 @@
-932 Proceedings of the 2022 Conference of the North American Chapter of the Association for Computational Linguistics : Human Language Technologies , pages 932 942 July 10 - 15 , 2022 © 2022 Association for Computational Linguistics 933 934 935 936 937 938 939 940 941 942 
+
+Zhengbao Jiang, Yi Mao, Pengcheng He, Graham Neubig, Weizhu ChenLanguage Technologies Institute, Carnegie Mellon UniversityMicrosoft Azure AI
+{zhengbaj,gneubig}@cs.cmu.edu
+{maoyi,penhe,wzchen}@microsoft.com
+Abstract
+The information in tables can be an important
+complement to text, making table-based ques-
+tion answering (QA) systems of great value.
+The intrinsic complexity of handling tables of-
+ten adds an extra burden to both model design
+and data annotation. In this paper, we aim to
+develop a simple table-based QA model with
+minimal annotation effort. Motivated by the
+fact that table-based QA requires both align-
+ment between questions and tables and the
+ability to perform complicated reasoning over
+multiple table elements, we propose an om-
+nivorous pretraining approach that consumes
+both natural andsynthetic data to endow mod-
+els with these respective abilities. Speciﬁcally,
+given freely available tables, we leverage re-
+trieval to pair them with relevant natural sen-
+tences for mask-based pretraining, and syn-
+thesize NL questions by converting SQL sam-
+pled from tables for pretraining with a QA
+loss. We perform extensive experiments in
+both few-shot and full settings, and the re-
+sults clearly demonstrate the superiority of our
+model OmniTab, with the best multitasking ap-
+proach achieving an absolute gain of 16.2%
+and 2.7% in 128-shot and full settings respec-
+tively, also establishing a new state-of-the-art
+on WikiTableQuestions. Detailed ablations
+and analyses reveal different characteristics of
+natural and synthetic data, shedding light on
+future directions in omnivorous pretraining.
+1 Introduction
+Humans are voracious information omnivores, con-
+suming information in a number of forms. Un-
+structured text is the form covered in most work
+in NLP, but another form widely used on the web,
+academic papers, and reports is the table , where
+elements are organized in rows and columns and
+presented in a structured and succinct way. Be-
+cause of this, systems to aid information accessover tables, such as table-based question answering
+(QA) (Pasupat and Liang, 2015; Iyyer et al., 2017;
+Zhong et al., 2017), hold signiﬁcant promise. How-
+ever, they also require understanding of the table
+structure and sophisticated reasoning across multi-
+ple elements to get the ﬁnal answer. This intrinsic
+complexity not only often requires special-purpose
+model designs such as pipeline systems that gener-
+ate structured queries as intermediate steps (Liang
+et al., 2018; Wang et al., 2019; Yin et al., 2020;
+Yu et al., 2021), but also adds an extra burden to
+the process of data annotation (Pasupat and Liang,
+2015; Shi et al., 2020).
+Given the challenges above, we ask the ques-
+tion: “can we create a simple model that is able to
+answer complex table-based questions with mini-
+mal annotation effort ?” Both modeling simplicity
+and limited assumptions regarding data availabil-
+ity would make it easier to apply table-based QA
+systems in practical scenarios. To this end, we fo-
+cus on developing a simple and generic end2end
+table-based QA model where only a limited num-
+ber of annotated natural language (NL) questions
+are available; the ﬁrst attempt to address this prob-
+lem under few-shot settings. In order to answer
+table-related questions, an end2end model needs
+to understand both the NL question and the table,
+build connections between the two formats, then
+perform complex reasoning. Taking the manually
+annotated question in Fig. 1 as an example, models
+need to align entities (“Collateral Damage”) and
+concepts (“ﬁlm”, “air”) in the question to elements
+in the table (the “Collateral Damage” cell and the
+“Film” and “Date” columns) and perform compara-
+tive reasoning based on chronological order (indi-
+cated by “previous” and “before”) to ﬁnd the ﬁnal
+answer. Motivated by this, we propose OmniTab ,
+an omnivorous pretraining approach that consumes
+natural data to endow models with the ability to
+understand and align NL with tables, and synthetic
+data to train models to perform reasoning.932
+To obtain natural NL-table pairs, we propose
+a novel approach that leverages the multitude of
+tables freely available from the web, and uses re-
+trieval to pair them with relevant NL sentences.
+Compared with manually deﬁned heuristics used in
+previous work (Herzig et al., 2020; Yin et al., 2020),
+retrieval-based methods have the potential to dis-
+cover better-aligned sentences. We explore differ-
+ent retrieval methods including string-based match-
+ing, sparse retrieval, and dense retrieval (Karpukhin
+et al., 2020; Khattab and Zaharia, 2020; Gao et al.,
+2021). Given these retrieved pairs, phrases in the
+sentence that align with table elements are then
+masked and the model takes both the masked sen-
+tence and the linearized table as input to predict
+masked mentions. For example, in Fig. 1 the re-
+trieved sentence describes a particular row and
+contains two phrases matching cells in the table
+(i.e., “Spider-Man” and “$114.8 million”) which
+are masked for prediction. To perform this sort of
+masked prediction, models need to understand that
+the sentence is about a record-breaking movie and
+refer to the table to extract the correct cells. Thus,
+training on this data endows models with better
+understanding and alignment across both formats.
+For the synthetic data approach, we propose a
+method where structured queries such as SQL are
+ﬁrst sampled and then converted into NL questions
+using an SQL2NL model, which allows for control
+of the reasoning operations covered by the SQL.
+Compared to existing work that trains directly on
+SQL (Liu et al., 2021), an approach hindered by
+the gap between structured and natural language,
+training on synthetic NL questions can close thegap, especially when limited annotated NL ques-
+tions are available. We train the SQL2NL model
+with a small number of SQL-NL pairs and further
+boost its performance using veriﬁcation-based self-
+training, which selects high-quality generated NL
+questions based on their likelihood to generate the
+gold answer. The converted NL question concate-
+nated with the linearized table is fed into the model
+to directly generate the ﬁnal answer, as shown in
+the synthetic example in Fig. 1 which involves com-
+parative reasoning indicated by the phrase “more
+than”. Although the ﬂuency and naturalness of
+synthetic data is usually lower than natural data,
+learning on synthetic data provides a direct way to
+simulate different reasoning skills, which is rela-
+tively sparse in natural data.
+Our overall framework is shown in Fig. 2. We
+use tables from Wikipedia and retrieve relevant
+sentences from the same page to generate natu-
+ral text-table parallel data after masking mentions
+aligned to table elements (the blue pipeline on the
+left of Fig. 2). We use SQL queries sampled by Liu
+et al. (2021) and convert them to NL questions as
+synthetic text-table parallel data (the green pipeline
+on the right of Fig. 2). We use WikiTableQuestions
+(WTQ) (Pasupat and Liang, 2015), a widely used
+table-based QA dataset consisting of complex ques-
+tions, as our major benchmark to evaluate our pre-
+training methods, and further use WikiSQL (Zhong
+et al., 2017) and topic-categorized WTQ (Chem-
+mengath et al., 2021) to evaluate the robustness of
+our methods, all under few-shot setting with sizes
+ranging from 16 to 1,024. When using only 128
+annotated questions, our model OmniTab improves933over the best-performing baseline by an absolute
+gain of 13.2% and 12.3% with natural and synthetic
+pretraining separately and 16.2% when combined,
+demonstrating the effectiveness of the approach.
+We also achieve state-of-the-art performance on
+the full WTQ with an absolute gain of 2.7%. Ex-
+tensive ablations and analyses reveal that natural
+and synthetic data indeed play the role of enhanc-
+ing alignment and injecting reasoning, shedding
+light on future works on omnivorous pretraining.
+2 End2End Table-based QA
+In this section, we ﬁrst explain the setting of table-
+based QA, then introduce the input format as well
+as our model architecture.
+Table-based QA Each example in table-based
+QA consists of an NL question q, a tableT, and
+an answer a. Both questions and answers are a
+sequence of tokens. Each table consists of Nrows
+{r}andMcolumns, where the token sequence
+in the cell located at the i-th row and j-th column
+is denoted as c. The ﬁrst row ris the header
+row, indicating the meaning of each column. Table-
+based QA aims to generate the answer agiven both
+the question qand the table Tas the input.
+Input Format We follow Liu et al. (2021) in
+concatenating the NL context with the linearized
+table as input. We ﬂatten the table following a top-
+to-bottom and left-to-right order, where we prepend
+“col:” to the beginning of the header and “row i:” to
+the beginning of the i-th row to separate different
+rows:T= [col:rrow 1:r... rowN:r]. Cells
+within each row are separated by a vertical bar “|”
+r= [c|c| ... |c]. Finally, the question q
+is prepended to the linearized table: [ qT].
+Model Architecture We use the state-of-the-art
+table-based QA model TAPEX (Liu et al., 2021) as
+our base model, which is based on BART (Lewis
+et al., 2020b). It feeds questions and tables into the
+encoder and generates answers from the decoder:
+P(a|q,T). Multiple answers are joined with com-
+mas into a single output sequence.
+3 OmniTab: Pretraining with Natural
+and Synthetic Data
+As mentioned in the introduction, table-based QA
+requires both (1) the ability to align NL phrases
+with table elements that could be expressed in dif-
+ferent wording and (2) perform reasoning such asﬁltering, aggregation, superlatives, comparatives,
+and arithmetic. Compared to synthetic data, real
+NL sentences relevant to the table excel at enhanc-
+ing the ﬁrst capability since they are more natural
+and ﬂuent, exhibiting various language variations.
+Learning on real sentences can endow models to
+grasp the nuances in language and align with struc-
+tured tables. On the other hand, synthetic data is
+ﬂexible, manipulable, and easy to obtain. It is cost-
+less to generate synthetic data via manipulating
+different aspects of the generated data to incorpo-
+rate various desired properties. As a result, we can
+generate large amounts of complicated synthetic
+data covering various reasoning operations, which
+is lacking in the NL corpora. This motivates us to
+explore both types of data.
+3.1 NL-Table Alignment Through Retrieval
+Using the Wikipedia table corpus released by
+Herzig et al. (2020), we explore three retrieval
+methods to construct aligned NL-Table pairs and
+propose a new pretraining objective.
+3.1.1 Retrieval Protocol
+Since sentences relevant to a table are usually in-
+cluded in the same document, we restrict our re-
+trieval models to only consider the document con-
+taining the table, with the purpose of reducing noise
+and increasing efﬁciency.
+String-based Matching For each sentence, we
+enumerate over all cells in the table and ﬁnd the
+longest common substring (LCS) between a cell
+cand a sentence s. An LCS is considered as a
+mention to be masked if it (1) is not a stopword, (2)
+contains alphanumeric characters, (3) is a complete
+word, and (4) is longer than 70% of the length of
+the cell. We choose the sentence with the largest
+number of mentions to pair with the table.
+Sparse Retrieval with BM25 Another method
+of string-based matching is BM25 with tables as
+queries and sentences as candidates. Different from
+the above method matching whole cells, BM25
+treats tables as a bag of tokens. We linearize tables
+as queries and choose the most relevant sentence to
+compose the pair. Since BM25 retrieval does not
+return aligned phrases and cells, we resort to the
+above method detect mentions.
+Dense Retrieval with Token Representations
+The above two methods can only consider exact934
+string matches, which is sub-optimal because differ-
+ent expressions might be used between sentences
+and tables such as “$114,844,116” and “$114.8 mil-
+lion” in Fig. 1. Tables tend to use full and formal
+expressions, while expressions in NL tend to be ca-
+sual, often with abbreviations. To address this issue,
+we propose to use dense representations to perform
+soft matching. Many works use a single dense
+vector to represent the whole query/document for
+retrieval (Guu et al., 2020; Karpukhin et al., 2020).
+However, in our case, queries are tables usually con-
+sisting of many cells,thus representing a whole
+table as a single vector might lead to information
+loss, which performs well below BM25 in our pre-
+liminary experiments. Additionally, retrieval based
+on a single vector only returns sentence-table pairs
+without revealing phrase-cell alignment, which is
+required for masking purposes. Thus, we pro-
+pose to use token representation to directly match
+phrases and cells, similar to token-level dense re-
+trieval (Khattab and Zaharia, 2020; Gao et al.,
+2021) in spirit.
+Speciﬁcally, we use BART to obtain token rep-
+resentations for each sentence sand tableTsep-
+arately. We then use a named entity recognition
+(NER) model to detect candidate phrases {p}
+in the sentence. Each phrase and cell are repre-
+sented as the average token representation, denoted
+aseanderespectively after normalized to a
+unit vector. We compute a similarity for each cell-
+phrase pair using dot product e·e, resulting in
+a two-dimensional similarity matrix A∈R,
+where each row and column correspond to a cell
+and a phrase respectively. We aggregate the rele-
+vance matrix Ato derive relevance scores for rank-
+ing sentences and an assessment score for each
+phrase to choose salient mentions for masking.
+Given the fact that soft match based on dense vec-
+tors usually yields a non-zero relevance score even
+for irrelevant pairs, we apply the max-sparsify op-erator to emphasize relevant matches and eliminate
+noisy irrelevant matches, similarly to the max op-
+erator in Khattab and Zaharia (2020); Gao et al.
+(2021). The max-sp (A,dim=i)keeps the max en-
+try along dimension iof the matrix Aand changes
+other entries to zero. As illustrated in Fig. 3, we
+ﬁrst apply this operator over all phrases ( dim= 1),
+assigning each cell the best-matching phrase, then
+apply it over all cells ( dim= 0), assigning each
+remaining phrase to its best-matching cell. We use
+the sum of the sparsiﬁed matrix as the relevance
+score to choose the best-matching sentences, rank
+remaining phrases in that sentence ( p>p>p
+in Fig. 3), and choose phrases with scores higher
+than a threshold τas mentions to be masked.
+rel(s,T) =sum(max-sp (max-sp (A,1),0)).(1)
+3.1.2 Learning Objective
+Given a retrieved sentence sassociated with the
+tableT, we apply two masking strategies: (1) ran-
+domly mask tokens in the sentence or cells in the
+table (2) salient mention masking where we ﬁrst
+identify phrases in the sentence that align with table
+elements, then mask aligned phrases (denoted as
+mentions). Compared to random masking, salient
+masking speciﬁcally focuses on masking shared
+information, enabling the model to better learn the
+correspondence across formats, which we will ver-
+ify in § 4.3. Since we use TAPEX as the base
+model, which is based on BART, we follow the pre-
+training format of BART to generate the original
+unmasked sequence given the input with masked
+tokens (in either NL or table). Instead of comput-
+ing the negative log likelihood loss (NLL) over all
+tokens, we only compute at masked positions to
+emphasize the recovery of missing information:
+L=−logP(s,T|s,T), (2)
+where s/Tdenote the masked sentence/table, and
+P(·|·)only computes loss at masked positions.
+3.2 Synthetic Questions Converted from SQL
+We use synthetic questions to simulate real table-
+based questions that involve various reasoning oper-
+ations, such as the comparative operation in Fig. 1.
+While directly synthesizing complex NL questions
+is challenging, it is easier to generate complex struc-
+tured queries such as SQL because they follow pre-
+deﬁned syntax, and different reasoning operations
+can be implemented with different SQL templates.
+For example, the SQL query in Fig. 1 is based on935
+a template that compares entries w.r.t. a numerical
+property. This motivates us to ﬁrst generate SQL
+(o) then convert them to NL questions ( q).
+Fortunately, Liu et al. (2021) already sampled a
+large corpus of SQL with associated answers based
+on tables from Wikipedia and used SQL plus ta-
+bles as input to pretrain their model TAPEX. They
+achieved state-of-the-art performance on table-
+based QA, making TAPEX a strong base model.
+However, there is a large gap between SQL and NL
+questions, and training solely on SQL might hinder
+it from closing this gap. Instead, we use NL ques-
+tions in the pretraining directly. Given synthesized
+NL questions, we pretrain with a standard genera-
+tive QA loss that takes NL questions concatenated
+with tables as input and decode answers obtained
+by executing SQL queries over tables:
+L=−logP(a|q,T). (3)
+Sampling SQL Based on Templates Liu et al.
+(2021) leverage tables from WTQ and instanti-
+ate different templates over them to sample large
+amounts of SQL, where answers are obtained by
+execution. Templates are automatically extracted
+from SQUALL (Shi et al., 2020), which includes
+SQL corresponding to NL questions in WTQ.
+Training SQL2NL Models We use BART as
+our base model and ﬁnetune it with limited SQL-
+NL pairs to strictly conform to the few-shot setting.
+We use SQUALL to simulate few-shot scenarios,
+by assuming that only a limited number of SQL
+queries have annotated NL questions, which we
+elaborate in § 4.1. The model takes SQL as input
+and generates NL questions autoregressively.Self-training with Veriﬁcation-based Selection
+Even with a strong model like BART, the accuracy
+of SQL2NL is not perfect, especially in the face of
+limited data. To further improve performance, we
+devise a veriﬁcation-based self-training approach
+that selects high-quality NL questions generated
+from unlabeled SQL by assessing how likely they
+elicit correct answers from the table-QA model.
+As illustrated in Fig. 4, we ﬁrst ﬁnetune BART
+model on supervised SQL-NL pairs to obtain the
+initial SQL2NL model ( x), which is used to gen-
+erate NL questions for unlabeled SQL ( y) in the
+second step. We attempted two generation methods
+including beam search and top-k sampling (Fan
+et al., 2018) and found that beam search leads
+to more diverse results. Thus we use a beam
+size of 50 to generate candidate NL questions
+ˆq. Third, we choose high-quality candidates for
+self-training based on various criteria. The most
+straightforward criterion is to choose questions
+with the highest generation probabilities for self-
+training score(ˆq) =P(ˆq|o), which does
+not lead to improvement as we will show in the
+ablations (§ 4.3). Motivated by the fact that Om-
+niTab has a strong capacity to answer table-related
+questions after large-scale pretraining and ﬁnetun-
+ing, we rank generated sentences by verifying how
+likely they elicit the correct answer using OmniTab
+score(ˆq) =P(a|ˆq,T), which provides a sim-
+ple and effective way to leverage the QA capacity
+of OmniTab to indirectly provide feedback to the
+SQL2NL model ( z). Given the veriﬁcation scores,
+we ﬁrst pair each unlabeled SQL with the sentence
+with the highest score among 50 candidates, then
+keep the top- KSQL-NL ranked based on the score
+as our self-training data. At the last step, the small
+supervised data is combined with the enlarged self-
+training data to train the ﬁnal SQL2NL model ( {).
+3.3 Combining Natural and Synthetic Data
+We perform multitasking using the two previously
+deﬁned objectives (Eq. 2, Eq. 3) to combine nat-
+ural and synthetic data. In addition, since we use
+TAPEX as initialization and their SQL-based pre-
+training has demonstrated effective in endowing
+models with reasoning capability, we add SQL-
+based pretraining in the multitask setting. L=
+−logP(a|o,T), resulting a combination of three
+partsL+L+Las the multitask loss.9364 Experiments
+We ﬁrst detail the experimental settings (§ 4.1).
+Then we report on extensive experiments, starting
+with the overall result including all design elements
+to achieve the best results (§ 4.2), then breaking
+down into each design choice to analyze their in-
+dividual contribution (§ 4.3). Finally, we analyze
+concrete examples to provide insight on different
+characteristics of natural and synthetic data (§ 4.4).
+4.1 Experimental Settings
+Few-shot Settings We use WikiTableQuestions
+(Pasupat and Liang, 2015) as our major benchmark,
+as it is a widely used table-based QA dataset in-
+volving various complex reasoning operations, and
+report the answer accuracy given by the ofﬁcial
+evaluator. Following work on few-shot QA (Ram
+et al., 2021), we create few-shot settings of WTQ
+by sampling a subset from the original training con-
+taining 11K examples in total, with sizes changing
+on a logarithmic scale from 16 to 1024.
+Another component that requires annotated NL
+questions is the SQL2NL model. We use SQUALL
+(Shi et al., 2020), which contains ≈10K annota-
+tions in total, to simulate few-shot scenarios by
+varying the number of SQL annotated with NL
+from 16 to 4,096. In the f-shot setting, we use
+SQUALL-fto train the SQL2NL model and WTQ-
+fto ﬁnetune QA models. Since SQUALL and
+WTQ share the same set of NL questions, we make
+sure that SQUALL- falso includes the same ques-
+tions as WTQ- f, so in total only fannotated ques-
+tions are used in the f-shot setting.
+We also report on WikiSQL (Zhong et al., 2017),
+another table-based QA benchmark with relatively
+simple questions. To evaluate robustness under top-
+ical shift, we further use WikiTableQuestions-TS
+which split WTQ into ﬁve topics (Chemmengath
+et al., 2021) based on Wikipedia categories. We
+follow their creation procedure to reproduce the
+split, and evaluate our methods by ﬁnetuning on
+one topic and testing on the other four topics.
+Pretraining Corpora We use the table corpus
+by Herzig et al. (2020) extracted from Wikipedia
+as our source of tables for retrieval. All tables
+are preprocessed into a two-dimensional structure
+with a single header and one or multiple data rows.
+We use a subset of this corpus and ﬁnd the corre-
+sponding Wikipedia page through its URL, which
+is preprocessed into sentences using SLING. Since
+some tables are noisy and some Wikipedia pagesdo not contain meaningful sentences, eventually
+we pair approximately 0.5M tables with sentences
+using our three retrieval methods. To make the syn-
+thetic data of similar size, we also use 0.5M SQL
+sampled by Liu et al. (2021) to generate synthetic
+questions.
+Baselines We consider two types of models as
+baselines (1) pipeline methods that execute gen-
+erated SQL to get answers such as TaBERT (Yin
+et al., 2020) with MAPO (Liang et al., 2018) as
+the semantic parser and (2) end2end methods that
+directly generate answers, such as BART (Lewis
+et al., 2020b), TAPAS (Herzig et al., 2020), and
+TAPEX (Liu et al., 2021). More discussions about
+table-related models can be found in the related
+work section in § 5. Since we also incorporate the
+SQL data used by TAPEX in our ﬁnal multitask set-
+ting, we report TAPEXwhen comparing with our
+multitask setting, which continued to train TAPEX
+on SQL data for as many steps as OmniTab to make
+a fair and rigorous comparison. We use OmniTab
+to denote our full model trained in the multitask
+setting with both natural, synthetic, and SQL data
+(§ 3.3).
+Implementation Details During pretraining, we
+use a batch size of 512 and train OmniTab for 5
+epochs, which takes about 20 hours on 8 V100
+GPUs for multitasking on both natural and syn-
+thetic data. During ﬁnetuning, we use a batch size
+of 96 and ﬁnetune OmniTab for 50 epochs, which
+takes about 30 minutes on 8 V100 GPUs. We use a
+learning rate of 2e-5 for both pretraining, ﬁnetun-
+ing. We use BART-large and TAPEX-large in all
+experiments. For dense retrieval, since we use the
+max operation, all phrases have scores ∈[−1,1].
+We bucket phrases into bins with an interval of
+0.1, manually inspect the quality of some randomly
+sampled phrases from each bin, and found that
+phrases with scores larger than τ= 0.6are of high
+quality. We use spaCyto detect named entities for
+dense retrieval. For self-training of the SQL2NL
+model, we use the best-performing OmniTab model
+without self-training as the veriﬁcation QA model,
+and make sure that it uses the same amount of an-
+notations as the ﬁnal model (i.e. if the ﬁnal model
+is af-shot model, we also use fannotations to
+train the veriﬁcation model). In our ﬁnal model,
+we added approximately 10K SQL-NL pairs for
+self-training.937
+4.2 Overall Results
+The overall results comparing OmniTab with other
+baselines are listed in Tab. 1. Across three few-
+shot settings, simulating low, medium, and high
+resource scenarios, pretraining on natural or syn-
+thetic data individually both outperform baselines
+signiﬁcantly, and multitasking further increases
+the performance by a large margin. OmniTab
+improves over the best baseline performance by
+11.1%, 16.2%, and 6.4% across the three settings,
+clearly demonstrating that pretraining on natural
+sentences relevant to tables and synthetic questions
+provides OmniTab with a stronger capacity to align
+text and tables and perform reasoning. The two
+types of data are complementary to each other,
+which we will analyze in detail in § 4.4. Despite the
+fact that we focus on the few-shot setting, we also
+observe signiﬁcant improvements of 2.7% on the
+full setting, establishing a new state-of-the-art on
+WTQ. The performance in all few-shot/full settings
+shown in Fig. 5 clearly indicates the superiority
+of OmniTab across the whole spectrum. The im-
+provement is larger when annotations are fewer,
+indicating the value of pretraining especially when
+fewer annotations are available. We also observe
+improvements on WikiSQL as shown in Tab. 2,
+reinforcing the effectiveness of our methods.
+4.3 Ablation Study
+Next, we study the contribution of individual
+components, including different retrieval methods,
+masking strategies, self-training methods, and vary-
+ing the number of training pairs.
+Comparison of Different Retrieval Methods
+Our ﬁrst ablation concerns the inﬂuence of differ-
+ent retrieval methods on the ﬁnal performance. We
+examined three retrieval methods to pair tables with
+a relevant sentence, including string-based match-
+ing, BM25, and dense retrieval (§ 3.1), as summa-
+rized in Tab. 3. We also add a baseline (title-based
+heuristic) that pairs a table with the caption, article
+title, and description used by Herzig et al. (2020)
+to validate the utility of retrieval. (1) Our three
+retrieval methods usually perform better than the
+title-based heuristic, indicating that retrieving sen-
+tences based on the table content is better than ﬁxed
+heuristics that always pair a table with pre-speciﬁed
+content. (2) By comparing two string-based match-
+ing variants, we found that selecting the sentence
+with the maximal number of mentions is better than
+sentences with minimal overlap,conﬁrming our
+intuition that sentences more aligned with the ta-
+ble enable models to learn better alignment. (3)
+BM25 performs similarly to string-based match-
+ing, partially because we still rely on string-based
+matching to locate mentions after BM25 returns a
+similar sentence. (4) Dense retrieval with threshold
+τ= 0.6achieves the best overall performance, but
+it is relatively sensitive to the threshold. A high
+threshold only keeps highly relevant phrase-cell
+pairs, while a low threshold can discover more par-
+tial matches for masked pretraining, leading to a
+trade-off between quality and quantity. Given that
+this initial attempt to use dense retrieval for text-
+table alignment directly uses BART without further
+tuning, further advances in retriever could likely
+improve this trade-off.
+Random Masking vs. Salient Masking We use
+both salient mention masking that only masks men-938
+tions of cells in the sentence and random masking
+in our ﬁnal model. To examine the contribution
+of each masking strategy, we remove one masking
+strategy from the underlined model at the bottom
+of Tab. 3. It is clear that both maskings help, with
+salient masking being the major contributor, which
+indicates that masking tokens indicative of align-
+ment is more effective than aimless masking.
+Comparison of Different Self-training Methods
+To study which element is crucial in self-training,
+we perform ablations to study various aspects of
+self-training including (1) selection criterion for
+questions (generation- vs veriﬁcation-based) and
+(2) models used for veriﬁcation (BART vs Om-
+niTab) by comparing all variants under the same
+setting of 128 annotated SQL-NL. As summarized
+in Tab. 4, self-training on selected questions with
+the highest generation probabilities given by the
+SQL2NL model does not improve over the base-
+line without self-training, which is mainly because
+the SQL2NL model is too weak to output reliable
+generation probabilities. However, our method that
+selects questions with the highest probabilities to
+elicit answers from OmniTab (last line) improve
+over no self-training by a large margin (4.3%, 2.5%,
+and 1.8%), validating the idea of leveraging the
+strong QA capacity of OmniTab to assess the qual-
+ity of generated questions. To conﬁrm the source
+of success, we perform a sanity check that selects
+sentences most unlikely to elicit answers (min), and
+the performance indeed becomes much lower. We
+also replace OmniTab with BART that is only ﬁne-
+tuned with 128 annotations, and the performance
+is signiﬁcantly lower, conﬁrming that stronger QA
+models can provide a better assessment.
+Performance w.r.t. Number of Annotated and
+Self-training Pairs Here we study the inﬂuence
+of increasing either annotated or self-training SQL-
+NL pairs. We use the SQL2NL model trained with
+128 annotated pairs as a starting point, and addi-
+tionally using more annotated or self-training pairs.
+As shown in Fig. 6, using more annotated or self-
+training pairs both improves over the initial perfor-
+mance of 35.0%. However, the improvement due
+to self-training still falls far behind the supervised
+approach, demonstrating the challenge of learning
+a robust SQL2NL model with very few annotations.
+The increasing trend of self-training suggests that
+further improvements may be provided by using
+more pairs in self-training.
+4.4 Analysis
+Roles of Natural and Synthetic Data We quan-
+titatively veriﬁed using the multitasking experiment
+that natural and synthetic are complementary to939
+each other, with the hypothetical reason that natu-
+ral data excels at enhancing alignment while syn-
+thetic data is more targeted on endowing reasoning
+capabilities. Our analysis on cases where natural
+pretraining succeeds but synthetic fails and the op-
+posite cases conﬁrms that this is indeed the case.
+Enabled by the ﬁne-grained annotation in SQUALL
+(Shi et al., 2020), we compare OmniTab trained on
+natural or synthetic data separately in the 128-shot
+setting, and study on the two groups of cases in the
+development set of WikiTableQuestions. Based on
+309/315 cases favoring natural/synthetic pretrain-
+ing, we witness a clear distinction on the average
+number of question tokens aligned with tables be-
+tween the two groups in Tab. 5, indicating that
+natural data is indeed more targeted at addressing
+the alignment across formats. We also compute the
+frequency of each SQL keyword for the two con-
+trasting groups of cases. As shown in Fig. 7, cases
+favoring synthetic data indeed involves reasoning-
+rich keywords more frequently, such as “where =
+( )” which are often used in nested queries, and
+“count * id” which are often used in aggregation.
+Performance under Topical Distributional Shift
+Last, we analyze the robustness of OmniTab un-
+der topical distributional shift on WTQ-TS, which
+splits WTQ into ﬁve topics. We ﬁnetune OmniTab
+on one topic (128-shot) and test the resulting model
+on all ﬁve topics. As indicated by Tab. 6, OmniTab
+outperforms TAPEX by a large margin across all
+topics, validating the robustness of our methods
+under topical shift.
+5 Related Work
+Table-based QA is a well-studied area from early
+systems using structured queries as intermediate
+steps (Krishnamurthy et al., 2017; Liang et al.,
+2018; Wang et al., 2019; Yin et al., 2020; Yu et al.,
+2021) to recent advances that generate answers in
+an end2end fashion (Herzig et al., 2020; Liu et al.,
+2021). Our methods follow the end2end approach
+because of its modeling simplicity and higher ﬂex-
+ibility. Given large amounts of table and text on
+the web, table-based QA and other table-related
+tasks such as semantic parsing (Deng et al., 2021;
+Shi et al., 2021) and table understanding (Deng
+et al., 2020; Wang et al., 2021) start witnessing
+efforts invested in pretraining on both structured
+and unstructured information. Most works leverag-
+ing retrieval to ﬁnd relevant information to assist
+pretraining are designed for text format only (Guu
+et al., 2020; Lewis et al., 2020a), while the major-
+ity of table-based pretraining still use alignment
+heuristics (Herzig et al., 2020; Yin et al., 2020).
+There are some initial attempts to perform retrieval
+over tables (O ˘guz et al., 2020; Herzig et al., 2021;
+Ma et al., 2021), but they mainly use tables as an
+additional information source while we focus on
+pairing tables with text for pretraining.
+6 Conclusion
+We propose an omnivorous pretraining approach
+that consumes both natural and synthetic data to
+enhance the ability to understand and align text and
+tables and the ability to perform reasoning. Our
+extensive results demonstrate the effectiveness of
+both data and verify their complementary value.
+Our empirical results together with the case analy-
+sis indicate that omnivorous pretraining can indeed
+beneﬁt from the merits of both data, encouraging
+future advances in retrieval and synthesis to obtain
+higher-quality data and better pretraining strategies
+to combine heterogeneous data.
+Acknowledgments
+We thank Qian Liu and Pengcheng Yin for their
+insightful comments and suggestions.
+References940941942

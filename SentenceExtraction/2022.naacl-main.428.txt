@@ -1,1 +1,824 @@
-5840 Proceedings of the 2022 Conference of the North American Chapter of the Association for Computational Linguistics : Human Language Technologies , pages 5840 5857 July 10 - 15 , 2022 © 2022 Association for Computational Linguistics 5841 5842 5843 5844 5845 5846 5847 5848 5849 5850 5851 5852 5853 5854 5855 5856 5857 
+
+Yuanxin Liu, Fandong Meng, Zheng Lin,
+Peng Fu,Yanan Cao,Weiping Wang,Jie ZhouInstitute of Information Engineering, Chinese Academy of Sciences, Beijing, ChinaSchool of Cyber Security, University of Chinese Academy of Sciences, Beijing, ChinaPattern Recognition Center, WeChat AI, Tencent Inc, China ,
+Abstract
+Recent studies on the lottery ticket hypothesis
+(LTH) show that pre-trained language models
+(PLMs) like BERT contain matching subnet-
+works that have similar transfer learning per-
+formance as the original PLM. These subnet-
+works are found using magnitude-based prun-
+ing. In this paper, we find that the BERT sub-
+networks have even more potential than these
+studies have shown. Firstly, we discover that
+the success of magnitude pruning can be at-
+tributed to the preserved pre-training perfor-
+mance, which correlates with the downstream
+transferability. Inspired by this, we propose
+to directly optimize the subnetwork structure
+towards the pre-training objectives, which can
+better preserve the pre-training performance.
+Specifically, we train binary masks over model
+weights on the pre-training tasks, with the aim
+of preserving the universal transferability of
+the subnetwork, which is agnostic to any spe-
+cific downstream tasks. We then fine-tune the
+subnetworks on the GLUE benchmark and the
+SQuAD dataset. The results show that, com-
+pared with magnitude pruning, mask training
+can effectively find BERT subnetworks with
+improved overall performance on downstream
+tasks. Moreover, our method is also more ef-
+ficient in searching subnetworks and more ad-
+vantageous when fine-tuning within a certain
+range of data scarcity. Our code is available at
+https://github.com/llyx97/TAMT .
+1 Introduction
+The NLP community has witnessed a remarkable
+success of pre-trained language models (PLMs).
+After being pre-trained on unlabelled corpus in
+a self-supervised manner, PLMs like BERT (De-
+vlin et al., 2019) can be fine-tuned as a universal
+text encoder on a wide range of downstream tasks.Figure 1: Average downstream performance (left) and
+pre-training performance (right) of OMP and random
+subnetworks of BERT . See Appendix A.1 for the
+downstream results of each task.
+However, the growing performance of BERT is
+driven, to a large extent, by scaling up the model
+size, which hinders the fine-tuning and deployment
+of BERT in resource-constrained scenarios.
+At the same time, the lottery ticket hypothesis
+(LTH) (Frankle and Carbin, 2019) emerges as an
+active sub-field of model compression. The LTH
+states that randomly initialized dense networks con-
+tain sparse matching subnetworks , i.e., winning
+tickets (WTs), that can be trained in isolation to
+similar test accuracy as the full model. The original
+work of LTH and subsequent studies have demon-
+strated that such WTs do exist at random initial-
+ization or an early point of training (Frankle et al.,
+2019, 2020). This implicates that it is possible to
+reduce training and inference cost via LTH.
+Recently, Chen et al. (2020) extend the original
+LTH to the pre-training and fine-tuning paradigm,
+exploring the existence of matching subnetworks
+in pre-trained BERT. Such subnetworks are smaller
+in size, while they can preserve the universal trans-
+ferability of the full model. Encouragingly, Chen
+et al. (2020) demonstrate that BERT indeed con-
+tains matching subnetworks that are transferable to
+multiple downstream tasks without compromising
+accuracy. These subnetworks are found using itera-
+tive magnitude pruning (IMP) (Han et al., 2015) on
+the pre-training task of masked language modeling
+(MLM), or by directly compressing BERT with5840oneshot magnitude pruning (OMP), both of which
+are agnostic to any specific task.
+In this paper, we follow Chen et al. (2020) to
+study the question of LTH in BERT transfer learn-
+ing. We find that there is a correlation, to cer-
+tain extent, between the performance of a BERT
+subnetwork on the pre-training task (right after
+pruning), and its downstream performance (after
+fine-tuning). As shown by Fig. 1, the OMP sub-
+networks significantly outperform random subnet-
+works at 50% sparsity in terms of both MLM loss
+and downstream score. However, with the increase
+of model sparsity, the downstream performance and
+pre-training performance degrade simultaneously.
+This phenomenon suggests that we might be able
+to further improve the transferability of BERT sub-
+networks by discovering the structures that better
+preserve the pre-training performance.
+To this end, we propose to search transfer-
+able BERT subnetworks via Task-Agnostic Mask
+Training (TAMT), which learns selective binary
+masks over the model weights on pre-training
+tasks. In this way, the structure of a subnetwork
+is directly optimized towards the pre-training ob-
+jectives, which can preserve the pre-training per-
+formance better than heuristically retaining the
+weights with large magnitudes. The training ob-
+jective of the masks is a free choice, which can
+be designed as any loss functions that are agnostic
+to the downstream tasks. In particular, we inves-
+tigate the use of MLM loss and a loss based on
+knowledge distillation (KD) (Hinton et al., 2015).
+To examine the effectiveness of the proposal, we
+train the masks on the WikiText dataset (Merity
+et al., 2017) for language modeling and then fine-
+tune the searched subnetworks on a wide variety of
+downstream tasks, including the GLUE benchmark
+(Wang et al., 2019) for natural language understand-
+ing (NLU) and the SQuAD dataset (Rajpurkar et al.,
+2016) for question answering (QA). The empirical
+results show that, through mask training, we can in-
+deed find subnetworks with lower pre-training loss
+and better downstream transferability than OMP
+and IMP. Compared with IMP, which also involves
+training (the weights) on the pre-training task, mask
+training requires much fewer training iterations to
+reach the same performance. Moreover, the subnet-
+works found by mask training are generally more
+robust when being fine-tuned with reduced data, as
+long as the training data is not extremely scarce.
+In summary, our contributions are:•We find that the pre-training performance of
+a BERT subnetwork correlates with its down-
+stream transferability, which provides a useful
+insight for the design of methods to search
+transferable BERT subnetworks.
+•Based on the above finding, we propose to
+search subnetworks by learning binary masks
+over the weights of BERT, which can directly
+optimize the subnetwork structure towards the
+given pre-training objective.
+•Experiments on a variety of NLP tasks show
+that subnetworks found by mask training have
+better downstream performance than magni-
+tude pruning. This suggests that BERT subnet-
+works have more potential, in terms of univer-
+sal downstream transferability, than existing
+work has shown, which can facilitate our un-
+derstanding and application of LTH on BERT.
+2 Related Work
+2.1 The Lottery Ticket Hypothesis
+The lottery ticket hypothesis (Frankle and Carbin,
+2019) suggests the existence of matching subnet-
+works, at random initialization, that can be trained
+in isolation to reach the performance of the original
+network. However, the matching subnetworks are
+found using IMP, which typically requires more
+training cost than the full network. There are two
+remedies to overcome this problem: Morcos et al.
+(2019) proposed to transfer the WT structure from
+source tasks to related target tasks, so that no fur-
+ther searching is required for the target tasks. You
+et al. (2020) draw early-bird tickets (prune the orig-
+inal network) at an early stage of training, and only
+train the subnetwork from then on.
+Some recent works extend the LTH from random
+initialization to pre-trained initialization (Prasanna
+et al., 2020; Chen et al., 2020; Liang et al., 2021;
+Chen et al., 2021b). Particularly, Chen et al. (2020)
+find that WTs, i.e., subnetworks of the pre-trained
+BERT, derived from the pre-training task of MLM
+using IMP are universally transferable to the down-
+stream tasks. The same question of transferring
+WTs found in pre-training tasks is also explored
+in the CV field by Chen et al. (2021a); Caron et al.
+(2020). EarlyBERT (Chen et al., 2021b) investi-
+gates drawing early-bird tickets of BERT. In this
+work, we follow the question of transferring WTs
+and seek to further improve the transferability of
+BERT subnetworks.58412.2 BERT Compression
+In the literature of BERT compression, pruning
+(LeCun et al., 1989; Han et al., 2015) and KD
+(Hinton et al., 2015) are two widely-studied tech-
+niques. BERT can be pruned in either unstruc-
+tured (Gordon et al., 2020; Sanh et al., 2020; Mao
+et al., 2020) or structured (Michel et al., 2019; Hou
+et al., 2020) ways. Although unstructured pruning
+is not hardware-friendly for speedup purpose, it is
+a common setup in LTH, and some recent efforts
+have been made in sparse tensor acceleration (Elsen
+et al., 2020; Tambe et al., 2020). In BERT KD, var-
+ious knowledge are explored, which includes the
+soft-labels (Sanh et al., 2019), the hidden states
+(Sun et al., 2019; Hou et al., 2020; Liu et al., 2021)
+and the attention relations (Jiao et al., 2020), among
+others. Usually, pruning and KD are combined to
+compress the fine-tuned BERT. By contrast, the
+LTH compresses BERT before fine-tuning.
+Another way to obtain more efficient BERT with
+the same transferability as the original one is to pre-
+train a compact model from scratch. This model
+can be trained either with the MLM objective (Turc
+et al., 2019) or using pre-trained BERT as the
+teacher to perform KD (Wang et al., 2020a; Sun
+et al., 2020; Jiao et al., 2020). By contrast, the LTH
+extracts subnetworks from BERT, which is about
+exposing the knowledge already learned by BERT,
+rather than learning new knowledge from scratch.
+Compared with training a new PLM, the LTH in
+BERT is still underexplored in the literature.
+2.3 Learning Subnetwork Structure via
+Binary Mask Training
+To make the subnetwork structure trainable, we
+need to back-propagate gradients through the bi-
+nary masks. This can be achieved through the
+straight-through estimator (Bengio et al., 2013) or
+drawing the mask variables from a hard-concrete
+distribution (Louizos et al., 2018) and then using
+the re-parameterization trick. Mask training has
+been utilized in model compression (Wang et al.,
+2020b; Sanh et al., 2020), and parameter-efficient
+training (Mallya et al., 2018; Zhao et al., 2020;
+Radiya-Dixit and Wang, 2020). However, unlike
+these works that learn the mask for each task sep-
+arately ( task-specific ), we learn the subnetwork
+structure on pre-training task and transfer it to mul-
+tiple downstream tasks ( task-agnostic ).3 Methodology
+3.1 BERT Architecture
+BERT consists of an embedding layer and LTrans-
+former layers (Vaswani et al., 2017). Each Trans-
+former layer has two sub-layers: the self-attention
+layer and the feed-forward network (FFN).
+The self-attention layer contains Nparallel at-
+tention heads and each head can be formulated as:
+(1)
+where H∈Ris the input; dand|x|are
+the hidden size and the length of input x, respec-
+tively. W∈Rare the query, key
+and value matrices, and d=. In practice, the
+matrices for different heads will be combined into
+three large matrices W∈R. The out-
+puts of the Nheads are then concatenated and
+linearly projected by W∈Rto obtain
+the final output of the self-attention layer.
+The FFN consists of two weight matrices
+W∈R,W∈Rwith a GELU
+activation (Hendrycks and Gimpel, 2016) in be-
+tween, where dis the hidden dimension of FFN.
+Dropout (Srivastava et al., 2014), residual connec-
+tion (He et al., 2016) and layer normalization (Ba
+et al., 2016) are also applied following each sub-
+layer. Eventually, for each downstream task, a
+classifier is used to give the final prediction based
+on the output of the Transformer module.
+3.2 Subnetwork and Magnitude Pruning
+Consider a model f(·;θ)with weights θ, we can
+obtain its subnetwork f(·;M⊙θ)by applying
+a binary mask M∈ {0,1}toθ, where ⊙de-
+notes element-wise multiplication. In terms of
+BERT, we extract the subnetwork from the pre-
+trained weights θ. Specifically, we consider the
+matrices of the Transformer sub-layers and the
+word embedding matrix, i.e., θ={W} ∪/braceleftig
+W,W,W,W,W,W/bracerightig.
+Magnitude pruning (Han et al., 2015) is initially
+used to compress a trained neural network by set-
+ting the low-magnitude weights to zero. It can be
+conducted in two different ways: 1) Oneshot mag-
+nitude pruning (OMP) directly prunes the trained
+weights to target sparsity while 2) iterative mag-
+nitude pruning (IMP) performs pruning and re-
+training iteratively until reaching the target spar-5842
+sity. OMP and IMP are also widely studied in the
+literature of LTH as the method to find the match-
+ing subnetworks, with an additional operation of
+resetting the weights to initialization.
+3.3 Problem Formulation: Transfer BERT
+Subnetwork
+As depicted in Fig. 2, given Ndownstream tasks
+T={T}, the subnetwork f/parenleftig
+·;M⊙θ,C/parenrightig
+is fine-tuned on each task, together with the ran-
+domly initialized task-specific linear classifier C.
+We formulate the training algorithm for task Tas a
+function A/parenleftig
+f/parenleftig
+·;M⊙θ,C/parenrightig/parenrightig
+(e.g., Adam or
+SGD), which trains the model for tsteps and pro-
+duces f/parenleftig
+·;M⊙θ,C/parenrightig
+. After fine-tuning, the
+model is evaluated against the metric E(f(·;M⊙
+θ,C))(e.g., Accuracy or F1) for task T.
+In this work, we focus on finding a BERT subnet-
+work, that maximally preserves the overall down-
+stream performance given a particular sparsity S,
+especially at the sparsity that magnitude pruning
+performs poorly. This can be formalized as:
+max/parenleftigg
+1
+N/summationdisplayE/parenleftig
+A/parenleftig
+f/parenleftig
+·,M·θ,C/parenrightig/parenrightig/parenrightig/parenrightigg
+s.t.∥M∥
+|θ|= (1− S)
+(2)
+where∥M∥and|θ|are the Lnorm of the mask
+and the total number of model weights respectively.3.4 Task-agnostic Mask Training
+3.4.1 Mask Training with Binarization and
+Gradient Estimation
+In order to learn the binary masks, we adopt the
+technique for training binarized neural networks
+(Hubara et al., 2016), following Zhao et al. (2020);
+Mallya et al. (2018). This technique involves mask
+binarization in the forward pass and gradient esti-
+mation in the backward pass.
+As shown in Fig. 2, each weight matrix W∈
+Ris associated with a binary mask M∈
+{0,1}, which is derived from a real-valued
+matrix M∈Rvia binarization:
+M=/braceleftigg
+1ifM≥ϕ
+0otherwise(3)
+where ϕis the threshold that controls the sparsity.
+In the forward pass of a subnetwork, W⊙Mis
+used in replacement of the original weights W.
+Since Mare discrete variables, the gradient
+signals cannot be back-propagated through the bi-
+nary mask. We therefore use the straight-through
+estimator (Bengio et al., 2013) to approximate the
+gradients and update the real-valued mask:
+M←M−η∂L
+∂M(4)
+where Lis the loss function and ηis the learning
+rate. In other words, the gradients of Mis esti-
+mated using the gradients of M. In the process of
+mask training, all the original weights are frozen.58433.4.2 Mask Initialization and Sparsity Control
+The real-valued masks can be initialized in various
+forms, e.g., random initialization. Considering that
+magnitude pruning can preserve the pre-training
+knowledge to some extent, and OMP is easy to
+implement with almost zero computation cost, we
+directly initialize Musing OMP:
+M=/braceleftigg
+α×ϕifM = 1
+0 otherwise(5)
+where Mis the binary mask derived from
+OMP and α≥1is a hyper-parameter. In this way,
+the weights with large magnitudes will be retained
+at initialization according to Eq. 3, because the
+corresponding M=α×ϕ≥ϕ. In practice, we
+perform OMP over the weights locally based on
+the given sparsity, which means the magnitudes are
+ranked inside each weight matrix.
+AsMbeing updated, some of its entries with
+zero initialization will gradually surpass the thresh-
+old, and vice versa. If the threshold ϕis fixed
+throughout training, there is no guarantee that the
+binary mask will always satisfy the given sparsity.
+Therefore, we rank Maccording to their absolute
+values during mask training, and dynamically ad-
+just the threshold to satisfy the sparsity constraint.
+3.4.3 Mask Training Objectives
+We explore the use of two objectives for mask train-
+ing, namely the MLM loss and the KD loss.
+The MLM is the original task used in BERT pre-
+training. It randomly replaces a portion of the input
+tokens with the [MASK] token, and requires the
+model to reconstruct the original tokens based on
+the entire masked sequence. Concretely, the MLM
+objective is computed as cross-entropy loss on the
+predicted masked tokens. During MLM learning,
+we allow the token classifier (i.e., the Cin Fig.
+2) to be trainable, in addition to the masks.
+In KD, the compressed model (student) is trained
+with supervision from the original model (teacher).
+Under our framework of mask training, the train-
+ing signal can also be derived from the unpruned
+BERT. To this end, we design the KD objective by
+encouraging the subnetwork to mimic the represen-
+tations of the original BERT, which is shown to be
+a useful source of knowledge in BERT KD (Sun
+et al., 2019; Hou et al., 2020). Specifically, the dis-
+tillation loss is formulated as the cosine similarity
+between the teacher’s and student’s representations:L =1
+L|x|/summationdisplay/summationdisplay(1−cos/parenleftbig
+H,H/parenrightbig
+)(6)
+where His the hidden state of the itoken at the
+llayer; TandSdenote the teacher and student
+respectively; cos(·,·)is the cosine similarity.
+4 Experiments
+4.1 Experimental Setups
+4.1.1 Models
+We examine two PLMs from the BERT fam-
+ily, i.e., BERT (Devlin et al., 2019) and
+RoBERTa (Liu et al., 2019). They have basi-
+cally the same structure, while differ in the vocabu-
+lary size, which results in approximately 110M and
+125M parameters respectively. The main results
+of Section 4.2.1 study both two models. For the
+analytical studies, we only use BERT .
+4.1.2 Baselines, Datasets and Evaluation
+We compare our mask training method with IMP,
+OMP as well as subnetworks with random struc-
+tures. Following Chen et al. (2020), we use the
+MLM loss during IMP training. For TAMT, we con-
+sider three variants, namely TAMT-MLM that uses
+MLM as training objective, TAMT-KD that uses
+the KD objective (Eq. 6), and TAMT-MLM+KD
+that equally combines MLM and KD.
+We build our pre-training set using the WikiText-
+103 dataset (Merity et al., 2017) for language mod-
+eling. For downstream fine-tuning, we use six
+datasets, i.e., CoLA, SST-2, RTE, MNLI, MRPC
+and STS-B from the GLUE benchmark for NLU
+and the SQuAD v1.1 dataset for QA.
+Evaluations are conducted on the dev sets. For
+the downstream tasks, we follow the standard eval-
+uation metrics (Wang et al., 2019). For the pre-
+training tasks, we calculate the MLM and KD loss
+on the dev set of WikiText-103. More information
+about the datasets and evaluation metrics can be
+found in Appendix B.1.
+4.1.3 Implementation Details
+Both TAMT and IMP are conducted on the pre-
+training dataset. For mask training, we initialize
+the mask using OMP as described in Section 3.4.2.
+We also provide a comparison between OMP and
+random initialization in Section 4.2.4. The initial
+threshold ϕandαare set to 0.01and 2 respectively,5844
+which work well in our experiments. For IMP, we
+increase the sparsity by 10% every 1/10 of total
+training iterations, until reaching the target spar-
+sity, following Chen et al. (2020). Every pruning
+operation in IMP is followed by resetting the re-
+maining weights to θ. In the fine-tuning stage,
+all the subnetworks and the full PLMs are trained
+using the same set of hyper-parameters unless oth-
+erwise specified.
+For TAMT, IMP and random pruning, we gener-
+ate three subnetworks with different seeds, and the
+result of each subnetwork is also averaged across
+three runs, i.e., the result of every method is the
+average of nine runs in total. For OMP, we can
+only generate one subnetwork, which is fine-tuned
+across three runs. More implementation details and
+computing budgets can be found in Appendix B.2.
+4.2 Results and Analysis
+4.2.1 Main Results
+Fig. 3 and Fig. 4 present the downstream per-
+formance of BERT and RoBERTa subnetworks,respectively. We can derive the following observa-
+tions:
+There is a clear gap between random subnet-
+works and the other ones found with certain in-
+ductive bias. At 50% sparsity for BERT and 30%
+for RoBERTa, all the methods, except for “Rand”,
+maintain 90% of the full model’s overall perfor-
+mance. As sparsity grows, the OMP subnetworks
+degrade significantly. IMP, which is also based on
+magnitude, exhibits relatively mild declines.
+TAMT further outperforms IMP with perceiv-
+able margin. For BERT subnetworks, the per-
+formance of TAMT variants are close to each
+other, which have advantage over IMP across
+60%∼90% sparsity. When it comes to RoBERTa,
+the performance of TAMT-KD is undesirable at
+70%∼90% sparsity, which only slightly outper-
+forms IMP. In comparison, TAMT-MLM consis-
+tently surpasses IMP and TAMT-KD on RoBERTa.
+Combining MLM and KD leads to comparable
+average performance as TAMT-MLM for BERT,
+while slightly improves over TAMT-MLM for5845
+RoBERTa. This suggests that the two training ob-
+jectives could potentially benefit, or at least will not
+negatively impact each other. In Section 4.2.2, we
+will show that the MLM and KD objectives indeed
+exhibit certain consistency.
+At90% sparsity, all the methods perform poorly,
+with average scores approximately half of the
+full model. On certain tasks like CoLA, RTE
+and MRPC, drastic performance drop of all meth-
+ods can even be observed at lower sparsity (e.g.,
+60%∼80%). This is probably because the num-
+ber of training data is too scarce in these tasks for
+sparse PLMs to perform well. However, we find
+that the advantage of TAMT is more significant
+within a range of data scarsity, which will be dis-
+cussed in Section 4.2.6.
+We also note that RoBERTa, although outper-
+forms BERT as a full model, is more sensitive to
+task-agnostic pruning. A direct comparison be-
+tween the two PLMs is provided in Appendix A.2.
+4.2.2 The Effect of Pre-training Performance
+As we discussed in Section 1, our motivation of
+mask training is to improve downstream transfer-
+ability by preserving the pre-training performance.
+To examine whether the effectiveness of TAMT
+is indeed derived from the improvement on pre-
+training tasks, we calculate the MLM/KD dev loss
+for the subnetworks obtained from the mask train-
+ing process, and associate it with the downstream
+performance. The results are shown in Fig. 5,
+where the "Avg Score" includes CoLA, SST-2,
+MNLI, STS-B and SQuAD. In the following sec-
+tions, we also mainly focus on these five tasks. We
+can see from Fig. 5 that:There is a positive correlation between the pre-
+training and downstream performance, and this
+trend can be observed for subnetworks across differ-
+ent sparsities. Compared with random pruning, the
+magnitude pruning subnetworks and TAMT sub-
+networks reside in an area with lower MLM/KD
+loss and higher downstream score at 50% sparsity.
+As sparsity increases, OMP subnetworks gradually
+move from the upper-left to the lower-right area of
+the plots. In comparison, IMP is better at preserv-
+ing the pre-training performance, even though it
+is not deliberately designed for this purpose. For
+this reason, hypothetically, the downstream perfor-
+mance of IMP is also better than OMP.
+TAMT-MLM and TAMT-KD have the lowest
+MLM and KD loss respectively, which demon-
+strates that the masks are successfully optimized
+towards the given objectives. As a result, the down-
+stream performance is also elevated from the OMP
+initialization, which justifies our motivation. More-
+over, training the mask with KD loss can also op-
+timize the performance on MLM, and vice versa,
+suggesting that there exists some consistency be-
+tween the objectives of MLM and KD.
+It is also worth noting that the correlation be-
+tween pre-training and fine-tuning performance
+is not ubiquitous. For example, among the sub-
+networks of OMP, IMP and TAMT at 50% spar-
+sity, the decrease in KD/MLM loss produces little
+or no downstream improvement; at 60%∼80%
+sparsity, OMP underperforms random pruning in
+MLM, while its downstream performance is better.
+These phenomenons suggest that some properties
+about the BERT winning tickets are still not well-
+understood by us.5846
+4.2.3 The Effect of Pre-training Cost
+We have shown that mask training is more effec-
+tive than magnitude pruning. Now let us take a
+closer look at the results of TAMT and IMP with
+different iterations of pre-training, to evaluate their
+efficiency in subnetwork searching. For TAMT, we
+directly obtain the subnetworks from varied pre-
+training iterations. For IMP, we change the pruning
+frequency to control the number of training itera-
+tions before reaching the target sparsity.
+Fig. 6 presents the downstream results with in-
+creased pre-training iterations and time. We can
+see that for all the methods, the fine-tuning perfor-
+mance steadily improves as pre-training proceeds.
+Along this process, TAMT advances at a faster
+pace, reaching the best score achieved by IMP with
+8.4×fewer iterations and 8.7×fewer time. This
+indicates that directly optimizing the pre-training
+objectives is more efficient than the iterative pro-
+cess of weight pruning and re-training.
+4.2.4 The Effect of Mask Initialization
+In the main results, we use OMP as the default
+initialization, in order to provide a better start point
+for TAMT. To validate the efficacy of this setting,
+we compare OMP initialization with random ini-
+tialization. Concretely, we randomly sample some
+entries of the real-valued masks to be zero, accord-
+ing to the given sparsity, and use the same αandϕ
+for the non-zero entries as in Eq. 5.
+The results are shown in Fig. 7. We can see
+that, for random initialization, TAMT can still
+steadily improve the downstream performance as
+pre-training proceeds. However, the final results
+of TAMT-MLM/KD (Rand_init) are significantly
+worse than TAMT-MLM/KD, which demonstrates
+the necessity of using OMP as initialization.
+4.2.5 Similarity between Subnetworks
+The above results show that the subnetworks found
+by different methods perform differently. We are
+therefore interested to see how they differ in the
+mask structure. To this end, we compute the simi-
+larity between OMP mask and the masks derived
+during the training of TAMT and IMP. Follow-
+ing Chen et al. (2020), we measure the Jaccard
+similarity between two binary masks MandM
+as, and the mask distance is defined as
+1−.
+From the results of Fig. 8, we can find that:
+1) With different objectives, TAMT produces dif-
+ferent mask structures. The KD loss results in
+masks in the close proximity of OMP initialization,
+while the MLM masks deviate away from OMP. 2)
+Among the four methods, IMP and TAMT-MLM
+have the highest degree of dissimilarity, despite
+the fact that they both involve MLM training. 3)5847
+Although IMP, TAMT-KD and TAMT-MLM are
+different from each other in terms of subnetwork
+structure, all of them clearly improves over the
+OMP baseline. Therefore, we hyphothesize that
+the high-dimensional binary space {0,1}might
+contain multiple regions of winning tickets that are
+disjoint with each other. Searching methods with
+different inductive biases (e.g., mask training ver-
+sus pruning and KD loss versus MLM loss) are
+inclined to find different regions of interest.
+4.2.6 Results of Reducing Fine-tuning Data
+To test the fine-tuning results with reduced data,
+we select four tasks (CoLA, SST-2, MNLI and
+SQuAD) with the largest data sizes and shrink them
+from the entire training set to 1,000 samples.
+Fig. 9 summarizes the results of subnetworks
+found using different methods, as well as results of
+full BERT as a reference. We can see that the four
+datasets present different patterns. For MNLI and
+SQuAD, the advantage of TAMT first increases
+and then decreases with the reduction of data size.
+The turning point appears at around 10,000 sam-
+ples, after which the performance of all methods,
+including the full BERT, degrade drastically (note
+that the horizontal axis is in log scale). For SST-2,
+the performance gap is enlarged continuously until
+we have only 1,000 data. With regard to CoLA, the
+gap between TAMT and IMP shrinks as we reduce
+the data size, which is not desirable. However, a
+decrease in the gap between full BERT and IMP is
+also witnessed when the data size is reduced under5,000 samples. This is in part because the Mcc
+of IMP is already quite low even with the entire
+training set, and thus the performance decrease of
+IMP is limited compared with TAMT. However, the
+results on CoLA, as well as the results on MNLI
+and SQuAD with less than 10,000 samples, also
+suggest an inherent difficulty of learning with lim-
+ited data for subnetworks at high sparsity, which is
+also discussed in the main results.
+5 Conclusions
+In this paper, we address the problem of searching
+transferable BERT subnetworks. We first show that
+there exist correlations between the pre-training
+performance and downstream transferablility of a
+subnetwork. Motivated by this, we devise a sub-
+network searching method based on task-agnostic
+mask training (TAMT). We empirically show that
+TAMT with MLM loss or KD loss achieve better
+pre-training and downstream performance than the
+magnitude pruning, which is recently shown to be
+successful in finding universal BERT subnetworks.
+TAMT is also more efficient in mask searching
+and produces more robust subnetworks when being
+fine-tuned within a certain range of data scarsity.
+6 Limitations and Future Work
+Under the framework of TAMT, there are still
+some unsolved challenges and interesting questions
+worth studying in the future work: First, we fo-
+cus on unstructured sparsity in this work, which is
+hardware-unfriendly for speedup purpose. In fu-
+ture work, we are interested in investigating TAMT
+with structured pruning or applying unstructured
+BERT subnetworks on hardware platforms that sup-
+port sparse tensor acceleration (Elsen et al., 2020;
+Tambe et al., 2020). Second, despite the overall
+improvement achieved by TAMT, it fails at extreme
+sparsity or when the labeled data for a task is too
+scarce. Therefore, another future direction is to
+further promote the performance of universal PLM
+subnetworks on these challenging circumstances.
+To achieve this goal, thirdly, a feasible way is to
+explore other task-agnostic training objectives for
+TAMT beyond MLM and hidden state KD, e.g.,
+self-attention KD (Jiao et al., 2020) and contrastive
+learning (Gao et al., 2021). An in-depth study on
+the selection of TAMT training objective might fur-
+ther advance our understanding of TAMT and the
+LTH of BERT.5848Acknowledgments
+This work was supported by the National Nat-
+ural Science Foundation of China under Grants
+61976207 and 61906187.
+References58495850
+A More Results and Analysis
+A.1 Single Task Downstream Performance of
+OMP and Random Pruning
+In Fig. 1 of the main body of paper, we show
+that the pre-training and overall downstream perfor-
+mance of OMP, as well as the gap between “OMP"
+and “Rand", degrade simultaneously as sparsity in-
+creases. The detailed results of each downstream
+task are presented in Fig. 10. As we can see,
+the general pattern for every task is similar, with
+the exception that the gap between “OMP" and
+“Rand" slightly increases before high sparsity on
+tasks RTE, MNLI and SQuAD.
+A.2 Comparison Between BERT and
+RoBERTa Subnetworks
+In the main results of Fig. 3 and Fig. 4, we com-
+pare the fine-tuning performance of subnetworks
+of the same PLM but found using different meth-
+ods. In this section, we give a comparison between
+subnetwords of BERT andRoBERTa .
+As shown in Fig. 11, RoBERTa consistently outper-
+forms BERT as a full model. However, as we prune
+the pre-trained weights accroding to the magni-
+tudes, the performance of RoBERTa declines more
+sharply than BERT, leading to worse results of
+RoBERTa subnetworks when crossing a certain
+sparsity threshold. This phenomenon suggests that,
+compared with BERT, RoBERTa is less robust to
+task-agnostic magnitude pruning. More empirical
+and theoretical analysis are required to understand
+the underlying reasons.A.3 Pre-training Performance and Single
+Task Downstream Performance
+The relation between pre-training performance and
+overall downstream performance is illustrated in
+Fig. 5. Here in this appendix, we provide the
+detailed results about each single downstream task,
+as shown in Fig. 12 and Fig. 13. As we can see,
+the pattern in each single task is general the same
+as we discussed in Section 4.2.2. When the model
+sparsity is higher than 50%, TAMT promotes the
+performance of OMP in terms of both pre-training
+tasks and downstream tasks, and improves over
+IMP with perceivable margin. As shown in Fig.
+3 and Fig. 4 of the main paper, both IMP and
+TAMT display no obvious improvement over OMP
+on MRPC and RTE (but no degradation as well).
+Therefore, we do not report the comparison on
+these two datasets.
+A.4 Pre-training Iteration and Single Task
+Downstream Performance
+In Fig. 6, we show the overall downstream perfor-
+mance at 70% sparsity with the increase of mask
+training iterations. Here, we report the results of
+each single downstream task from 60%∼80%
+sparsities, which are shown in Fig. 14, Fig. 15
+and Fig. 16. We can see that: 1) The single task
+performance of both TAMT-MLM and TAMT-KD
+grows faster than IMP at 60% and70% sparsity,
+with the only exception of STS-B, where TAMT-
+MLM and IMP are comparable in the early stage of
+pre-training. 2) The MLM and KD objectives are
+good at different sparsity levels and different tasks.
+TAMT-KD performs the best at 60% sparsity, sur-5851
+passing TAMT-MLM on all the five tasks. In con-
+trast, TAMT-MLM is better at higher sparsities. 3)
+At80% sparsity, the searching efficiency of the KD
+objective is not desirable, which requires more pre-
+training steps to outperform IMP on CoLA, STS-B,
+SQuAD and the overall performance. However, the
+advantage of TAMT-MLM is still obvious at 80%
+sparsity.
+A.5 Subnetwork Similarity at Different
+Sparsities
+In Section 4.2.5, we analyse the similarity between
+subnetworks at 70% sparsity. In Fig. 17, we
+present additional results of subnetworks at differ-
+ent sparsities. We can see that the general pattern,
+as discussed in Section 4.2.5, is the same across
+60%,70% and80% sparsities. However, as spar-
+sity grows, different searching methods becomes
+more distinct from each other. For instance, the
+similarity between TAMT-MLM and IMP subnet-
+works decreases from 0.75 at 60% sparsity to less
+than 0.6 at 80% sparsity. This is understandable
+because the higher the sparsity, the lower the prob-
+ability that two subnetworks will share the same
+weight.
+B More Information about Experimental
+Setups
+B.1 Datasets and Evaluation
+For pre-training, we adopt the WikiText-103
+datasetfor language modeling. WikiText-103is a collection of articles on Wikipedia and has
+over 100M tokens. Such data scale is relatively
+small for PLM pre-training. However, we find that
+it is sufficient for mask training and IMP to dis-
+cover subnetworks with perceivable downstream
+improvement.
+For the downstream tasks, we use six datasets
+from the GLUE benchmark and the SQuAD v1.1
+dataset. The GLUE benchmark is intended to
+train, evaluate, and analyze NLU systems. Our ex-
+periments include the tasks of CoLA for linguistic
+acceptability, SST-2 for sentiment analysis, RTE
+and MNLI for natural language inference, MRPC
+and STS-B for semantic matching/similarity. The
+SQuAD dataset is for the task of question answer-
+ing. It consists of questions posed by crowdworkers
+on a set of Wikipedia articles. Tab. 1 summarizes
+the dataset statistics and evaluation metrics. All the
+datasets are in English language.
+B.2 Implementation Details
+The hyper-parameters for pre-training and fine-
+tuning are shown in Tab. 1. The pre-training setups
+of IMP basically follow (Chen et al., 2020), ex-
+cept for the number of training epochs, because we
+use different pre-training datasets. Since we aim
+at finding universal PLM subnetworks that are ag-
+nostic to the downstream tasks, we do notperform
+hyper-parameter search for TAMT based on the
+downstream performance. The pre-training hyper-5852
+parameters in Tab. 1 are determined as they can
+guarantee stable convergence on the pre-training
+tasks.
+For fair comparison between TAMT and IMP,
+we control the number of pre-training iterations
+(i.e., the number of gradient descent steps) to be
+the same. Considering that the IMP subnetworks
+of different sparsities are obtained from different
+pre-training iterations, we adjust the pre-training
+iterations of TAMT accordingly. Specifically, we
+set the maximum number of pre-training epochs to
+2 for IMP, which equals to 27.92K training itera-
+tions. Thus, the sparsity is increased by 10% every
+2.792K iterations. Tab. 2 shows the number of pre-
+training iterations for IMP and TAMT subnetworks
+at20%∼90% sparsity. Note that the final training
+iteration does not equal to 27.92K at 100% sparsity
+according to Tab. 2. This is because we prune to
+10% sparsity at the 0iteration, which follows the
+implementation of Chen et al. (2020).
+The hyper-parameters for downstream fine-
+tuning follow the standard setups of (Wolf et al.,
+2020; Chen et al., 2020). We use the same set of
+hyper-parameters for all the subnetworks, as well
+as the full models. We perform evaluations dur-
+ing the fine-tuning process, and the best result is
+reported as the downstream performance.
+Training and evaluation are implemented on
+Nvidia V100 GPU. The codes are based on the
+Pytorch frameworkand the huggingface Trans-
+formers library(Wolf et al., 2020). Tab. 3 shows
+the pre-training time of IMP and TAMT.58535854585558565857

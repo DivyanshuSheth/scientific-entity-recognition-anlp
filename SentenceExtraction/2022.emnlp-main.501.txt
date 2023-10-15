@@ -1,1 +1,594 @@
-7403 Proceedings of the 2022 Conference on Empirical Methods in Natural Language Processing , pages 7403 7416 December 7 - 11 , 2022 © 2022 Association for Computational Linguistics 7404 7405 7406 7407 7408 7409 7410 7411 7412 7413 7414 7415 7416 
+
+Alexis RossMatthew E. PetersAna Marasovi ´cMassachusetts Institute of Technology, Cambridge, MA, USAAllen Institute for AI, Seattle, WA, USAUniversity of Utah, Salt Lake City, UT, USA
+alexisro@mit.edu matthewp@allenai.org ana.marasovic@utah.edu
+Abstract
+Rationalization is fundamental to human rea-
+soning and learning. NLP models trained
+to produce rationales along with predictions,
+called self-rationalization models, have been
+investigated for their interpretability and util-
+ity to end-users. However, the extent to which
+training with human-written rationales facili-
+tates learning remains an under-explored ques-
+tion. We ask whether training models to self-
+rationalize can aid in their learning to solve
+tasks for the right reasons . Speciﬁcally, we
+evaluate how training self-rationalization mod-
+els with free-text rationales affects robustness
+to spurious correlations in ﬁne-tuned encoder-
+decoder and decoder-only models of six dif-
+ferent sizes. We evaluate robustness to spu-
+rious correlations by measuring performance
+on 1) manually annotated challenge datasets
+and 2) subsets of original test sets where re-
+liance on spurious correlations would fail to
+produce correct answers. We ﬁnd that while
+self-rationalization can improve robustness to
+spurious correlations in low-resource settings,
+it tends to hurt robustness in higher-resource
+settings. Furthermore, these effects depend
+on model family and size, as well as on ratio-
+nale content. Together, our results suggest that
+explainability can come at the cost of robust-
+ness; thus, appropriate care should be taken
+when training self-rationalizing models with
+the goal of creating more trustworthy models.
+1 Introduction
+Rationalization—the process of explaining the rea-
+soning used to come to a particular decision—plays
+a pivotal role in human inference and learning
+(Lombrozo, 2016). For these reasons, there has
+been a growing interest in producing NLP mod-els that can output rationalesfor their predic-
+tions. Models that output such rationales have mul-
+tiple beneﬁts: First, they are more interpretable
+and easier to interact with for end-users than non-
+rationalizing models (Alvarez-Melis and Jaakkola,
+2018). Second, such intermediate rationalization
+can offer learning beneﬁts, such as achieving com-
+parable performance with less data and improving
+out-of-distribution generalization (Nye et al., 2021;
+Wei et al., 2022; Zelikman et al., 2022).
+However, the question of whether training mod-
+els to rationalize can help them learn how to solve
+tasks for the right reasons remains open. In par-
+ticular, rationales encode information about the
+underlying reasoning humans use to reach answers,
+which raises the question: Does incorporating such
+rationales into training allow models to rely on
+human-aligned reasoning rather than spurious fea-
+ture interactions? If so, training with rationales
+could offer a pathway towards creating more ro-
+bust, trustworthy, or cognitively plausible models.
+In this work, we explore this question by empir-
+ically investigating whether training models with
+human-written rationales can help make them more
+robust to spurious correlations in data. We ana-
+lyze a class of models called self-rationalization
+models—which jointly output free-text rationales
+along with predictions—and focus speciﬁcally on
+the ﬁne-tuning setting, in which prior work has
+found reliance on spurious correlations to emerge
+(Utama et al., 2021).
+We evaluate six models of varying architectures
+and sizes across two tasks, natural language infer-
+ence and commonsense question answering. Our
+main results are as follows:
+1.While the effects of training with rationales
+are model- and task-speciﬁc, when it improves
+robustness to spurious correlations, it tends7403to be in lower-resource settings. In higher-
+resource settings, training with rationales can
+hurt robustness (§4.1).
+2.Within model families, larger models beneﬁt
+more in robustness from rationales (§4.2).
+3.The effects of self-rationalization on robust-
+ness are not fully explained by its effects on
+in-domain task performance (§4.3).
+4.The content of rationales used during training
+inﬂuences both task performance and robust-
+ness to spurious correlations (§4.4).
+Our results suggest that straightforward self-
+rationalization training does not always facilitate
+learning to solve a task for the right reasons. In-
+stead, the effects of self-rationalization on robust-
+ness to spurious correlations depend on a multitude
+of factors. Thus, appropriate care should be taken
+when training models to self-rationalize for the goal
+of creating trustworthy models.
+2 Related Work
+Learning to rationalize Two classes of ap-
+proaches to producing models that can rational-
+ize their predictions include self-rationalization
+models,which are fully differentiable and out-
+put free-text rationales along with task predic-
+tions, and pipeline models, which consist of two
+components—one that produces rationales, and a
+second that makes predictions from those rationales
+(Wiegreffe et al., 2021).Such methods are typi-
+cally evaluated by the faithfulness andplausibility
+of their rationales, where faithfulness represents
+the extent to which a model actually relied on the
+rationale in making its prediction, and plausibility
+indicates human judgment of how well the ratio-
+nale explains the output (DeYoung et al., 2020).
+In contrast to these works which aim to im-
+prove model interpretability through new methods
+for rationalizing models, we ask to what extent
+existing methods affect model robustness to spu-
+rious correlations. We conduct our analysis on
+self-rationalization models, which have been found
+to achieve better task performance and produce
+higher-quality rationales than do pipeline models
+(Wiegreffe et al., 2021; Camburu et al., 2018).Learning from rationales Recent work has ex-
+plored the utility of rationales for improving end-
+task performance in in-context learning (Wei et al.,
+2022; Lampinen et al., 2022; Ye and Durrett, 2022)
+as well as in ﬁne-tuning (Zaidan et al., 2007; Han-
+cock et al., 2018; Camburu et al., 2018; Narang
+et al., 2020; Hase and Bansal, 2021; Nye et al.,
+2021; Zhao and Vydiswaran, 2021). Previous work
+has shown that training with both human-annotated
+rationales (Rajani et al., 2019) and rationales gen-
+erated by language models (Paranjape et al., 2021)
+can increase in-domain task performance, partic-
+ularly in low-resource settings (Bhat et al., 2021;
+Pruthi et al., 2022; Zelikman et al., 2022). Unlike
+these prior works, which study how training with
+rationales affects in-domain, end-task performance,
+we focus speciﬁcally on evaluating impact on ro-
+bustness to spurious correlations.
+Improving robustness with rationales Most
+closely related are recent works that study how
+training with rationales affects model robustness.
+Stacey et al. (2022) propose a method of supervis-
+ing attention weights with extractive rationales and
+show that this method leads to both in-distribution
+and out-of-distribution improvements for natural
+language inference. Schuster et al. (2021) ﬁnd that
+training with contrastive extractive rationales im-
+proves robustness as measured by performance on
+adversarial evaluation sets. Concurrent work by
+Chen et al. (2022) investigates to what extent train-
+ing models to extract rationales through pipelines
+improves their robustness to adversarial attacks.
+In contrast to all three of these works, we focus
+on freeform rationales instead of extractive ratio-
+nales and explore the impact of amount of training
+data on robustness. In contrast to Schuster et al.
+(2021) and Chen et al. (2022), we analyze self-
+rationalization models instead of pipeline models
+and measure robustness to spurious correlations,
+rather than robustness to adversarial attacks. While
+Stacey et al. (2022) evaluate robustness to spurious
+correlations for natural language inference with
+some of the same test sets, they work with masked
+language models and evaluate the effect of super-
+vising model attention with rationales; in contrast,
+we work with encoder-decoder and decoder-only
+models of varying sizes and evaluate the effect of
+outputting rationales along with predictions. In ad-
+dition, their analysis is limited to natural language
+inference, for which evaluation datasets targeting
+robustness exist; in contrast, we also experiment7404with commonsense question answering through
+new methods for evaluating robustness. In §4.1,
+we discuss the variance in results across different
+tasks and highlight the importance of cross-task
+evaluation.
+3 Experiments
+3.1 Experimental Set-Up
+Models We experiment with encoder-decoder
+and decoder-only models of varying sizes ranging
+from 140 to 774 million parameters, as shown in
+Figures 1 and 2. Our encoder-decoder models build
+on pretrained T5(Raffel et al., 2020) and B
+models (Lewis et al., 2020), and our decoder-only
+models build on pretrained G2(Radford et al.,
+2019) models. Our T5models build speciﬁcally on
+the versions trained for an additional 100K steps on
+the language modeling objective after pretraining
+(Lester et al., 2021), as we aim to measure how
+the amount of training data impacts results, and the
+default T5models have already been ﬁne-tuned on
+the full Straining dataset.
+Tasks We evaluate self-rationalization models
+on two tasks— natural language inference (N),
+andcommonsense question answering (C)—
+for which human-annotated rationales already ex-
+ist. For N, we train task models on S(Bow-
+man et al., 2015) and obtain rationales fromS
+(Camburu et al., 2018). For C, we train task
+models on C(Talmor et al., 2019) and obtain
+rationales from E (Aggarwal et al., 2021). Ex-
+amples of inputs and outputs for both tasks are
+shown in Table 2. For C, unless otherwise spec-
+iﬁed, we train on the “positive” freeform rationales
+inE, which explain why the gold answer is
+the correct answer for a given question. In §4.4,
+we explore the impact of training with the different
+forms of rationales shown in Table 2.
+Rationales For each task, we compare a baseline
+model trained solely to predict task labels with
+models trained to also self-rationalize. All self-
+rationalization models are trained to generate a
+rationale following the task label, as previous work
+has found that outputting rationales conditioned on
+labels leads to better performance than outputtinglabels conditioned on rationales in the ﬁne-tuning
+setting (Schuff et al., 2021).
+Data We experiment with different numbers of
+training examples n, as we seek to understood how
+training data size inﬂuences the impact of self-
+rationalization training on robustness to spurious
+correlations. We experiment with n∈{1K, 2.5K,
+5K, 10K, 50K, 100K} for Nandn∈{1K, 5K,
+7598} for C.For each training data amount n,
+we create validation data for checkpointing mod-
+els by randomly sampling n/2instances from the
+original task-only validation dataset, such that we
+perform model selection based on task performance
+across baseline and self-rationalization models. For
+self-rationalization models, we create training data
+by concatenating original task-only training input-
+output pairs with their rationale-extended counter-
+parts, such that we have 2ntraining inputs obtained
+fromnoriginal instances.
+Training For each amount of training data n, we
+report the average difference between task-only
+and self-rationalization models across multiple ran-
+dom seeds (5 for Nand 10 for C).For one
+random seed in each evaluation setting (where a set-
+ting is determined by the task, model family, model
+size, whether rationales are used, and amount of
+training data), we tune the learning rate from pos-
+sible values [1e−5,3e−5,5e−5]and use the best-
+performing learning rate for other random seeds in
+the same setting. We train with ﬁxed batch size 64
+and linear learning rate scheduler using Adafactor
+until accuracy on the validation data stops decreas-
+ing, or for a maximum of 50 epochs. We use pa-
+tience values of 10forn < 10K, 5forn >=10K,
+and3forn >=50K.
+Evaluation We decode predictions using greedy
+decoding and evaluate accuracy using exact match
+with gold labels. We evaluate robustness to spuri-
+ous correlations by measuring performance on 1)
+manually annotated challenge datasets and 2) sub-
+sets of original test sets where reliance on spurious7405correlations would fail to produce correct answers.
+Both methods are discussed below in §3.2.
+3.2 Evaluating Reliance on Spurious
+Features
+Out-of-domain challenge datasets Our ﬁrst
+method of evaluating reliance on spurious cor-
+relations leverages out-of-domain evaluation sets
+designed by experts to test for reliance on spu-
+rious features. For N, we evaluate on HANS
+(McCoy et al., 2019) and CAD (Kaushik et al.,
+2021). HANS is a controlled evaluation dataset
+that tests for reliance on surface-level syntactic bi-
+ases present in S.CAD is an evaluation dataset
+with human-annotated edits to inputs that change
+entailment labels. To the best of our knowledge,
+such evaluation datasets do not exist for C.
+C N
+“Hard” subsets of original evaluation data To
+directly test for reliance on spurious correlations
+without introducing additional domain shifts, we
+also subset the original task test sets into subsets of
+varying difﬁculty, where difﬁculty is measured by
+the success of spurious heuristics: “Easy” subsets
+include instances for which heuristics that build on
+spurious correlations in training data would lead
+to correct predictions, and “hard” subsets include
+instances where such spurious heuristics would fail.
+To create these “easy” and “hard” subsets, we
+build on the statistical framework for uncovering
+dataset-level artifacts introduced by Gardner et al.
+(2021). Speciﬁcally, we measure correlation be-
+tween features and outputs across the Cand
+Straining datasets and consider as artifacts any
+features showing statistically signiﬁcant correla-
+tion, i.e.,with z-statistic >2.
+ForS, we consider tokens in inputs as fea-tures, as well as lexical overlap between premise
+and hypothesis. Following previous work (Wu
+et al., 2022), we consider an input to have high
+lexical overlap if the ratio of tokens in the hypoth-
+esis that are also present in the premise is at least
+0.8. We use classiﬁcation labels as outputs. For
+C, the feature and output spaces are less clearly
+deﬁned, as it contains different output choices for
+each input. We take tokens in answer choices to
+be features and whether or not those tokens are
+present in the gold answers as outputs. To remove
+features that are very frequent or infrequent, we
+ﬁlter features that appear less than 10 or more than
+200K times for Sand less than 5 or more than
+10K times for C. Table 1 displays the 10 fea-
+tures with highest z-statistics for the CandS
+training sets.
+We subset the original CandNtest sets
+based on whether artifacts appear with the same
+output they showed statistically signiﬁcant corre-
+lations with in the training datasets. T-H
+contains instances for which relying solely on ar-
+tifacts to make predictions would fail to produce
+correct predictions ( i.e.,artifacts appear with a dif-
+ferent output than they are correlated with), and
+T-E contains instances for which relying
+on artifacts would lead to correct predictions.For
+example, a Ctest instance for which an incor-
+rect answer choice had token “fountain” would be
+considered “hard,” as “fountain” has statistically
+signiﬁcant correlation with being in the correct an-
+swer choice (Table 1). The sizes of T-E
+andT-H are 76/333 respectively for N
+and 82/372 for C. In addition to reporting per-
+formance values for these subsets, we measure the
+spread in performance on hard vs. easy subsets,
+i.e.,T-ET-H, which we refer
+to as ∆T-S . We take a lower value
+of∆T-S to indicate less reliance on
+artifacts.ForN, we also evaluate on T-7406
+H, a subset of the Stest set for which a
+hypothesis-only classiﬁer was found to give incor-
+rect predictions (Gururangan et al., 2018).
+4 Results
+Figures 1 and 2 show, for NandCrespec-
+tively, the effects of self-rationalization across mul-
+tiple random seeds. Plotted are mean differences
+between self-rationalization models and baselinetask-only models ( i.e.,self-rationalizationbase-
+line) across six models (columns) and varying
+amounts of training data (x axis). Improvements
+onT(row 1) reﬂect in-domain, task improve-
+ments, while improvements on other metrics (rows
+> 1) indicate robustness improvements.
+4.1 Main Results
+As shown in Figure 1, under our evaluation of
+robustness to spurious correlations, we observe
+that self-rationalization improves the robustness
+ofB- and G2-based Nmodels in lower
+resource data settings. In higher resource set-
+tings, we observe a degradation in some robust-
+ness metrics, namely performance on T-H
+&T-H and∆T-S for all mod-
+els except B-L . For B-B, this
+degradation in higher-resource settings is also seen
+for performance on HANS . The T5models ( T5-
+B &T5-L ) show more mixed results:
+While self-rationalization hurts performance on7407
+HANS for both T5-B andT5-L in all
+data regimes, it improves performance on some
+metrics, i.e.,∆T-S in higher-resource
+settings (n>=5k) for T5-L .
+ForC(Figure 2), results are more mixed, and
+they depend on model properties, i.e.,architecture
+and size, as well as size of the training data. For
+B andG2models of size L , training
+with rationales generally leads to improvements.
+For models smaller than size L , as well as
+both T5models, the effect of training with ratio-
+nales depends on the amount of training data, but
+rationales tend to hurt robustness in higher-resource
+settings (7.6K training examples) for these models.
+These general trends are similar to those for N,
+with more improvements from self-rationalization
+in lower-resource settings and some degradation in
+higher-resource settings. However, unlike for N,
+the results are not always monotonic in the amount
+of training data, particularly for B-B and
+G2-M on∆T-S . In addition,
+forG2-L , results on ∆T-S
+improve with increasing data size, opposite to thegeneral trend. Furthermore, improvements in T-
+H are similar to standard errors, except for
+T5-B and n=1K, suggesting that even in low-
+resource settings, self-rationalization does not no-
+tably improve robustness for C.
+The varied results for Cand lack of consis-
+tency between NandCmay be inﬂuenced by
+the differing numbers of artifacts in the datasets;
+in particular, perhaps self-rationalization training
+has a larger effect on robustness to spurious corre-
+lations when there are more spurious correlations
+in the training data (as in Sbut not E). We
+leave it to future work to investigate the impact
+of artifacts in training data on effect of rationales.
+The differences between NandCalso sug-
+gest that evaluations solely based on Nmay not
+cleanly transfer to other tasks; this ﬁnding provides
+further evidence that the beneﬁts of rationales are
+task-dependent (Carton et al., 2020; Palaskar et al.,
+2022) and that evaluations on one task such as N
+alone are not comprehensive enough to draw gen-
+eral conclusions about the utility of rationales.
+4.2 Effect of Model Size
+ForN, for the G2andB models, we ﬁnd
+that increasing model size leads to increasing gains
+in robustness: Self-rationalization leads to larger
+improvements in robustness for B-L than
+forB-B, and similarly for G2-L
+andG2-M (except for when n=2.5K);7408
+furthermore, we do not observe the same degra-
+dation in robustness for B-L in higher-
+resource settings that we observe for B-B.
+For the T5models, self-rationalization generally
+leads to less degradation in robustness for T5-
+L than for T5-B. For C, we observe
+a similar trend: self-rationalization generally leads
+to larger improvements in robustness for B-
+L than for B-B, for G2-L
+than for G2-M , and for T5-L than
+for T5-B (except for when n=1K).
+Thus, our results suggest that, within model fam-
+ilies, increasing model size may improve effects on
+robustness from training with rationales. Previous
+work has shown that rationales improve in-domain
+performance only for larger models, in both ﬁne-
+tuning (Nye et al., 2021) and in-context learning
+(Wei et al., 2022; Lampinen et al., 2022); our re-
+sults can be seen as an extension of this ﬁnding
+to the effects of training with rationales on robust-
+ness. It is worth noting that the trends we observeappear to be speciﬁc to model families, i.e.,increas-
+ing model size has no noticeable effect when not
+conditioning on model family.
+4.3 Correlation between robustness metrics
+To determine how results on different robustness
+metrics relate to each other, we compute their cor-
+relations. These correlations should indicate how
+much insight we can get into the overall impact of
+self-rationalization on a model’s robustness by only
+looking at select metrics. For each pair of metrics
+in Figure 1, we aggregate the differences in per-
+formance between baseline and self-rationalization
+performance on those metrics in all evaluation set-
+tings ( e.g., model type, training data size), and
+compute the Pearson Correlation of these values.
+As shown in Figure 3, results on the “hard” sub-
+sets of original test data ( T-H &T-
+H) are overall correlated with the results on out-
+of-domain challenge datasets; the lowest correla-
+tion we observe for these subsets is between T-7409
+HandHANS , with Pearson coefﬁcient 0.449.
+Furthermore, CAD andHANS , the manually an-
+notated challenge sets, show low correlation with
+each other, with a Pearson coefﬁcient of 0.271, sug-
+gesting that out-of-domain performance does not
+straightforwardly reﬂect all aspects of robustness.
+We also observe that in-domain test performance is
+not always highly correlated with robustness met-
+rics, with Pearson coefﬁcient magnitudes as low as
+0.496; this result suggests that difference in test per-
+formance is not entirely predictive of the effect of
+self-rationalization on robustness. In other words,
+training with rationales has effects on robustness
+that go beyond facilitating or hurting in-domain
+task performance.
+4.4 Effect of rationale content
+Shufﬂed explanations One hypothesis for why
+training models to output rationales in addition to
+predictions may improve robustness is that it serves
+as a form of regularization; under this hypothesis,
+training to output even rationales with low explana-
+tory power might improve robustness to spurious
+correlations by reducing overﬁtting.
+To determine to what extent rationale content
+inﬂuences effects on robustness, we experiment
+with shufﬂing rationales during training such that
+the rationale for a given input no longer explains
+that input. Results from training B-L
+with shufﬂed rationales for Nare shown in Ta-
+ble 3. We also report results for B-B,
+G2-M , and T5-L , which follow
+a similar trend, in Table 5 in the Appendix. We ﬁnd
+that, as expected, training with shufﬂed rationales
+leads to worse robustness compared to training withoriginal rationales, except on HANS.
+Different E rationales We also experiment
+with training B-L with the different ratio-
+nale types in the E dataset, depicted in Table 2.
+Results for B-B,G2-M , and T5-
+L , which follow a similar trend, are shown in
+Table 6 in the Appendix.
+“Positive” rationales explain why the gold an-
+swer is correct for a given question, “negative” ra-
+tionales explain why other choices are incorrect,
+and “freeﬂow” rationales combine positive and neg-
+ative rationales into a coherent and free-ﬂowing
+paragraph and thus constitute freeform contrastive
+rationales.As shown in Table 4, training with
+1K positive rationales improves performance on
+both T&T-H and decreases ∆T-
+S . In contrast, training with 1K negative
+or freeﬂow rationales hurts performance on T
+&T-H. We also observe that training with
+freeﬂow rationales generally leads to worse results
+than positive rationales and better results than neg-
+ative rationales. In contrast to prior ﬁndings on the
+beneﬁts of contrastive rationales (Paranjape et al.,
+2021; Schuster et al., 2021), our results suggest that
+contrastive rationales do not always provide more
+learning beneﬁts than non-contrastive rationales,
+given that training with freeﬂow rationales hurts
+robustness compare to the non-contrastive positive
+rationales.
+A possible explanation for the differences in ef-
+fects from training with these different rationale
+types is their varying lengths. As shown in Table 2,
+negative and freeﬂow rationales are longer than
+positive rationales.To rule out this explanation,
+we also train B-L with length-controlled
+negative and freeﬂow rationales, in which we trun-
+cate their lengths to 96 tokens, the maximum length
+used to train with positive rationales. As shown in
+Table 4, we still observe degradation in both task
+performance and robustness when using negative
+or freeﬂow rationales rather than positive rationales.
+These consistent results suggest that rationale con-
+tent, rather than length, indeed inﬂuences learning.
+Another possible explanation for these varied
+effects is that the topical relevance of rationales
+to gold labels may inﬂuence their utility in train-
+ing. Positive rationales, as explanations of gold7410
+answers, are more topically related to gold answers
+than negative rationales, while freeﬂow rationales
+have topical relevance between those of positive
+and negative rationales. We observe that the ef-
+fects of training with these rationale types align
+with their levels of topical relevance. Future work
+can further explore how properties like topical rele-
+vance inﬂuence the utility of rationales.
+5 Conclusion
+We investigate to what extent training models to
+rationalize their predictions affects their robust-
+ness to spurious correlations. We experiment
+with encoder-decoder and decoder-only models
+ranging in size from 140 to 774 million param-
+eters across two tasks—natural language infer-
+ence and commonsense question-answering—and
+measure reliance on spurious correlations through
+both manually-annotated, out-of-domain challenge
+sets and challenging in-domain subsets of orig-
+inal test sets. We ﬁnd that the effects of self-
+rationalization are model- and task-speciﬁc: While
+self-rationalization can improve robustness to spuri-
+ous correlations in lower-resource settings for some
+models and tasks, it tends to exacerbate reliance
+on spurious correlations in higher-resource settings.
+Furthermore, larger models tend to beneﬁt more
+from rationales, and rationale content inﬂuences
+rationale utility in improving robustness.
+The variability of our results suggests that, de-
+spite the appeal of self-rationalization models for
+increasing model trustworthiness by facilitating
+debugging and interaction with end-users (Jacoviet al., 2021a), training models to self-rationalize
+can have the unintended effect of increasing re-
+liance on spurious features and biases, thereby de-
+creasing the models’ trustworthiness. Thus, ap-
+propriate care should be taken when training self-
+rationalization models with the goal of creating
+trustworthy models. Future work can investigate
+how to alleviate these harms while retaining the in-
+terpretability beneﬁts of models that can rationalize
+their predictions.
+6 Limitations
+Conducting the analysis in this work required train-
+ing over 700 models, particularly because the vari-
+ability of model robustness requires training mul-
+tiple models, governed by different random seeds,
+for every evaluation setting of interest. Thus, a
+main limitation of replicating this work is its com-
+putational demand.
+Furthermore, even with the scale of our exper-
+iments, we do not exhaustively experiment with
+all possible evaluation settings of interest. Most
+notably, we focus our analysis on a standard way of
+training self-rationalization models—training gen-
+eration models end-to-end to output rationales after
+their predictions; future work can investigate how
+our ﬁndings translate to other methods for training
+with rationales. In addition, while many evalua-
+tion sets targeting robustness exist for N, they
+do not for C; thus, our evaluation of robustness
+to spurious correlations for Cwere limited. Fu-
+ture work can develop more tests for evaluating
+robustness for tasks beyond N.
+Acknowledgements
+We thank Howard Chen, Chenhao Tan, Joe Stacey,
+Marek Rei, members of the AllenNLP team, and
+anonymous reviewers for their helpful feedback.
+References741174127413741474157416

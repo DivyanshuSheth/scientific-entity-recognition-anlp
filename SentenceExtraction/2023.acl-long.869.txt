@@ -1,1 +1,776 @@
-15590 Proceedings of the 61st Annual Meeting of the Association for Computational Linguistics Volume 1 : Long Papers , pages 15590–15606 July 9 - 14 , 2023 © 2023 Association for Computational Linguistics 15591 15592 15593 15594 15595 15596 15597 15598 15599 15600 15601 15602 15603 15604 15605 15606 
+
+Xuandong Zhao, Siqi Ouyang, Zhiguo Yu, Ming Wu, Lei LiUC Santa BarbaraMicrosoft
+{xuandongzhao,siqiouyang,leili}@cs.ucsb.edu
+{zhiguo.yu,mingwu}@microsoft.com
+Abstract
+How can we extend a pre-trained model to
+many language understanding tasks, without la-
+beled or additional unlabeled data? Pre-trained
+language models (PLMs) have been effective
+for a wide range of NLP tasks. However,
+existing approaches either require fine-tuning
+on downstream labeled datasets or manually
+constructing proper prompts. In this paper,
+we propose nonparametric prompt ing PLM
+(NPPrompt) for fully zero-shot language under-
+standing. Unlike previous methods, NPPrompt
+uses only pre-trained language models and
+does not require any labeled data or additional
+raw corpus for further fine-tuning, nor does
+it rely on humans to construct a comprehen-
+sive set of prompt label words. We eval-
+uate NPPrompt against previous major few-
+shot and zero-shot learning methods on di-
+verse NLP tasks: text classification, text entail-
+ment, similar text retrieval, paraphrasing, and
+multiple-choice question answering. Experi-
+mental results demonstrate that our NPPrompt
+outperforms the previous best fully zero-shot
+method by big margins, with absolute gains
+of 12.8% in accuracy on text classification
+and 15.6% on the GLUE benchmark. Our
+source code is available at https://github.
+com/XuandongZhao/NPPrompt .
+1 Introduction
+Natural language understanding (NLU) has been
+important in many applications such as intelligent
+dialog assistants, online search, and social media
+analysis. Recent advancement of NLU has been
+driven by emergent pre-trained language models
+(PLMs) including BERT (Devlin et al., 2019; Liu
+et al., 2019b), GPT (Radford et al., 2018, 2019;
+Brown et al., 2020), BART (Lewis et al., 2020),
+and T5 (Raffel et al., 2020). Prior studies show
+that PLMs obtain substantial knowledge during pre-
+training on raw text corpus (Petroni et al., 2019;
+Feldman et al., 2019). By fine-tuning on task-
+specific labeled data, PLMs exploit such knowl-edge and gain impressive accuracy on a wide range
+of NLP tasks, such as text classification (Kowsari
+et al., 2019), question answering (Rajpurkar et al.,
+2016), machine reading comprehension (Campos
+et al., 2016), etc.
+However, fine-tuning approaches are expensive.
+It requires labeled datasets, which are rarely avail-
+able for many tasks. Significant computational
+efforts are needed to update PLMs’ parameters for
+multiple tasks. In addition, fine-tuning results in
+one distinct model for each task to maintain.
+How can we generalize a pre-trained model to
+many NLP tasks, without labeled or additional un-
+labeled data? Existing few-shot and zero-shot ap-
+proaches propose to construct prompts to elicit de-
+sired predictions from PLMs (Brown et al., 2020).
+The main idea of prompting PLMs is to convert
+an input utterance to one with masked templates.
+For example, in text classification an input can be
+“The Warriors won the NBA championship 2022”
+and it is instead converted to “The Warriors won
+the NBA championship 2022. This topic is about
+[MASK] ”. A PLM (e.g. BERT) takes the converted
+text and produces predictions for the masked token,
+along with the probability. Ideally, a PLM will
+generate a higher probability for the word “sports"
+than “politics" on the [MASK] token.
+Although these prompting-based methods are
+effective, they require unlabeled data for training
+or huge human efforts to construct prompts and to
+choose designated tokens to represent class labels
+(Schick and Schütze, 2021a,b; Gao et al., 2021). In
+addition, these manually constructed verbalizers ,
+i.e. mapping from words (e.g. “basketball”) to
+class labels (e.g. S ), do not extend to new
+emerging categories after PLMs are deployed.
+In this paper, we investigate the fully zero-shot
+learning problem for NLU where only the target
+label names are available but not the extra raw
+text. We propose nonparametric prompt ing PLM
+(NPPrompt), a novel method to generate predic-15590tions for semantic labels without any fine-tuning.
+NPPrompt uses PLM’s own embeddings to auto-
+matically find relevant words to labels (e.g. “basket-
+ball” and “NBA” for S ), therefore it does not
+need humans to construct verbalizers. Our key idea
+is to search for the top knearest neighbors to a label
+name in the embedding manifold and then generate
+and aggregate PLM’s predicted logits from masked
+prompts. In the above case, both predicted val-
+ues for “basketball” and “NBA” contribute to the
+final prediction for the S category. In this
+way, NPPrompt can be easily generalized to any
+new categories as long as the category names are
+semantically meaningful.
+The contributions of this paper are as follows. a)
+We develop NPPrompt, a novel method for fully
+zero-shot learning with PLMs. b) We conduct
+extensive experiments on diverse language under-
+standing tasks including text classification, text en-
+tailment, similar text retrieval, paraphrasing, and
+multiple-choice question answering. Experimen-
+tal results show that NPPrompt outperforms the
+previous zero-shot methods by absolute 12.8% in
+accuracy on text classification and 15.6% on the
+GLUE benchmark. Surprisingly, NPPrompt is on
+a par with the best prior method that trained with
+manual verbalizers, an additional knowledge base,
+and extra unlabeled data.
+2 Related Work
+Prompting The success of GPT-3 (Brown et al.,
+2020) has attracted much attention to prompting
+engineering, a new way to leverage pre-trained
+language models. (Brown et al., 2020) concate-
+nate a few input and output pairs and feed them
+to the large-scale GPT-3 language model, which
+is an intuitive in-context learning paradigm, al-
+lowing the model to generate answers for addi-
+tional cases autoregressively. Recent works (Schick
+and Schütze, 2021a,b) show that small-scale pre-
+trained language models such as BERT (Devlin
+et al., 2019), RoBERTa (Liu et al., 2019b) and AL-
+BERT (Lan et al., 2019) can also achieve decent
+performance using prompt-tuning. Prompting has
+been applied to a large variety of tasks such as Text
+Classification (Schick and Schütze, 2021a), Natural
+Language Understanding (Xu et al., 2022), Knowl-
+edge Probing (Petroni et al., 2019), and Relation
+Extraction (Han et al., 2021). Typically, a piece of
+prompt contains a template and a verbalizer. The
+language model predicts a probability distributionover vocabulary given the template and the verbal-
+izer transforms it into a prediction over class labels.
+In this work, we focus on designing the verbalizers
+automatically.
+Verbalizer Design The verbalizer plays a cru-
+cial role in prompting as it connects model outputs
+and labels, significantly influencing performance.
+(Schick and Schütze, 2021a) design human writ-
+ten verbalizers for prompting, however, they are
+highly biased towards personal vocabulary with in-
+adequate coverage. Apart from manually designed
+verbalizers, some recent studies explore automatic
+verbalizer construction. Auto-L (Gao et al., 2021)
+uses re-ranking to find the label words set by fine-
+tuning the model on the candidates searched by
+RoBERTa; AutoPrompt (Shin et al., 2020) applies
+gradient-based search to create both prompts and
+label words automatically with a few trigger ex-
+amples. But these approaches need to update pa-
+rameters with gradient descent, which turns out to
+be infeasible without access to the model weights
+(e.g., GPT-3). KPT (Han et al., 2021) incorporates
+external knowledge into the verbalizer in which the
+unlabeled dataset is needed to refine the label words
+and thus is not applicable to scenarios where only
+label names are known. In contrast, our approach
+NPPrompt directly finds, without any gradient up-
+date, relevant words to label names with PLM’s
+initial word embedding only.
+Zero-shot Text Classification General zero-shot
+text classification typically focuses on classifying
+texts into categories that were not seen during the
+training process. Transferring knowledge from
+seen classes to unseen ones requires accurate and
+discriminative descriptions of all classes (Liu et al.,
+2019a; Xia et al., 2018) or joint embeddings of
+categories and documents (Nam et al., 2016). How-
+ever, these methods rely on supervised data for
+the known label set, making them unsuitable for
+scenarios where no labeled pairs for any category
+are available. SimPTC (Fei et al., 2022) improves
+zero-shot classification by clustering input texts
+and employing class-related prompts. LOTClass
+(Meng et al., 2020) proposes a model that utilizes
+label names with self-training for zero-shot clas-
+sification. Nonetheless, both SimPTC and LOT-
+Class still require an unlabeled corpus or knowl-
+edge base to extract topic-related words and per-
+form self-training. In contrast, NPPrompt achieves
+comparable or even superior performance without15591the need for any unlabeled dataset or knowledge
+base.
+3 Background: Prompt-based Tuning for
+PLMs
+We first provide standard paradigms, prompt-based
+tuning, that perform well in few-shot scenarios,
+before introducing our approach for the zero-shot
+case. Take Nway text classification as an example.
+We aim to predict the label y∈ Y for each sentence,
+where Yis the label set with Ndistinct classes.
+Prompt-based tuning tunes PLM using cus-
+tomized prompts (Brown et al., 2020). The reg-
+ular prompt-based tuning converts a specific task
+to a cloze-style mask language modeling problem.
+For each input example x(single sentence or sen-
+tence pair), we first apply a task template Ton
+it, converting original input xtox . For
+instance, we concatenate the template “ T(·) =
+This topic is about [MASK] " with the original input
+“The Warriors won the NBA championship 2022"
+and wrap it into:
+x =T(x) =x. This topic is about [MASK]
+The verbalizer fin vanilla prompt engineering
+maps a set of selected words Vfrom the vocabu-
+lary to the original label space Y, i.e.,f:V → Y .
+Inversely, we use M(y)to denote the label words
+inVthat are mapped into a specific label y,
+∪M(y) =V. Then we calculate the proba-
+bility of label y:
+where g(·)is for aggregating the probability of
+label words into the probability of the label. Then
+PLMs can be fine-tuned by minimizing the cross-
+entropy loss with supervised examples.
+4 Proposed Method: NPPrompt
+We inherit PLM with verbalizers framework but
+keep PLM’s parameters frozen (Gao et al., 2021).
+The key idea of NPPrompt is using PLM’s word
+embeddings to automatically construct verbalizers
+– mapping from words to labels – in a fully zero-
+shot way. It does not need any additional raw text
+corpus for fine-tuning. NPPrompt consists of two
+steps to compute predictions for any labels in a
+nonparametric form (Figure 1). 1) We search for
+all label words closely related to each class yin
+PLM’s token embedding manifold. 2) Then we
+use the PLM to predict values for [MASK] , filterthem using each class’s set of label words, and
+aggregate the properly weighed outputs to produce
+the final prediction. In the following, we describe
+NPPrompt for text classification but it generalizes
+to other language understanding tasks.
+k-Nearest-Neighbor Verbalizer Construction
+For each class label (e.g. “SPORTS”), we search
+over the whole vocabulary Vfor the top- kwords
+nearest to the label name in the PLM’s embedding
+space. Here, the distance between words and label
+names is measured using the cosine similarity score.
+Other distance metrics work as well and are exam-
+ined in Section 5. We denote kas the neighborhood
+number . Assuming the embeddings of word vand
+label name yareemb(v)andemb(y)respec-
+tively, the label words of the verbalizer for yare
+selected by top- kranking:
+M(y) = Top- k{S(emb(v),emb(y))},(1)
+where S(·)is the cosine similarity function:
+S(emb(v),emb(y)) =·.
+Since the PLM is already pre-trained on raw text
+corpus, it acquires sensible semantic knowledge
+and relatedness of words in the vocabulary. We
+use PLM’s embedding to search for label words
+semantically relevant to given label names. For
+illustration, we show the found label words of two
+categories in the AG News dataset (Zhang et al.,
+2015) and the corresponding similarity scores in
+Table 1. We also extend our verbalizer to support
+label names with longer expressions in Appendix
+A.2.
+Nonparametric Aggregation of Prompted Pre-
+dictions For each input text x, we construct a
+prompt-augmented sequence x =T(x)with
+a[MASK] token. We use the PLM to predict tokens15592
+for[MASK] . In contrast to previous prompting meth-
+ods which directly calculate the probability over the
+surface labels, we use the nearest label words from
+above to compute the probability for each output
+label. Only the words in a label’s top- kneighbor-
+hood will contribute to the class prediction. The
+contribution from each label word is non-equal.
+To be specific, with T(x), a PLM produces the
+logit vector Θ for all possible words at the
+[MASK] token. Notice that if the whole vocabulary
+isV,Θ∈R. Then we compute the class
+probability for a label yby aggregating the logits
+filtered by the verbalizer’s label words. We use
+kernel smoothing to aggregate as follows:
+Where the weight between label word vand class
+name yis defined as:
+Finally, the best class prediction is selected from
+the maximum of all labels:
+/tildewidey= argmaxQ(y|x).
+Notice since we use kernel smoothing on logits
+instead of probability, Qis also unnormalized prob-
+ability.For example, AG News has two classes y=
+{S },y={S }. From Table 1,
+the verbalizer for S M(y)includes label
+words “sports”, “athletics”, etc, and the verbal-
+izer for B M(y)includes label words
+“business”, “corporate”, etc. Given an input text x
+“The Warriors won the NBA championship 2022”,
+the prompt-augmented sequence x will be
+“The Warriors won the NBA championship 2022.
+This topic is about [MASK] ”. The PLM computes
+logits for every word Θ([MASK] =v|x ).
+NPPrompt computes the unnormalized probabil-
+ities for S and B :If the aggregated prediction QforS is
+larger than B , NPPrompt outputs S .
+There are certain conditions where one class
+has label names containing little semantic mean-
+ing or where several keywords are needed to de-
+fine a label. For instance, in the DBPedia dataset
+(Lehmann et al., 2015), one class is related to
+N P , then we can use the keywords
+{“river”, “lake”, “mountain”} to represent this class.
+In this setting, we pick out the keyword with the
+maximum score calculated by Equation 2 to rep-
+resent each label first. Then we choose the label
+with the largest score. We use Φ(y)to denote all15593keywords in class y, and the final prediction is :
+/tildewidey= arg max/parenleftig
+arg maxQ/parenleftbig
+y|x/parenrightbig/parenrightig
+.(4)
+5 Experiment
+We conduct extensive zero-shot learning exper-
+iments to demonstrate the effectiveness of our
+method. We provide detailed information on our
+implementation and address several research ques-
+tions related to NPPrompt.
+5.1 Datasets, Prompt Templates, and
+Experimental Setup
+We adopt sentiment classification tasks on two
+datasets, IMDB (Maas et al., 2011) and Amazon
+(McAuley and Leskovec, 2013), and topic classi-
+fication tasks on another two datasets, AG News
+(Zhang et al., 2015) and DBPedia (Lehmann et al.,
+2015). All datasets are in the English language.
+For each task, we directly use the test set to as-
+sess model performances, without incorporating
+validation or training sets for post-tuning or cherry-
+picking hand-crafted prompts. The statistics of
+each dataset are shown in Table 2.
+To concentrate on the verbalizer and reduce the
+influence of templates, we adopt multiple fixed
+manual templates following (Hu et al., 2022). We
+report the best template used for the RoBERTa-
+large model in Table 3.
+We implement our experiments based on an
+open-source toolkit OpenPrompt (Ding et al.,
+2021), which aims to conduct prompt learning eas-
+ily. We choose RoBERTa-large (Liu et al., 2019b)
+as our pre-trained language model. We report thebest accuracy of classification results for all ex-
+periments using different neighborhood numbers.
+Since we directly use the pre-trained models for
+testing, there is no randomness (random seed) in
+this process. All experiments are conducted on
+Nvidia A6000 GPUs and more details can be found
+in Appendix A.1.
+5.2 Baselines
+We evaluate the following baseline methods.
+Semantic Retrieval We utilize sentence embed-
+ding models (Reimers and Gurevych, 2019) to ob-
+tain the embedding for each sentence and descrip-
+tions for each class. Then we calculate the cosine
+similarity between sentences and label descriptions.
+We assign the most similar class labels to the sen-
+tence. Particularly, we use all-mpnet-base-v2
+from Hugging Face as the sentence embedding
+model, and the descriptions for each class can be
+found in Appendix A.1.
+NSP-BERT (Sun et al., 2021) propose text en-
+tailment tasks to replace text classification tasks
+and then use the Next Sentence Prediction (NSP)
+head to predict the results. We show the template
+we use in Appendix A.1.
+ManualVerb Manual verbalizers are defined by
+human experts with domain knowledge and we sim-
+ply use the label words provided by OpenPrompt
+(Ding et al., 2021).
+LOTClass (Meng et al., 2020) employ pre-
+trained neural language models with unlabeled data
+for category understanding, i.e., finding words sim-
+ilar to label names. They then introduce a self-
+training approach to the entire unlabeled corpus to
+generalize the model.
+GPT-3 with descriptions Following (Brown
+et al., 2020), we manually write the descriptions for
+each class and query GPT-3 where the predicted
+token serves as the prediction. We show the de-
+scriptions in Appendix A.1.
+ChatGPT with descriptions In the case of Chat-
+GPT (OpenAI, 2022), we employ the same descrip-
+tions as those used for GPT-3. We query the Chat-
+GPT model using these descriptions, and the pre-
+dicted token is considered as the corresponding
+prediction. Our experimentation is based on the
+March 2023 version of ChatGPT.15594
+SimPTC Fei et al. (2022) show that zero-shot
+text classification can be improved by leverag-
+ing text clustering in the embedding spaces of
+pre-trained language models. SimPTC utilizes a
+Bayesian Gaussian Mixture Model to fit unlabeled
+texts. The initialization of cluster positions and
+shapes is performed using class names.
+KPT (Hu et al., 2022) propose knowledgeable
+prompt-tuning, which expands the label words
+space using external knowledge bases (KB). KPT
+also refines the expanded label words based on the
+unlabeled data. We show the best results of KPT in
+the zero-shot setting.
+Null Prompt (IV et al., 2022) insert a token at
+the end of the text (i.e. using the prompt template“[x][MASK] " ) and then use the prediction of the
+[MASK] token to perform zero-shot classification.
+Multi-Null prompting (Wang et al., 2021) find
+that simply introducing a few prompt [MASK] s can
+improve the performance and robustness of the
+Null Prompt in the zero-shot settings.
+5.3 Main Results
+We demonstrate our experimental results in Table
+4. Overall NPPrompt outperforms Null Prompt and
+Multi-Null Prompt remarkably by over 10 percent
+in a fully zero-shot setting. NPPrompt achieves an
+accuracy of over 85% on AG News and DBPedia
+and over 90% on IMDB and Amazon. We con-
+jecture that topic classifications in AG News and15595DBPedia are more complicated than binary senti-
+ment classifications in IMDB and Amazon, hence
+the higher accuracy on the latter.
+NPPrompt is only slightly worse than KPT and
+SimPTC but outperforms most baseline methods
+in which human efforts/external knowledge or un-
+labeled data are strictly required. It’s worth not-
+ing that NPPrompt performs much better than
+ManualVerb, suggesting that the label words gen-
+erated by our method are more comprehensive
+and unbiased than human-designed ones. Besides,
+NPPrompt can beat GPT-3 by 4% in terms of aver-
+age accuracy, a strong sign of the great potential for
+RoBERTa-large with 355M parameters compared
+to 175B parameters giant GPT-3.
+To explore how our method NPPrompt performs
+on different kinds of tasks, we also conduct experi-
+ments on the GLUE benchmark (Wang et al., 2018).
+Specifically, we test on Multi-Genre Natural Lan-
+guage Inference Matched (MNLI), Multi-Genre
+Natural Language Inference Mismatched (MNLI-
+mm)(Williams et al., 2018) , Question Natural Lan-
+guage Inference (QNLI) (Rajpurkar et al., 2016)
+and Recognizing Textual Entailment (RTE) (Ben-
+tivogli et al., 2009) for Natural Language Inference
+(NLI); Microsoft Research Paraphrase Matching
+(MRPC) (Dolan and Brockett, 2005) and Quora
+Question Pairs (QQP) (Chen et al., 2018) for Para-
+phrase Similarity Matching; Stanford Sentiment
+Treebank (SST-2) (Socher et al., 2013) for Sen-
+timent Classification; The Corpus of Linguistic
+Acceptability (CoLA) (Warstadt et al., 2019) for
+Linguistic Acceptability.
+As shown in Table 5, NPPrompt outperforms
+all other methods in fully zero-shot setting. Auto-
+L (Gao et al., 2021) and AMuLaP (Wang et al.,
+2022) are both automatic label words searching
+methods utilizing few-shot examples. Our method
+NPPrompt can even outperform them without any
+unlabeled data or few-shot training examples.
+5.4 Effects of similarity functions in
+nonparametric aggregation
+Both weight and similarity functions play a critical
+role in the design of NPPrompt and we test how
+NPPrompt performs on AG News with different
+configurations. The “Default" setting is as stated
+in Equation 1 and 3. We fix the similarity function
+S(emb(v),emb(y)) =·,
+setw(v, y) = 1 for the “Same weight" setting and
+w(v, y) =for the
+“Average weight" setting. Besides cosine similar-
+ity, the Euclidean distance and the dot product are
+also common similarity measures for embeddings.
+Consequently, we fix the weight w(v, y) = 1 ,
+choose S(emb(v),emb(y)) =−∥emb(v)−
+emb(y)∥for the “Euclidean distance" setting and
+S(emb(v),emb(y)) = emb(v)·emb(y)for
+the “Dot product" setting. It can be informed from
+Figure 2 that with a fixed similarity function, dif-
+ferent weight calculations yield comparable results,
+but with a fixed weight, cosine similarity is the
+optimal similarity measure.
+5.5 Can we sum over probabilities?
+NPPrompt sums up all logits for a label word set as
+shown in Equation 2. Another possible approach is
+to sum up the probabilities from PLM’s prediction
+for the label words and choose the argmax for all
+different labels as the prediction: P(y|x ) =/summationtextw(v, y)·P([MASK] =v|x ),
+/tildewidey= arg maxP(y|x ). We conduct ex-
+periments on AG News to compare the above two
+approaches, one that sums up logits (“sum logit")
+and one that sums up probabilities (“sum prob").
+Figure 3 presents the results and we find that “sum
+logit" performs better at small kbut “sum prob"15596
+delivers better results when kexceeds 30. “sum
+logit" achieves the best result at k= 12 among all
+experiments.
+5.6 How many label words should we choose?
+The number of label words impacts the perfor-
+mance of our method NPPrompt as well. In Fig-
+ure 4, we display the performances of different
+models with varied neighborhood numbers. In gen-
+eral, NPPrompt attains similar test accuracy across
+different neighborhood numbers. Regardless of
+the choice for neighborhood number, NPPrompt-
+RoBERTa-large achieves over 80% accuracy in
+topic classification tasks on AG News and DBPe-
+dia, and it gains over 90% accuracy in sentiment
+classification tasks on IMDB and Amazon. In real-
+world applications, we can simply choose a fixed
+neighborhood number (e.g. 8-10) to achieve decent
+performance.
+5.7 How does NPPrompt perform with
+different PLMs?
+The performance of NPPrompt heavily relies on
+the choice of the pre-trained language model. Thisis due to the variations in label words for differ-
+ent categories, which stem from the distinct initial
+word embeddings and vocabularies employed by
+each PLM. Additionally, NPPrompt can be adapted
+for text generation models such as T5 (Raffel et al.,
+2020) and GPT-2 (Radford et al., 2019)) with mi-
+nor modifications. In our approach, we utilize T5-
+base/GPT2-base to generate the missing spans at
+the end of the prompt text. The first predicted token
+serves as the input to the verbalizer, and we follow
+the nonparametric aggregation steps outlined in
+Appendix A.1 to determine the category.
+To investigate the impact of employing different
+PLMs, we conduct additional experiments using
+BERT-base-cased, BERT-large-cased, RoBERTa-
+base, T5-base, and GPT2-base models. The re-
+sults are presented in Table 6. Notably, NPPrompt
+with RoBERTa-large achieves the highest perfor-
+mance, which can be attributed to the model’s ex-
+tensive parameter count and the fact that it is pre-
+trained on a large corpus. As anticipated, larger
+models such as RoBERTa-large and BERT-large
+outperform their base counterparts (RoBERTa-base
+and BERT-base) on average, with RoBERTa con-
+sistently exhibiting superior accuracy compared
+to BERT models. While NPPrompt-T5-base and
+NPPrompt-GPT2-base demonstrate commendable
+performance, they do not surpass the performance
+of NPPrompt-RoBERTa-large.
+5.8 Is NPPrompt limited to text classification
+tasks
+Our research extends beyond text classification and
+encompasses experiments on multiple-choice ques-
+tion answering (QA) tasks as well. Specifically,15597
+we assess the performance of NPPrompt using the
+widely-utilized CommonsenseQA (CQA) dataset
+(Talmor et al., 2019). In this new setting, we use the
+prompt template “ xThe answer is [MASK] .”, e.g.
+“What do animals do when an enemy is approach-
+ing? The answer is [MASK] .”. Subsequently, we
+search for the k-nearest neighbors for each target
+answer, setting kas 15. The prediction is obtained
+by applying the same process employed for text
+classification tasks. The results of our experiments
+are presented in Table 7 (few-shot results obtained
+from (Zelikman et al., 2022)). Notably, NPPrompt
+not only achieves satisfactory performance on the
+CommonsenseQA dataset but even outperforms
+few-shot GPT-J (Wang, 2021) as well. This demon-
+strates the versatility and flexibility of NPPrompt
+across various NLP scenarios.
+6 Discussion
+Our proposed method, NPPrompt, demonstrates
+exceptional performance in zero-shot text classifi-
+cation tasks. We attribute this success to two key
+factors. Firstly, by utilizing the initial word em-
+bedding from pre-trained language models (PLMs),
+we are able to identify cognates of the label words.
+For instance, in Table 1, we observe variations of
+the word "business" such as "Business" and "busi-
+nesses" for the B category. Secondly, we
+effectively leverage the capabilities of pre-trained
+language models by reformulating the zero-shot
+classification problem as a masked token prediction
+task, which aligns with the pre-training process.
+Furthermore, NPPrompt offers a promising so-
+lution for dynamic and open zero-shot classifica-
+tion problems, where new classes may arise or old
+classes may be removed. With the use of efficient
+PLMs and category names, as well as the key word
+design in Equation 4, NPPrompt can also be ap-
+plied in scenarios where label names do not possess
+semantic meaning (e.g. categories with label names
+“A”, “B”, “C”). This technique has the potential for
+wide deployment in real-world applications.7 Conclusion
+In this paper, we propose NPPrompt, a novel and
+effective method for fully zero-shot learning with
+pre-trained language models. We use initial word
+embedding of PLM to automatically find related
+words for category names, which enables us to
+construct the verbalizers without manual design
+or unlabeled corpus. Experimental results show
+that NPPrompt outperforms the previous zero-shot
+methods by large margins.
+Limitations
+For those label names without semantic meanings,
+several keywords are still required for NPPrompt to
+work well. Furthermore, this study focuses exclu-
+sively on the zero-shot setting. However, there are
+potential avenues for exploration in the few-shot
+scenario, which is prevalent in practical applica-
+tions. The applicability of NPPrompt to other tasks,
+such as ranking and relation extraction, remains
+uncertain and warrants further investigation. De-
+signing a refinement method to jointly search for
+label words and templates can be a promising di-
+rection for future research.
+References155981559915600A Appendix
+A.1 Experimental Details
+Table 8 shows all the manual templates of
+NSP-BERT. We show the prompt templates for
+NPPrompt-T5 in Table 9. Table 11 summarizes
+manual designed descriptions of each dataset for
+Semantic Retrieval. As for GPT-3, we query the
+OpenAI APIand test with Davinci-001 model.
+The prompts for GPT-3 are shown in Table 12. We
+list all templates and label names for NPPrompt
+of all experiments in Table 13. We also list the
+related words result in sentiment classification
+(G/B) and NLI ( Y/N)) tasks in Table
+14.
+Dataset Template
+AG News News: label name .
+DBPedia News: label name .
+IMDB This text shows label name sentiment.
+Amazon The attitude of this text is label name .
+A.2 What label words do different PLMs
+choose?
+We summarize the label words of different PLMs
+forS category in DBPedia in Table 10.
+RoBERTa-large and RoBERTa-base share similar
+sets of label words yet with a minor discrepancybetween their similarity scores. RoBERTa-large
+usually produces larger similarities than RoBERTa-
+base. In contrast, the label words in RoBERTa are
+quite different from those in BERT.
+A.3 Extension to Multi-Word Expressions
+Here we extend our method to support
+multi-word label names like N P ,
+MOT and etc. The major
+part is to obtain related words to a multi-word label
+name. Once we obtain the related words, the rest
+non-parametric aggregation step remains identical.
+We consider two scenarios:
+The label name is multi-word (i.e., phrase) and
+related words are still single-words To model
+the phrase, we use average contextualized embed-
+ding instead of word embedding for both label
+names and related single-words to compute cosine
+similarity. As suggested in (Su et al., 2021), we
+whiten the contextualized output of RoBERTa by
+a linear transformation obtained from the contex-
+tualized embedding of all words in vocabulary. To
+obtain the best result, we select the output of layer
+6 of RoBERTa. This extension achieves 61% ac-
+curacy on the DBPedia dataset using the original
+multi-word label names (original label names can
+be found at https://rdrr.io/cran/textdata/
+man/dataset_dbpedia.html ).
+Both the label name and related words are
+phrases Since the search space of a related
+phrase is exponentially large in its length, we use
+another prompt to filter candidate words. The tem-
+plate we use is “ [LABEL_NAME] can also be called
+[MASK] ∗n.”, where nis the length of the candidate.
+For example, if the label name is MOT - andn= 2, the template will look
+like “Mean of transportation can also be called
+[MASK] [MASK] .”. We feed it to RoBERTa and fil-
+ter top- kcandidate phrases of masked prediction.
+Since masked prediction is conditionally indepen-
+dent of each mask, we further re-rank the top- k
+candidate phrases by either the contextualized em-
+bedding method mentioned above or another auto-
+regressive LM. For the latter one, we evaluate the
+perplexity of the template with [MASK] filled by
+candidate phrases. This generates 71% accuracy
+on DBPedia if the length of the phrase is two and
+the re-ranking is performed by GPT-2 (Radford
+et al., 2019).1560115602Dataset Template Label Names k
+AG News A [MASK] news : x.category 1: world, politics
+12category 2: sports
+category 3: business
+category 4: technology, science
+DBPediacategory 1: company
+7category 2: school
+category 3: artist
+category 4: sports
+category 5: politics, office
+category 6: transportation, car, bus, train
+xxIn this sentence, x category 7: building, construct, room, tower
+is a[MASK] . category 8: river, lake, mountain
+category 9: village
+category 10: animal, pet
+category 11: plant
+category 12: album
+category 13: film
+category 14: book, publication
+IMDB xAll in all, it was [MASK] .positive: good500negative: bad
+Amazon xAll in all, it was [MASK] .positive: good170negative: bad
+SST-2 xIt was [MASK] .positive: great9negative: terrible
+MNLI x?[MASK] ,xentailment: yes
+4 neutral: maybe
+contradiction: no
+MNLI-mm x?[MASK] ,xentailment: yes
+4 neutral: maybe
+contradiction: no
+QNLI x?[MASK] ,xentailment: Yes, Indeed, Overall3not_entailment: No, Well, However
+RTE x?[MASK] ,xentailment: Yes10not_entailment: No
+MRPC x[MASK] ,xequivalent: Yes9not_equivalent: No
+QQP x[MASK] ,xequivalent: Yes9not_equivalent: No
+CoLA xThis is [MASK] .grammatical: true7not_grammatical: wrong1560315604ACL 2023 Responsible NLP Checklist
+A For every submission:
+/squareA1. Did you describe the limitations of your work?
+Section limitations
+/squareA2. Did you discuss any potential risks of your work?
+Not applicable. Left blank.
+/squareA3. Do the abstract and introduction summarize the paper’s main claims?
+Section 1
+/squareA4. Have you used AI writing assistants when working on this paper?
+ChatGPT in section 6
+B/squareDid you use or create scientiﬁc artifacts?
+Left blank.
+/squareB1. Did you cite the creators of artifacts you used?
+No response.
+/squareB2. Did you discuss the license or terms for use and / or distribution of any artifacts?
+No response.
+/squareB3. Did you discuss if your use of existing artifact(s) was consistent with their intended use, provided
+that it was speciﬁed? For the artifacts you create, do you specify intended use and whether that is
+compatible with the original access conditions (in particular, derivatives of data accessed for research
+purposes should not be used outside of research contexts)?
+No response.
+/squareB4. Did you discuss the steps taken to check whether the data that was collected / used contains any
+information that names or uniquely identiﬁes individual people or offensive content, and the steps
+taken to protect / anonymize it?
+No response.
+/squareB5. Did you provide documentation of the artifacts, e.g., coverage of domains, languages, and
+linguistic phenomena, demographic groups represented, etc.?
+No response.
+/squareB6. Did you report relevant statistics like the number of examples, details of train / test / dev splits,
+etc. for the data that you used / created? Even for commonly-used benchmark datasets, include the
+number of examples in train / validation / test splits, as these provide necessary context for a reader
+to understand experimental results. For example, small differences in accuracy on large test sets may
+be signiﬁcant, while on small test sets they may not be.
+No response.
+C/squareDid you run computational experiments?
+Section 5
+/squareC1. Did you report the number of parameters in the models used, the total computational budget
+(e.g., GPU hours), and computing infrastructure used?
+Section 5.115605/squareC2. Did you discuss the experimental setup, including hyperparameter search and best-found
+hyperparameter values?
+Section 5
+/squareC3. Did you report descriptive statistics about your results (e.g., error bars around results, summary
+statistics from sets of experiments), and is it transparent whether you are reporting the max, mean,
+etc. or just a single run?
+Section 5
+/squareC4. If you used existing packages (e.g., for preprocessing, for normalization, or for evaluation), did
+you report the implementation, model, and parameter settings used (e.g., NLTK, Spacy, ROUGE,
+etc.)?
+Left blank.
+D/squareDid you use human annotators (e.g., crowdworkers) or research with human participants?
+Left blank.
+/squareD1. Did you report the full text of instructions given to participants, including e.g., screenshots,
+disclaimers of any risks to participants or annotators, etc.?
+No response.
+/squareD2. Did you report information about how you recruited (e.g., crowdsourcing platform, students)
+and paid participants, and discuss if such payment is adequate given the participants’ demographic
+(e.g., country of residence)?
+No response.
+/squareD3. Did you discuss whether and how consent was obtained from people whose data you’re
+using/curating? For example, if you collected data via crowdsourcing, did your instructions to
+crowdworkers explain how the data would be used?
+No response.
+/squareD4. Was the data collection protocol approved (or determined exempt) by an ethics review board?
+No response.
+/squareD5. Did you report the basic demographic and geographic characteristics of the annotator population
+that is the source of the data?
+No response.15606

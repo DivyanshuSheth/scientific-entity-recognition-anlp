@@ -1,1 +1,720 @@
-947 Proceedings of the 60th Annual Meeting of the Association for Computational Linguistics Volume 1 : Long Papers , pages 947 961 May 22 - 27 , 2022 c(cid:13)2022 Association for Computational Linguistics 948 949 950 951 952 953 954 955 956 957 958 959 960 961 
+
+Yongliang Shen, Xiaobin Wang, Zeqi Tan, Guangwei Xu,
+Pengjun Xie, Fei Huang, Weiming Lu, Yueting ZhuangCollege of Computer Science and Technology, Zhejiang UniversityDAMO Academy, Alibaba Group
+{syl, luwm}@zju.edu.cn
+xuanjie.wxb@alibaba-inc.com
+Abstract
+Named entity recognition (NER) is a funda-
+mental task in natural language processing. Re-
+cent works treat named entity recognition as a
+reading comprehension task, constructing type-
+specific queries manually to extract entities.
+This paradigm suffers from three issues. First,
+type-specific queries can only extract one type
+of entities per inference, which is inefficient.
+Second, the extraction for different types of
+entities is isolated, ignoring the dependencies
+between them. Third, query construction relies
+on external knowledge and is difficult to apply
+to realistic scenarios with hundreds of entity
+types. To deal with them, we propose Parallel
+Instance Query Network (PIQN), which sets up
+global and learnable instance queries to extract
+entities from a sentence in a parallel manner.
+Each instance query predicts one entity, and
+by feeding all instance queries simultaneously,
+we can query all entities in parallel. Instead of
+being constructed from external knowledge, in-
+stance queries can learn their different query se-
+mantics during training. For training the model,
+we treat label assignment as a one-to-many Lin-
+ear Assignment Problem (LAP) and dynami-
+cally assign gold entities to instance queries
+with minimal assignment cost. Experiments on
+both nested and flat NER datasets demonstrate
+that our proposed method outperforms previous
+state-of-the-art models.
+1 Introduction
+Named Entity Recognition (NER) aims to identify
+text spans to specific entity types such as Person,
+Location, Organization. It has been widely used
+in many downstream applications such as entity
+linking (Ganea and Hofmann, 2017; Le and Titov,
+2018) and relation extraction (Li and Ji, 2014;Figure 1: (a) For a sentence, type-specific queries can
+only extract entities of one type per inference, so the
+model needs to be run multiple times. (b) In contrast,
+instance-based queries can be input into the model si-
+multaneously, and all entities can be extracted in parallel.
+Furthermore, the parallel manner can model the interac-
+tions between entities of different types.
+Miwa and Bansal, 2016; Shen et al., 2021b). Tradi-
+tional approaches for NER are based on sequence
+labeling, assigning a single tag to each word in a
+sentence. However, the words of nested entities
+have more than one tag, thus these methods lack
+the ability to identify nested entities.
+Recently, Ju et al. (2018); Straková et al. (2019);
+Wang et al. (2020a) redesign sequence labeling
+models to support nested structures using different
+strategies. Instead of labeling each word, Luan
+et al. (2019); Tan et al. (2020); Li et al. (2021);
+Shen et al. (2021a) perform a classification task on
+the text span, and Straková et al. (2019); Paolini
+et al. (2021); Yan et al. (2021); Tan et al. (2021)
+treat NER as a sequence generation or set pre-
+diction task and design encoder-decoder models
+to generate entities. Recently, Li et al. (2020b);
+Mengge et al. (2020); Zheng et al. (2021) refor-
+mulate the NER task as a machine reading task
+and achieve a promising performance on both flat
+and nested datasets. As shown in Figure 1(a), they
+treat the sentence as context and construct type-
+specific queries from external knowledge to extract
+entities. For example, for the sentence "U.S. Presi-
+dent Barack Obama and his wife spent eight years947in the White House" , Li et al. (2020b) constructs
+thePER-specific query in natural language form -
+"Find person entity in the text, including a single
+individual or a group" to extract the PER entities,
+such as "U.S. President" ,"Barack Obama" . How-
+ever, since the queries are type-specific, only one
+type of entities can be extracted for each inference.
+This manner not only leads to inefficient prediction
+but also ignores the intrinsic connections between
+different types of entities, such as "U.S." and"U.S.
+President" . In addition, type-specific queries rely
+on external knowledge for manual construction,
+which makes it difficult to fit realistic scenarios
+with hundreds of entity types.
+In this paper, we propose the Parallel Instance
+Query Network (PIQN), where global and learn-
+able instance queries replace type-specific ones to
+extract entities in parallel. As shown in Figure 1(b),
+each instance query predicts one entity, and multi-
+ple instance queries can be fed simultaneously to
+predict all entities. Different from previous meth-
+ods, we do not need external knowledge to con-
+struct the query into natural language form. The
+instance query can learn different query semantics
+during training, such as position-related or type-
+related semantics. Since the semantics of instance
+queries are implicit, we cannot assign gold entities
+as their labels in advance. To tackle this, we treat
+label assignment as a one-to-many Linear Assign-
+ment Problem (LAP) (Burkard and Çela, 1999),
+and design a dynamic label assignment mechanism
+to assign gold entities for instance queries.
+Our main contributions are as follow:
+•Different from type-specific queries that re-
+quire multiple rounds of query, our model
+employs instance queries that can extract all
+entities in parallel. Furthermore, the style of
+parallel query can model the interactions be-
+tween entities of different types.
+•Instead of relying on external knowledge to
+construct queries in natural language form,
+instance queries learn their query semantics
+related to entity location and entity type dur-
+ing training.
+•To train the model, we design a dynamic one-
+to-many label assignment mechanism, where
+the entities are dynamically assigned as labels
+for the instance queries during training. The
+one-to-many manner allows multiple queriesto predict the same entity, which can further
+improve the model performance.
+•Experiments show that our model achieves
+state-of-the-art performance consistently on
+several nested and flat NER datasets.
+2 Related Work
+Traditional approaches for NER can be divided
+into three categories, including tagging-based,
+hypergraph-based and span-based approaches. The
+typical sequence labeling approach (Huang et al.,
+2015) predicts labels for each token, and struggles
+to address nested NER. Some works (Alex et al.,
+2007; Wang et al., 2020a) adapt the sequence la-
+beling model to nested entity structures by design-
+ing a special tagging scheme. Different from the
+decoding on the linear sequence, the hypergraph-
+based approaches (Lu and Roth, 2015; Muis and
+Lu, 2017; Katiyar and Cardie, 2018) construct hy-
+pergraphs based on the entity nesting structure and
+decode entities on the hypergraph. Span-based
+methods first extract spans by enumeration (Sohrab
+and Miwa, 2018; Luan et al., 2019) or boundary
+identification (Zheng et al., 2019; Tan et al., 2020),
+and then classify the spans. Based on these, Shen
+et al. (2021a) treats NER as a joint task of bound-
+ary regression and span classification and proposes
+a two-stage identifier of locating entities first and
+labeling them later.
+Three novel paradigms for NER have recently
+been proposed, reformulating named entity recog-
+nition as sequence generation, set prediction, and
+reading comprehension tasks, respectively. Yan
+et al. (2021) formulates NER as an entity span
+sequence generation problem and uses a BART
+(Lewis et al., 2020) model with the pointer mech-
+anism to tackle NER tasks. Tan et al. (2021) for-
+mulates NER as an entity set prediction task. Dif-
+ferent from Straková et al. (2019), they utilize a
+non-autoregressive decoder to predict entity set. Li
+et al. (2020b); Mengge et al. (2020) reformulate
+the NER task as an MRC question answering task.
+They construct type-specific queries using semantic
+prior information for entity categories.
+Different from Li et al. (2020b); Jiang et al.
+(2021), our method attempts to query at the entity
+level, where it adaptively learns query semantics
+for instance queries and extracts all types of en-
+tities in parallel. It is worth noting that Seq2Set
+(Tan et al., 2021) is quite different from ours: (1)948Seq2Set attempts to eliminate the incorrect bias in-
+troduced by specified entity decoding order in the
+seq2seq framework, and proposes an entity set pre-
+dictor, while we follow the MRC paradigm and fo-
+cus on extracting entities using instance queries. (2)
+Seq2Set is an encoder-decoder architecture, while
+our model throws away the decoder and keeps only
+the encoder as in Wang et al. (2022a), which speeds
+up inference and allows full interaction between
+query and context. (3) Seq2Set uses bipartite graph
+matching to compute the entity-set level loss, while
+we focus on the label assignment for each instance
+query and propose a one-to-many dynamic label
+assignment mechanism.
+3 Method
+In this section, we first introduce the task formu-
+lation in § 3.1, and then describe our method. As
+shown in Figure 2, our method consists of three
+components: the Encoder (§ 3.2), the Entity Pre-
+diction (§ 3.3) and the Dynamic Label Assignment
+(§ 3.4). The encoder encodes both the sentence
+and instance queries. Then for each instance query,
+we perform entity localization and entity classifi-
+cation using Entity Pointer and Entity Classifier
+respectively. For training the model, we introduce
+a dynamic label assignment mechanism to assign
+gold entities to the instance queries in § 3.4.
+3.1 Task Formulation
+We use (X, Y )to denote a training sample, where
+Xis a sentence consisting of Nwords labeled by
+a set of triples Y={<Y, Y, Y>}.Y∈
+[0, N−1],Y∈[0, N−1]andY∈ E are the
+indices for the left boundary, right boundary and
+entity type of the k-th entity, where Eis a finite
+set of entity types. In our approach, We set up
+M(M > G )global and learnable instance queries
+I=R, each of which (denoted as a vector of
+sizeh) extracts one entity from the sentence. They
+are randomly initialized and can learn the query
+semantics automatically during training. Thus we
+define the task as follows: given an input sentence
+X, the aim is to extract the entities Ybased on the
+learnable instance queries I.
+3.2 Encoder
+Model input consists of two sequences, the sen-
+tence Xof length Nand the instance queries Iof
+length M. The encoder concatenates them into one
+sequence and encodes them simultaneously.Input Embedding We calculate the token em-
+beddings E, position embeddings Eand type
+embeddings Eof the input from two sequences
+as follows ( E, E, E∈R):
+E= Concat( V, I)
+E= Concat( P, P)
+E= Concat([ U],[U])(1)
+where V∈Rare token embeddings of the
+word sequence, I∈Rare the vectors of in-
+stance queries, P∈RandP∈Rare
+separate learnable position embeddings. Uand
+Uare type embeddings and [·]means repeating
+Ntimes. Then the input can be represented as
+H=E+E+E∈R.
+One-Way Self-Attention Normal self-attention
+would let the sentence interact with all instance
+queries. In such a way, randomly initialized in-
+stance queries can affect the sentence encoding
+and break the semantics of the sentence. To keep
+the sentence semantics isolated from the instance
+queries, we replace the self-attention in BERT (De-
+vlin et al., 2019) with the one-way version:
+OW-SA( H) =αHW (2)
+α= softmaxHW(HW)
+√
+h+M
+(3)
+where W, W, W∈Rare parameter matri-
+ces and M ∈ { 0,−inf}is a mask
+matrix for the attention score where elements in M
+set to 0 for kept units and −inffor removed ones.
+In our formula, the upper right sub-matrix of M
+is a full −infmatrix of size (N×M)and other
+elements are zero, which can prevent the sentence
+encoding from attending on the instance queries. In
+addition, the self-attention among instance queries
+can model the connections between each other, and
+then enhance their query semantics.
+After BERT encoding, we further encode the se-
+quence at word-level by two bidirectional LSTM
+layers and Lextra transformer layers. Finally we
+splitH∈Rinto two parts: the sentence
+encoding H∈Rand the instance query en-
+coding H∈R.
+3.3 Entity Prediction
+Each instance query can predict one entity from the
+sentence, and with Minstance queries, we can pre-
+dict at most Mentities in parallel. Entity prediction949
+can be viewed as a joint task of boundary prediction
+and category prediction. We design Entity Pointer
+and Entity Classifier for them respectively.
+Entity Pointer For the i-th instance query H,
+we first interact the query with each word of the
+sentence by two linear layers. The fusion represen-
+tation of the i-th instance query and j-th word is
+computed as:
+S= ReLU( HW+HW) (4)
+where δ∈ {l, r}denotes the left or right boundary
+andW, W∈Rare trainable projection pa-
+rameters. Then we calculate the probability that the
+j-th word of the sentence is a left or right boundary:
+P= sigmoid( SW+b) (5)
+where W∈Randbare learnable parameters.
+Entity Classifier Entity boundary information
+are useful for entity typing. We use P=
+[P, P,···, P], δ∈ {l, r}to weigh all
+words and then concatenate them with instancequeries. The boundary-aware representation of the
+i-th instance query can be calculated as:
+S= ReLUh
+HW;PH;PHi
+(6)
+where W∈Ris a learnable parameter. Then
+we can get the probability of the entity queried by
+thei-th instance query belonging to category c:
+P=exp(SW+b)Pexp(SW+b)(7)
+where W∈Randbare learnable parameters.
+Finally, the entity predicted by the i-th instance
+query is T= 
+T,T,T
+.T= arg max(P)
+andT= arg max(P)are the left and right
+boundary, T= arg max(P)is the entity type.
+We perform entity localization and entity classi-
+fication on all instance queries to extract entities
+in parallel. If multiple instance queries locate the
+same entity but predict different entity types, we
+keep only the prediction with the highest classifica-
+tion probability.9503.4 Dynamic Label Assignment for Training
+Dynamic Label Assignment Since instance
+queries are implicit (not in natural language form),
+we cannot assign gold entities to them in advance.
+To tackle this, we dynamically assign labels for the
+instance queries during training. Specifically, we
+treat label assignment as a Linear Assignment Prob-
+lem. Any entity can be assigned to any instance
+query, incurring some cost that may vary depending
+on the entity-query assignment. We define the cost
+of assigning the k-th entity ( Y=<Y, Y, Y>)
+to the i-th instance query as:
+Cost=−
+P+P+P
+(8)
+where Y,YandYdenote the indices for the
+entity type, left boundary and right boundary of
+thek-th entity. It is required to allocate as many
+entities as possible by assigning at most one entity
+to each query and at most one query to each entity,
+in such a way that the total cost of the assignment
+is minimized. However, the one-to-one manner
+does not fully utilize instance queries, and many
+instance queries are not assigned to gold entities.
+Thus we extend the traditional LAP to one-to-many
+one, where each entity can be assigned to multiple
+instance queries. The optimization objective of this
+one-to-many LAP is defined as:
+minXXACost
+s.t.PA≤1PA=q
+∀i, k, A∈ {0,1}.(9)
+where A∈ {0,1}is the assignment matrix,
+Gdenotes the number of the entities and A=
+1 indicates the k-th entity assigned to the i-th in-
+stance query. qdenotes the assignable quantity
+of the k-th gold entity and Q=Pqdenotes
+the total assignable quantity for all entities. In our
+experiments, the assignable quantities of different
+entities are balanced.
+We then use the Hungarian (Kuhn, 1955) algo-
+rithm to solve Equation 9, which yields the label
+assignment matrix with the minimum total cost.
+However, the number of instance queries is greater
+than the total assignable quantity of entity labels
+(M > Q ), so some of them will not be assigned to
+any entity label. We assign None label to them byextending a column for the assignment matrix. The
+new column vector ais set as follows:
+a=(
+0,PA= 1
+1,PA= 0(10)
+Based on the new assignment matrix ˆA∈
+{0,1}, we can further get the labels ˆY=
+Y.indexby( π)forMinstance queries, where
+π= arg max(ˆA)is the label index vector for
+instance queries under the optimal assignment.
+Training Objective We have computed the entity
+predictions for Minstance queries in § 3.3 and got
+their labels ˆYwith the minimum total assignment
+cost in § 3.4. To train the model, we define bound-
+ary loss and classification loss. For left and right
+boundary prediction, we use binary cross entropy
+function as a loss:
+L=−XXX1[ˆY=j] logP
++1[ˆY̸=j] log
+1−P(11)
+and for entity classification we use cross entropy
+function as a loss:
+L=−XX1[ˆY=c] logP (12)
+where 1[ω]denotes indicator function that takes 1
+when ωis true and 0 otherwise.
+Follow Al-Rfou et al. (2019) and Carion et al.
+(2020), we add Entity Pointer and Entity Classifier
+after each word-level transformer layer, and we can
+get the two losses at each layer. Thus, the total loss
+on the train set Dcan be defined as:
+L=XXL+L (13)
+where L,Lare classification loss and boundary
+loss at the τ-th layer. For prediction, we just per-
+form entity prediction at the final layer.
+4 Experiment Settings
+4.1 Datasets
+To provide empirical evidence for the effectiveness
+of the proposed model, we conduct our experiments951on eight English datasets, including five nested
+NER datasets: ACE04 (Doddington et al., 2004)
+, ACE05 (Walker et al., 2006), KBP17 (Ji et al.,
+2017), GENIA (Ohta et al., 2002), NNE(Ringland
+et al., 2019) and three flat NER dataset: FewNERD
+(Ding et al., 2021), CoNLL03 (Tjong Kim Sang
+and De Meulder, 2003), OntoNotes (Pradhan et al.,
+2013), and one Chinese flat NER dataset: MSRA
+(Levow, 2006). FewNERD and NNE are two
+datasets with large entity type inventories, contain-
+ing 66 and 114 fine-grained entity types. Please re-
+fer to Appendix A for statistical information about
+the datasets.
+4.2 Implementation Details
+In our experiments, we use pretrained BERT
+(Devlin et al., 2019) in our encoder. For
+a fair comparison, we use bert-large
+on ACE04, ACE05, NNE, CoNLL03 and
+OntoNotes, bert-base on KBP17 and FewN-
+ERD, biobert-large (Chiu et al., 2016) on
+GENIA and chinese-bert-wwm (Cui et al.,
+2020) on Chinese MSRA. For all datasets, we train
+our model for 30-60 epochs and use the Adam
+Optimizer (Kingma and Ba, 2015) with a linear
+warmup-decay learning rate schedule. We initialize
+all instance queries using the normal distribution
+N(0.0,0.02). See Appendix B for more detailed
+parameter settings and Appendix C for all baseline
+models.
+4.3 Evaluation Metrics
+We use strict evaluation metrics that an entity is
+confirmed correct when the entity boundary and
+the entity type are correct simultaneously. We em-
+ploy precision, recall and F1-score to evaluate the
+performance. We also report the F1-scores on the
+entity localization and entity classification subtasks
+in § 5.2 and Appendix D.2. We consider the local-
+ization as correct when the left and right boundaries
+are predicted correctly. Based on the accurately lo-
+calized entities, we then evaluate the performance
+of entity classification.
+5 Results and Analysis
+5.1 Performance
+Overall Performance Table 1 illustrates the
+performance of the proposed model as well as
+baselines on the nested NER datasets. We ob-
+serve significant performance boosts on the nested
+NER datasets over previous state-of-the-art models,952achieving F1-scores of 81.77%, 88.14%, 87.42%
+and 84.50% on GENIA, ACE04, ACE05, KBP17
+and NNE datasets with +1.23%, +0.73%, +0.37%,
++0.45% and +0.96% improvements. Our model
+can be applied to flat NER. As shown in Table 2,
+our model achieves state-of-the-art performance
+on the FewNERD and Chinese MSRA datasets
+with +1.44% and +0.88% improvements. On
+the CoNLL03 and OntoNotes datasets, our model
+also achieves comparable results. Compared with
+the type-specific query-based method (Li et al.,
+2020b), our model improves by +2.85%, +2.16%,
++0.54%, +3.53% on the GENIA, ACE04, ACE05
+and KBP17 datasets. We believe there are three
+reasons: (1) Rather than relying on external knowl-
+edge to inject semantics, instance queries can learn
+query semantics adaptively, avoiding the sensitivity
+to hand-constructed queries of varying quality. (2)
+Each query no longer predicts a group of entities
+of a specific type, but only one entity. This manner
+refines the query to the entity level with more pre-
+cise query semantics. (3) Instance queries are fed
+into the model in parallel for encoding and predic-
+tion, and different instance queries can exploit the
+intrinsic connections between entities.
+Inference Speed We compare the inference
+speed on ACE04 and NNE, as shown in Table 4.
+Compared to the type-specific query method (Li
+et al., 2020b), our model not only improves the
+performance, but also gains significant inference
+speedup. In particular, on the NNE dataset with
+114 entity types, our model speeds up by 30.46 ×
+and improves performance by +39.2%. This is
+because Li et al. (2020b) requires one inference
+for each type-specific query, while our approach
+performs parallel inference for all instance queries
+and only needs to be run once. We also compare
+previous state-of-the-art models (Tan et al., 2021;
+Shen et al., 2021a) and our method is still faster
+and performs better.
+5.2 Ablation Study
+In this section, we analyze the effects of different
+components in PIQN. As shown in Table 3, we
+have the following observations: (1) Compared to
+the static label assignment in order of occurrence,
+the dynamic label assignment shows significant
+improvement on localization, classification, and
+NER F1-score, which improves NER F1-score by
++5.71% on ACE04 and +8.84% on GENIA. This
+shows that modeling label assignment as a LAP
+problem enables dynamic assignment of optimal
+labels to instance queries during training, eliminat-
+ing the incorrect bias when pre-specifying labels.
+Furthermore, one-to-many for label assignment is
+more effective than one-to-one, improving the F1-
+score by +3.86% on ACE04 and +0.51% on GE-
+NIA. (2) The one-way self-attention blocks the
+attention of sentence encoding on instance queries,
+which improves the F1-score by +0.98% on ACE04
+and +0.57% on GENIA. It illustrates the impor-
+tance of keeping the semantics of the sentence
+independent of the query. In contrast, semantic
+interactions between queries are effective, which
+improves the F1-score by +0.92% on ACE04 and
++0.67% on GENIA. The major reason is that enti-
+ties in the same sentence are closely related and the
+interaction between instance queries can capture
+the relation between them.953
+5.3 Analysis
+In order to analyze the query semantics learned
+by the instance query in the training, we randomly
+selected several instance queries and analyzed the
+locations and types of entities they predicted.
+Entity Location We normalize the predicted cen-
+tral locations of the entities and use kernel den-
+sity estimation to draw the distribution of the pre-
+dicted entity locations for different queries, as
+shown in Figure 3. We observe that different in-
+stance queries focus on entities at different posi-
+tions, which means that the instance queries can
+learn the query semantics related to entity position.For example, instance queries #28 and #39 prefer
+to predict entities at the beginning of sentences,
+while #11 and #53 prefer entities at the end.
+Entity Type We count the co-occurrence of dif-
+ferent instance queries and different entity types
+they predicted. To eliminate the imbalance of entity
+types, we normalize the co-occurrence matrix on
+the entity type axis. As shown in Figure 4, differ-
+ent instance queries have preferences for different
+entity types. For example, instance queries #11
+and #13 prefer to predict PER entities, #30 and #43
+prefer VEH entities, #25 and #49 prefer WEA enti-
+ties, #12 prefers FAC entities, and #35 prefers LOC
+entities.
+We also analyze the auxiliary loss, the dynamic
+label assignment mechanism, and the performance
+on entity localization and classification, please see
+the Appendix D.
+6 Case Study
+Table 5 shows a case study about model predic-
+tions. Our model can recognize nested entities and954
+long entities well. In case 1, the entities of length
+31 or with the three-level nested structure are pre-
+dicted accurately. And thanks to the one-to-many
+dynamic label assignment mechanism, each en-
+tity can be predicted by multiple instance queries,
+which guarantees a high coverage of entity pre-
+diction. However, the model’s ability to under-
+stand sentences is still insufficient, mainly in the
+following ways: (1) There is a deficiency in the
+understanding of special phrases. Yahoo ! Com-
+munications Services in case 2 is misclassified as
+ORG, but in fact Yahoo ! isORG. (2) Over-focus
+on local semantics. In case 3, the model misclas-
+sifies Venezuelan consumer asPER, ignoring the
+full semantics of the long phrase the Venezuelan
+consumer protection agency , which should be ORG.
+(3) Insensitivity to morphological variation. The
+model confused Venezuelan andVenezuela , and
+misidentified the former as GPE in case 3.
+7 Conclusion
+In this paper, we propose Parallel Instance Query
+Network for nested NER, where a collection of
+instance queries are fed into the model simultane-
+ously and can predict all entities in parallel. The
+instance queries can automatically learn query se-
+mantics related to entity types or entity locations
+during training, avoiding manual constructions that
+rely on external knowledge. To train the model,
+we design a dynamic label assignment mechanismto assign gold entities for these instance queries.
+Experiments on both nested and flat NER datasets
+demonstrate that the proposed model achieves state-
+of-the-art performance.
+Acknowledgments
+This work is supported by the Key Research
+and Development Program of Zhejiang Province,
+China (No. 2021C01013), the National Key Re-
+search and Development Project of China (No.
+2018AAA0101900), the Chinese Knowledge Cen-
+ter of Engineering Science and Technology (CK-
+CEST) and MOE Engineering Research Center of
+Digital Library.
+References955956957958A Datasets
+GENIA (Ohta et al., 2002) is an English biol-
+ogy nested named entity dataset and contains 5 en-
+tity types, including DNA,RNA,protein ,cell
+line , and cell type categories. Follow Yu
+et al. (2020), we use 90%/10% train/test split and
+evaluate the model on the last epoch.
+ACE04 and ACE05 (Doddington et al., 2004;
+Walker et al., 2006) are two English nested datasets,
+each of them contains 7 entity categories. We fol-
+low the same setup as previous work Katiyar and
+Cardie (2018); Lin et al. (2019).
+KBP17 (Ji et al., 2017) has 5 entity categories,
+including GPE,ORG,PER,LOC, andFAC. We fol-
+low Lin et al. (2019) to split all documents into
+866/20/167 documents for train/dev/test set.
+NNE (Ringland et al., 2019) is a English nested
+NER dataset with 114 fine-grained entity types.
+Follow Wang et al. (2020a), we keep the original
+dataset split and pre-processing.
+FewNERD (Ding et al., 2021) is a large-scale
+English flat NER dataset with 66 fine-grained en-
+tity types. Follow Ding et al. (2021), we adopt a
+standard supervised setting.
+CoNLL03 (Tjong Kim Sang and De Meulder,
+2003) is an English dataset with 4 types of named
+entities: LOC,ORG,PER andMISC . Follow Yan
+et al. (2021); Yu et al. (2020), we train our model
+on the train and development sets.
+OntoNotes (Pradhan et al., 2013) is an English
+dataset with 18 types of named entity, consisting
+of 11 types and 7 values. We use the same train,
+development, test splits as Li et al. (2020b).
+Chinese MSRA (Levow, 2006) is a Chinese
+dataset with 3 named entity types, including ORG,
+PER,LOC. We keep the original dataset split and
+pre-processing.
+In Table 6 and Table 7, we report the number
+of sentences, the number of sentences containing
+nested entities, the average sentence length, the to-
+tal number of entities, the number of nested entities,
+the nesting ratio, the maximum and the average
+number of entities in a sentence on all datasets.
+B Implementation Details
+In default setting, we set the number of instance
+queries M= 60 , and the total assignable quantityQ=M×0.75 = 45 . To ensure that the assignable
+quantities of different entities are balanced, we ran-
+domly divide Qto different entities and adjust each
+division to be larger than Q/G , where Gis the num-
+ber of the ground-truth entities. When the number
+of entities is more than the total assignable quan-
+tity, we specify Q=G. We have also tried other
+configurations that will be discussed in Appendix
+D.3. We set Lword-level transformer layers after
+BERT and set auxiliary losses in each layer. In the
+default setting Lequals 5. We compare the effect
+of different auxiliary layers on the model perfor-
+mance, which will be discussed in Appendix D.1.
+Since the instance queries are randomly initialized
+and do not have query semantics at the initial stage
+of training, we first fix the parameters of BERT and
+train the model for 5 epochs, allowing the instance
+queries to initially learn the query semantics. When
+decoding entities, we filter out the predictions with
+localization probability and classification probabil-
+ity less than the threshold 0.6 and 0.8, respectively.
+C Baselines
+We compare PIQN with the following baselines:
+•ARN (Lin et al., 2019) designs a sequence-to-
+nuggets architecture for nested mention detec-
+tion, which first identifies anchor words and
+then recognizes the mention boundaries.
+•HIT (Wang et al., 2020b) designs a head-tail
+detector and a token interaction tagger, which
+can leverage the head-tail pair and token inter-
+action to express the nested structure.
+•Pyramid (Wang et al., 2020a) presents a lay-
+ered neural model for nested entity recogni-
+tion, consisting of a stack of inter-connected
+layers.
+•Biaffine (Yu et al., 2020) formulates NER
+as a structured prediction task and adopts a
+dependency parsing approach for NER.
+•BiFlaG (Luo and Zhao, 2020) designs a bi-
+partite flat-graph network with two subgraph
+modules for outermost and inner entities.
+•BERT-MRC (Li et al., 2020b) formulates the
+NER task as a question answering task. They
+construct type-specific queries using semantic
+prior information for entity categories.959
+•BARTNER (Yan et al., 2021) formulates
+NER as an entity span sequence generation
+problem and uses a unified Seq2Seq model
+with the pointer mechanism to tackle flat,
+nested, and discontinuous NER tasks.
+•Seq2Set (Tan et al., 2021) formulates NER
+as an entity set prediction task. Different
+from Straková et al. (2019), they utilize a non-
+autoregressive decoder to predict entity set.
+•Locate&Label (Shen et al., 2021a) treats
+NER as a joint task of boundary regression
+and span classification and proposed a two-
+stage identifier of locating entities first and
+labeling them later.
+For a fair comparison, we did not compare with
+Sun et al. (2020); Li et al. (2020a); Meng et al.
+(2019) on Chinese MSRA because they either used
+glyphs or an external lexicon or a larger pre-trained
+language model. In addition, some works (Wang
+et al., 2021, 2022b) used search engines to retrieve
+input-related contexts to introduce external infor-
+mation, and we did not compare with them as well.D Analysis
+D.1 Analysis of Auxiliary Loss
+Many works (Al-Rfou et al., 2019; Carion et al.,
+2020) have demonstrated that the auxiliary loss
+in the middle layer introduces supervised signals
+in advance and can improve model performance.
+We compared the effect of the different number
+of auxiliary-loss layers on the model performance
+(F1-score on ACE04). Overall, the model performs
+better as the number of auxiliary-loss layers in-
+creases. The model achieves the best results when
+the number of layers equals 5.960D.2 Analysis of Two Subtasks
+We compare the model performance on entity lo-
+calization and entity classification subtasks on the
+ACE04 dataset, as shown in Table 8. Compared
+with the previous state-of-the-art models (Tan et al.,
+2021; Shen et al., 2021a), our model achieves better
+performance on both entity localization and entity
+classification subtasks. This illustrates that the in-
+stance queries can automatically learn their query
+semantics about location and type of entities, which
+is consistent with our analysis in 5.3.
+D.3 Analysis of Label Assignment
+We analyze the impact of dynamic label assign-
+ment on model performance for different combi-
+nations of the number Mof instance queries and
+the total assignable quantity Qof labels. From
+Table 9, we observe that (1) there is a tradeoff be-
+tween MandQ, and the model achieves the best
+performance with a ratio of 4:3. With this setting,
+the ratio of positive to negative instances of in-
+stance queries is 3:1. (2) The number of instance
+queries and the total assignable quantity is not as
+large as possible, and an excessive number may de-grade the model performance. In our experiments
+(M, Q ) = (60 ,45)is the best combination.961

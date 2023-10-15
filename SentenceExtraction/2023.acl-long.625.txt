@@ -1,1 +1,783 @@
-11156 Proceedings of the 61st Annual Meeting of the Association for Computational Linguistics Volume 1 : Long Papers , pages 11156–11172 July 9 - 14 , 2023 © 2023 Association for Computational Linguistics 11157 11158 11159 11160 11161 11162 11163 11164 11165 11166 11167 11168 11169 11170 11171 11172 
+
+Tianxiang SunZhengfu HeQin Zhu Xipeng QiuXuanjing Huang
+School of Computer Science, Fudan University
+Shanghai Key Laboratory of Intelligent Information Processing, Fudan University
+{txsun19,zfhe19,xpqiu,xjhuang}@fudan.edu.cn zhuq22@m.fudan.edu.cn
+Abstract
+Prompt tuning is a parameter-efficient approach
+to adapting pre-trained language models to
+downstream tasks. Although prompt tuning has
+been shown to match the performance of full
+model tuning when training data is sufficient, it
+tends to struggle in few-shot learning settings.
+In this paper, we present Multi-task Pre-trained
+Modular Prompt ( MP) to boost prompt tun-
+ing for few-shot learning. MPis a set of
+combinable prompts pre-trained on 38 Chinese
+tasks. On downstream tasks, the pre-trained
+prompts are selectively activated and combined,
+leading to strong compositional generalization
+to unseen tasks. To bridge the gap between
+pre-training and fine-tuning, we formulate up-
+stream and downstream tasks into a unified ma-
+chine reading comprehension task. Extensive
+experiments under two learning paradigms, i.e.,
+gradient descent and black-box tuning, show
+that MPsignificantly outperforms prompt tun-
+ing, full model tuning, and prior prompt pre-
+training methods in few-shot settings. In ad-
+dition, we demonstrate that MPcan achieve
+surprisingly fast and strong adaptation to down-
+stream tasks by merely learning 8 parameters
+to combine the pre-trained modular prompts.
+1 Introduction
+Pre-trained models (PTMs) (Devlin et al., 2019;
+Lewis et al., 2020; Raffel et al., 2020; Qiu et al.,
+2020) with prompt-based learning have achieved
+remarkable progress in few-shot learning. A ma-
+jor reason behind their success is the closed gap
+between upstream pre-training and downstream
+fine-tuning (Liu et al., 2021a; Sun et al., 2022b).
+Since the downstream tasks are reformulated into a
+unified (masked) language modeling ((M)LM for
+short) task, one can reuse the pre-trained (M)LM
+head instead of training a randomly initialized clas-
+sification head to solve tasks with limited data.Figure 1: MPachieves fast adaptation to downstream
+tasks through three steps: (1) Self-supervised pre-
+training on large-scale unlabeled data. (2) Pre-training
+modular prompts and the corresponding router with
+multi-task learning. (3) A subset of prompts is activated
+and tuned for adaptation to downstream tasks.
+However, prompt-based learning (e.g., PET (Schick
+and Schütze, 2021) and LM-BFF (Gao et al., 2021))
+usually fine-tunes all the parameters of the PTM
+for each downstream task, which can be computa-
+tionally expensive and deployment-inefficient, es-
+pecially for large PTMs such as GPT-3 (Brown
+et al., 2020).
+Recently, much effort has been devoted to
+parameter-efficient prompt tuning (Li and Liang,
+2021; Lester et al., 2021; Liu et al., 2021c; Sun
+et al., 2022c), which only learns a small number
+of soft prompt parameters while keeping the main
+body of the PTM untouched. In contrast to full
+model tuning, prompt tuning can get specialized
+models for specific tasks by simply attaching task-
+specific prompts, and therefore is highly efficient
+for serving different tasks. Though it has been
+demonstrated that prompt tuning can match the per-
+formance of full model tuning when training data
+is sufficient (Lester et al., 2021), the soft prompt
+cannot be well trained from scratch in few-shot
+learning settings (Gu et al., 2021) because the ran-
+domly initialized soft prompt introduces a new gap
+between pre-training and fine-tuning.11156To bridge the gap between pre-training and fine-
+tuning for prompt tuning, we present Multi-task
+Pre-trained Modular Prompt ( MP). As illustrated
+in Figure 1, we insert a second pre-training pro-
+cedure before downstream fine-tuning, in which
+we pre-train a set of modular prompts with multi-
+task learning. The modular prompts are selectively
+activated and combined by a trainable router for
+specific tasks. By this, we can achieve fast adapta-
+tion to downstream tasks by learning to combine
+and reuse the pre-trained modular prompts. Draw-
+ing inspiration from the success of deep prompt
+tuning (Li and Liang, 2021; Liu et al., 2021b), we
+inject soft prompt into every layer of the PTM. Fur-
+ther, considering that a variety of tasks cannot be
+reformulated into a (M)LM task, we instead recast
+upstream and downstream tasks into a unified ma-
+chine reading comprehension (MRC) task, which
+has shown great potential to unify various NLP
+tasks (McCann et al., 2018; Sun et al., 2022b).
+We pre-train MPon 38 Chinese NLP tasks and
+evaluate on 14 downstream tasks including senti-
+ment analysis, topic classification, natural language
+inference, question answering, multiple choice clas-
+sification, and keyword extraction. Experimen-
+tal results in few-shot learning settings demon-
+strate that MPoutperforms prompt tuning, full
+model tuning, and previous prompt pre-training
+methods (Gu et al., 2021; Vu et al., 2022) by a
+large margin. We also evaluate the compatibility
+of MPwith black-box tuning (BBT) (Sun et al.,
+2022c) and BBTv2 (Sun et al., 2022a), which are
+gradient-free prompt tuning methods. As a result,
+MPachieves significant improvement over BBT
+and BBTv2. Besides, we demonstrate that MPcan
+achieve surprisingly fast adaptation to target tasks
+by merely tuning the router (only 8 parameters)
+while freezing the PTM and all the prompts.
+2 Related Work
+This work lies in the line of parameter-efficient tun-
+ing (PET) (He et al., 2021; Ding et al., 2022), which
+trains a small portion of parameters to adapt PTMs
+to downstream tasks. The small tunable param-
+eters can be lightweight neural adapters between
+PTM layers (Houlsby et al., 2019), or soft prompt
+attached to the input examples (Lester et al., 2021)
+or hidden states (Li and Liang, 2021), or bias terms
+in the PTM parameters (Zaken et al., 2022), or low-
+rank matrices to be added to attention weights (Hu
+et al., 2021). Especially, this work is closely re-
+lated to two prior works on prompt tuning, namely
+PPT (Gu et al., 2021) and SPoT (Vu et al., 2022).
+Comparison with PPT. A prior work with the
+similar motivation is Pre-trained Prompt Tuning
+(PPT) (Gu et al., 2021), which pre-trains soft
+prompt prepended to the input embedding on large-
+scale unlabeled corpora with an objective of next
+sentence prediction (NSP). Different from the NSP
+in BERT (Devlin et al., 2019), PPT recasts the NSP
+task into a multiple choice classification (MCC) for-
+mat. For downstream tasks, PPT formulates three
+types of tasks, namely single-sentence, sentence-
+pair, and multiple choice classification, into a uni-
+fied MCC format such that the gap between the pre-
+training task and downstream tasks can be filled.
+Despite their success, we argue that PPT has three
+possible defects: (1) Complexity Mismatch : The
+number of learnable parameters and the volume of
+training data are mismatched. PPT trains 410K
+parameters with 10 GB training data. By con-
+trast, conventional PTMs have much smaller data-
+parameter ratios (see Table 1). Hence, the limited
+number of parameters can hardly contain the rich
+knowledge in the large corpora. (2) Simple Objec-
+tive: The pre-training objective of PPT, i.e., NSP, is
+not difficult enough. It has been shown that the im-
+pact of the NSP objective is unreliable (Yang et al.,
+2019b; Liu et al., 2019). As formulated by Lan
+et al. (2020), NSP can be accomplished through
+two subtasks, topic prediction andcoherence pre-
+diction . Nevertheless, topic prediction is easier to
+learn than coherence prediction, and therefore can
+dominate learning and makes NSP a rather simple
+task. (3) Limited Task : The downstream tasks
+handled by PPT are limited. PPT cannot address11157tasks that cannot be reformulated into a MCC task,
+such as question answering. Besides, when pre-
+training with the MCC format, PPT supports up
+to 16 options ( A-P), which means it only promises
+to adapt to tasks with no more than 16 labels. In
+this work, the above issues are well addressed by
+MP.First , MPincreases capacity of prompt
+in two dimensions, i.e., depth (deep prompt) and
+width (modular prompt), to match the complexity
+of training data. Second , MPis pre-trained on 38
+real-world Chinese tasks with multi-task learning,
+instead of pre-training in a self-supervised fashion
+with the NSP loss. Third , MPrecasts upstream
+and downstream tasks into a unified MRC task to
+support a wider range of downstream tasks.
+Comparison with SPoT. Another work that is
+similar to ours is Soft Prompt Transfer (SPoT) (Vu
+et al., 2022), which also explored training soft
+prompt with multi-task learning and then using
+it to initialize the prompt for a target task. By com-
+parison, our proposed MPhas three main differ-
+ences from SPoT: (1) We pre-train a set of modular
+prompts that are selectively combined and attached
+to every layer of the PTM rather than training a
+single prompt to be prepended merely to the input
+layer. (2) We formulate upstream and downstream
+tasks into a unified MRC task instead of unifying
+tasks into a text-to-text format (Raffel et al., 2020)
+where the output label words cannot be shared be-
+tween upstream and downstream tasks.(3) Unlike
+SPoT that is mainly evaluated in full data settings,
+MPis dedicated to few-shot learning.
+3 Methods
+We first introduce the MRC format used to unify
+different tasks in §3.1, and then describe the deep
+modular prompt in §3.2, and finally we detail the
+procedure of multi-task pre-training and down-
+stream fine-tuning in §3.3 and §3.4, respectively.
+3.1 Unifying Tasks with MRC
+Bridging the gap between upstream and down-
+stream tasks is crucial for few-shot learning.
+Prompt-based learning (Liu et al., 2021a) formu-
+lates downstream tasks into a (M)LM task, which,
+however, cannot cover a wide range of tasks. Be-
+sides, the label words (a.k.a. verbalizer) can bedifferent across tasks. Therefore, the soft prompt
+pre-trained with a certain set of label words can
+be less effective to be used in a target task with a
+different set of label words. To that end, PPT (Gu
+et al., 2021) recasts upstream and downstream tasks
+into a MCC task such that different tasks can share
+the same set of label words, i.e., 16 option indica-
+tors ( A-P). As a result, there is still a gap between
+pre-training and fine-tuning when performing clas-
+sification with more than 16 labels. In addition, the
+task types supported by MCC can still be limited.
+In MP, we adopt a more general format, ma-
+chine reading comprehension (MRC), to unify
+upstream and downstream tasks. MRC has
+achieved great success in unifying a variety of NLP
+tasks (Sun et al., 2022b). The input of MRC is
+comprised of a passage (also referred to as context )
+and a query , and the output is the answer of the
+query, which is a span of text in the input. Typi-
+cally, the prediction of the answer is achieved by
+two binary classification heads on each token of
+the input, one for predicting the start position and
+one for predicting the end position (Xiong et al.,
+2017; Seo et al., 2017).
+For classification tasks, we use the original sam-
+ple as the context and construct a query consisting
+of all possible labels. In contrast to PPT that pre-
+defines a set of option indicators, MPdirectly
+extracts the answer from the query, and therefore
+can generalize across tasks with different numbers
+of labels. Appendix C contains some examples of
+converting tasks into the MRC format.
+3.2 Deep Modular Prompt
+To increase the capacity of the soft prompt such
+that it can match the complexity of training data,
+we extend soft prompt in two dimensions, depth
+and width. Figure 2 provides an overview of the
+deep modular prompt.
+Deep Prompt. Inspired by the success of deep
+prompt tuning (Li and Liang, 2021; Qin and Eisner,
+2021; Liu et al., 2021b), we inject soft prompt to
+every layer of the PTM instead of the mere input
+layer. The incorporation of deep prompt increases
+the number of learnable parameters and so as the
+adaptation ability to hard tasks.
+Modular Prompt. For the soft prompt attached
+to each layer of the PTM, we extend the single
+static prompt to a set of modular prompts. Formally,
+we pre-train Ksoft prompts {p, . . . ,p}for11158
+each layer l. For a certain task, the prompt at layer
+lis the weighted mean of the set of soft prompts,
+p=1
+K/summationdisplaywp, (1)
+where w={w, . . . , w}are layer- and task-
+specific learnable parameters called router . To
+pursue compositional generalization, we encour-
+age the prompts to be sparsely activated and com-
+bined. Thus, the router wshould be binary-
+valued, i.e., w∈ {0,1}. Each single prompt
+can be viewed as some fundamental skill, and a
+task can be solved by combining such modular
+skills. Different tasks tend to require different sub-
+sets of the skills. Though similar ideas have been
+proposed in other names and contexts (Sun et al.,
+2020b; Zhang et al., 2022a; Ponti et al., 2022), this
+is the first work that implements the skills with soft
+prompts to drive pre-trained language models.
+Relaxed Bernoulli Distribution. A challenge is
+that the discrete router wis not differentiable
+and therefore cannot be optimized by gradient
+descent in an end-to-end fashion. To that end,
+we keep w∈Ras free parameters to param-
+eterize a relaxed Bernoulli (or binary concrete)
+distribution (Maddison et al., 2017), which can
+be considered as a continuous relaxation of the
+Bernoulli distribution. From the relaxed Bernoulli
+distribution, we sample ˆ wto weight the modu-
+lar prompts, i.e., p=/summationtextˆwp/K. By using
+the reparameterization trick (Kingma and Welling,2014), the router can be learned via gradient de-
+scent while maintaining some degree of stochas-
+ticity. Formally, the sampling procedure for ˆw∼
+RelaxedBernoulli (α, τ)is as follows,
+u∼Uniform (0,1), (2)
+v= log( α) + log( u)−log(1−u),(3)
+ˆw=σ(v/τ), (4)
+where α∈(0,∞)is the location parameter, σ
+is the Sigmoid function, and τ∈(0,∞)is the
+temperature to control the degree of approximation.
+Note that wcan be negative during training and
+therefore cannot be used directly as the location
+parameter α. To ensure that α∈(0,∞), we set α
+as follows,
+α=σ(w)
+1−σ(w). (5)
+During inference, we simply set ˆw= 1ifw>
+0, otherwise ˆw= 0.
+Intrinsic Reparameterization. Recent stud-
+ies (Sun et al., 2022c; Diao et al., 2022) have
+demonstrated that prompt tuning can be achieved
+in a much lower dimensional intrinsic subspace
+through gradient-free optimization. To benefit tun-
+ing in the intrinsic subspace, we perform intrin-
+sic reparameterization , which is to decompose the
+original modular prompt p∈Rinto an in-
+trinsic prompt z∈Rand a projection matrix
+A∈R. Note that Ais shared by the modular
+prompts {p}at the same layer. During multi-
+task pre-training, both zandAare updated. On
+downstream tasks, black-box tuning (BBT) (Sun
+et al., 2022c) can be enabled by only tuning the
+intrinsic prompt zwhile keeping Afrozen.111593.3 Multi-Task Pre-Training
+Multi-task learning has been shown to boost the per-
+formance of prompt tuning in a variety of tasks (Vu
+et al., 2022). Following their success, we pre-train
+the deep modular prompts on a mixture of 38 Chi-
+nese NLP tasks with varying types, domains, and
+sizes. To handle the unbalanced data sizes, for each
+forward computation, we first randomly sample a
+task ID from 1 to 38 and then fetch a batch of train-
+ing data corresponding to the sampled task, such
+that the number of learning steps for each task is
+expected to be identical.
+Fast and Slow Learning. For the pre-training
+of the routers and the prompts, we intuitively en-
+courage fast learning for the routers to reuse exist-
+ing modular prompts to adapt to the current task,
+and slow learning for the task-specific prompts.
+In particular, we adopt a higher learning rate for
+the routers zto change quickly, and adopt a lower
+learning rate for the modular prompts pto change
+slowly and stably. Similar ideas are also explored
+by Madan et al. (2021); Ponti et al. (2022).
+3.4 Downstream Fine-Tuning
+For fast adaptation to downstream tasks, we pro-
+pose the two-stage tuning .In stage I , we allo-
+cate a random router for each layer to a new tar-
+get task and train the routers to selectively reuse
+pre-trained modular prompts to solve the target
+task while keeping all other parameters frozen. In
+stage II , we freeze the routers and only tune the
+selected prompts. The PTM parameters are un-
+changed throughout the entire fine-tuning process.
+We explore fine-tuning MPunder two learn-
+ing paradigms, namely gradient descent andblack-
+box tuning . For gradient descent, we use an
+Adam (Kingma and Ba, 2015) optimizer to perform
+two-stage tuning. For black-box tuning, we adopt
+the Bayesian optimization (BO) (Mockus, 1974) in
+stage I to optimize the routers, and adopt the CMA-
+ES (Hansen and Ostermeier, 2001) to optimize the
+selected intrinsic prompts zwhile freezing the pro-
+jection matrices A. See Appendix A for detailed
+description of fine-tuning.
+4 Experiments
+4.1 Datasets and Tasks
+Pre-training Tasks. We collect 38 public Chi-
+nese NLP tasks ranging from different task types,
+domains, and data sizes as upstream tasks for pre-
+training. The total size of the pre-training data
+is 15GB. Appendix D contains full details of the
+pre-training tasks.
+Downstream Tasks. We divide 14 downstream
+tasks into two tracks: U DandU
+T. The 7 tasks in the U Dtrack are
+a subset of upstream tasks, for which we retain a
+small portion of training data from the pre-training
+corpora to ensure that the downstream samples are
+unseen to MP. The U T track is com-
+prised of 7 tasks that are completely held-out tasks.
+Table 2 contains statistics of the downstream tasks.
+The sources of the tasks are in Appendix D.
+True Few-Shot Setting. For downstream tasks,
+we follow the same procedure as Gu et al. (2021)
+to form the true few-shot learning settings (Perez
+et al., 2021). In particular, we randomly draw 32
+samples from the original training set to construct
+a few-shot training set D, and construct a devel-
+opment set Dby randomly selecting another 32
+samples from the original training set. We ensure
+that the number of labels is balanced for both train-
+ing and development set. For tasks with more than
+5 labels, we randomly select 8 samples for each
+label. We use the original development sets as the
+test sets. For datasets without development sets,
+we use the original test sets.
+4.2 Backbones and Baselines
+We choose CPT-large (Shao et al., 2021) as our
+backbone model, which is a competitive Chinese11160
+PTM consisting of a 20-layered shared encoder, a
+4-layered understanding decoder and a 4-layered
+generation decoder. In our experiment, we use the
+encoder and the understanding decoder to compose
+a 24-layered PTM. We attach soft prompt to the in-
+put layer and all intermediate layers except the last
+layer, which has no effect on the output. Therefore,
+we pre-trained 24 sets of modular prompts, each
+corresponding to one layer of CPT. In addition to
+the pre-trained Deep MP, we also pre-trained a
+set of modular prompts that are merely attached to
+the input layer, denoted as Shallow MP.
+We evaluate MPunder two learning paradigms:
+gradient descent andblack-box tuning . For gradi-
+ent descent, we consider (1) Model Tuning , which
+fine-tunes all parameters of the PTM; (2) Prompt
+Tuning (Lester et al., 2021), which prepends a se-
+quence of soft prompt tokens to the input and only
+tunes the soft prompt for adaptation; (3) P-Tuningv2(Liu et al., 2021b): which incorporates and tunes
+soft prompt at every layer of the PTM. Prompt tun-
+ing and p-tuning v2 can be seen as the baselines to
+Shallow MPand Deep MP, respectively. Besides,
+we compare with two previous prompt pre-training
+methods: (4) PPT (Gu et al., 2021), which pre-
+trains soft prompt on large-scale unlabeled data
+with self-supervised learning; and (5) SPoT (Vu
+et al., 2022), which pre-trains soft prompt with
+multi-task learning. For fair comparison, we reim-
+plement PPT and SPoT with the same backbone
+model, i.e., CPT-large. For PPT, we pre-trained
+the "Unified PPT" on the same pre-training corpora
+as in the original paper, i.e., 10GB WuDaoCor-
+pora (Yuan et al., 2021). For SPoT, we pre-trained
+a single soft prompt with the same 38 Chinese NLP
+tasks as used by MP. Therefore, experiments of
+SPoT can be seen as an ablation study on the ef-
+fect of the modular prompt. For black-box tuning,11161
+we consider two baselines: (1) BBT (Sun et al.,
+2022c), which adopts a gradient-free optimizer to
+tune a low-dimensional intrinsic prompt, and then
+randomly embeds it into the original prompt space
+to be concatenated with the input embedding; and
+(2) BBTv2 (Sun et al., 2022a), which extends BBT
+by incorporating soft prompt into every layer of the
+PTM and uses a divide-and-conquer algorithm to
+alternately optimize the soft prompt at each layer.
+The prompt length is set to 50 for both shallow
+MPand deep MP. Each set of modular prompts
+is consisting of K= 8soft prompts, and therefore
+the pre-trained routers are in the shape of 38×
+8. Shallow MPhas only one router while deep
+MPcontains 24 routers corresponding to 24 layers.
+Hyper-parameters and more implementation details
+are provided in Appendix A.
+4.3 Results
+Main Results. Main results on 14 downstream
+tasks are listed in Table 3. We report mean and
+standard deviation of performance over 5 runs with
+different random seeds. Overall, MPoutperforms
+all baselines by a large margin. By further com-
+parison, we have the following findings: (1) Deep
+Prompt vs. Shallow Prompt : Deep prompt methods
+(i.e., p-tuning v2, BBTv2, and deep MP) signifi-
+cantly outperform their corresponding shallow ver-
+sions (i.e., prompt tuning, BBT, and shallow MP).
+(2) Modular Prompt vs. Single Prompt : Shallow
+MPachieves better performance than SPoT on
+13/14 tasks, demonstrating the strong composi-
+tional generalization of the modular prompts. (3)
+MRC vs. MCC : PPT lags far behind MP(and even
+p-tuning v2) on two MRC tasks, namely CMRC-
+2018 and DRCD, demonstrating the limitation of
+the MCC format. (4) Pre-trained Prompt Tuning vs.
+Prompt Tuning From Scratch : Pre-trained prompt
+tuning (i.e., PPT, SPoT, and MP) performs con-
+sistently better than tuning randomly initialized
+prompt with the same number of tunable parame-
+ters. (5) Gradient Descent vs. Black-Box Tuning :
+Without MPfor initialization, BBT and BBTv2
+achieve better performance than prompt tuning
+and p-tuning v2, respectively, on most tasks but
+much worse performance on a few tasks such as
+CCPM. By using MPfor initialization, the gap
+between gradient descent and black-box tuning on
+these tasks are closed, and in average, BBT and
+BBTv2 outperform their gradient-based counter-
+parts, showing the superiority of gradient-free opti-
+mization in few-shot learning settings.
+Two-Stage Tuning. As demonstrated in Table 3,
+by only tuning the router (only stage I), which
+contains merely 8parameters for shallow MPor
+8×24 = 192 parameters for deep MP, we can
+achieve surprisingly strong performance that can be
+comparable to two-stage tuning. For shallow MP,
+only tuning the router even outperforms two-stage
+tuning in average on U Dtasks. To take
+a closer look, we demonstrate the process of two-
+stage tuning with shallow MPfor initialization in
+Figure 3. For both learning paradigms, we find that
+the best performance on the development set of the
+U D task (here is the BQ task) can be
+observed in stage I, where we only tune the router
+to reuse pre-trained prompts. On U T
+(here is the LCQMC task), we observe improve-11162
+ment of performance during stage II. In Table 4, we
+compare the training time of the two stages to show
+the high efficiency of stage I when using black-box
+tuning. Results suggest that learning to combine
+instead of tuning the prompts is a promising way
+to achieve fast adaptation to downstream tasks.
+On Many-Label Classification Tasks. In con-
+trast to PPT that is pre-trained to perform up to
+16-label classification, our proposed MPunifies
+tasks into the MRC format such that it can general-
+ize to downstream tasks with varying numbers of
+labels. To simulate tasks with different numbers
+of labels, we extract subsets with 10/15/20/25/30
+labels from the IFLYTEK dataset, which contains
+119 labels in total. We follow the same procedure
+(§4.1) to generate train/dev/test splits from the ex-
+tracted subsets. As shown in Figure 4(a), there is
+a sharp decline in the accuracy of PPT when the
+number of labels exceeds 16. By contrast, the per-
+formance of MPis decreasing more slowly and
+steadily as the number of labels increases, demon-
+strating the superiority of the MRC format.
+On Sample Efficiency. We compare MPand
+PPT with different numbers of training samples
+on the LCQMC task. As shown in Figure 4(b),
+increasing training samples generally confers im-
+proved performance for both MPand PPT while
+MPconsistently outperforms PPT under varying
+numbers of training samples. In addition, the gap
+between MPand PPT cannot be easily filled with
+enlarged training set.
+Task Partitions Induced From the Router. We
+take a closer look at the learned router and find that
+non-trivial task partitions can be induced from it.
+For simplicity, we focus on the shallow MP, which
+has only one router. There are totally 8 modular
+prompts corresponding to 2= 256 possible com-
+binations. We perform a hierarchical clustering on
+the router learned on 38 upstream tasks and visual-
+ize the task partitions in Figure 5. The 38 upstream
+tasks can be partitioned into 8 groups. For instance,
+group A is mainly comprised of topic classification
+tasks; group D contains all the sentiment analysis
+tasks; group C and E are all comprised of NLI tasks,
+among which group E covers all the "Zhidao" tasks,
+which are question-answer matching tasks.
+5 Conclusion
+This work aims to bridge the gap between pre-
+training and fine-tuning of soft prompt tuning for
+few-shot learning. To achieve this, we extend the
+soft prompt in two dimensions, depth and width.
+The extended prompt, named deep modular prompt,
+is pre-trained on a mixture of 38 public Chinese
+NLP tasks, which are reformulated into the MRC
+format. For adaptation to downstream tasks, we
+propose the two-stage tuning, where we first learn
+to combine and reuse pre-trained prompts and then
+tune the selected prompts with gradient descent or
+black-box optimization. Extensive experiments on
+14 downstream tasks demonstrate that, the Multi-
+task Pre-trained Modular Prompt ( MP) signifi-
+cantly outperforms prompt tuning, full model tun-
+ing, and previous prompt pre-training methods,
+namely PPT and SPoT. Surprisingly, we demon-
+strate that MPcan achieve extremely fast adapta-
+tion to downstream tasks by only learning to com-
+bine pre-trained prompts.11163Limitations
+In this work, we demonstrate the effectiveness
+of the proposed MPwith the backbone PTM of
+CPT-large on a set of Chinese NLP tasks. Due
+to the expensive pre-training cost, we did not ex-
+plore MPon other PTMs with varying sizes, pre-
+training objectives and architectures. Besides, it is
+also unknown how does the number of pre-training
+tasks affect the performance of MP. For resource-
+rich languages such as English and Chinese, it
+would be promising for MPto be well-performed
+since one can easily collect sufficient public up-
+stream tasks. Nevertheless, for low-resource lan-
+guages or domains, the effect of MPis still under-
+explored.
+Ethics Statement
+The proposed MPis a parameter-efficient ap-
+proach for few-shot learning. In addition, we
+demonstrate that MPcan achieve highly efficient
+adaptation to a target task by only tuning a few
+parameters. Therefore, this work helps reduce com-
+putation costs and carbon emissions, and can fa-
+cilitate the adaptation of PTMs to low-resource
+downstream tasks. Though all the datasets used in
+our experiments are publicly available and have not
+been reported to carry social bias against any sen-
+sitive attributes, and the proposed approach would
+not explicitly introduce new negative societal im-
+pacts, more work is still needed to investigate the
+potential unfairness in these datasets.
+Acknowledgements
+This work was supported by the National Natu-
+ral Science Foundation of China (No. 62236004
+and No. 62022027) and CAAI-Huawei MindSpore
+Open Fund.
+References11164111651116611167A Implementation Details
+A.1 Upstream Pre-training
+MP.MPis pre-trained on 38 upstream tasks
+using an Adam optimizer with batch size of 32 for
+1M steps. During each forward computation, we
+first randomly select a task and then fetch a batch
+of training data corresponding to the selected task.
+By this, the number of learning steps on each task
+is expected to be identical. As demonstrated in
+Table 5, the fast and slow learning (FSL) can be
+beneficial to deep MP, and therefore we use two-
+speed learning rate for pre-training the routers and
+the prompts of deep MP. In particular, the learning
+rate of the routers is 5e-4, and the learning rate of
+the prompts is 1e-4. For shallow MP, we use a
+single learning rate of 1e-3 for the router and the
+modular prompts. The prompt length is set to 50
+for both shallow MPand deep MP. For shallow
+MPand each layer of the deep MP, we allocate
+K= 8modular prompts and one router to combine
+them. In addition to the routers and the prompts,
+we also train the randomly initialized MRC head
+on the top of the PTM. The original parameters of
+the PTM are frozen during pre-training. We run
+pre-training on NVIDIA A100 GPUs.
+Baselines. For fair comparison, we also reimple-
+ment PPT and SPoT with the same backbone model
+as MP, i.e., CPT-large. For pre-training PPT, we
+implement the "Unified PPT" variant, which is to
+formulate tasks into a unified MCC format, to sup-
+port a variety of downstream tasks. We follow the
+experimental setup in the original paper and use
+10GB data sampled from the WuDaoCorpora for
+pre-training. We train for 400K steps using an
+Adam optimizer with batch size of 32 and learning
+rate of 3e-2. For SPoT, we pre-trained a single soft
+prompt on the same 38 upstream tasks as used by
+MPusing an Adam optimizer with batch size of 32
+and learning rate of 3e-3 for 650K steps. Though
+the numbers of training steps for PPT and SPoT are
+less than MP, they are sufficient for convergence
+due to their limited numbers of parameters. To be
+consistent with MP, we set prompt length to 50
+for PPT and SPoT.
+A.2 Downstream Fine-tuning
+We use the two-stage tuning to adapt MPto var-
+ious downstream tasks. In stage I, we only tune
+the router(s)while keeping all other parameters
+frozen. In stage II, we fix the learned router(s) and
+only fine-tune the modular prompts selected by the
+router(s). The implementation details of the two-
+stage tuning can be different for gradient descent
+and black-box tuning. We provide a graphical il-
+lustration of the two-stage tuning using gradient
+descent and black-box tuning in Figure 6. For gra-
+dient descent , we fine-tune MPfor 1K epochs
+on each task, where the first 500 epochs as stage
+I and the last 500 epochs as stage II. For the shal-
+low/deep MP, we use an Adam optimizer with
+learning rate of 1e-2/3e-3 for tuning the router(s)
+(stage I) and learning rate of 3e-4/2e-5 for tun-
+ing the prompts (stage II). For black-box tuning ,
+we fine-tune shallow/deep MPfor 8K iterations
+(model forward computes) on each task, where the
+first 200/100 iterations as stage I and the rest as
+stage II. In stage I, we use Bayesian optimization
+(BO) with the acquisition function of upper confi-
+dence bound (UCB) with κ= 2to tune the param-
+eters of the router(s). In stage II, we use CMA-ES
+to optimize the prompts. For shallow MP, we
+useµ= 0 andσ= 0.1for initialization of the
+CMA-ES. For deep MP, we follow BBTv2 and
+use the divide-and-conquer algorithm to alternately
+optimize the prompt at each layer. For optimization
+of the prompt at the embedding layer, we initialize
+CMA-ES with µ= 0andσ=5e-2. For optimiza-
+tion of the prompt at intermediate layers, we adopt
+µ= 0 andσ=1e-2. All the hyper-parameters
+are tuned manually in a lightweight manner on de-
+velopment sets. We perform fine-tuning a single
+NVIDIA 3090 GPU.
+B Additional Results
+Ablation of Fast and Slow Learning. We con-
+duce ablation study on fast and slow learning (FSL),
+which is to assign different learning rates to routers11168
+and prompts. As demonstrated in Table 5, FSL ex-
+hibits positive effect on downstream tasks to deep
+MPand negative effect to shallow MP. There-
+fore, we retain the shallow MPpre-trained without
+FSL and the deep MPpre-trained with FSL in our
+experiments.
+C MRC Format
+We unify upstream and downstream tasks into the
+machine reading comprehension (MRC) format,
+which takes as input a context and a query , and
+outputs the answer of the query. For topic classifi-
+cation and sentence-pair classification tasks, we use
+the original input text as the context and construct
+a query containing all valid labels. The context
+and the constructed query are concatenated and fedinto the model. The model is trained to extract
+the answer in the query by predicting its start and
+end positions. For more complicated tasks such
+as relation extraction and poem understanding, we
+manually design task-specific templates to convert
+inputs to the desired contexts and queries. Some
+examples are shown in Table 7.
+D Additional Details of Tasks
+D.1 Upstream Tasks
+Table 8 contains details of the 38 upstream tasks.
+We only use the training sets during pre-training.
+For tasks that also serve as a downstream task in the
+U D track, we remove a small portion
+of training samples from pre-training to avoid data
+leakage.
+D.2 Downstream Tasks
+The downstream tasks are divided into two tracks,
+U DandU T. The tasks in
+theU Dtrack are a subset of upstream
+task, for which the details have been provided in
+Table 8. For the 7 tasks in the U T track,
+we provide the sources in Table 6.1116911170ACL 2023 Responsible NLP Checklist
+A For every submission:
+/squareA1. Did you describe the limitations of your work?
+The limitations are discussed in the ﬁrst section after the conclusion.
+/squareA2. Did you discuss any potential risks of your work?
+The potential risks are discussed in the ﬁrst section after the conclusion.
+/squareA3. Do the abstract and introduction summarize the paper’s main claims?
+Abstract and 1. Introduction.
+/squareA4. Have you used AI writing assistants when working on this paper?
+Left blank.
+B/squareDid you use or create scientiﬁc artifacts?
+4.1 Datasets and Tasks and Appendix D Additional Details of Tasks.
+/squareB1. Did you cite the creators of artifacts you used?
+4.1 Datasets and Tasks and Appendix D Additional Details of Tasks.
+/squareB2. Did you discuss the license or terms for use and / or distribution of any artifacts?
+All the datasets used in the submission are publicly accessible for research use, as listed in Table 6
+and Table 8.
+/squareB3. Did you discuss if your use of existing artifact(s) was consistent with their intended use, provided
+that it was speciﬁed? For the artifacts you create, do you specify intended use and whether that is
+compatible with the original access conditions (in particular, derivatives of data accessed for research
+purposes should not be used outside of research contexts)?
+all the datasets used in the submission are publicly accessible for research use
+/squareB4. Did you discuss the steps taken to check whether the data that was collected / used contains any
+information that names or uniquely identiﬁes individual people or offensive content, and the steps
+taken to protect / anonymize it?
+Appendix D Additional Details of Tasks.
+/squareB5. Did you provide documentation of the artifacts, e.g., coverage of domains, languages, and
+linguistic phenomena, demographic groups represented, etc.?
+4.1 Datasets and Tasks and Appendix D Additional Details of Tasks.
+/squareB6. Did you report relevant statistics like the number of examples, details of train / test / dev splits,
+etc. for the data that you used / created? Even for commonly-used benchmark datasets, include the
+number of examples in train / validation / test splits, as these provide necessary context for a reader
+to understand experimental results. For example, small differences in accuracy on large test sets may
+be signiﬁcant, while on small test sets they may not be.
+4.1 Datasets and Tasks.
+C/squareDid you run computational experiments?
+4 Experiments, Appendix A.1 Upstream Pre-training, Appendix A.2 Downstream Fine-tuning
+/squareC1. Did you report the number of parameters in the models used, the total computational budget
+(e.g., GPU hours), and computing infrastructure used?
+4.2 Backbones and Baselines, Appendix A.1 Upstream Pre-training, Appendix A.2 Downstream
+Fine-tuning11171/squareC2. Did you discuss the experimental setup, including hyperparameter search and best-found
+hyperparameter values?
+Appendix A.1 Upstream Pre-training, Appendix A.2 Downstream Fine-tuning
+/squareC3. Did you report descriptive statistics about your results (e.g., error bars around results, summary
+statistics from sets of experiments), and is it transparent whether you are reporting the max, mean,
+etc. or just a single run?
+4.3 Results
+/squareC4. If you used existing packages (e.g., for preprocessing, for normalization, or for evaluation), did
+you report the implementation, model, and parameter settings used (e.g., NLTK, Spacy, ROUGE,
+etc.)?
+We did not use existing packages.
+D/squareDid you use human annotators (e.g., crowdworkers) or research with human participants?
+Left blank.
+/squareD1. Did you report the full text of instructions given to participants, including e.g., screenshots,
+disclaimers of any risks to participants or annotators, etc.?
+No response.
+/squareD2. Did you report information about how you recruited (e.g., crowdsourcing platform, students)
+and paid participants, and discuss if such payment is adequate given the participants’ demographic
+(e.g., country of residence)?
+No response.
+/squareD3. Did you discuss whether and how consent was obtained from people whose data you’re
+using/curating? For example, if you collected data via crowdsourcing, did your instructions to
+crowdworkers explain how the data would be used?
+No response.
+/squareD4. Was the data collection protocol approved (or determined exempt) by an ethics review board?
+No response.
+/squareD5. Did you report the basic demographic and geographic characteristics of the annotator population
+that is the source of the data?
+No response.11172

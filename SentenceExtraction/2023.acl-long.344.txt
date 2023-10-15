@@ -1,1 +1,1203 @@
-6252 Proceedings of the 61st Annual Meeting of the Association for Computational Linguistics Volume 1 : Long Papers , pages 6252–6272 July 9 - 14 , 2023 © 2023 Association for Computational Linguistics 6253 6254 6255 6256 6257 6258 6259 6260 6261 6262 6263 6264 6265 6266 6267 6268 6269 6270 6271 6272 
+
+Paul RoitJohan FerretLior Shani
+Roee AharoniGeoffrey CideronRobert DadashiMatthieu Geist
+Sertan GirginLéonard HussenotOrgad KellerNikola Momchev
+Sabela RamosPiotr StanczykNino Vieillard
+Olivier BachemGal ElidanAvinatan HassidimOlivier PietquinIdan SzpektorBar-Ilan UniversityGoogle Research
+Abstract
+Despite the seeming success of contemporary
+grounded text generation systems, they of-
+ten tend to generate factually inconsistent text
+with respect to their input. This phenomenon
+is emphasized in tasks like summarization, in
+which the generated summaries should be cor-
+roborated by their source article. In this work
+we leverage recent progress on textual entail-
+ment models to directly address this problem
+for abstractive summarization systems. We
+use reinforcement learning with reference-free,
+textual-entailment rewards to optimize for fac-
+tual consistency and explore the ensuing trade-
+offs, as improved consistency may come at
+the cost of less informative or more extractive
+summaries. Our results, according to both au-
+tomatic metrics and human evaluation, show
+that our method considerably improves the
+faithfulness, salience and conciseness of the
+generated summaries.
+1 Introduction
+Recent advancements in abstractive summarization
+systems (Zhang et al., 2019; Liu et al., 2022b) are
+often impeded by their tendency to output infor-
+mation that is either contradicting or unsupported
+by their input article, often termed as “hallucina-
+tions” or factual inconsistency (Falke et al., 2019;
+Maynez et al., 2020; Pagnoni et al., 2021). While
+these systems produce highly relevant and coherent
+text, this lack of factual consistency often limits
+their wide-spread adoption in real-world applica-
+tions. An example is depicted in Figure 1, where
+the highlighted statement in the summary, while
+plausible, has no support in the input article.Figure 1: Summaries produced by multiple methods
+from a news article in the XSum dataset. Hallucina-
+tions or contradictions are highlighted in red. Note how
+the T5 generated summary mentions that there is a fall
+in operating proﬁts for the second year in a row , while
+the article only discusses a recent decline in earnings
+and a warning made in the previous year.
+Since widely-used metrics such as ROUGE (Lin,
+2004) were shown to be inefﬁcient for detecting
+hallucinations, many recent research efforts intro-
+duced novel automatic metrics for measuring fac-
+tual consistency (Kryscinski et al., 2020; Goyal and
+Durrett, 2020; Scialom et al., 2021, inter alia). We
+propose to leverage these automatic metrics within
+areinforcement learning (RL) framework at train-
+ing time. Speciﬁcally, we apply textual entailment
+assessment (a.k.a. natural language inference , or
+NLI; Dagan et al., 2005; Bowman et al., 2015) be-
+tween the source article and the generated summary
+as a reward.
+Our reward is based on the well studied textual
+entailment task (Pavlick and Kwiatkowski, 2019;
+McCoy et al., 2019; MacCartney and Manning,
+2007, inter alia), for which there are many pub-
+licly available datasets (Nie et al., 2020; Liu et al.,62522022a). While these NLI datasets are not speciﬁc to
+summarization, it was shown that classiﬁers trained
+on these datasets perform well in detecting factual
+inconsistencies in summarization and other genera-
+tive tasks (Honovich et al., 2022). Because faithful
+summaries must be textually entailed from the cor-
+responding input documents, using such a reward
+explicitly should guide a summarization model to-
+wards generating more factually consistent sum-
+maries. Yet, a high-quality summary should also be
+coherent and contain relevant information (Fabbri
+et al., 2021), aspects which may not be captured by
+entailment alone. Moreover, a reward that is based
+only on entailment raises the risk of degenerate so-
+lutions, leading to either highly extractive (Ladhak
+et al., 2022) or less informative summaries (“re-
+ward hacking”; Amodei et al., 2016; Skalse et al.,
+2022; Pan et al., 2022).
+To address these issues, we propose Reinforce-
+ment Learning with Entailment Feedback (RLEF):
+Start with a model trained to produce summaries
+with the conventional cross-entropy objective, and
+further ﬁne-tune it using RL with an entailment-
+based reward. Throughout the RL procedure, we
+constrain the candidate models to stay close to the
+initial model. This way, while the model is be-
+ing corrected for higher consistency, it also retains
+other summarization capabilities that were learnt
+with the maximum-likelihood (MLE) objective. In
+this work we explore the consistent vs. informative
+trade-off in our RL-based summaries w.r.t. various
+aspects including model scale, regularization and
+decoding strategies. We ﬁnd those aspects to be
+highly important and interdependent for the ﬁnal
+model performance, highlighting the importance
+of carefully tuning them.
+Our work stands in contrast to two prior RL-
+based approaches. The ﬁrst approach induces a
+reward function from human feedback that encom-
+passes various task-speciﬁc requirements into a
+single value (Böhm et al., 2019; Stiennon et al.,
+2020). Collecting such feedback is expensive and
+requires dedicated data collection for each target
+task. In contrast, we use readily-available mod-
+els and datasets for the reward, which address a
+speciﬁc aspect of generation that is generic across
+many different tasks. Other works modeled the
+reward using different similarity functions between
+thereference and the generated summaries (Pa-
+sunuru and Bansal, 2018; Gunasekara et al., 2021),
+thus requiring reliable reference data. Instead, our
+reward function evaluates the generated output only
+w.r.t. the input , enabling to train using RL on data
+without reference summaries. We evaluated our
+approach on the widely used XSum (Narayan et al.,
+2018a) dataset, using both automated metrics and
+human raters. The results show considerable im-
+provements over strong baselines for factual con-
+sistency, salience, and conciseness of the generated
+summaries.
+2 Method
+We would like to increase factual consistency us-
+ing an entailment-based reward, while retaining the
+high salience and coherence that current summa-
+rization models already obtain. To achieve this,
+we propose to initialize an RL policy with a sum-
+marization model trained on supervised data (the
+anchor model ). From there, in each RL-based train-
+ing step we update the parameters according to two
+signals: an entailment reward and a regularization
+term grounded on the anchor model. During RL
+training, the entailment reward directs the model
+towards increased faithfulness, while the regular-
+ization term keeps the model from drifting to degen-
+erate solutions and “forgetting” how to summarize.
+The process is illustrated in Figure 2.62532.1 RLEF: RL from Entailment Feedback
+Problem Formulation. We denote the input doc-
+ument and output summary as x,y respectively.
+LetVdenote the input and output vocabulary, and
+y= (y,...,y)denote the generated summary
+up to then-th token. We deﬁne the token-wise
+generative summarization process as a determinis-
+tic Contextual Markov Decision Process (CMDP,
+Hallak et al. 2015) with observable context, where
+thecontext is the input text x, the state at then-th
+token generation is the sequence generated thus
+fary, and the action space is deﬁned over the
+vocabulary V. A policyπ(·|y,x), is a proba-
+bility distribution over all tokens in V, conditioned
+on the context and state. We note that following
+this formulation, the policy is identical to a token-
+level auto-regressive language model (Bengio et al.,
+2003). The RL objective is to ﬁnd the optimal pol-
+icy, which maximizes the cumulative reward signal.
+Rewards. We use an NLI classiﬁcation model
+as a factual consistency reward signal. Since
+the model is trained to evaluate complete utter-
+ances and expects as input a grammatical premise
+(document) / hypothesis (summary) pair, we use
+sequence-level rewards and deﬁne the token-level
+NLI reward to be zero on every token except for
+the end-of-sequence (EOS) token. For the EOS
+token we set the reward to be the log-probability
+for an “entailment” decision according to the NLI
+classiﬁer, using xas the premise and yas the
+fully generated hypothesis:
+r(y;y,x) =/braceleftBigg
+NLI(y;x)y=;
+0 otherwise,
+whereis an end-of-sequence symbol, and
+NLI(y;x) = log Pr( entailment|y,x).
+To retain the summarization capabilities of the
+anchor model, we use Kullback-Leibler (KL) regu-
+larization to keep the RL-based policy close to the
+supervised anchor policy (Jaques et al., 2017):
+r(y;y,x) = logπ(y|y,x)
+π(y|y,x).
+This term is added to the NLI reward, producing
+the ﬁnal token-level reward:
+r(y;y,x) = (1−α)r(y;y,x)
++αr(y;y,x).(1)
+The hyperparameter αenables controlling the trade-
+off between enforcing faithfulness through the re-
+ward and remaining close to the anchor policy.Training Algorithm. We train the policy to opti-
+mize for the rewards deﬁned in Equation (1) using
+an on-policy actor-critic policy gradient (PG) ap-
+proach. Since we keep proximity to the anchor
+model via the KL penalty reward, the algorithm
+can be considered a regularized PG algorithm, sim-
+ilarly to works by Geist et al. (2019); Shani et al.
+(2020); Abdolmaleki et al. (2018); Tomar et al.
+(2022); Vaswani et al. (2021); see Appendix C for
+a detailed formulation. Speciﬁcally, two models
+are learned: a policy (the generation model) and the
+expected value of the policy (the value network).
+We use the supervised model to initialize the pa-
+rameters of both models, with the exception that
+the last layer of the value network outputs single
+scalars instead of a distribution over the vocabulary.
+The RL training process consists of the following
+stages: (1) Generating summaries with the current
+policy and (2) Scoring the summaries using the
+reward signal. Then, (3) Policy and value networks
+are trained, jointly: the policy is trained via the PG
+loss while using the value for generalized advan-
+tage estimation (GAE, Schulman et al. (2016)); the
+value is trained via standard bootstrapping, using
+the GAE predictions. Notably, this process does
+not require reference summaries for learning the
+policy. More details regarding the algorithm and
+losses can be found in Appendix A.
+2.2 Decoding at Inference Time
+As a direct consequence of RL training, the model
+explicitly learns to generate tokens with the goal of
+maximizing the long-term sequence reward. This is
+in contrast to MLE-based training, where the model
+learns to generate each token myopically, requiring
+heuristic decoding strategies such as beam-search
+to plan ahead. As a result, we can use the more
+efﬁcient temperature sampling instead of beam-
+search when decoding from an RL-trained policy.
+3 Experimental Design
+3.1 Data
+We focus on XSum (Narayan et al., 2018a), an
+abstractive summarization dataset that poses chal-
+lenges around factual consistency. XSum is com-
+piled from 200K web-scraped BBC news articles,
+where the lead (introductory) sentence in every ar-
+ticle is taken as the summary, and the rest of the6254sentences are taken as the source document.
+Due to this formulation, XSum summaries may
+contain additional information that was not re-
+peated in the rest of the sentences. Indeed, prior
+work found that only 20% of the reference sum-
+maries in XSum are entailed from their source doc-
+ument (Maynez et al., 2020), and that summariza-
+tion systems trained on XSum are likely to generate
+factually inconsistent summaries. For this reason
+we ﬁnd XSum suitable for our experiments, as we
+would like to see if the RL-based reward could al-
+leviate the factual inconsistencies that supervised
+models learn to generate based on this data.
+We also experiment on two additional datasets to
+compare to prior work. The TL;DR dataset (Völske
+et al., 2017), using the same cleaned version pro-
+vided by Stiennon et al. (2020), which contains
+120K Reddit posts and their short summaries, and
+the CNN/DM (Nallapati et al., 2016) dataset. The
+latter contains 200K news articles and their bullet-
+point highlights, which are mostly copied excerpts
+from article sentences. In this work we focus on ab-
+stractive summarization, and therefore evaluate our
+methods on CNN/DM with models trained, both
+supervised and reinforced, over TL;DR.
+3.2 Entailment Model
+In this work we focus on combining an existing
+entailment model as a reward in an RL framework.
+We employ the NLI classiﬁer from Honovich et al.
+(2022) across our study as a reward as well as for
+evaluation and data labelling for baseline meth-
+ods. It was trained over the ANLI dataset (Nie
+et al., 2020) with the T5-XXL architecture. The
+classiﬁer produces the characters ‘1’ or ‘0’ as its
+output for binary entailment and non-entailment
+decisions, respectively. We pose the source docu-
+ment as the premise and the predicted summary as
+the hypothesis, and use the log-probability of the
+decoded character ‘1’ conditioned on the input as
+our reward.We leave improvements to the under-
+lying factual consistency models for future efforts.
+See Section 6 for more discussion about different
+factual consistency models.
+3.3 Baseline Methods
+SL. Our supervised learning baseline is obtained
+by ﬁne-tuning a T5 model on document-summary
+pairs. We use the T5X framework (Roberts et al.,2022) for ﬁne-tuning with batch size of 32 and
+keep the other hyperparameters to their default
+values (see Appendix A for details). Fine-tuning
+is stopped once the model converges in terms of
+ROUGE on the validation set. This supervised
+baseline will also be used as the initialization check-
+point of our RL methods. Decoding a summary us-
+ing this model is implemented using beam search.
+Filtered. Similar to the SL approach, with the
+distinction that we ﬁlter out training data where the
+summaries are not entailed by the input document
+according to our NLI model. This ﬁltering leaves
+60% of the original XSum training set. We train the
+model similarly to the SL model, and evaluate on
+the full validation and test splits, without ﬁltering.
+CTRL. Inspired by Filippova (2020); Rashkin
+et al. (2021b), we train the model on the full train-
+ing set to explicitly differentiate between generat-
+ing faithful and unfaithful summaries: each training
+document is prepended with a phrase indicating if
+the target summary is entailed or not according
+to our NLI model. At inference, since we aim
+to produce consistent summaries, each document
+is always prepended with the phrase denoting an
+entailing summary, and continue decoding the sum-
+mary using beam search. Other parameters are
+similar to the SL method.
+FactPegasus. Wan and Bansal (2022) employ
+a tailored pre-training setup similar to PEGA-
+SUS (Zhang et al., 2019) that also takes factual
+consistency into account, and combine it with data
+pre-processing, and contrastive learning to generate
+more faithful summaries.
+CLIFF. Cao and Wang (2021) propose a con-
+trastive learning objective that distinguishes be-
+tween reference and heuristically created noisy
+summaries.
+RLHF. Stiennon et al. (2020) uses an RL ap-
+proach with a reward model that learns from human
+comparisons of summaries. They iteratively add
+new feedback from humans for summaries gener-
+ated by the current policy, and re-train the reward
+model. We use their publicly released samples of
+the TL;DR validation set and the CNN/DM test set.
+3.4 Proposed Models
+We train two ﬂavors of RL-based models. The ﬁrst,
+RLEF, gives a lower weight to the regularization6255reward by setting α= 0.1and the sampling tem-
+perature to 1. The second model, RLEF, gives
+a higher weight to the regularization reward with
+α= 0.2and a sampling temperature of 0.3. We
+altered both the αvalues and the sampling temper-
+atures since we saw that both parameters affect the
+trade-off between factual consistency, as measured
+by the NLI model, and lexical similarity, as mea-
+sured by ROUGE (see Figure 3). For additional
+implementation details see Appendix A.
+3.5 Automatic Evaluation Metrics
+We report the common lexical n-gram overlap eval-
+uation metrics and a set of factual consistency met-
+rics, as the former were shown to be ill-suited for
+detecting unfaithful outputs (Falke et al., 2019;
+Pagnoni et al., 2021).
+For factual consistency, we report NLI, which
+is the percent of entailed summaries according to
+our NLI classiﬁer, and the Qscore (Honovich
+et al., 2021). Qis similar to QAGS (Wang et al.,
+2020) and QuestEval (Scialom et al., 2021) but was
+shown to work better on XSum data (Honovich
+et al., 2022) with higher correlation with human
+judgements.
+When optimizing for faithfulness, an RL policy
+may resort to less abstractive summaries that are
+copied verbatim from the source (Ladhak et al.,
+2022), or less informative ones with a reduced level
+of detail. To explicitly measure these attributes
+in a summary, we report extractiveness metrics:
+C andD (Grusky et al., 2018),
+where the ﬁrst measures the percent of summary
+tokens that also appear in the document, while the
+second measures a quantity similar to the average
+length of extractive spans in the summary. Finally,
+we report the average summary length(L ).
+3.6 Manual Evaluation Protocol
+We asked human evaluators to rate a sample of the
+XSum test-set from several selected methods. Each
+summary was evaluated by 3 different raters. In-
+spired by Fabbri et al. (2021), we pose 4 questions
+outlining comprehensibility, attribution, salience
+and conciseness (see example in Figure 5 in the
+appendix). To get conclusive results, similarly to
+Rashkin et al. (2021a) we request binary yes/no
+answers and ask to answer “No” for any slight devi-
+ation from the desired property. For unfaithful sum-
+maries, the evaluator also provides the offending
+phrase. Our evaluator pool consists of 11 workers
+that successfully completed a short training round
+of 10 examples (for details, see Appendix B).
+4 Results
+Automatic Evaluation. Table 1 presents the au-
+tomatic evaluation results on the XSum test set,
+comparing the supervised baselines to the two RL-
+based models (RLEF, RLEF).
+The table shows that the RL-based models
+achieve the highest entailment scores as measured
+by the NLI and Qmetrics. Notably, the RL ap-
+proach is the most effective approach to utilize the
+NLI signal, scoring favorable compared to super-
+vised baselines Filtered and CTRL, which leverage
+the same signal.
+Analyzing ROUGE reveals the trade-off be-
+tween the entailment and other summarization
+traits. Without strong regularization, RLEFscores
+highest on entailment but lower on ROUGE, indi-
+cating that in order to reach higher factual con-
+sistency, the model pushed farther away from the
+supervised starting point. The more strongly reg-6256
+ularized RLEFachieves a ROUGE score on par
+with the CTRL and SL baselines, suggesting that
+our KL-regularization prevented the policy from
+drifting.
+Looking at extractiveness, the Density metric
+suggests that RL policies do not resort to copying
+text, and the increased Coverage implies that they
+tend to use more terms from the document, suggest-
+ing fewer hallucinations. Lower ROUGE scores
+may hint at lower quality summaries for the less
+regularized entailment model, yet the other met-
+rics actually point at higher conciseness. We next
+present our human evaluation to shed light on these
+differences, and analyze whether the improvement
+in entailment is also captured by human readers,
+and whether the lexical divergence from the refer-
+ence summary affects has implications on salience
+or conciseness.
+Human Evaluation. The results of our human
+evaluation are detailed in Table 3. Our raters fully
+agreed on 60% of the examples regarding attri-
+bution. From attribution (factual consistency) per-
+spective, the results strengthen the evidence that the
+RL approach is superior to other methods by a large
+gap. Interestingly the XSum reference summaries
+scored lowest with 23.6%, showing that they are
+ill-suited to serve as faithful references for ROUGE
+and similar reference-based metrics. Notably, the
+human attribution evaluation was much stricter than
+the NLI metric, with much lower scores for all mod-
+els, and we analyze this discrepancy in Section 5.
+Surprisingly, the RLEF models outperforms all
+other models also on Salience and Conciseness.
+Speciﬁcally, the less regularized RLEFlearned
+to generate not only the most factually consistent
+summaries but also to improve on Salience and
+Conciseness, indicating that they are correlated
+w.r.t human quality perception.Comparison with RLHF. We applied our RL
+approach on the TL;DR dataset. We used the same
+input format and data split as in Stiennon et al.
+(2020) for both the supervised and RL training pro-
+cesses. For the supervised model (SL) we used
+hyper-parameters identical to our previous experi-
+ments (see Appendix A) except for a batch size of
+128 and learning rate of 2e-4.
+We compared our results using automated met-
+rics with the RLHF approach (Stiennon et al.,
+2020). This approach is also based on the T5 model
+and uses a similar RL setup, yet it employs a re-
+ward model trained on task-speciﬁc human pref-
+erences and applying a KL-based anchor. The re-
+sults, detailed in Table 2, show that RLEF achieves
+higher entailment scores in both NLI and Qmet-
+rics, while our supervised model is on par with
+RLHF. We also note that RLHF produces notice-
+ably different and longer summaries compared to
+our supervised baseline, while RLEF maintains
+similar length and ROUGE to the supervised base-
+line.
+We also compared the two approaches in a trans-
+fer learning setting, where we predicted a summary
+on a different dataset (CNN/DM) using models
+trained on TL;DR. The results show similar trends,
+with higher entailment score for RLEF. These re-
+sults hint at the beneﬁt of utilizing a general NLI
+reward function, which managed to outperform the
+domain-speciﬁc RLHF reward both on the source
+domain and on a transfer setting.
+5 Analysis
+Regularization and Sampling Temperature.
+Figure 3 describes an ablation experiment where
+we vary the regularization αand the decoding tem-
+perature and measure the effect on different auto-
+matic metrics. Higher sampling temperature cor-
+relates with higher entailment and lower ROUGE
+scores. We conjecture that this is since higher tem-
+perature generates more diverse summaries, which
+ampliﬁes exploration away from the original gold
+references. A similar phenomenon is observed
+when considering token length, as lower tempera-
+ture policies produce summaries closer in length to
+the data-mean than their higher temperature coun-
+terparts.
+As for the regularization coefﬁcient α, we ob-
+serve the expected trade-off: lower regularization
+(smallerα) leads to higher entailment (NLI), lower
+similarity to the supervised summary (ROUGE),6257
+and higher Coverage. These may be explained by
+removal of external hallucinations that often use vo-
+cabulary terms that are unrelated to the document.
+Surprisingly, in each KL setting, the lower
+temperature policy favors more document-aligned
+terms (perhaps for their higher initial probability),
+yet this is not reﬂected in the NLI metric, that stays
+lower than its higher-temperature counterpart. We
+also observe that the summaries get shorter with
+less regularization, as the policy learns to mention
+fewer details as a way to alleviate generating incon-
+sistencies.
+Model Size. We tested our approach with differ-
+ent model sizes to study the effect of scale in the
+RLEFsetup. We compared T5-Base (220M pa-
+rameters), T5-Large (770M) and T5-XXL (11B),
+using the same hyper-parameters for all three mod-
+els. Figure 4 shows the entailment rate on the
+XSum validation set during RL-ﬁnetuning. For
+all model sizes, our approach improved the entail-
+ment ratio over the supervised model by a large
+margin.
+However, while the Large and XXL models
+changes the average summary length only slightly,
+the Base model completely degenerates, “hacking”
+the NLI reward by generating summaries that are
+half as short as the reference. This suggests that
+higher-capacity models are essential to prevent re-
+ward hacking, perhaps due to two possible reasons.
+First, the larger policies have higher generalization
+capabilities overall and can better accommodate
+different rewards, such as entailment and summa-
+rization regularization in our case. Second, since
+the anchor model uses the same architecture, the
+higher capacity anchor model is more robust to
+changes in the summary and produces lower scores
+for less informative or more extractive summaries.
+5.1 Manual Analysis.
+To gain more insight into the inner workings of
+RLEF, we propose two manual inspections about
+the types of changes being induced by the policy,
+and analysis of attribution errors found by our hu-
+man evaluation procedure.
+Changes to the summary during RL training.
+We study the changes that the RLEFpolicy in-
+duces on a summary during RL training, focusing
+on the changes that cause a ﬂip in entailment deci-
+sion. We sample 200 documents from the valida-
+tion set for which we obtain the predicted summary
+at different checkpoints throughout the RL train-
+ing process in 4K steps intervals. We apply the
+NLI classiﬁer for each document and summary list,
+and select 60 examples for which the NLI decision
+has ﬂipped between any pair of consecutive check-
+points, and study what changes have been made to
+the summary that caused the ﬂip. Notably, most
+ﬂips occur only once during training, and from the
+non-entailed to the entailed decision. Examples are
+shown in Table 4 together with our categorization
+of the changes, with some summaries morphing
+in more than one way. We notice that for sum-
+maries produced by RLEFmost changes are lo-
+cal, meaning that the main predicate clause and the6258
+core participants remain the same throughout most
+checkpoints. We classiﬁed 13 out of 60 examples
+as abstractively rephrased, where a speciﬁc detail is
+replaced with a broader description, e.g. returned
+to earth instead of landed in Florida (ex. 1). How-
+ever, we also found that 27 examples contained
+argument omissions, where verbal arguments or
+noun modiﬁers with typically non-core semantic
+roles (Palmer et al., 2005) are removed (e.g. Loca-
+tive or Temporal descriptions). See for example
+the “Cause for arrest” omission in ex. 5. Such
+omissions keep the information regarding the main
+participants intact, while lowering the risk of errors
+around non-core details. Other changes included
+claim changes (16 cases) where a predicate has
+been replaced (see ex 3), argument replacements
+(8 cases), and other non-speciﬁc alterations.
+Attribution error analysis. We analyzed attri-
+bution errors from the human evaluation of our
+best policy, RLEF, aggregated by majority vote.
+We inspect the offending phrase supplied by the
+evaluator for 39 out of 100 examples that are found
+to be non-attributable. 28 are considered as a lo-
+cal hallucination, mostly conﬁrming to addition of
+personal names, numbers, places, and roles that
+did not appear in the article. For example, an ar-
+ticle mentioned Kevin O’Malley without alluding
+to his job title, while the summary referred to him
+as the Irish Ambassador . While Kevin O’Malley
+was indeed an Irish ambassador, the model should
+not add such details if they are not explicitly men-
+tioned in the article. Since most of these examples
+were found as entailing by our reward, this may
+point at issues with the NLI model that are due
+to knowledge conﬂicts between its parametric and
+contextual knowledge (Neeman et al., 2022). The
+rest of the examples include 5 contradictions and 5
+major hallucinations.6 Related Work
+RL for text generation. RL has been applied to
+many text generation tasks like neural machine
+translation (Wu et al., 2018; Leblond et al., 2021),
+extractive summarization (Narayan et al., 2018b;
+Wu and Hu, 2018; Gao et al., 2019; Arumae and
+Liu, 2019), abstractive summarization (Chen and
+Bansal, 2018) and others (Bahdanau et al., 2017;
+Welleck et al., 2019; Bai et al., 2022a; Ouyang
+et al., 2022; Bai et al., 2022b).
+Speciﬁcally for summarization, prior RL ap-
+proaches used different reference-based metrics
+as a reward function. In Pasunuru and Bansal
+(2018), two reward signals are measured between
+the generated and reference summaries: lexical
+overlap (ROUGE) to gauge salience and an entail-
+ment score to measure factual consistency. Gu-
+nasekara et al. (2021) employed a similar approach
+with question-answering, they produced QA pairs
+conditioned on the generated summary to detect
+inconsistencies with the reference, and another
+set of QAs conditioned on the reference to mea-
+sure salience. Additionally, Nan et al. (2021) pro-
+posed QUALS, a more computationally efﬁcient
+QA approach, that was used in a contrastive learn-
+ing setting. While their approach could be used
+without comparing outputs to reference summaries,
+they observed that adding such comparisons with
+the reference is essential for the stability of their
+method. We note that for some datasets, refer-
+ence summaries are likely to contain factual errors
+(Maynez et al., 2020), decreasing the effectiveness
+of reference-based rewards.
+Other RL methods, instead of explicitly deﬁn-
+ing the quality of a summary suggest to model it
+directly from human feedback (Böhm et al., 2019;
+Ziegler et al., 2019; Wu et al., 2020; Stiennon et al.,
+2020). This technique can prevent errors due to ref-6259erences that are misaligned with human judgment.
+While it is a promising approach, it also requires
+acquiring task-speciﬁc annotation, which can be
+labor-intensive.
+Another hybrid approach interleaves a cross-
+entropy objective with policy gradients (Pang et al.,
+2021) in multi-document summarization (MDS).
+They use an in-domain NLI model, for which they
+annotate their MDS dataset with entailment deci-
+sions. To stabilize their policy they employ an
+additional GAN-like training regime and add a dis-
+criminator loss between generated and reference
+summaries to their reward.
+Trade-offs in consistency models. The choice
+of which factual consistency approach to use has in-
+teresting consequences for the RL setup. Our work
+employs a binary NLI decision that does not point
+towards the speciﬁc inconsistent parts in the output
+summary. Consequently, the reward is assigned
+to the ﬁnal token of the summary, leaving proper
+credit assignment to the RL algorithm. Other meth-
+ods, speciﬁcally those based on question-answering
+(Durmus et al., 2020; Wang et al., 2020; Honovich
+et al., 2021) can frame misaligned answers in the
+generated summary and assign the reward explicitly
+to the offending tokens. However, these QA-QG
+based methods may be much slower to compute.
+Our reward requires a single forward pass using
+a transformer model over the document-summary
+pair, in comparison, QA-QG approaches require
+generating answer candidates, questions, answers
+from both sources and computing answer align-
+ment. Some of this complexity is remedied by gen-
+erating jointly questions-and-answers (Nan et al.,
+2021), but it still requires a lengthy decoding of QA
+pairs. A different NLI-based approach decomposes
+the document and summary into smaller blocks
+of sentences (Laban et al., 2022) and aggregates
+the ﬁnal decision over a matrix of block-level NLI
+scores. Such approach could aid the RL algorithm
+with credit assignment when generating long sum-
+maries. In practice, the abstractive summarization
+datasets in this study use short single sentence sum-
+maries.
+7 Conclusions and Future Work
+We propose to leverage NLI models as a ready-
+made, reference-free reward signal for RL training
+of factually consistent abstractive summarization
+models. Our experiments and thorough analysis
+with automatic and human evaluation show promis-ing results for this approach, with our RL approach
+outperforming all baselines on factual consistency,
+while maintaining and even improving on other
+desired summarization attributes as well.
+In future work, we would like to extend this
+approach to other grounded generation tasks, like
+knowledge-driven dialog. In addition, we ﬁnd it
+interesting to explore additional reference-free re-
+ward models for other summarization attributes (or
+for other tasks). Then, an important research direc-
+tion would be to understand how to properly adapt
+our method to work with multiple such rewards.
+Limitations
+While our approach shows promising results in
+both automatic and human evaluation, it relies on
+two signiﬁcant pillars: a strong entailment model
+and a strong initial summarization model. The NLI
+model implicitly encodes the biases and other data
+regularities that were part of the NLI training set
+into the generated summaries of our policy. This is
+well demonstrated by the gap between human attri-
+bution judgements and the automatic NLI metric.
+Our RL policies cannot improve on factual consis-
+tency errors if they are undetectable by the NLI
+reward. Hopefully, as NLI capabilities get better,
+so will the efﬁcacy of RLEF and the abilities to au-
+tomatically ﬂag hallucinations and contradictions.
+Secondly, a strong summarization model is es-
+sential for our method in two ways: as an initialized
+starting point for RL exploration and as an anchor
+point to a policy. While our RL training does not
+require any reference data and opens the possibility
+to use more un-summarized documents, it would
+probably not succeed as well without initializing
+from a high-quality supervised model.
+Another limitation is that our experiments sug-
+gest that model size is important when using RLEF
+(Figure 4): both our summarization and NLI mod-
+els are 11B parameters models. We believe it is
+important to further understand how to make our ap-
+proach more robust to smaller models, to increase
+its computational efﬁciency and availability.
+Ethics Statement
+Our work aims at solving the ethical issue of ad-
+dressing misinformation in automated text genera-
+tion tasks. Yet, adopting automatic summarization
+by real users can amplify misinformation in cases
+where the model still makes an error or when the
+input text itself is not trustworthy. As we stated6260in the limitations, our trained models heavily rely
+on other predictive models and therefore carry the
+biases of their training data, and may implicitly en-
+code these into our generative process. Therefore,
+we believe that to reach real-world use, not just
+our method should be scrutinized but also the NLI
+and summarization datasets that were used to train
+these models. Thus, such methods should be used
+with caution and combined with other techniques to
+ensure humans are capable of judging the validity
+of the information generated by the model.
+Acknowledgements
+We would like to thank our anonymous reviewers
+for their thorough comments and insightful sugges-
+tions.
+References6261626262636264A Experimental Details
+RL Algorithm Details. We use an actor-critic
+on-policy PG algorithm with a learned value func-
+tionVand a parameterized policy πto maximize
+the RL objective. The policy gradient w.r.t. to the
+regularized reward r(y;y,x)deﬁned in Equa-
+tion (1) is
+∇J(θ)
+=E/bracketleftBig/summationdisplay∇logπ(y|y,x)G/bracketrightBig
+,
+where for brevity we denote G =/summationtextr(y;y,x), the accumulated regu-
+larized return. For more details on the derivation
+of this expression, and framing the regularized
+objective as an RL problem, we refer the reader to
+Appendix C.
+We use the value Vas a baseline, a state-
+dependent function that can be subtracted in the
+policy gradient without changing it. This leads to
+the following equivalent policy gradient
+∇J(θ) =E/bracketleftBig/summationdisplay∇logπ(y|y,x)×
+/parenleftbig
+G−V(y,x)/parenrightbig/bracketrightBig
+=E/bracketleftBig/summationdisplay∇logπ(y|y,x)A(y)/bracketrightBig
+whereAis termed the advantage function. Ap-
+plying this PG can be regarded a variant of the
+REINFORCE (Williams, 1992) algorithm with a
+baseline. In practice, we replace the advantage
+in the expression above by generalized advantage
+estimation (GAE, Schulman et al., 2016), which
+allows to better control the bias-variance trade-off
+via theλparameter:
+A(y;y,x) =/summationdisplay(γλ)×
+/parenleftBig
+r(y;y,x) +γV(y,x)−V(y,x)/parenrightBig
+.
+Finally, the above policy gradient deﬁnition leads
+to the following per-example loss for learning the
+policyπ,
+L(θ)(y,x) =A(y,x) logπ(y|y,x),
+where the gradients are only propagated here w.r.t.
+the policy parameters.The valueVitself is learned via regression to-
+wards the return estimate induced by GAE, which
+is equivalent to minimizing the GAE advantage:
+L(ψ)(y,x) =/parenleftbig
+A(y,x)/parenrightbig.
+We now describe more intricate implementation
+details and hyper parameter choices.
+RL Implementation Details. Given that we op-
+erate in the ﬁnite horizon setting, we naturally set
+the discount factor γto 1. Similarly to the PPO
+algorithm (Schulman et al., 2017b), we normalize
+the advantages in a given batch of data so that they
+approximately follow a standard normal distribu-
+tion. We also normalize the value loss by dividing
+it by the variance of the batch returns. An impor-
+tant difference between our implementation and the
+standard (regularized) PG implementation is that
+instead of treating KL penalties along a given se-
+quence as immediate rewards, we accumulate those
+and treat the resulting quantity as a sequence-level
+penalty. We found this to lead to more stability in
+the RL procedure.
+Unlike the conventional RL setting where both
+the policy and value are randomly initialized, in
+our case the policy is already ﬁne-tuned to solve
+the required task. Thus, to make the value function
+accurate w.r.t. the already initialized policy, we ob-
+served that we needed a small number of iterations
+before the value estimation is sufﬁciently accurate
+to avoid detrimental policy gradients. To do so, we
+run RL ﬁne-tuning for 20K steps, with a warmup
+of 5K steps for the value network. We also noticed
+that it was beneﬁcial to use distinct values for the
+policy and value learning rates, so we decouple
+them in practice.
+Optimization. We use Adafactor (Shazeer and
+Stern, 2018) with a learning rate warmup phase:
+the learning rate is linearly annealed from zero to
+the speciﬁed asymptotic value.
+Hyperparameter Search. We noticed that the
+optimal value of the policy and value learning rates
+are highly correlated. Hence, we propose a decou-
+pled hyperparameter search: we start by ﬁnding a
+suitable value learning rate by keeping the policy
+ﬁxed. We then follow a standard grid search to ﬁnd
+suitable values for the remaining hyperparameters
+including the policy learning rate, temperature and
+the regularization coefﬁcient α. Speciﬁcally, in
+our hyperparameter sweep we used temperatures
+[0.1,0.3,1.0]andαvalues between 0.1and0.86265Hyperparameter Value
+γ 1
+GAEλ 0.95
+Batch size 32
+Temperature 0.3 / 1.0
+Regularization α 0.2 / 0.1
+LR warmup period 2000
+Policy update delay 5000
+Policy LR 1e-5
+Value LR 1e-5
+with a grid size of 0.1. Thus overall, our main
+sweep for the XXL model consisted of 24runs of
+20Kiterations.
+We list all the hyperparameters used (unless dif-
+ferent values are mentioned in the text) in Table 5.
+For the learning rate warmup and policy update
+delay, note that the number of steps reported cor-
+respond to gradient steps of the RL ﬁne-tuning
+procedure.
+SL Implementation details. For the SL models,
+we decode summaries with beam search with a
+beam width of 4 and a brevity penalty of 0.6. For
+training we use the same optimizer with base learn-
+ing rate of 0.001, batch size of 32, and a dropout
+rate of 0.1.
+Resources. We used TPU-v4 chips to train all
+the models mentioned. Each of our T5-XXL based
+RLEF experiment ran for approximately 17 hours
+on 64 TPU chips. Furthermore, our main hyper
+parameters sweep included 24 such experiments,
+accounting for 1088 TPU-days.
+B Evaluator Demographics, UI and
+Instructions
+We employed full-time hourly workers to rate the
+summary quality. Our raters consist of native En-
+glish speakers, nationals from the U.S. and U.K.
+that hold graduate (70%) and high-school (30%)
+diplomas. We supplied them with 2 pages of in-
+structions and additional examples, and conducted
+an initial pilot study and training batch before pro-
+ceeding to rate the summaries. The UI that we usedis displayed in Figure 5. In what follows we attach
+the guidelines presented to the raters in the human
+evaluation described in Section 3.6. The guidelines
+are loosely based on Rashkin et al. (2021a).
+B.1 Guidelines
+In this task you will be presented with a news arti-
+cle and multiple summaries of the article, and you
+are asked to evaluate the summary quality. You will
+rate each summary with 4 yes/no questions. These
+questions ask if the summary is: Comprehensible
+and understandable. Attributable (supported) by
+the article - no contradicting or unattested infor-
+mation. Captures the main idea(s) behind the arti-
+cle. Concise - does not contain additional details
+beyond the key information in the article. Read
+carefully the text and the summary. The summaries
+may appear very ﬂuent and well-formed, but con-
+tain slight inaccuracies that are not easy to discern
+at ﬁrst glance.
+Q1: Comprehensibility. An incomprehensible
+summary is not understandable due to signiﬁcantly
+malformed phrases and sentences that are difﬁcult
+to comprehend or make sense of. If there is any
+part of the summary that is unclear or hard to un-
+derstand or malformed (e.g., partially cut-off or
+contains strange characters), select "No, not fully
+comprehensible". Summary When you leave it late,
+you leave it late is adding interest to your pension
+money as a result of the ﬁnancial crisis. o, not fully
+comprehensible
+Q2: Attributable (Supported) by the article.
+A fully supported summary contains information
+that can be found in the source article. No informa-
+tion in the summary is unattested when compared
+against the source news article. In other words,
+if you can say that “According to the news arti-
+cle. . . ” with the summary following this phrase,
+you should answer, “Yes, it is attributable.” If some
+key details in the summary are not supported by
+the article (e.g. missing from the article), inaccu-
+rately represent the information in the article, or
+contradicted by the article, then please mark “No,
+not fully attributable.”
+Q3: Main Idea. A main idea captures a fact or
+theme that is central to the article’s discussion. It
+should involve the people, locations, or events that
+the article focuses on. If a main idea was removed
+from the original article, it would change the mean-
+ing, focus, or argument of the article. Note that6266
+this question is NOT asking whether the summary
+includes ONLY main ideas.
+In Q3, to the best of your ability try to distinguish
+between the following cases, some may be more
+rare than others:
+•The summary is fully supported (yes to Q2)
+and captures the main idea (yes to Q3).
+•The summary is fully supported (yes to Q2),
+but ignores the central point of the document
+(No in Q3).
+•The summary contradicts the document in mi-
+nor details or hallucinates some information
+(No to Q2), but the idea behind the document
+is mostly captured even if some details are
+incorrect (Yes to Q3).
+•The summary contradicts the document in key
+details (No to Q2) to the level where the main
+idea is unrecoverable or largely missed (No to
+Q3).
+Q4: Conciseness. A summary is concise if it in-
+cludes only the necessary details and the important
+information in the article. If it includes any details
+which are not central to the article, it should be
+marked as "No, it is not concise". A summary may
+be concise even if some details are contradicting
+(i.e. you marked “No, it is not fully attributable” inQ2) as long as those were part of the main idea of
+the article.
+In Q4 we are trying to ﬁnd if the summary con-
+tains substantial information that does not belong
+to the main idea. If some minor details in the sum-
+mary are contradicting, yet they are part of the
+main idea, then this summary is still concise, the
+system made an error of attribution, but not of over-
+generation.
+C Fine-Tuning Language Models with
+Reinforcement Learning
+C.1 Language Generation as a Contextual
+Markov Decision Problem
+In this appendix, we explain the connection be-
+tween arbitrary language generation tasks and
+the Markov Decision Process (MDP) frame-
+work (Howard, 1960) which is widely used in
+RL. We recall that an MDP Mis a tupleM=
+(S,A,γ,r,P ), whereSis a state space,Ais
+an action space, γ∈[0,1]is a discount factor,
+r:S×A→ [−r,r]is a bounded reward
+function and P:S×A→ ∆is a transition kernel.
+∆denotes the standard simplex over χ. We repre-
+sent sequential decision-making strategies as poli-
+ciesπ:S→ ∆. At any point in time t, a policyπ
+interacts in an MDP by observing the current state
+s, selecting an action a∼π(·|s), and accord-
+ingly receiving a reward r=r(s,a), before ob-6267serving a new state s∼P(·|s,a). We deﬁne
+the return as the discounted sum of rewards in one
+episode of interaction: G=/summationtextγr, whereT
+is called the horizon and is potentially inﬁnite. We
+now introduce Contextual MDPs (CMDPs) (Hal-
+lak et al., 2015). They model the fact that a ﬁxed
+context is available and determines the nature of
+rewards and dynamics. Formally, a CMDP is a
+tupleM= (C,f), whereCis a context space
+andf:c∈C→Mis a function that maps a
+context to the corresponding MDP.
+Any language generation task can be seen as the
+following interactive process: a language model
+observes the current state s=yand con-
+textc=x, that is both the input text xand
+the text generated so far y, and selects a to-
+kena=y. Thus, we can view any language
+generation task as a CMDP M= (C,f)with
+f(c) = (S,A,γ,r(·;c),P(·;c)), with the pol-
+icyπbeing the language model itself. The state
+spaceSis the set of all potential generations (ei-
+ther complete or incomplete). We suppose that
+the maximum length of generated text T, which
+is equivalent to the horizon, and that of the input
+textTare ﬁnite, which is a common assumption in
+NLP. Accordingly, if we note Vthe vocabulary (the
+set of all admissible tokens), we have S=∪V.
+Similarly, we have the context space C=∪V.
+The action spaceAis the set of tokens that the
+policy can output at any point in time, that is the
+vocabulary, henceA=V. The discount factor γis
+arbitrary and can be set to 1 given that the horizon
+is supposedly ﬁnite. The reward function ris also
+arbitrary, but in the case of interest exposed in the
+main text we set it to:
+r(s,a;c) =/braceleftBigg
+NLI(y;x)ify=ort=T,
+0otherwise.
+Finally, and most importantly, the transition kernel
+is deterministic:
+P(s|s,a;c) =
+
+1if∈sands=s,
+1if/∈sands=y,
+0otherwise.
+Indeed, any state that contains antoken can be
+considered an absorbing state.
+C.2 Language Generation From a
+Pre-Trained Model as a Regularized
+Markov Decision Problem
+While the previous formalism applies to all lan-
+guage generation tasks, we now describe a formal-ism that speciﬁcally applies to the language genera-
+tion task that is explored in the main text: language
+generation when a pre-trained model is available.
+It models the fact that we want generated text to
+be likely according to the pre-trained model, which
+we call anchor model in what is next. We note
+the corresponding policy π. We consider the
+following reward function:
+r(s,a) = (1−α)r(s,a) +αr(s,a),
+with the regularization term:
+r(s,a) = logπ(a|s)−logπ(a|s),
+whereris the reward function deﬁned previously
+andαis a scalar controlling the regularization
+strength. We recall that the Kullback-Leibler (KL)
+divergence between the current policy and the an-
+chor policy has the expression:
+KL(π||π)(s) =
+−E/bracketleftBig
+logπ(a|s)−logπ(a|s)/bracketrightBig
+.
+Hence, the regularization term is an unbiased es-
+timator for the KL divergence between current
+and anchor policies. Intuitively, it encourages
+the learned policy to keep a distribution that is
+close to the distribution over tokens induced by
+the anchor policy (the ﬁne-tuned model). Since
+the learned policy evolves along training, the re-
+ward function we described is non-stationary, that
+is the reward for a given state-action pair (s,a)
+changes with the policy π. Hence, the modiﬁed
+MDP is best viewed as a regularized MDP (Geist
+et al., 2019). We deﬁne the KL regularizer as
+Ω(π) = KL(π||π), which is a strongly con-
+vex function. We can show that this formalism
+is equivalent to the MDP with the non-stationary
+reward function described above.
+C.3 Deﬁning the Reinforcement Learning
+Objective
+In this section, we show that the regularized reward
+deﬁned in Equation (1) can be used together with
+any PG based algorithm. To do that, we show that
+for any MDP (see Appendix C.1), the policy gradi-
+ent can be easily re-derived for our regularization
+scheme when using parameterized policies. This
+repeats the derivations in Schulman et al. (2017a);
+Geist et al. (2019). We denote trajectories τ=
+{s}∪{a,s}. By a slight abuse of nota-
+tions we denote the probability of a given trajectory6268under the policy πasπ(τ), that we can decompose
+asπ(τ) =P(s)/producttextπ(a|s)P(s|s,a).
+We also denote Gas the return of a trajectory start-
+ing from time-step t. Now, denote a parameterized
+policyπ, and deﬁne the standard RL objective,
+J(θ) =E/bracketleftBig/summationdisplayr(s,a)/bracketrightBig
+,
+=E[G].
+The goal of RL is to ﬁnd a parameterization θthat
+maximizes the following objective:
+θ∈arg maxJ(θ).
+The policy gradient theorem states that
+∇J(θ) =E/bracketleftBig/summationdisplay∇logπ(a|s)G/bracketrightBig
+.
+We now place ourselves in the speciﬁc regularized
+MDP deﬁned in Equation (1) and Appendix C.2,
+with the reward regularization scheme, r(s,a) =
+(1−α)r(s,a) +αlog. Deﬁne the RL
+objective of interest, which adds a regularization
+term to the reward function,
+J(θ) =E/bracketleftBig/summationdisplay(1−α)r(s,a)
++αlogπ(a|s)
+π(a|s)/bracketrightBig
+.
+Forr(s,a), we repeat standard steps to re-
+derive the corresponding policy gradient. However,
+we need to have a separate treatment for the KL reg-
+ularization reward log, as it explicitlydepends onθ. We have:
+∇E/bracketleftBig/summationdisplaylogπ(a|s)
+π(a|s)/bracketrightBig
+=−∇E/bracketleftBig/summationdisplaylogπ(a|s)
+π (a|s)/bracketrightBig
+=−∇/summationdisplayπ(τ)/summationdisplaylogπ(a|s)
+π (a|s),
+=−/summationdisplay∇/parenleftBig
+π(τ)/summationdisplaylogπ(a|s)
+π (a|s)/parenrightBig
+,
+=−/summationdisplay∇π(τ)/summationdisplaylogπ(a|s)
+π (a|s)
+/bracehtipupleft /bracehtipdownright/bracehtipdownleft /bracehtipupright
+−/summationdisplayπ(τ)∇/summationdisplaylogπ(a|s)
+π (a|s)
+/bracehtipupleft /bracehtipdownright/bracehtipdownleft /bracehtipupright.
+We keepAas is and show that Bis equal to 0:
+B=/summationdisplayπ(τ)∇/summationdisplaylogπ(a|s)
+π (a|s)
+=/summationdisplayπ(τ)/summationdisplay∇logπ(a|s)
+π (a|s),
+=/summationdisplayπ(τ)∇/summationdisplaylogπ(a|s),
+=/summationdisplayπ(τ)∇logπ(τ),
+=/summationdisplay∇π(τ),
+=∇/summationdisplayπ(τ),
+= 0.
+By putting all the pieces together we get the ex-
+pression of the policy gradient for the modiﬁed RL
+objective:
+∇J(θ)
+=E/bracketleftBig/summationdisplay∇logπ(a|s)/summationdisplayr(s,a)/bracketrightBig
+,
+DenotingG, the return of the trajectory when
+usingr, this can be rewritten as,
+∇J(θ) =E/bracketleftBig/summationdisplay∇logπ(a|s)G/bracketrightBig
+.6269Note that we recovered the standard policy gradient
+for the regularized reward r(and corresponding
+returnG). This means that by treating ras the
+reward we can use any policy gradient method, to
+solve the new objective. Because this holds for
+any MDP, it holds for the speciﬁc MDP deﬁned
+in Appendix C.1 for the summarization task. To
+see how this is concretely used in our approach
+to construct the PG losses, we refer the reader to
+Appendix A.6270ACL 2023 Responsible NLP Checklist
+A For every submission:
+/squareA1. Did you describe the limitations of your work?
+We discuss the limitations of our work in section 8 Limitations.
+/squareA2. Did you discuss any potential risks of your work?
+We discuss potential risks in our ethics statement.
+/squareA3. Do the abstract and introduction summarize the paper’s main claims?
+Abstract and Section 1
+/squareA4. Have you used AI writing assistants when working on this paper?
+Left blank.
+B/squareDid you use or create scientiﬁc artifacts?
+Section 2-3
+/squareB1. Did you cite the creators of artifacts you used?
+We cite the dataset creators in section 3.
+/squareB2. Did you discuss the license or terms for use and / or distribution of any artifacts?
+Section 3. We use well-known and publicly released datasets, with CC-BY-4 or MIT open licenses
+/squareB3. Did you discuss if your use of existing artifact(s) was consistent with their intended use, provided
+that it was speciﬁed? For the artifacts you create, do you specify intended use and whether that is
+compatible with the original access conditions (in particular, derivatives of data accessed for research
+purposes should not be used outside of research contexts)?
+The intended use of the summarization datasets we employed is to advance research in summarization,
+as we did.
+/squareB4. Did you discuss the steps taken to check whether the data that was collected / used contains any
+information that names or uniquely identiﬁes individual people or offensive content, and the steps
+taken to protect / anonymize it?
+We use standard, well-known and publicly available datasets. Some of the content has been ﬁltered
+by the creators of the datasets to remove problematic content. We publish only aggregated numerical
+rating data collected by our evaluators.
+/squareB5. Did you provide documentation of the artifacts, e.g., coverage of domains, languages, and
+linguistic phenomena, demographic groups represented, etc.?
+Section 3, we brieﬂy mention the content type of each dataset.
+/squareB6. Did you report relevant statistics like the number of examples, details of train / test / dev splits,
+etc. for the data that you used / created? Even for commonly-used benchmark datasets, include the
+number of examples in train / validation / test splits, as these provide necessary context for a reader
+to understand experimental results. For example, small differences in accuracy on large test sets may
+be signiﬁcant, while on small test sets they may not be.
+Section 3, brieﬂy, as we use the standard train validation and dev splits or splits used in earlier
+works (and we explicitly mention and cite those).6271C/squareDid you run computational experiments?
+Section 3 and appendix A.
+/squareC1. Did you report the number of parameters in the models used, the total computational budget
+(e.g., GPU hours), and computing infrastructure used?
+Section 3 and Appendix A
+/squareC2. Did you discuss the experimental setup, including hyperparameter search and best-found
+hyperparameter values?
+Sections 2-3, Appendices
+/squareC3. Did you report descriptive statistics about your results (e.g., error bars around results, summary
+statistics from sets of experiments), and is it transparent whether you are reporting the max, mean,
+etc. or just a single run?
+Sections 4-5. We report results of a single run for automatic metrics on mainstream dataset splits.
+Human evaluation results have conﬁdence intervals.
+/squareC4. If you used existing packages (e.g., for preprocessing, for normalization, or for evaluation), did
+you report the implementation, model, and parameter settings used (e.g., NLTK, Spacy, ROUGE,
+etc.)?
+Section 3, Appendix A
+D/squareDid you use human annotators (e.g., crowdworkers) or research with human participants?
+Section 3-4, Appendix B
+/squareD1. Did you report the full text of instructions given to participants, including e.g., screenshots,
+disclaimers of any risks to participants or annotators, etc.?
+Appendix B
+/squareD2. Did you report information about how you recruited (e.g., crowdsourcing platform, students)
+and paid participants, and discuss if such payment is adequate given the participants’ demographic
+(e.g., country of residence)?
+Section 3, Appendix B
+/squareD3. Did you discuss whether and how consent was obtained from people whose data you’re
+using/curating? For example, if you collected data via crowdsourcing, did your instructions to
+crowdworkers explain how the data would be used?
+We hired full-time annotators and explained the essence of their work is for research purposes in
+NLP .
+/squareD4. Was the data collection protocol approved (or determined exempt) by an ethics review board?
+A similar protocol was determined in previous studies.
+/squareD5. Did you report the basic demographic and geographic characteristics of the annotator population
+that is the source of the data?
+Section 3, Appendix B6272

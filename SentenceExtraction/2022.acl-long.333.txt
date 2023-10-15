@@ -1,1 +1,676 @@
-4852 Proceedings of the 60th Annual Meeting of the Association for Computational Linguistics Volume 1 : Long Papers , pages 4852 4864 May 22 - 27 , 2022 c(cid:13)2022 Association for Computational Linguistics 4853 4854 4855 4856 4857 4858 4859 4860 4861 4862 4863 4864 
+
+Wei Chen, Yeyun Gong, Song Wang, Bolun Yao, Weizhen Qi, Zhongyu Wei,
+Xiaowu Hu, Bartuer Zhou, Yi Mao, Weizhu Chen, Biao Chengand Nan DuanSchool of Data Science, Fudan University, ChinaMicrosoft Research Asia, ChinaMicrosoft, USNanjing University of Science and Technology, China
+{chenwei18,zywei}@fudan.edu.cn;
+{yegong,weizhen,xiaowuhu,bazhou,bicheng,nanduan}@microsoft.com;
+{sonwang,yimao,wzchen}@microsoft.com; yaobl001@njust.edu.cn
+Abstract
+Dialog response generation in open domain is
+an important research topic where the main
+challenge is to generate relevant and diverse
+responses. In this paper, we propose a new dia-
+log pre-training framework called DialogVED,
+which introduces continuous latent variables
+into the enhanced encoder-decoder pre-training
+framework to increase the relevance and di-
+versity of responses. With the help of a large
+dialog corpus (Reddit), we pre-train the model
+using the following 4 tasks, used in training lan-
+guage models (LMs) and Variational Autoen-
+coders (V AEs) literature: 1) masked language
+model; 2) response generation; 3) bag-of-words
+prediction; and 4) KL divergence reduction.
+We also add additional parameters to model the
+turn structure in dialogs to improve the perfor-
+mance of the pre-trained model. We conduct
+experiments on PersonaChat, DailyDialog, and
+DSTC7-A VSD benchmarks for response gen-
+eration. Experimental results show that our
+model achieves the new state-of-the-art results
+on all these datasets.
+1 Introduction
+Pre-trained language models (PLMs) have been
+widely explored both in natural language under-
+standing (NLU) and generation (NLG) in recent
+years, this pre-training and fine-tuning paradigm
+sheds light on various downstream tasks in natural
+language processing (NLP). Compared with gen-
+eral pre-trained models, task-oriented pre-trained
+models (such as Summarization ,Dialog and etc.),
+which is designed in line with task characteristics,
+may achieve better performance and be more ro-
+bust. In this paper, we proposes a novel pre-trained
+dialog response generation model based on previ-
+ous research.
+Dialogue Response Generation (DSG) in open
+domain is a challenging task with a wide range ofapplication scenarios. Recent advances in DSG
+utilize pre-trained language models (PLMs) such
+as BERT (Devlin et al., 2019) and GPT2 (Radford
+et al., 2019) in two major categories. The first one
+focuses on how to fine-tune PLMs in downstream
+tasks and address the various application-specific
+needs and challenges (Lin et al., 2020). The sec-
+ond one augments dialog specific tasks into the
+PLM training (Zhang et al., 2020; Bao et al., 2020)
+and then fine-tunes the new pre-trained model in
+downstream tasks. We study the latter in this paper.
+There is a proverbial one-to-many problem in
+DSG, i.e., a single dialog context could be followed
+by multiple reasonable responses. Existing works
+introduce latent variables to model this problem.
+For example, VHRED (Serban et al., 2017) incorpo-
+rates latent continuous variable into the sequence-
+to-sequence (Seq2Seq) RNN model to improve the
+diversity of generated responses. V AE-Seq2Seq
+(Bahuleyan et al., 2017) proposes variational at-
+tention to replace the vanilla encoder-decoder at-
+tention (Luong et al., 2015), to avoid attention to
+bypass the latent space and invalidate the latent
+variable. For controllability and interpretability,
+some discrete V AEs have also been proposed, such
+as (Oord et al., 2017; Vahdat et al., 2018).
+Recently, PLATO (Bao et al., 2020) firstly in-
+troduces latent variables into their pre-training di-
+alog model, where the authors introduce a K-way
+(K= 20 ) categorical latent variable, and the pre-
+trained model shows significant gains in multiple
+downstream response generation tasks. Continu-
+ous latent variables besides discrete latent variables
+is popularly used for modeling one-to-many map-
+ping in dialog system, but the potential of incorpo-
+rating continuous latent variables with large-scale
+language pretraining is less explored.
+In this paper, we propose a pre-trained latent
+Variable Encoder- Decoder model for Dialog gen-
+eration, which is called DialogVED. In this model,
+we introduce a continuous latent variable into the4852enhanced encoder-decoder pre-training framework
+and we adopt the optimization techniques based on
+the V AEs literature to learn the model with contin-
+uous latent variables. More specifically, we con-
+duct the pre-training by optimizing the following 4
+pre-training objectives simultaneously: 1) masked
+language spans loss to enhance the encoder’s un-
+derstanding of context, 2) response generation with
+n-gram loss to improve the decoder’s planning abil-
+ity, 3) Kullback-Leibler divergence loss to mini-
+mize the difference between the posterior and prior
+distribution of the latent variables, and 4) bag-of-
+words loss to reduce posterior distribution collapse.
+In addition, we also explore the effect of absolute
+and relative position embeddings specific for con-
+versational data on the model performance.
+We conduct experiments on three different
+kinds of conversation tasks: chit-chat, knowledge
+grounded conversation, and conversational ques-
+tion answering. Experimental results verify the
+effectiveness and superiority of our model com-
+pared with the previous state-of-the-art method.
+We further carry out ablation study to better un-
+derstand the impact of different components in the
+DialogVED on model performance including la-
+tent space sizes, different decoding strategies, and
+position embeddings for turns and roles.
+The main contributions of this paper can be
+summarized as follows: 1) We propose a pretrained
+dialog model, which incorporates continuous la-
+tent variables into the enhanced encoder-decoder
+pre-training framework; 2) We explore the impact
+of latent variable sizes, different decoding strate-
+gies, and position embeddings for turns and roles
+in our model; 3) Extensive experiments show that
+the proposed model achieves the new state-of-the-
+art (SOTA) in multiple downstream tasks, and our
+model has better performance both on relevance
+and diversity than previous SOTA in response gen-
+eration.
+2 Method
+2.1 Model Architecture
+In response generation, there are three elements:
+dialogue context c, response rand latent variable z.
+The dialogue context cmay consist of several his-
+tory utterances (i.e., multi turns) and the response r
+is one piece of appropriate reply towards the given
+context. Additionally, the latent variable zin the
+latent space represents many unobserved factors
+associating the context and the response.We assume the latent variable zis continu-
+ous, which is different from PLATO (Bao et al.,
+2020), and portrays a certain conditional probabil-
+ity distribution related to the response given con-
+text. We then define the conditional distribution
+p(r, z|c) =p(r|c, z)p(z|c)and our goal is to use
+encoder-decoder models (parameterized by θ) to
+approximate p(r|c, z)and a multi-layer perceptron
+(parametrized by ϕ) to estimate p(z|c), which is
+called the prior network in V AE literature. We call
+the final pre-trained model DialogVED, which is a
+transformer-based encoder-decoder model with an
+extra prior network for modeling the latent space.
+Figure 1 gives a overview of our model.
+2.2 Encoder
+We use multi-layer Transformer-based (Vaswani
+et al., 2017) encoder to encode the dialogue con-
+text. First, an input sequence of tokens is mapped to
+a sequence of embeddings, which are then passed
+into the encoder. The encoder consists of a stack
+of “blocks”, each of which comprises two subcom-
+ponents: a self-attention layer followed by a small
+feed-forward network. Compared to the vanilla
+transformer encoder, our encoder has slight dif-
+ferences in position embeddings and self-attention
+layer in fine-tuning phase, which contains richer lo-
+cation information and will be introduced in § 2.7.
+2.3 Decoder
+Future predicting strategy has been concerned in
+recent research (Qi et al., 2020; Xiao et al., 2020),
+instead of predicting only the next token at each
+time step, the decoder using future predicting pre-
+dictsnfuture tokens simultaneously.
+Specifically, the original Seq2Seq model aims
+to optimize the conditional likelihood P(r|r, c),
+while future predicting strategy changes the op-
+timization of predicting next single token to
+P(r|r, c)at each time step t, where
+rdenotes the next continuous nfuture to-
+kens. The future n-gram prediction loss can explic-
+itly encourage the model to plan for future token
+prediction and prevent over-fitting on strong local
+correlations (Qi et al., 2020).
+We adopt the n-stream self-attention proposed
+in ProphetNet (Qi et al., 2020) in our decoder. The
+n-stream self-attention mechanism incorporates n
+extra self-attention predicting streams besides main
+stream to predict next ncontinuous future tokens
+respectively at each time step.4853
+Memory Scheme To incorporate the latent vari-
+able into decoder, we adopt a memory scheme sim-
+ilar to OPTIMUS (Li et al., 2020), where latent
+variable z∈Ris mapped to a additional memory
+vector, denoted as h , which is an additional
+key-value pair for decoder to attend. We have mem-
+ory vector
+h =z
+z
+=Wz (1)
+where W∈Ris the weight matrix, and
+the memory vector is shared and propagated across
+all layers in decoder as:
+where Hrefers to the hidden state of the k-th
+layer of decoder. The memory vector is equivalent
+to adding a virtual token during decoding to partici-
+pate in the calculation of self-attention main stream,
+and the predicting streams are implicitly affected
+byh through interaction with the main stream.
+The latent variable guides the generation of each
+step of the decoder through the memory vector.
+2.4 Latent Variable
+Intuitively, introducing latent variables provides
+a hierarchical generation procedure: 1) sample a
+latent variable zfrom the prior network p(z|c); 2)
+generate rthrough the decoder network p(r|c, z).
+From previous research (Zhao et al., 2017a), z∼
+p(z|c)may determine the high-level semantics, andthe auto-regressive decoding is followed to produce
+the output sentences with low-level syntactic and
+lexical details.
+Similar to the Variational Autoencoders (V AEs),
+we learn the parameters θby maximizing the
+marginal log likelihood:
+logp(r|c) = logZ
+p(z|c)p(r|c, z)dz,
+where pinvolves an intractable marginaliza-
+tion over the latent variable z. (Kingma et al.,
+2016; Li et al., 2020), We will optimize its lower
+bound, which is equivalent to minimize the two
+terms below: reconstruction loss (or negative log-
+likelihood)
+L=−E[log p(r|c, z)]
+=−E[logYp(r|r, c)](2)
+and K-L regularization term
+L=KL(q(z)||p(z|c)). (3)
+Hereq(z)is a multivariable normal distribution
+with mean µ∈Rand diagonal variance matrix
+with diagonal taiking values σ∈R, denoted as
+diag(σ).
+To connect to the hidden space, we add a special
+classification token ([CLS]) to the beginning of
+the context, and the first hidden state denoted as
+h∈Rin last-layer is used to represent the
+global dialog context. We assume4854µ
+log(σ)
+= MLPh (4)
+where MLPis a multilayer perceptron and this
+multilayer perceptron is called the prior network
+in V AEs literature. We can then sample Prandom
+variables with each variable is from standard nor-
+mal distribution and via transformation, we obtain
+samples of z∈RfromN(µ,diag(σ)), and feed
+them to the decoder.
+2.5 Mask Language Spans
+To improve the understanding ability of the encoder
+and the robustness to noise, we randomly mask part
+of the context before encoding. Recent research
+(Joshi et al., 2020; Lewis et al., 2020) on masked
+language models show the advantages of masking
+spans over masking individual words or subword
+units.
+We adopt a simple method to mask spans: 1)
+randomly select ntokens in context, denote as S; 2)
+for each token t∈ S, extend it to a text span with a
+fixed length of m; 3) mask all selected tokens after
+sorting, deduplication and boundary checking.
+Following BERT (Devlin et al., 2019), the total
+number of masked tokens in the context accounts
+for approximately 15%, and we replace the masked
+token with: 1) the [MASK] token 80% of the time;
+2) a random token 10% of the time; 3) the un-
+changed masked token 10% of the time. Then, the
+last-layer hidden states h∈Rof each masked
+token xwill be used to predict the original token
+and the encoder is trained to optimize the cross
+entropy loss:
+L=−XLSM( Wtanh(Wh+b))(x)(5)
+where W∈R,b∈RandW∈R
+denote the weight matrices of one fully-connected
+layer,|V|is the vocabulary size, LSM is log soft-
+max function and LSM( . . .)(x)means to take the
+log probability value corresponding to token x. In
+this paper, we share the parameters of Wwith pa-
+rameters of embedding layers in the encoder and
+decoder. Note that we only mask the context only
+the pre-training stage.
+2.6 Reduce KL-vanishing
+DialogVED allows the decoder to attend the hidden
+states of context (i.e., the output of the encoder),
+and thus direct training will cause the decoder toignore the latent variable z, and the KL loss will
+rapidly decrease to 0 and the latent space loses its
+expressive power, which is called posterior collapse
+or KL-vanishing (Bowman et al., 2016). This paper
+adopts two methods developed in V AEs literature
+to reduce posterior collapse:
+Free Bits (Kingma et al., 2016), which replaces
+the K-L regularization term in (3) with a hinge loss
+term that maximize each component of the original
+K-L term with a constant λ:
+L=−Xmax(λ, KL (q(z)||p(z|c))) (6)
+Bag-of-words Loss (Zhao et al., 2017b), which
+is used to encourage the latent variable to predict
+the words in response rin a non-autoregressive
+way:
+L =−Xlog f (7)
+where Tis the number of tokens in response r, and
+fdenotes the estimated probability of word r.
+More specifically, fis the function outputting the
+probability of words within the target response:
+f= softmax(MLP[z⊕h])∈R(8)
+where MLPis a multilayer perceptron and V
+refers to the whole vocabulary.
+2.7 Position Embeddings
+Absolute Position Embeddings Besides token-
+level learned position embeddings used in origi-
+nal Transformer, we also consider turn level and
+speaker-level position embeddings like PLATO
+(Bao et al., 2020). To better model the meaning of
+a turn in a dialog, We introduce embedding for turn
+position and role position in one conversation, the
+final input embedding of each token is the sum of
+corresponding turn, role and token embeddings.
+Relative Position Embeddings It has recently
+become more common to use relative position em-
+beddings, which produce a different learned embed-
+ding according to the offset between the “key” and
+“query” being compared in the self-attention mech-
+anism (Shaw et al., 2018; Raffel et al., 2019). We
+extend the element of the original relative distance
+matrix in T5 (Raffel et al., 2019) to two-tuple.
+e=xW(xW+a)
+√d,
+a=f(d, d, x, x)4855In the mapping function f, we consider both token
+relative distance d and turn relative distance
+d, where these tuples are mapped through a
+bucket function, and then ais queried in pre-
+defined embedding layers.
+2.8 Pre-training Objectives
+Combining the losses detailed in the Equations
+(2) (5) (6) and (7), we have pre-training objective,
+which we use to pre-train the DialogVED on the
+large-scale conversation corpus:
+loss=L+L+L+L (9)
+To sum up, we mask text spans in the context c,
+sample a latent variable zfrom prior network, and
+then let the encoder and decoder predict the masked
+spans and response rrespectively with the guidance
+of the latent variable z.
+3 Experiments
+In this section, we firstly introduce the pre-training
+datasets and fine-tuning benchmarks in § 3.1, and
+implement details in § 3.2. Then we present the
+main results in § 3.3. Lastly, we analyze the in-
+fluence of parameters and position embeddings in
+§ 3.4.
+3.1 DataSets and Baselines
+3.1.1 Pre-training Corpus
+Large-scale Reddit comments dataset (Zhou et al.,
+2018; Galley et al., 2019) is employed for pre-
+training our dialog language model. This dataset
+has been proved to be helpful in various conver-
+sation downstream tasks (Bao et al., 2020; Zhang
+et al., 2020). We use the script provided by Di-
+aloGPT (Zhang et al., 2020) to obtain the latest
+Reddit comment data. We obtain 215 milliontrain-
+ing samples (42GB in total) for pre-training.
+To accelerate the training process and accom-
+modate GPU memory limitations, we adopt two
+methods. First, we sort the samples according to
+the length of the context. Samples with similar
+length (i.e. number of tokens in context) are as-
+sembled into a batch to minimize the amount of
+padding. Secondly, due to the uneven distribution
+of sample lengths, we divide the Reddit corpus into
+two sub-datasets: Reddit-Short andReddit-Long
+according to the length of context and response.
+with some statistics in Table 1, and optimize the
+batch size for each sub-dataset to avoid reserving a
+large amount of memory for a few long response
+samples during the training process. Within an
+epoch, we first pre-train on Reddit-Short with a
+larger batch size, and then pre-train Reddit-Long
+with a smaller batch size. We split the reddit com-
+ment dataset here mainly for efficiency.
+3.1.2 Fine-tuning Benchmarks
+Following PLATO (Bao et al., 2020), we select
+three datasets as our benchmarks:
+DailyDialog (Li et al., 2017), a chit-chat dataset,
+which contains high-quality human conversations
+about daily life.
+Persona-Chat (Zhang et al., 2018), a knowl-
+edge grounded conversation dataset. It provides
+both manually annotated conversations and cor-
+responding persona profiles (background knowl-
+edge), where two participants chat naturally and try
+to get to know each other.
+DSTC7-A VSD (Alamri et al., 2019a), a con-
+versational question answering dataset, shorts for
+Audio Visual Scene-aware Dialog of the DSTC7
+challenge. The system needs to generate an answer
+given dialogue context and background knowledge.
+There are multiple reference responses for each
+context in DSTC7-A VSD test set.
+For evaluation, we use the same metrics as used
+in PLATO, except for knowledge-related metrics,
+since this paper does not focus on utilizing knowl-
+edge. So we will focus the following metrics:
+BLEU-1/2 (Papineni et al., 2002), which mea-
+sures the relevance of generated text to the refer-
+ence text by calculating the 1/2-gram overlapping
+between them.
+Distinct-1/2 (Li et al., 2016a), which measures
+the diversity of a generated sentence by focusing
+on the number of distinct 1/2-gram of a sentence4856
+and thus penalizing sentences with lots of repeated
+words.
+Other word-overlap-based metrics, METEOR,
+ROUGE-L, and CIDEr, which are also reported for
+the DSTC7-A VSD dataset, same as DSTC7 reviews
+(Alamri et al., 2019b).
+3.1.3 Baselines
+Vanilla sequence to sequence (Seq2Seq) models,
+dialog pre-training models, and general natural lan-
+guage pre-training models are used as our baselines:
+Seq2Seq (Vinyals and Le, 2015) is a sequence-
+to-sequence model with attention. iV AE(Fang
+et al., 2019) is an implicit deep latent variable
+model based on Variational Autoencoder for bet-
+ter latent representations and diverse responses.
+LIC (Golovanov et al., 2019) obtains the best per-
+formance during the contest, and is one transformer
+based generation method. PLATO (Bao et al.,
+2020) utilizes a discrete latent variable for dialog
+generation pre-training to address the one-to-many
+problem. ProphetNet (Qi et al., 2020) is a pre-
+trained LM model with predicting more than one
+future tokens as the pre-training objective. We fine-
+tune ProphetNet-Large model released in (Qi et al.,
+2020) with downstream training data directly.
+For benchmark DSTC7-A VSD, we include
+A VSD Baseline (Alamri et al., 2019a) system pro-
+vided by the the challenge organizer, as well as thebest performing model developed by the team of
+CMU Sinbad’s (Sanabria et al., 2019).
+3.2 Model Configuration
+DialogVED is composed of a 12-layer encoder and
+a 12-layer decoder, with 1024 embedding/hidden
+size and 4096 feed-forward filter size. The dimen-
+sionPof hidden states zis set to 64 and we will
+analyze the effect of Pin § 3.4.1. We use Adam
+optimizer (Kingma and Ba, 2014) with a learning
+rate of 3×10for pre-training. We set ngram
+as 2 following ProphetNet (Qi et al., 2020). The
+pre-training of dialogue generation is carried out
+on 32 Nvidia Telsa V100 32G GPU (4 nodes) for 6
+epochs, taking about 5 days to reach convergence.
+Mixed precision training is also adopted for ef-
+ficiently training and inference, and we use the
+Fairseq (Ott et al., 2019) framework to conduct all
+experiments. We use the BERT-uncased dictionary,
+and replace some unused tokens to custom special
+symbols (such as [SOT], denoting the beginning of
+the conversation, which is suitable for conversation
+datasets containing knowledge, like PersonaChat
+and DSTC7-A VSD). We used package WordPiece
+(Devlin et al., 2019) for tokenization.
+For fine-tuning, we use exactly the same hyper-
+parameter settings in all three datasets, and they
+are slightly different from the hyperparameter in
+pre-training. The learning rate is set to 1×104857and the batch size is fixed to 512. We also adopt
+an additional warmup strategy where we linearly
+increase the learning rate from initial learning rate
+(1×10), the number of warmup updates is set to
+2000. For each dataset, we train 10 epochs, and se-
+lect the checkpoint with the lowest validation loss
+for inference.
+3.3 Main Results
+In Table 2, we compare several DialogVED vari-
+ants with baseline models. DialogVED represents
+inferencing DialogVED with beam search. Com-
+pared with DialogVED, DialogVED w/o latent is
+not equipped with latent variable, thus the loss func-
+tion does not include bag-of-words loss and K-L
+loss. DialogVED Greedy means DialogVED in-
+ference with greedy search. For DialogVED Sam-
+pling , we sample from the top Ktokens with the
+highest output probability at each decoding step.
+For the latent space, we always sample each latent
+variable from the prior distribution standard normal
+distribution. Here, beam size is set to 5 and Kis
+set to 100.
+As shown in Table 2 and Table 3, our model Di-
+alogVED is very competitive compared to PLATO
+and other models. In particular, decoding using
+Top-K ( K= 100 ) sampling with DialogVED beats
+the PLATO in BLEU-1/2 and Distinct-1/2 on Dai-
+lyDialog and PersonaChat (see in Table 2). In fact,
+asKincreases, the overlap of n-grams decreases
+and the diversity increases. Based on our obser-
+vations, Ktaking 100 is a good balance, Table 4
+shows more detailed results.
+On the DSTC7-A VSD, the diversity of the re-
+sponses is not as important as the accuracy. From
+Table 3, We observe that DialogVED w/o latent
+variable perform the best in overall metrics. How-
+ever, DialogVED equipped with beam search or
+greedy search, can still easily beat PLATO even
+though it has a post-generation ranking component.
+There are 2 essential components that contribute
+greatly the success of our model: Firstly, We adopt
+a newly developed pretrained LM as the initializer
+and further continue its pretraining pipeline on our
+dialog dataset (Reddit) and thus we have a really
+powerful encoder-decoder. This is demonstrated
+in the fact that our model (DialogVED w/o latent
+variable) beat PLATO (w/o latent variable) in all
+metrics on all the three datasets.
+Secondly, the special structure of our model com-
+bines the benefits of both seq2seq models and V AEmodels. Compared to general V AEs, DialogVED
+allows encoder-decoder interaction in the decod-
+ing, which avoids insufficient representation of low-
+dimensional latent variable. At the same time, com-
+pared with seq2seq model, predicting the bag of
+words pushes the latent variable to give extra guid-
+ance to decoder. This is demonstrated by the fact
+that when compared with DialogVED w/o latent
+variable, we observe the additional gains in terms
+of both accuracy and diversity (see Table 2).
+Overall, our DialogVED achieves new state-of-
+the-art results in all three downstream tasks of dia-
+logue response generation.
+3.4 Parameters and Position Analysis
+3.4.1 Balancing Accuracy and Diversity with
+Sampling
+We investigate the effect of latent space sizes, P,
+defined as the dimension of the latent variable z
+and the different Kin sampling.
+The results in Table 4 show that smaller latent
+size (P= 32 ) is more dominant in n-gram based
+metrics (BLEU-1/2), while larger latent size gener-
+ates more diverse texts. From the results of top- K
+sampling, we see that the two metric (BLEU-1/2
+and Distinct-1/2) have a negative correlation.
+We can flexibly choose the decoding strategy
+depends on specific scene.
+3.4.2 Position Embeddings
+We study the impact of position embeddings as
+described in section 2.7, we define two types of po-
+sition embeddings: absolute position embeddings
+(APE) and relative position embeddings (RPE).
+We report the metrics of their different combina-
+tions, these independent components are TurnAPE
+(turn absolute embedding), RoleAPE (role abso-
+lute embedding), TokenRPE (token relative em-
+bedding) and TurnRPE(turn relative embedding)4858respectively.
+As the results shown in Table 5, the combina-
+tion of TurnAPE and RoleAPE achieve the best
+performance. Both absolute and relative position
+embeddings improve model performance, never-
+theless, including them at the same time can be
+harmful.
+3.5 Human Evaluation
+Automated metrics (BLEU 1/2, Distinct-1/2, etc.)
+have limitations for evaluating open-domain dialog
+tasks. To make it more convincing, we conduct a
+human evaluation. Specifically, we randomly select
+100 dialogue contexts and generate responses with
+the following methods: PLATO, DialogVED and
+DialogVED-Sampling. Following PLATO, annota-
+tors are asked to compare the response (win, tie or
+lose) quality from four aspects: fluency, coherence,
+informativeness and overall.
+The results of human comparison are shown in
+Table 6, where the average Cohen’s kappa (Krae-
+mer, 2014) of group 1 and 2 is 0.729 and 0.743
+respectively, indicating annotators have reached
+moderate agreement. It can be seen that most of
+the time they are tied, and the three models some-
+times generate exactly the same response. For Di-
+alogVED, it beats Plato more in coherence but with
+close informativeness; while DialogVED-samplingbeats Plato significantly in informativeness but with
+a slightly weaker coherence.
+In general, DialogVED can generate both rel-
+evant and diverse response, we show some case
+study to help illustrate the effectiveness of our
+model in Appendix A.
+4 Related Work
+Encoder-Decoder dialog models Unlike re-
+trieval based dialogue systems (Boussaha et al.,
+2019; Chen et al., 2021), encoder-decoder mod-
+els are widely used in dialog response generation,
+but it tends to generate generic responses and dull
+responses (e.g., I don’t know). To enhance encoder-
+decode models and generate diverse responses, re-
+searchers have tried different approaches: using
+diversity promotion objectives (Li et al., 2016a), us-
+ing different decoding algorithms (Li et al., 2016b),
+adding additional contents (Xu et al., 2019), or in-
+troducing large-scale knowledge graphs into dialog
+generation (Liu et al., 2018; Wu et al., 2020).
+Another class of methods is using the latent
+variable to address the one-to-many problem in
+response generation. These models introduce
+discourse-level diversity and are able to generate
+diverse dialog responses (Serban et al., 2017; Zhao
+et al., 2017a, 2018; Gao et al., 2019). In this paper,
+we also adopt this approach and further we incor-
+porate the latent variables both in the pre-training
+and fine-tuning.
+Pre-trained Dialog Models Pre-trained lan-
+guage models have been successfully used in NLG
+and NLU tasks (Devlin et al., 2019; Radford et al.,
+2019). Recently, various new pre-trained language
+models have been pre-trained including BART
+(Lewis et al., 2020), ProphetNet (Qi et al., 2020),
+T5 (Raffel et al., 2020). In these papers, they
+demonstrate that better performance can be ob-
+tained with fine-tuning PLMs than training from
+scratch.
+Due to the fact that there are many important
+applications in the dialog domain and the dialog
+corpus has different linguistic features from gen-
+eral documents, pre-trained dialog models with
+open domain dialog data such as Reddit is very im-
+portant. DialoGPT (Zhang et al., 2020) continues
+to pre-train GPT-2 model directly on Reddit com-
+ments data, and the new pre-trained model achieves
+better performance on downstream tasks including
+several dialog response generation benchmarks.4859PLATO (Bao et al., 2020) proposes a new model
+specifically for dialog generation, which introduces
+a discrete variable for one-to-many relationship
+modeling. The pre-trained model helps to achieve
+state-of-the-art results on several response genera-
+tion tasks. This is the closest work in literature to
+ours. However, in our paper, we introduce continu-
+ous latent variables during pre-training on dialog
+corpus instead of a discrete latent variable.
+5 Conclusion
+This paper proposes a new pre-training frame-
+work for dialogue response generation called Di-
+alogVED. The latent variable is incorporated into
+the sequence-to-sequence framework based on
+Transformer, and obtains a robust and diverse re-
+sponse generation model through 4 training targets.
+our pre-trained model has achieved new state-of-
+the-art in multiple downstream tasks of dialogue
+response generation. Extensive experiments prove
+the effectiveness of our model. Additional human
+evaluation demonstrates the advantages of our pro-
+posed model.
+Acknowledgments
+This work is partially supported by Natural
+Science Foundation of China (No.6217020551,
+No.61906176), Science and Technology Com-
+mission of Shanghai Municipality Grant
+(No.20dz1200600, 21QA1400600, GWV-
+1.1, 21511101000) and Zhejiang Lab (No.
+2019KD0AD01).
+Ethical Statement
+In this paper, different ethical restrictions deserve
+discussion.
+All data used in our pre-training are available
+online and other dialog corpus in this paper are
+publicly available sources. We strictly followed
+the platform’s policies and rules when crawling
+data from web platforms. We did not employ any
+author-specific information in our research.
+Our corpus may includes some bias, such as po-
+litical bias and social bias, and our model might
+have inherited some forms of these bias. In order to
+limit these bias as much as possible, we filter con-
+troversial articles and removed data with offensive
+information when possible.References48604861
+A Case Study
+We demonstrate the responses generated from our
+model as well as other baseline models in Table 7,
+8 and 9, respectively. The results in Table 8 and 9
+show that our model accurately outputs the knowl-
+edge information contained in context although
+we do not model knowledge explicitly. Compared
+with beam search or greedy decoding, decoding
+with top-K sampling not only generates bolder and
+more diverse response, but also can maintain good
+relevance, as showed in Table 7 and 8.486248634864

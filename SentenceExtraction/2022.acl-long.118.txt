@@ -1,1 +1,641 @@
-1687 Proceedings of the 60th Annual Meeting of the Association for Computational Linguistics Volume 1 : Long Papers , pages 1687 1698 May 22 - 27 , 2022 c(cid:13)2022 Association for Computational Linguistics 1688 1689 1690 1691 1692 1693 1694 1695 1696 1697 1698 
+
+Ziming MaoChen Henry WuAnsong NiYusen Zhang
+Rui ZhangTao YuBudhaditya Deb
+Chenguang ZhuAhmed H. AwadallahDragomir RadevYale UniversityCarnegie Mellon UniversityPenn State UniversityThe University of Hong KongMicrosoft Research
+ziming.mao@yale.edu, henrychenwu@cmu.edu
+Abstract
+Transformer-based models have achieved
+state-of-the-art performance on short-input
+summarization. However, they still struggle
+with summarizing longer text. In this pa-
+per, we present D, a novel dynamic latent
+extraction approach for abstractive long-input
+summarization. D jointly trains an extrac-
+tor and a generator and treats the extracted
+text snippets as the latent variable, allowing
+dynamic snippet-level attention weights dur-
+ing decoding. To provide adequate supervi-
+sion, we propose simple yet effective heuris-
+tics for oracle extraction as well as a con-
+sistency loss term, which encourages the ex-
+tractor to approximate the averaged dynamic
+weights predicted by the generator. We eval-
+uate our method on different long-document
+and long-dialogue summarization tasks: Gov-
+Report, QMSum, and arXiv. Experiment re-
+sults show that D outperforms all exist-
+ing methods on GovReport and QMSum, with
+gains up to 6.1 ROUGE, while yielding strong
+results on arXiv. Further analysis shows that
+the proposed dynamic weights provide inter-
+pretability of our generation process.
+1 Introduction
+Transformer-based (Vaswani et al., 2017) pre-
+trained language models (PLMs) such as BART
+(Lewis et al., 2020a) and T5 (Raffel et al., 2020),
+have achieved state-of-the-art performance on short
+text summarization. However, due to the high mem-
+ory complexity of the full self-attention (Tay et al.,
+2020a), PLMs still struggle to handle long inputs
+(Rohde et al., 2021). Model efﬁciency andsum-
+mary quality present a pair of challenges (Huang
+et al., 2021): models need to capture information
+scattered across the long input while maintaining a
+low computational cost.Figure 1: Overview of our approach. The input is a
+documentX(eachx2Xis a sentence) and an op-
+tional query q, and the output is a summary y.
+Prior models tackled long input summarization
+mostly in four ways. First, sparse attention (Child
+et al., 2019; Beltagy et al., 2020; Tay et al., 2020b)
+is used to reduce the memory complexity of the
+Transformers so that they can attend to more to-
+kens. Second, extract-then-generate methods ex-
+tract salient texts from the input and then sum-
+marize the extracted texts. Extractors are either
+independently trained with full supervision (Zhong
+et al., 2021b) or optimized using reinforcement
+learning (Williams, 1992; Chen and Bansal, 2018;
+Bae et al., 2019; Bražinskas et al., 2021). Third,
+models are proposed to divide source text into sec-
+tions (Gidiotis and Tsoumakas, 2020; Wu et al.,
+2021; Liu et al., 2021) which are individually sum-
+marized and combined to form a full summary.
+Fourth, hierarchical models (Rohde et al., 2021;
+Zhu et al., 2020) improve summarization by captur-
+ing sentence or discourse level dependencies. We
+elaborate on these four directions and their limita-
+tions in Section 2.
+We believe that the extract-then-generate ap-
+proach mimics how a person would handle long-
+input summarization: ﬁrst identify important pieces
+of information in the text and then summarize them
+(Kiyoumarsi, 2015; Sun et al., 2020). The extract-
+then-generate framework is based on the assump-
+tion that salient information useful for summariza-
+tion only occupies a small portion of the input,1687which is a sensible assumption given the long in-
+put length. This approach shortens the source in-
+put to a pre-set length, which addresses the main
+challenge of the model not being able to handle
+longer input beyond a certain limit. However, pre-
+vious separately-trained extract-then-generate ap-
+proaches are limited as they suffer from cascaded
+errors from the extractor to the generator. Though
+various reinforcement learning techniques are intro-
+duced to bridge the two steps, they have noticeable
+drawbacks (discussed in Section 3.3), and we argue
+that the long input makes this approach suboptimal.
+In this paper, we propose a new approach
+for long-input summarization: Dynamic Latent
+Extraction for Abstractive Summarization (D).
+D jointly trains the extractor and the generator
+and keeps the extracted text snippets latent. For an
+output token, D compute its probability con-
+ditioned on each input snippet separately , and its
+generation probability is computed by marginal-
+izing over all the input snippets under a learned
+dynamic weights assigned by the generator condi-
+tioned on the previously generated tokens.
+We optimize the extractor with two surrogate
+losses. First, we compute the extractive oracle
+based on the reference summary with a greedy
+search over the best ROUGE scores. These ora-
+cle snippets are used as targets for the extractor
+learning signal. Moreover, we propose consistency
+lossto encourage the extractor to approximate its
+own predicted weights on the snippet to the aver-
+aged dynamic weights predicted by the generator.
+We conducted experiments on three long-input
+summarization datasets: GovReport (Huang et al.,
+2021) and arXiv (Cohan et al., 2018) for long-
+document summarization, and QMSum (Zhong
+et al., 2021b) for long-dialogue summarization.
+Our method D largely outperforms existing
+methods on GovReport and QMSum, while achiev-
+ing strong results on arXiv. Notably, D yields
+gains of 4.2/6.1/4.0 of ROUGE-1/2/L points over
+the previous best method on GovReport. These
+experiments demonstrate the generalizability of
+D to multiple long-input summarization tasks.
+We summarize our contributions as follows:
+•We introduce D, a dynamic latent extrac-
+tion approach for abstractive long-input sum-
+marization. D better captures information
+in the long input and reduces computational
+cost;
+•We propose multiple auxiliary optimizationsfor the effective training of D: 1) extrac-
+tive oracle as a learning signal for the extrac-
+tor; 2) consistency loss that bridges extraction
+and generation; 3) hybrid training methods
+that make the extraction more robust;
+•Experimental results show that D largely
+outperforms the state-of-the-art on two long
+input summarization datasets. We also con-
+ducted a detailed analysis that shows dynamic
+weights improve model interpretability.
+2 Related Work
+We introduce in detail the four main categories
+of methods in recent work to address long-input
+summarization tasks.
+Sparse attention mechanism The full attention
+mechanism has a quadratic memory cost. Prior
+research works have proposed different sparse at-
+tention mechanisms to reduce the memory cost.
+Longformer (Beltagy et al., 2020) uses a dilated
+sliding window of blocks and global attention pat-
+terns. BigBird (Zaheer et al., 2020) employs slid-
+ing windows and random blocks. Reformer (Kitaev
+et al., 2020) uses the locality-sensitive hashing. In
+addition to optimizing the encoder self-attention,
+Huang et al. (2021) proposes head-wise positional
+strides to reduce the cost of the encoder-decoder
+attention. However, sparse attention diminishes the
+beneﬁts of pretraining and sacriﬁces parts of the
+receptive ﬁeld.
+Extract-then-generate method This method ex-
+tracts salient text snippets from the input, followed
+by generating an overall summary. Most of these
+approaches are trained separately (Zhang et al.,
+2019; Lebanoff et al., 2019; Xu and Durrett, 2019;
+Bajaj et al., 2021; Zhang et al., 2021b), which suf-
+fer from information loss as we pass the extracted
+snippets to the generator. Some approaches attempt
+to reduce that loss by bridging the two stages. Chen
+and Bansal (2018) adopts reinforcement learning
+(RL) with a sentence-level policy gradient. Bae
+et al. (2019) proposes summary-level policy gra-
+dient. Using RL suffers from various drawbacks
+on long input texts, which will be elaborated in
+Section 3.3. D is different as we jointly train
+an extract-then-generate model for summarization
+using latent variables.
+Divide-and-conquer approach A common ap-
+proach in long input summarization is divide-and-1688conquer (Gidiotis and Tsoumakas, 2020; Grail
+et al., 2021; Zhang et al., 2021a). It breaks a long
+input into multiple parts, which are summarized
+separately and combined to produce a ﬁnal sum-
+mary. However, these models do not capture the
+contextual dependencies across parts and assume
+that the input has certain structure.
+Hierarchical models Various hierarchical mod-
+els have been proposed to handle the longer in-
+puts. Cohan et al. (2018) models the document
+discourse structure with a hierarchical encoder
+and a discourse-aware decoder. HAT-Bart (Rohde
+et al., 2021) proposes a new Hierarchical Atten-
+tion Transformer-based architecture that attempts
+to capture sentence and paragraph-level informa-
+tion. HMNet (Zhu et al., 2020) builds a hierarchical
+structure that includes discourse-level information
+and speaker roles. However, these models focus
+mainly on model performance and not on reducing
+the memory and computational cost.
+3 Our Approach
+An overview of our approach is shown in Fig-
+ure 1. In Section 3.1, we formulate our task and the
+extractor-generator framework. In Section 3.2, we
+introduce our parameterization of the extractor for
+long inputs. In Section 3.3, we introduce generator
+formulation and the novel consistency loss. The
+extractor module is both optimized with the consis-
+tency loss and the oracle loss, which we elaborate
+on in Section 3.4. The overall training objective is
+summarized in Section 3.5.
+3.1 Extractor-Generator Framework
+In the long-input summarization task, the input con-
+sists ofLtext snippets, X= (x;:::;x), and an
+optional query qif a query is paired with a sum-
+mary. In long-input summarization, the number of
+text snippets, L, could be potentially large. The out-
+put is a summary yof lengthT. For the dialogue
+summarization task, dialogue utterances by each
+speaker are used as snippets. For documents, we
+tokenize the input into sentences and use each sen-
+tence as a snippet. The goal is to learn a model that
+generates a sequence of summary tokens ygiven
+the input snippets Xand the previously generated
+tokensy:
+P(yjq;X) =YP(yjq;X;y)
+The extractor takes the query and the source
+text as input and outputs a score s=E(q;x)
+for each text snippet x. Hereis the extractor
+parameters. We extract KsnippetsXfrom the
+documentXbased on their scores:
+X=top-K(E(q;x);x2X) (1)
+After retrieving XfromX, the extractor-
+generator framework models the output probability
+by replacing XwithX, i.e.,
+P(yjq;X) =P(yjq;X)
+=YP(yjq;X;y)(2)
+Note that the top- Koperation in Eq. (1) is non-
+differentiable, and we do not propagate gradients
+through top-K; instead, we propose methods to op-
+timize the extractor in Section 3.3 and Section 3.4.
+3.2 Extractor for Long Inputs
+An interesting research question is how to design
+the extractor for long inputs. Limited by GPU mem-
+ory, it is impractical to concatenate all snippets
+and encode them with a large pre-trained language
+model. As shown in Figure 2, we group consecu-
+tive snippets into chunks . We concatenate the query
+qwith each chunk and compute the encoded vector
+for each snippet independently within the chunk
+it belongs to. We project the encoded vectors to
+scalar scores s=E(q;x)using an MLP.
+3.3 Generator with Dynamic Weights
+Challenges An extract-then-generate model
+faces two challenges in long-input summarization.1689
+The ﬁrst challenge is that the extraction operation
+(top-Kin Eq. (1)) is non-differentiable. One
+approach is to adopt RL-based optimizations
+(Chen and Bansal, 2018; Bae et al., 2019), which
+has two drawbacks. First, reinforcement learning
+for large action spaces (i.e., extracting Kout
+ofLsnippets when Lis very large) has high
+variances. Second, current methods mostly use
+sentence-level ROUGE (Chen and Bansal, 2018)
+or summary-level ROUGE (Bae et al., 2019) as
+training rewards. Using sentence-level ROUGE
+could potentially select sentences with overlapping
+contents (Narayan et al., 2018), resulting in
+redundant ﬁnal summaries. Using a summary-level
+ROUGE leads to the sparsity of the training signal,
+and longer input makes this approach harder to
+train. The second challenge is interpretability:
+one might want to know whether the generator
+is leveraging the extracted information at each
+decoding time step.
+To address these challenges, we propose a gen-
+erator that dynamically assigns weights to every
+extracted snippet at each time step. Different from
+the extractor scores, which are independent of the
+decoding time step, the generator assigns different
+dynamic scores at different time steps. Dynamic
+weights make the decoding process interpretable
+and help denoise the extraction by down-weighting
+irrelevant snippets. It also provides training signals
+for the extractor using consistency loss .
+Generator formulation The overview of the
+generator is shown in Figure 3. For each ex-
+tracted snippet x, the generator predicts the gen-
+eration probability P(yjq;x;y)on this snippet
+and a dynamic weight P(xjq;X;y)for this
+snippet. The independent encoding of each ex-
+tracted snippet saves memory because the snip-
+pets do not need to attend to each other. Without
+loss of generality, we assume that P(jq;x;y)
+is computed by ﬁrst mapping the input (q;x;y)to a contextualized representation vector h. For
+Transformers (Vaswani et al., 2017) and encoder-
+decoder with attention models (Bahdanau et al.,
+2015), his usually the model’s output before
+the ﬁnal language model head. The generation
+probabilityP(yjq;x;y)is computed by feed-
+inghinto the language model head. For the dy-
+namic weight P(xjq;X;y), we adopt a sepa-
+rate MLP to map each hto a scalar logit l, and
+P(jq;X;y)is deﬁned as softmax(flg).
+We compute the generation probability by marginal-
+izing over all extracted snippets:
+P(yjq;X) =YX
+P(yjq;x;y)P(xjq;X;y)(3)
+The dynamic weight P(xjq;X;y)at each de-
+coding time step tallows us to interpret how the
+generator utilizes the extracted snippets. For exam-
+ple, a larger weight to a particular snippet indicates
+the larger importance of the snippet to the current
+decoding time step. The generation loss is deﬁned
+as the NLL of the gold summary:
+L= logP(yjq;X) (4)
+whereP(yjq;X)is deﬁned in Eq. (2). Here we
+do not propagate gradients of Lto the extrac-
+tor parameters since top- Kis non-differentiable.
+Instead, methods to optimize the extractor are de-
+scribed in Section 3.3 and Section 3.4.
+Consistency loss We also leverage the dynamic
+weights to provide a training signal for the extrac-
+tor. Since the dynamic weight of a snippet can be
+interpreted as the importance of the snippet at a par-
+ticular time step, we average the dynamic weights
+over all the decoding steps and view the averaged
+weight as the overall importance of the snippet.
+Based on this intuition, we propose what we term
+asconsistency loss , which measures the distance
+between the averaged dynamic weights distribution
+and the extractor distribution. We want these two
+distributions to be close on an arbitrary subset of
+X. For simplicity, we take Xas the subset and
+deﬁne the consistency loss as
+L = KLh1
+TXP(jq;X;y)jj
+softmax (E(q;x);x2X)i(5)1690Note that the consistency loss is superscripted with
+the extractor’s parameters , which means that we
+do not compute gradients for the generator’s param-
+eters. Since we want the distributional distance
+to be small on an arbitrary subset ofX, we do not
+propagate gradients through the top- Koperator.
+3.4 Leveraging Extractive Oracles
+For long-input summarization, the extracted snip-
+petsXused during training are important for
+stable optimization. Instead of using Xdeﬁned
+in Eq. (1), we propose to leverage extractive ora-
+clesduring training. No extractive oracles are used
+during test time.
+Greedy search for extractive oracles Extrac-
+tive oracles denote a set of selected text snippets
+whose concatenation maximizes the evaluation met-
+ric given the gold summary. We implement the
+extractive oracle using greedy search. Speciﬁcally,
+we start with an empty set, and we iteratively select
+a snippet from the input such that the concatenation
+of that snippet and the already selected snippets
+maximizes the average of ROUGE-1, ROUGE-2,
+and ROUGE-L scores given the gold summary. We
+denote the extractive oracles as X.
+Hybrid training We leverage the extractive or-
+acles to deﬁne Xused during training. If the
+number of oracles equals or exceeds K, we deﬁne
+Xas the ﬁrstKoracle snippets. If the number
+of oracles is less than K, we deﬁne Xas the
+union ofXand the top snippets ranked by the
+extractor that is not appearing in X. Such hybrid
+training has two beneﬁts. First, compared with X
+deﬁned in Eq. (1), it provides higher-quality inputs
+to the generator. Second, it reduces the reliance
+on the oracle and improves the generalizability of
+our model beyond the training set, as other text
+snippets omitted in the greedy search might help
+the generation.
+Oracle loss The extractive oracles Xare used
+as a supervision signal for the extraction part of
+our model. The oracle loss Lis computed
+from the cross-entropy loss between all chunks in
+the extractor selected set and the extractive oracle.
+Formally, the oracle loss is computed as
+L= 1
+jXjXloge
+Pe(6)
+3.5 Training Objective
+The overall training objective of our method is
+L=L+L+L (7)
+where,, andare hyperparameters to bal-
+ance the loss components. Gradients are computed
+for the superscripted parameters. Speciﬁcally, the
+extractor is solely optimized with the consistency
+loss and the oracle loss, and the generator is solely
+optimized with the generation loss.
+4 Experiment Setups
+4.1 Datasets
+We consider the following long-input abstractive
+summarization datasets as evaluation benchmarks:
+QMSum (Zhong et al., 2021b) is a benchmark
+for query-based multi-domain meeting summariza-
+tion. It consists of meetings from three domains:
+AMI (Carletta et al., 2005), ICSI (Janin et al.,
+2003), and committee meetings of the Welsh Par-
+liament and Parliament of Canada;
+GovReport (Huang et al., 2021) is a large-scale
+long document summarization dataset, consisting
+of about 19.5k U.S. government reports with expert-
+written abstractive summaries; GovReport is a
+good benchmark as it contains signiﬁcantly longer
+documents (average 9.4k words) and summaries
+(553 words) than other long document datasets,
+such as ArXiv, PubMed (Cohan et al., 2018), Bill-
+Sum (Kornilova and Eidelman, 2019), and Big-
+Patent (Sharma et al., 2019);
+arXiv (Cohan et al., 2018) is a dataset of scien-
+tiﬁc articles from arXiv. Abstracts of the articles
+are used as the target summary. ArXiv is chosen
+over PubMed (Cohan et al., 2018) as arXiv contains
+longer articles compared to PubMed.
+A detailed comparison of the datasets used can
+be found in Table 1.1691
+4.2 Baselines and Implementation
+Baselines for Comparisons We compare D
+with the previous state-of-the-art methods on the
+aforementioned three datasets. More speciﬁcally:
+1) For GovReport, we report the performance from
+the original paper, which uses various encoder
+self-attention and the proposed HEPOS encoder-
+decoder attention; 2) For QMSum, we compare
+with Zhong et al. (2021a), the current SoTA and
+other baselines mentioned in that work; 3) For
+arXiv, we include the results from the best perform-
+ing models in previous works, including ExtSum-
+LG (Xiao and Carenini, 2019), PEGASUS (Zhang
+et al., 2020), DANCER (Gidiotis and Tsoumakas,
+2020), BigBird (Zaheer et al., 2020), HEPOS +
+LSH (Huang et al., 2021), HAT-BART (Rohde
+et al., 2021), Longformer (Beltagy et al., 2020),
+and SSN-DM (Cui and Hu, 2021). Note that those
+baselines spans over different strategies to handle
+long input, such as sparse-attention (HEPOS, Big-
+Bird, Longformer), hierarchical attention (HAT-
+BART), extract-then-generate (Locator + different
+generators).
+4.3 Implementation Details
+Pretrained-LM The extractor is initialized with
+RoBERTa-base (Liu et al., 2019) weights. The
+generator is initialized with BART-large (Lewis
+et al., 2020a) weights. We use the Adam optimizer
+and set the extractor learning rate to 5e-5 and the
+generator learning rate to 5e-6.
+Hyperparameters ,, andare the coefﬁ-
+cients for the generation loss, oracle loss, and the
+consistency loss respectively. For and, we
+did a 2-step binary search between 0 and 2. For
+, we did a 3-step binary search between 0 and
+10. For the QMSum dataset, we used = 1,
+= 1,= 1. For the GovReport dataset, we
+used= 0:5,= 1,= 1. For the ArXiv
+dataset, we used = 0:5,= 1,= 5.
+Hardware We apply gradient checkpointing
+(Chen et al., 2016) to save the GPU memory. Each
+experiment is run on one NVIDIA Quadro RTX
+8000 GPU. The effective batch size is set to 8.
+5 Experiment Results
+5.1 Main Results
+The evaluation results are summarized in Table 2,
+Table 3, and Table 4. For GovReport, D yields1692
+gains of 4.15/6.21/4.00 of ROUGE-1/2/L scores
+compared to the previous best method. Experi-
+ments on GovReport show that Dis performant
+over prior sparse attention approaches.
+On QMSum, D yields the new state-of-
+the-art ROUGE-1/2/L scores of 34.42/9.71/30.10,
+outperforms UniLM with DialogLM pretraining.
+Comparing D with locator-based models on
+the QMSum dataset shows that D outperforms
+prior extract-then-generate approaches where the
+locator is independently trained with intermediate
+annotated text spans. This shows the effectiveness
+ofDYLE ’s joint training approach. These results
+show that D can be applied to both the long
+document summarization and long dialogue sum-
+marization tasks. D’s better performance can
+be attributed to lowered information loss between
+the extraction and the generation steps and its abil-
+ity to handle input of a much longer length.
+We notice that while D largely outperforms
+the LSH baseline (Huang et al., 2021) on the Gov-
+Report dataset, it underperforms the LSH base-
+line on arXiv. We posit two reasons. First, the
+input of the GovReport is much longer than that
+of arXiv. Most, if not all, of the sentences in the
+arXiv input article can be processed by the LSH
+model. Second, the summaries of the arXiv dataset
+are more abstractive than those of GovReport. It
+is possible that individually extracted text snippet
+is not the best linguistic unit for generating out-
+put tokens. It is our future work to explore the
+optimal input unit for an extract-then-generate ap-
+proach. Nevertheless, DYLE outperforms other
+extraction-based approaches ( e.g., SSN-DM (Cui
+and Hu, 2021)) and divide-and-conquer approaches
+(e.g., DANCER (Gidiotis and Tsoumakas, 2020)).
+5.2 Evaluation of Auxiliary Optimizations
+We conduct ablation studies to investigate the ef-
+fectiveness of the auxiliary optimizations we in-
+troduced. Speciﬁcally, we report the full model’s
+performance after removing 1) hybrid training, 2)consistency loss, 3) extractive oracle loss. In our
+default model, the consistency loss is computed
+on the combination of the extracted snippets and
+oracle snippets; in the “w/o hybrid” experiment,
+the consistency loss is only computed on the set of
+oracle snippets; in “w/o consistency” experiment,
+the consistency loss is not computed. The results
+are summarized in Table 5. Note that without the
+hybrid training optimization, only the extractive
+oracles will be used to train the generator. When
+the consistency loss is not calculated, the extractor
+and the generator can be viewed as being trained
+independently with the extractive oracles.
+We see that excluding either of the hybrid train-
+ing, consistency loss, or oracle loss optimization
+leads to a performance drop. Training the model
+without the supervision of the oracle leads to the
+greatest decrease in model performance, showing
+the importance of good supervision for the extrac-
+tor. Removing the consistency loss also decreases
+the model performance. This shows that the con-
+sistency loss allows the extractor to better learn
+to select salient snippets from the input text and
+enables D to generalize better to the test set.
+6 Analysis and Discussion
+Analysis of extracted snippets We are inter-
+ested in the amount of salient information passed
+to the generator. To investigate this, we report the
+decomposed precision and recall of ROUGE scores
+in Table 6. We observe that the extracted snippets
+have much higher recall than the generated sum-
+maries, while the generated summaries have higher
+precision. This suggests that to improve the overall
+performance, we can increase the information cov-
+erage (i.e., recall) of the extractor and improve the
+accuracy of the generator in identifying the salient
+snippets (i.e., precision).
+Interpretability of dynamic weights Our ap-
+proach is more interpretable than sparse attention
+and two-step extraction-generation pipeline meth-1693
+ods. Speciﬁcally, dynamic weights in the generator
+shows how the information is used throughout the
+decoding process. In Figure 4, we visualize the dy-
+namic weights for the extracted snippets assigned
+by the generator during decoding. In each subﬁg-
+ure, we visualize the dynamic weight matrices of
+thegenerated summary and a random summary
+from other samples in the validation set. The x-
+axis andy-axis represent the index of the extracted
+top-Ksnippets and the decoding time step, respec-
+tively. Darker squares denote higher weights. For
+each generated summary, we observe multiple con-
+secutive high-weight areas, indicating alignments
+between the extracted snippets and the generated
+summary. By contrast, weights are uniformly dis-
+tributed for random summaries. Interestingly, we
+observe that, on QMSum, fewer sentences are con-sidered when generating the summaries. Our ex-
+planation for this observation is that QMSum is a
+query-based dataset, where the queried information
+is more concentrated in a few snippets. By contrast,
+we ﬁnd that a larger number of snippets are used
+on the GovReport dataset as seen in Figure 4, as
+GovReport is a general summarization dataset.
+Effect of number of extracted snippets To eval-
+uate the effect of number of extracted snippets on
+model performance, we vary the value of Kof
+top-Kin Eq. (1) and test it on both the GovReport
+and QMSum datasets. We observe that the model
+performance generally increases as the value of K
+increases. This is expected as more extracted snip-
+pets provide the generator with more information
+to form a ﬁnal summary. The results are summa-1694
+rized in Table 7. Due to the limit of GPU memory,
+the largestKvalue we tried is 25.
+Effect of consistency loss We evaluate the ef-
+fect of consistency loss on extractor performance.
+Note that removing the consistency loss means that
+the extractor and the generator are independently
+trained. The results are presented in Table 5 as
+part of the ablation study. Removing the consis-
+tency loss leads to worse model performance. We
+observe that the consistency loss helps the model
+better learn the importance of the selected text snip-
+pets useful for the generation.
+Extractor performance compared with extrac-
+tive oracles We feed the extractive oracles to the
+generator. The results are summarized in Table 8.
+We observe that extractive oracles contain more
+salient information than the text snippets extracted
+by the extractor. Feeding the extractive oracle to the
+generator indicates the upper bound of the extractor
+performance. However, we observe that the gap
+between the performance of using the extractive
+oracle and using the extractor output is relatively
+small.
+Comparison with RAG The generator of our
+method is related to but differs signiﬁcantly from
+Retrieval-Augmented Generation (RAG) (Lewiset al., 2020b). The similarity only lies in the idea of
+marginalization over a set of text snippets, which
+is shown to be useful in question answering as well
+(Ni et al., 2021b). However, unlike our dynamic
+weights, the weights in RAG remains static dur-
+ing decoding. In our notations, RAG’s generation
+probability can be formulated as:
+P(yjq;X) =YP(yjq;X;y)
+=YXP(yjq;x;y)P(xjq;X)(8)
+The static weight P(xjq;X)in Eq. 8 is com-
+puted based on qandX, while our dynamic
+weightP(xjq;X;y)is additionally condi-
+tioned on the already generated tokens.
+Limitations and future directions We acknowl-
+edge that joint training of the extractor and the
+generator cannot eliminate information loss, which
+might be addressed by combining D and sparse
+attention to encode longer snippets. Though for-
+mulated for long-input summarization, D can
+be applied to general long-input generation tasks
+where information is scattered across the input, e.g.,
+open-domain question answering and multi-turn di-
+alogue systems with long dialogue history.
+7 Conclusions
+In this paper, we propose the ﬁrst framework that
+jointly trains an extract-then-generate model with
+latent extraction. The ﬁrst-step extraction picks out
+salient information from the long input, thereby
+extending the input length that the model can han-
+dle. Our novel joint training method addresses the
+challenge of information loss associated with the
+prior extract-then-generate approaches. Our model
+largely outperforms the current state-of-the-art on
+GovReport and QMSum, while achieving strong
+results on arXiv. Lastly, D has the advantages
+of being able to process arbitrarily long input with
+a lower memory cost and interpretable generator
+weights.
+Acknowledgment
+The authors would like to thank Yixin Liu and
+Ming Zhong for the discussions. We also would
+like to thank the anonymous reviewers for their
+helpful comments. This work is supported in part
+by a grant from Microsoft Research.1695References1696
+A Additional Dynamic Weight
+Visualization16971698

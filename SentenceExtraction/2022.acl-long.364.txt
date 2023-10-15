@@ -1,1 +1,606 @@
-5306 Proceedings of the 60th Annual Meeting of the Association for Computational Linguistics Volume 1 : Long Papers , pages 5306 5315 May 22 - 27 , 2022 c(cid:13)2022 Association for Computational Linguistics 5307 5308 5309 5310 5311 5312 5313 5314 5315 
+
+Colin Leong
+University of Dayton
+cleong1@udayton.eduDaniel Whitenack
+SIL International
+dan_whitenack@sil.org
+Abstract
+Multi-modal techniques offer significant un-
+tapped potential to unlock improved NLP tech-
+nology for local languages. However, many
+advances in language model pre-training are
+focused on text, a fact that only increases sys-
+tematic inequalities in the performance of NLP
+tasks across the world’s languages. In this work,
+we propose a multi-modal approach to train lan-
+guage models using whatever text and/or audio
+data might be available in a language. Initial
+experiments using Swahili and Kinyarwanda
+data suggest the viability of the approach for
+downstream Named Entity Recognition (NER)
+tasks, with models pre-trained on phone data
+showing an improvement of up to 6% F1-score
+above models that are trained from scratch. Pre-
+processing and training code will be uploaded
+to https://github.com/sil-ai/phone-it-in.
+1 Introduction
+Pre-trained language models are increasingly ap-
+plied in ways that are agnostic to targeted down-
+stream tasks (Brown et al., 2020). This usage has
+led to a proliferation of large language models
+trained on enormous amounts of data. For exam-
+ple, the recent Megatron-Turing NLG 530B model
+was trained on the Pile, which includes 800GB+ of
+text (Gao et al., 2021), and other large language
+models utilize large portions of the 200TB+ com-
+mon crawl data.These large data sets include
+impressive amounts of text, but all languages are
+not represented equally (or at all) in that text. The
+reality is that only a negligible fraction of the 7000+
+currently spoken languages (Eberhard et al., 2021)
+have sufficient text corpora to train state-of-the-
+art language models. This data scarcity results in
+systematic inequalities in the performance of NLP
+tasks across the world’s languages (Blasi et al.,
+2021).Local language communities that are working to
+develop and preserve their languages are producing
+diverse sets of data beyond pure text. The Bloom
+Library project,for example, is being used by lo-
+cal language communities to create and translate
+"shell" or "template" books into many languages
+(426 languages at the time this paper is being writ-
+ten). However, Bloom allows users to do more
+than just translate text. Users are also recording
+audio tracks and sign language videos, which has
+resulted in 1600+ oral translations. Other examples
+showing the multi-modal nature of data in local lan-
+guages include: (i) the creation of ChoCo: a mul-
+timodal corpus of the Choctaw language (Brixey
+and Artstein, 2021); (ii) SIL International’s 50+
+year effort to document endangered Austronesian
+languages via text, audio, and video (Quakenbush,
+2007); (iii) the grassroots Masakhane effort cat-
+alyzing the creation and use of diverse sets of
+African language data ( ∀et al., 2020); and (iv) work
+with the Me’phaa language of western Mexico that
+is producing digital recordings (video and audio)
+along with vocabulary, grammar and texts (Marlett
+and Weathers, 2018). These diverse data sources
+are effectively unusable by traditional text-based
+NLP techniques. In the light of data scarcity on
+these languages, they offer significant untapped po-
+tential to unlock improved NLP technology, if text
+data can be leveraged along with audio, image and
+video data. Furthermore, flexible multi-modal tech-
+nology such as this will make it easier to include
+diverse people and communities such as those de-
+scribed above within the NLP technology develop-
+ment process - audio-based technology reducing
+the need for literacy, for example.
+In this paper, we propose a multi-modal ap-
+proach to train both language models and mod-
+els for downstream NLP tasks using whatever text
+and/or audio data might be available in a language
+(or even in a related language). Our method uti-5306lizes recent advances in phone recognition and
+text/grapheme-to-phone transliteration to convert
+input audio and text into a common phonetic rep-
+resentation (the IPA phone inventory). We then
+pre-train character-based language models in this
+phone-space. Finally, we fine-tune models for
+downstream tasks by mapping text-based training
+data into the phonetic representation. Thus, in ad-
+dition to flexibility in pre-training, our method pro-
+vides a way to reuse labeled text data for common
+NLP tasks, like Named Entity Recognition or Sen-
+timent Analysis, in the context of audio inputs.
+We demonstrate our phonetic approach by train-
+ing Named Entity Recognition (NER) models for
+Swahili [ swh]using various combinations of
+Swahili text data, Swahili audio data, Kinyarwanda
+[kin] text data, and Kinyarwanda audio data. These
+two languages both originate from from the same
+language family, Bantu, and are spoken by mil-
+lions of people in Eastern Africa, often within the
+same country, resulting in some overlap in loan
+words, etc.However, they are both considered
+low-resource languages. Kinyarwanda in partic-
+ular, though spoken by approximately 13-22 mil-
+lion people, has very little text data available in
+that language, with fewer than 3,000 articles on
+the Kinyarwanda-language Wikipedia, and Swahili
+comparatively ahead but still poorly resourced at
+approximately 68,000 articles, far less than many
+European languages., though some datasets have
+been created such as KINNEWS (Niyongabo et al.,
+2020). On the other hand, Kinyarwanda is uniquely
+placed as a language to leverage speech-based tech-
+nologies, due to well-organized effortsto collect
+voice data for that language. It is in fact one of
+the largest subsets available on the Common V oice
+Dataset (Ardila et al., 2019), with 1,183 hours of
+voice clips collected and validated. Choosing these
+two languages allowed us to test the use of the
+technique on legitimately low-resourced languages
+that could benefit from improved NLP technology,
+and which as part of the same family of languagesmight be similar enough in vocabulary, grammar,
+sound systems and so on, to benefit from cross-
+lingual training.
+We find that simple NER models, which just
+look for the presence or absence of entities, can
+be trained on small amounts of data (around 2000
+samples) in the phonetic representation. Models
+trained for complicated NER tasks in the phonetic
+representation, which look for entities and their
+locations within a sequence, are improved (by up
+to 6+% in F1 score) through pre-training a phonetic
+language model using a combination of text and
+audio data. We see this improvement when fine-
+tuning either a Swahili or Kinyarwanda language
+model for downstream Swahili tasks, which implies
+that one could make use of text and audio data in
+related languages to boost phonetic language model
+performance. The utility of the method in data
+scarce scenarios and importance of pre-training
+depends on the complexity of the downstream task.
+2 Related Work
+There have been a series of attempts to utilize pho-
+netic representations of language to improve or
+extend automatic speech recognition (ASR) mod-
+els. Some of these jointly model text and audio
+data using sequences of phonemes combined with
+sequences of text characters. Sundararaman et al.
+(2021), for example, uses a joint transformer archi-
+tecture that encodes sequences of phonemes and
+sequences of text simultaneously. However, this
+joint model is utilized to learn representations that
+are more robust to transcription errors. The archi-
+tecture still requires text inputs (from ASR tran-
+scriptions) and generates outputs in both text and
+phoneme representations. In contrast, our approach
+allows for text input, audio input, or text plus audio
+input to language models.
+Similarly, in (Chaudhary et al., 2018) and
+(Bharadwaj et al., 2016) investigate the potential of
+phoneme-based or phoneme aware representations
+and models, showing gains in performance, lan-
+guage transfer, and flexibility across written scripts.
+These works conduct training on text-based data
+only, using Epitran to convert to phonemes.
+Baevski et al. (2021) transforms unlabeled text
+(i.e., not aligned with corresponding audio files)
+into phonemes in a scheme to train speech recogni-
+tion models without any labeled data. This scheme
+involves a generator model trained jointly with a
+discriminator model. The generator model converts5307audio, segmented into phonetic units into predicted
+phonemes, and the discriminator model attempts
+to discriminate between these predicted phonemes
+and the phonemes transliterated from unlabeled
+text. Although both text and audio are utilized in
+this work, they are not input to the same model
+and the primary output of the training scheme is a
+model that creates good phonetic speech represen-
+tations from input audio.
+Outside of speech recognition focused
+work, Shen et al. (2020) (and other researchers
+cited therein) attempt to "fuse" audio and text at the
+word level for emotion recognition. They introduce
+another architecture that internally represents both
+audio and text. However, the so-called WISE
+framework relies on speech recognition to generate
+the text corresponding to audio frames in real-time.
+The current work explicitly avoids reliance
+on speech recognition. The 2021 Multimodal
+Sentiment Analysis (MuSe) challenge continues
+this vein of research integrating audio, video, text,
+and physiology data in an emotion recognition
+task (Stappen et al., 2021). Contributions to
+this challenge, such as Vlasenko et al. (2021),
+introduce a variety of ways to "fuse" audio and text
+inputs. However, these contributions are squarely
+focused on emotion/sentiment analysis and do not
+propose methods for flexible, phonetic language
+models.
+Lakhotia et al. (2021) introduced functionality
+for "textless" NLP. They explored the possibility of
+creating a dialogue system from only audio inputs
+(i.e., without text). As part of this system, language
+models are directly trained on audio units without
+any text. This advances the state-of-the-art with
+regard to self-supervised speech methods, but it
+does not provide the flexibility in audio and/or text
+language modeling introduced here.
+3 Methodology
+Our approach is inspired by the fact that many lan-
+guages are primarily oral, with writing systems
+that represent spoken sounds. We convert both
+text and audio into single common representation
+of sounds, or "phones," represented using the In-
+ternational Phonetic Alphabet, or IPA. Then, we
+perform both language model pre-training and the
+training of models for downstream tasks in this
+phonetic representation. Well-tested architectures,
+such as BERT-style transformer models (Vaswani
+et al., 2017), are thus flexibly extended to eitherspeech or audio data.
+Regarding the conversion process of text and
+audio data, we leverage recent advances to translit-
+erate this data into corresponding sounds repre-
+sented by IPA phonetic symbols. This translitera-
+tion is possible for speech/audio data using tools
+such as the Allosaurus universal phone recognizer,
+which can be applied without additional training
+to any language (Li et al., 2020), though it can
+benefit from fine-tuning(Siminyu et al., 2021). To
+convert text data to phonemes we can use tools
+such as the Epitran grapheme-to-phoneme con-
+verter (Mortensen et al., 2018), which is specifi-
+cally designed to provide precise phonetic translit-
+erations in low-resource scenarios.
+Fig. 1 shows how downstream models for certain
+NLP tasks, like Named Entity Recognition (NER),
+are performed in the phonetic representation. La-
+beled data sets for NLP tasks need to be mapped
+or encoded into the phonetic representation to train
+downstream models. However, once this mapping
+is accomplished, models trained in the phonetic
+representation can perform tasks with audio input
+that are typically restricted to processing text input.
+3.1 Phonetic Language Modeling
+One complication arising from direct speech-to-
+phone transcription is the loss of word boundaries
+in the transcription. This is expected, as natural
+speech does not put any pauses between the words
+in an utterance. This does, however, result in mix-
+ing text data sets containing clear word boundaries
+with speech data sets containing no clear word
+boundaries.
+Borrowing from techniques used on languages
+that do not indicate word boundaries by the use
+of whitespace, we address the problem by remov-
+ing all whitespace from our data sets after phone
+transliteration. We train character-based language
+models over the resulting data. Character-based
+models such as CharFormer (Tay et al., 2021) or
+ByT5 (Xue et al., 2021) have shown promise in
+recent years for language modeling, even if this
+approach is known to have some trade offs related
+to shorter context windows.
+3.2 Potential Information Losses
+The transliteration of text and audio data into pho-
+netic representations presents several other chal-
+lenges related to potential loss of information or
+injection of noise:5308
+1.Loss of suprasegmental information : In some
+languages, meaning may be encoded through
+tones, or pitch changes across sounds (aka
+across segments, or "suprasegmental"). Partic-
+ularly for tonal languages such as Mandarin
+Chinese [ cmn], this loss can represent a signif-
+icant informational loss particularly for homo-
+phones with different tones, as seen in (Am-
+rhein and Sennrich, 2020). While IPA sym-
+bols can represent these intricacies, it adds
+complexity
+2.Phone/phoneme differences : As noted in (Li
+et al., 2020), speech sounds which are phys-
+ically different (different phones ), may be
+perceived as the same (one phoneme ) by
+speakers of one language, but these same
+sounds could perhaps be distinguished by
+speakers of another language. For exam-
+ple, the French words words bouche , and
+bûche contain phones (/u/ vs. /y/) which
+may sound "the same" to English speak-
+ers, but are semantically different to French
+speakers. In other words, in English, both
+phones map to the same phoneme perceptu-
+ally. As the Allosaurus phone recognizer rec-
+ognizes the actual phones/sounds, not their
+perceived phonemes, it would transcribe these
+two phones to different representations even
+for English speech. This can be mitigated to
+an extent by customizing the output of Al-
+losaurus on a per-language basis, see Sec. 4.3.
+3.Simple errors in phone recognition : As noted
+in (Siminyu et al., 2021), even the best-trained
+Allosaurus models, fine-tuned on language-
+specific data, have a non-trivial Phone ErrorRate (PER).
+An important question, therefore, is whether
+these added sources of noise/information losses
+are outweighed by the potential benefits in terms
+of flexibility. Does working in a phonetic represen-
+tation cause a prohibitive amount of information
+loss? We constructed our experiments and data sets
+in order to answer this question.
+4 Experiments
+In order to evaluate the quality of learned pho-
+netic representations, we transliterate several text
+and audio data sets in the Swahili [ swh] language.
+We pre-train phonetic language models on various
+combinations of these data sets and evaluate down-
+stream performance on NER tasks. See Fig. 2 for a
+detailed overview of these various combinations.
+We refer to these combinations as denoted by
+downstream tasks (SNER for Swahili NER), and
+pre-training language (( KforKinyarwanda, Sfor
+Swahili) as well as data modality ( Tfor text, Afor
+audio). By way of example, the SNER+ST2 model
+results from pre-training using 2 swhtext datasets
+(ST2) and fine-tuning on the swhNER (SNER)
+task, whereas the SNER+SAT model results from
+pre-training using swhaudio and text data (SAT).
+Kinyarwanda [ kin] data is used in our experi-
+ments as a language related to the target language
+(swh) with existing text and audio resources that,
+in some ways, surpasses those available in the tar-
+get language. Thus, we pre-train some models
+onkin data while fine-tuning for the downstream
+NER task using swh data.
+Three different formulations of the NER task,
+from more simple (NER1) to more compli-5309
+cated/granular (NER3), are used (see Fig. 2) to
+help determine the applicability of our methods
+to less challenging (NER1) to more challenging
+(NER3) tasks. The NER1 task tries to determine
+the presence or absence of certain kinds of entities
+within an input. For our task we use PER, ORG,
+DATE, and LOC entities. The NER2 task addition-
+ally requires models to predict the correct numbers
+of these entities within an input. Finally, the NER3
+task requires models to determine entities at the
+correct locations with an input sequence of phones.
+For all of these tasks, we first convert text data
+to phones using Epitran and audio data to phones
+using Allosaurus. Then, we pre-train on various
+combinations of data, before fine-tuning on NER.
+4.1 Data Sources
+Forswh pre-training data we use: (i) the "Lan-
+guage Modeling Data for Swahili" dataset (Shikali
+and Refuoe, 2019) hosted on Hugging Face (which
+we refer to as the "HF Swahili" data set); and (ii)
+the ALFFA speech dataset (Gelas et al., 2012). For
+ALFFA data we process both the audio files (using
+Allosaurus) and the original "gold" text transcrip-
+tions (using Epitran).For Kinyarwanda pre-training data, we use
+the Common V oice (CV) Kinyarwanda 6.1 sub-
+set (Ardila et al., 2019). Again, we utilize both the
+audio files and transcriptions. Due to the large size
+of the CV 6.1 Kinyarwanda subset, we processed
+only about 80% of the audio files.
+For fine-tuning the downstream NER task, we
+use the MasakhaNER data set (Adelani et al., 2021).
+As with other text-based data sets, we transform
+the NER sample with Epitran to map the samples
+into the phonetic representation.
+4.2 Entity to Phone Encoding
+For the downstream NER tasks we map or encode
+the NER annotations into the phonetic representa-
+tion. We thus edited the labels (PER, ORG, DATE,
+and LOC) to convert them from word-level labels to
+phone-level labels as shown in Fig. 3. Unlike (Kuru
+et al., 2016), we leave in the B- and I- prefixes.
+Our fork of the MasakhaNER data set, which im-
+plements our phonetic representations of the labels,
+is published on Github..5310
+4.3 Phone Inventory Considerations
+As mentioned already, we use Allosaurus for phone
+recognition with audio inputs. In order to ensure
+consistency with Epitran, we took advantage of
+Allosaurus’s inventory customization feature, giv-
+ing it the phone inventories specified by the same
+language in Epitran. The inventory used through-
+out this work (for swh) is the swa-Latn inventory
+from Epitran.When this inventory is supplied as
+input, Allosaurus will only output symbols from
+the inventory. We followed similar practice when
+transliterating Kinyarwanda data.
+We compare the output of Epitran and Al-
+losaurus on the ALFFA dataset. Following
+the practice of (Li et al., 2020), we used the
+editdistancelibrary to calculate the Phone
+Error Rate (PER). Having no ground truth phone
+annotations, we instead take Epitran’s outputs as
+"ground truth" for comparison. The mean PER
+between the outputs is 23.7%. This result is consis-
+tent with Siminyu et al. (2021), which finds PERs
+as high as 72.8% when testing on on the Bukusu
+(bxk), Saamia (lsm) and East Tusom languages (an
+endangered subdialect of the Tungkhulic language
+family). However, by training the phone recog-
+nizer on even minimal amounts of data in these
+languages, PERs were improved significantly.
+A spreadsheet with detailed results for 10k sam-
+ples from ALFFA can be found online.
+4.4 Model Architecture and Training
+All models use the SHIBA implementation of CA-
+NINE (Tanner and Hagiwara, 2021). SHIBA was
+designed for use on the Japanese [ jpn] language,
+which does not include spaces between its charac-
+ters (similar to our phonetic representations withoutword boundaries). We used the default hyperpa-
+rameter settings for SHIBA pre-training and fine-
+tuning, because we are primarily concerned with
+the relative impact of various combinations of pre-
+training data on the downstream NER tasks. We
+use the Hugging Face transformers library (Wolf
+et al., 2020) to train all models.
+Because of the small size of the NER data
+set used during fine-tuning, we enabled Hugging
+Face’s early stopping callback for all downstream
+training runs. We stopped these runs if they did not
+improve training loss after 20 evaluations. Nonethe-
+less, we found after a number of trials that the
+models quickly overfit using this setting. We also
+experimented with modifying this on several tri-
+als to stop based on the evaluation loss instead,
+but this change did not significantly influence the
+evaluation results.
+Following the example of Adelani et al. (2021),
+we do not run downstream model trainings once,
+but multiple times. We also pre-trained each pho-
+netic language model multiple times with different
+random seeds. We report averages of these multiple
+trials in the following.
+Scripts and code for our experiments will be
+uploaded to Github.
+5 Results and Discussion
+Table 1 presents the F1 scores for our training sce-
+narios in the downstream NER1 and NER2 tasks.
+The models that utilize pre-training on the kin
+audio and text data give the best results. However,
+pre-training does not appear to dramatically influ-
+ence the level. F1 scores in the range of 74-85%
+suggests the minimum viability of these phonetic
+models for simple NLP tasks.
+Table 2 presents the F1 scores for our various
+training scenarios in the downstream NER3 task,
+which should be the most challenging for our pho-
+netic models. The influence of pre-training is more
+noticeable for this task. Further, the models pre-
+trained on the kin audio and text data have the
+best performance. This is likely due to the fact that
+thekin data is both large and higher quality (in
+terms of sound quality) as compared to the ALFFA
+Swahili data. This benefit of this data size and
+quality appears to outweigh any degradation due to
+the pre-training occurring in a different (although
+related) language.5311Model F1 NER1 F1 NER2
+SNER 0.829 0.753
+SNER+ST1 0.827 0.770
+SNER+ST2 0.824 0.747
+SNER+SA 0.817 0.751
+SNER+SAT 0.818 0.763
+SNER+KT 0.823 0.771
+SNER+KA 0.846 0.763
+Model F1 F1 (strict)
+SNER 0.357 0.161
+SNER+ST1 0.401 0.213
+SNER+ST2 0.394 0.166
+SNER+SA 0.363 0.163
+SNER+SAT 0.405 0.203
+SNER+KT 0.408 0.217
+SNER+KA 0.397 0.197
+The importance (or relative impact) of pre-
+training phonetic language models increases with
+the complexity of the NER task. Fig. 4 shows
+the maximum percentage improvement due to pre-
+training for each of our NER tasks. This suggests
+that simple NLP tasks with a small number of out-
+put classes are much easier to port to phonetic rep-
+resentations, even without pre-training, while more
+complicated NLP tasks may require a more sig-
+nificant amount of text and/or audio data for pre-
+training. We expect this trend to carry through to
+tasks like sentiment analysis, which could be for-
+mulated as a simple classification task with NEG,
+NEU, and POS sentiment labels or a more compli-
+cated aspect based sentiment analysis task.
+6 Conclusions and Further Work
+The proposed method for multi-modal training us-
+ing phonetic representations of data has minimum
+viability for simple NER tasks. For more compli-
+cated NER tasks, pre-training phonetic language
+models boosts downstream model performance by
+up to 6% in F1 scores. This pre-training can be
+performed in the target language or in a related
+language using text and/or audio data. Thus, the
+method provides flexibility in the data needed to
+train language models, while also allowing for au-
+dio and/or text inputs to models trained on down-
+stream NLP tasks.
+We anticipate exploring various extensions to
+and validations of this method in the future. Specif-
+ically, we would like to explore methods that might
+mitigate performance degradation due to a lack
+of word boundaries in our method. Subword to-
+kenization techniques, such as Byte-Pair Encod-
+ings (BPE) (Sennrich et al., 2016; Gage, 1994),
+or character-based word segmentation techniques
+might help in detecting and exploiting repeating
+patterns within the phonetic representation. Fur-
+thermore, the word embedding techniques used
+by (Chaudhary et al., 2018) or (Bharadwaj et al.,
+2016) have been shown to work well, and would
+be worth investigating how the removal of space-
+delimited word boundaries would affect this.
+We would also like to validate our methods on
+a variety of other data sets and tasks. We selected
+the MasakhaNER dataset for evaluation because
+we specifically wished to evaluate results on ac-5312tual low-resource languages supported by both Al-
+losaurus and Epitran. While there are still, we
+argue, detectable improvements in downstream re-
+sults with our method, further work would benefit
+from additional evaluations on other data sets or
+tasks. In particular, the Swahili News Classifica-
+tion corpus (David, 2020) corpus may provide a
+useful evaluation.
+We did not investigate going from audio to
+phones, then phones to words/characters, judging
+that information losses and errors would likely com-
+pound in multiple stages of processing. Instead, we
+focused on what could be achieved with the Al-
+losaurus "universal phone transcriber" without any
+language-specific finetuning. A truly universal tran-
+scriber would increase flexibility when training for
+truly low-resource scenarios.
+Nevertheless, it has been shown by Siminyu et al.
+(2021) that it is possible to improve phone recogni-
+tion with even small amounts (approximately 100
+sentences) of annotation. It may be possible to
+improve phonetic language modeling results by
+performing this fine-tuning in the target language.
+Experiments involving other languages with, e.g.
+languages that are notrelated would help to isolate
+the role of relatedness, lexical overlap, or related
+sound systems/phonology.
+While we do not claim that conversion to phones
+provides better performance generally, we believe
+that our experiments show that the fundamental
+idea of converting either textoraudio data to the
+common phone representation provides a viable
+path to more flexible approach to certain down-
+stream NLP tasks, worthy of further development.
+Acknowledgements
+The authors wish to thank Dr. Vijayan Asari, Dr.
+Steven Rogers, Dr. Julia Kreutzer, Dr. Graham
+Neubig, Dr. David Mortenson, Andre Niyongabo
+Rubungo, and Joshua Turner for advice, helpful
+discussions, assistance in debugging, and time
+spent in proofreading. In addition, David Adelani
+and the Masakhane community provided invalu-
+able help, encouragement and assistance with the
+MasakhaNER dataset.
+We used GNU Parallel for much of the dataset
+processing (Tange, 2011). In combination with
+Lhoest et al. (2021) from Hugging Face, GNU Par-
+allel significantly accelerated pre-processing and
+phone transcription.
+ClearML (AI, 2019) provided experiment track-ing, model and dataset management, and (when
+needed) prompt and helpful technical support. As
+our project involved the creation of over 20 dis-
+tinct dataset variations and training many models
+on some of them, these management tools signifi-
+cantly eased the entire research process.
+Ethics Statement
+This research project uses open datasets and mod-
+els, which are used in accordance with correspond-
+ing licenses to the best of our knowledge. For the
+downstream task in question (NER), we used the
+MasakhaNER dataset, which is constructed from
+newspaper data. Where this newspaper data in-
+cludes mentions of individuals, the individuals are
+public figures. The domain of this NER data is lim-
+ited to the newspaper/news domain, which should
+be kept in mind while considering the applicability
+of the methods presented.
+In terms of compute, the work presented here
+required approximately 200 pre-training or fine-
+tuning jobs tracked via ClearML. Each run lasted
+no more than 1-2 hoursfor finetuning, but gener-
+ally much longer for pretraining (on the order of a
+day), and only consumed one GPU resource at a
+time (either an A100 or P100). This computation
+sums up to around 5-6 GPU-weeks on the A100,
+about one gpu-week on the Titan RTX, and several
+compute-days each for the other GPUs. Additional
+exploratory work and debugging consumed another
+few GPU-days on Google Colab.
+References531353145315

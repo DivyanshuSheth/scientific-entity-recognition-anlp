@@ -1,1 +1,687 @@
-206 Proceedings of the 2022 Conference of the North American Chapter of the Association for Computational Linguistics : Human Language Technologies , pages 206 218 July 10 - 15 , 2022 © 2022 Association for Computational Linguistics 207 208 209 210 211 212 213 214 215 216 217 218 
+
+Yu Li, Baolin Peng, Yelong Shen, Yi Mao, Lars Liden, Zhou Yu, Jianfeng GaoMicrosoft Research, Redmond, WAColumbia University, New York, NY
+{bapeng,yeshe,maoyi,laliden,jfgao}@microsoft.com
+{yl5016, zy2461}@columbia.edu
+Abstract
+Knowledge-grounded dialogue systems are
+challenging to build due to the lack of training
+data and heterogeneous knowledge sources.
+Existing systems perform poorly on unseen
+topics due to limited topics covered in the train-
+ing data. In addition, it is challenging to gener-
+alize to the domains that require different types
+of knowledge sources. To address the above
+challenges, we present PLUG, a language
+model that homogenizes different knowledge
+sources to a uniﬁed knowledge representation
+for knowledge-grounded dialogue generation
+tasks. We ﬁrst retrieve relevant information
+from heterogeneous knowledge sources (e.g.,
+wiki, dictionary, or knowledge graph); Then
+the retrieved knowledge is transformed into
+text and concatenated with dialogue history to
+feed into the language model for generating
+responses. PLUG is pre-trained on a large-
+scale knowledge-grounded dialogue corpus.
+The empirical evaluation on two benchmarks
+shows that PLUG generalizes well across dif-
+ferent knowledge-grounded dialogue tasks. It
+achieves comparable performance with state-
+of-the-art methods in the fully-supervised set-
+ting and signiﬁcantly outperforms other ap-
+proaches in zero-shot and few-shot settings.
+1 Introduction
+Recent work has shown that conversational mod-
+els can be trained in an end-to-end fashion (Gao
+et al., 2019; Roller et al., 2020; Zhang et al., 2019;
+Adiwardana et al., 2020). Though such models
+can generate coherent and natural responses con-
+sistent with conversation history, there is still a
+clear gap between conversational AI agents and hu-
+mans. The primary reason is that existing dialogue
+systems lack knowledge of the subject and thus
+cannot deep dive into speciﬁc topics with humans.Dataset Knowledge % Topics
+Open-domain
+Wizard of Wikipedia articles 0.02%
+CMU_DoG articles 0.04%
+Recommendation
+RD tables 15.0%
+ODKG graph 7.5%
+Table 1: Knowledge representation and topic cover-
+age statistics of existing knowledge-grounded dialogue
+datasets. % Topics means the portion of topics or facts
+in the knowledge database covered by the dataset.
+In order to better incorporate knowledge into dia-
+logue, knowledge-grounded dialogue systems have
+become increasingly popular.
+Knowledge-grounded dialogue generation aims
+to generate informative and meaningful responses
+based on both conversation context and external
+knowledge sources. Thus far, researchers have col-
+lected knowledge-grounded dialogues for various
+tasks using crowdsourcing platforms, for instance,
+open-domain dialogues (Dinan et al., 2019; Zhou
+et al., 2018) and conversational recommendation
+dialogues (Li et al., 2018; Moon et al., 2019; Hay-
+ati et al., 2020). Workers are asked to base their
+replies on knowledge from structured knowledge
+bases (Moon et al., 2019; Tuan et al., 2019) or un-
+structured documents (Dinan et al., 2019; Zhou
+et al., 2018; Feng et al., 2020). Taking advantage
+of recent advances in large-scale language mod-
+els (Raffel et al., 2019; Lewis et al., 2020a; Guu
+et al., 2020), researchers have also built knowledge-
+grounded dialogue systems by ﬁne-tuning such lan-
+guage models in an end-to-end fashion (Shuster
+et al., 2021; Zhao et al., 2020b; Li et al., 2021).
+However, there are two critical challenges in
+these existing methods. First, it is expensive and
+time-intensive to collect knowledge-grounded dia-
+logues. As shown in Table 1, most of the datasets206only cover a small portion of the knowledge base.
+Thus, systems which only ﬁne-tune with small
+training sets generalize poorly on unseen topics
+in the same knowledge base. Additionally, the for-
+mats of knowledge sources vary in different tasks,
+making the approaches unable to transfer to other
+domains with different knowledge sources. For ex-
+ample, RD(Li et al., 2018) adopts a movie
+database as the knowledge source to recommend
+movies. Techniques on this task exploit the graph
+structure. It is not easy to adapt such techniques to
+document-grounded conversation tasks like Wizard
+of Wikipedia (Dinan et al., 2019).
+In this work, we present PLUG, a model that can
+unify different knowledge formats for knowledge-
+grounded dialogue generation. First, we con-
+vert different knowledge formats (e.g., knowledge
+graph, knowledge base, and passages) to unstruc-
+tured text, each using a different retriever. Then
+we use a pre-trained language model to process
+them into a uniﬁed representation to incorporate the
+knowledge into dialogue generation. We pre-train
+PLUG on different knowledge-ground dialogue cor-
+pora, including a large-scale open-domain conver-
+sation dataset from Reddit. This allows PLUG to
+learn knowledge in various formats from different
+tasks, and thus transfer to any knowledge-grounded
+dialogue task with few-shot learning techniques.
+We evaluate the effectiveness of PLUG by ap-
+plying it to an open-domain knowledge-grounded
+dialogue benchmark, Wizard of Wikipedia (Dinan
+et al., 2019), and a knowledge-grounded conversa-
+tional recommendation benchmark, RD(Li
+et al., 2018). PLUG achieves results comparable to
+the state-of-the-art method under a fully-supervised
+setting. It outperforms other methods on both tasks
+under zero-shot and few-shot settings, demonstrat-
+ing that PLUG can be grounded on world knowl-
+edge in different knowledge sources and generalize
+to different downstream tasks.
+Our contributions are three-fold: (1) We pro-
+pose a novel knowledge-based pre-trained lan-
+guage model, PLUG, that can be applied to any
+knowledge-grounded dialogue tasks; (2) Our model
+achieves slightly better results than state-of-the-
+art models in fully-supervised settings and shows
+promising improvements over the current state-
+of-the-art in zero-shot and few-shot settings; (3)
+We present extensive experiments to explore the
+bottlenecks of the task and the future direction of
+knowledge-grounded dialogues.2 Approach
+We describe our approach in this section. Figure 1
+gives a diagram of our proposed method. We ﬁrst
+introduce the background of knowledge-grounded
+dialogues and the backbone language model in Sec-
+tion 2.1. Then, we formalize the task and introduce
+the details of PLUG in Section 2.2. Finally, we
+explain the training process of our PLUG, which
+includes the pre-training dataset selection and the
+data pre-processing processes in Section 2.3.
+2.1 Background: Knowledge-Grounded
+Pre-training
+Traditional knowledge-grounded dialogue includes
+three steps: information extraction, knowledge pre-
+diction, and response generation. Previous work fo-
+cuses on developing separate modules (Zhou et al.,
+2020b). Inspired by the recent success of apply-
+ing a large-scale pre-trained language model on
+task-oriented dialogue systems (Peng et al., 2020;
+Hosseini-Asl et al., 2020), we explore the possibil-
+ity of using a uniﬁed knowledge representation in
+a large-scale language model. In order to properly
+manage the task in a sequence-to-sequence setup,
+we choose T5 (Raffel et al., 2020) as our backbone.
+T5 is a sequence-to-sequence pre-trained Trans-
+former (Vaswani et al., 2017) model for transfer
+learning. It is trained by converting various lan-
+guage tasks into text-to-text tasks. After ﬁne-tuning
+on a dialogue dataset, T5 can generate ﬂuent and
+coherent responses. Nevertheless, responses are
+often too generic because they are not grounded on
+speciﬁc knowledge. PLUG is built on the T5 model
+but grounded on real-world knowledge during train-
+ing, making it inherit T5’s capability of producing
+good responses but include more knowledge.
+2.2 PLUG
+We formulate a knowledge-grounded dialogue as:
+D={C, R,S} (1)
+where C={C}is a dialogue context, and
+R={R}is the response in a dialogue that has
+nturns. Sis the external knowledge source for
+taskt. For each dialogue turn, we can formulate a
+knowledge-grounded dialogue generation task on a
+single domain dasp(R|C,S).
+As shown in Figure 1, each task has its own
+knowledge source (e.g., documents, databases,
+and knowledge graphs). In order to make all
+knowledge-grounded dialogue generation tasks207
+able to ﬁt in the text-to-text encoder-decoder frame-
+work, we follow T5 to feed each dialogue turn
+into the language model simply by concatenating
+the context C={c, c, ..., c}, and essential
+knowledge triples K={k, k, ..., k}as a token
+sequence. The essential knowledge is extracted
+from the knowledge source Sand represented as
+text of triples. We train the model to predict the re-
+sponses token sequence R={r, r, ..., r}. The
+probability of the responses is formulated as:
+p(R|C) =/productdisplayp(r|C, K, r, ..., r)(2)
+We will explain how we select and process pre-
+training datasets in the following sections.
+2.3 Model training process
+We pre-trained the PLUG model using two datasets,
+Reddit Conversation (Galley et al., 2018) and Open-
+DialKG (Moon et al., 2019). We will ﬁrst present
+the three-step data cleaning process of Reddit Con-
+versation in Section 2.3.1, then we will introduce
+OpenDialKG in Section 2.3.2.
+2.3.1 Reddit Conversation
+Reddit Conversation Galley et al. (2018) is a large-
+scale open-domain conversation dataset. It extracts
+the conversation threads grounded on a document
+from the Reddit data.We only keep the conver-
+sations grounded on Wikipedia passages for pre-
+training to recognize better the knowledge used
+in the dialogue. Since vanilla document-based di-
+alogue in the dataset does not have a knowledgelabel for each dialogue turn, we apply a hierarchi-
+cal information extraction method to obtain the
+essential knowledge in each turn. Our information
+extraction method includes three steps: knowledge
+retrieval, statistical ranking, and semantic ranking.
+Knowledge Retriever. We use a knowledge re-
+triever to retrieve all relevant knowledge in a sin-
+gle turn’s response. We ﬁrst extract the title of
+the grounding Wikipedia passage in the dialogue.
+Then, we retrieve knowledge triples from a large-
+scale knowledge graph, DBpedia (Lehmann et al.,
+2015). Speciﬁcally, we query the DBpedia via a
+public SPARQL endpointand then collect triples
+whose subject or object is in the Wikipedia pas-
+sage in the dialogue. For example, we keep
+triples <Barack Obama, alma mater, Columbia
+University> and<Michelle Obama, spouse, Barack
+Obama> for the dialogue about Barack Obama. To
+carry sufﬁcient knowledge to reﬁne in the next step,
+we retrieve 500 triples for every passage.
+Statistical Ranking. After retrieving adequate
+knowledge, we rank the corresponding triples to
+reﬁne the knowledge. Speciﬁcally, we get the TF-
+IDF (term frequency-inverse document frequency)
+value for all the retrieved triples. To ﬁnd the triples
+related to the context, we concatenate the dialogue
+history and the response as the query. Then we com-
+pute the cosine similarity between the query and
+every triple. Because every triple has the Wikipedia
+passage name as the subject or object, a higher co-
+sine similarity score means the query has more
+similar text with the distinguished text in the triple.208We rank the query-document similarity score and
+only keep the top-50 triples in this step.
+Semantic Ranking. The TF-IDF-based cosine
+similarity score only counts words overlapping be-
+tween triples and the query. It will introduce triples
+whose overlapping words are not meaningful in the
+context and response. Additionally, the Reddit Con-
+versation dataset is obtained from Reddit conversa-
+tion threads. It involves many responses that are not
+grounded on any knowledge. In order to ﬁnd the
+triples that have the best semantic similarity with
+the response and ﬁlter out ungrounded responses,
+in this step, we estimate the semantic similarity
+score with Sentence-Bert (Reimers and Gurevych,
+2019). We rerank the 50 triples from the second
+step based on the score. Additionally, we abandon
+the dialogue turns whose best semantic similarity is
+lower than a threshold because the response cannot
+ﬁnd proper knowledge, while we want to pre-train
+the model with knowledge-grounded turns.
+2.3.2 OpenDialKG
+To generalize our model to various tasks, we also
+employ OpenDialKG to enrich our pre-training
+dataset. OpenDialKG consists of two types of
+tasks, recommendations and chit-chat, across four
+domains. Unlike the Reddit Conversation dataset,
+which needs to ﬁnd the knowledge grounding in
+every turn, the original OpenDialKG has a Knowl-
+edge graph path label for each dialogue, and a
+triple label for each dialogue turn. The response is
+grounded on the labeled triple during data collec-
+tion. Thus, we use the triple in the dataset as the
+essential knowledge in our pre-training examples.
+3 Experiments
+We demonstrate our approach on two differ-
+ent downstream tasks: open-domain knowledge-
+grounded dialogue and conversational recommen-
+dation. Besides the fully-supervised learning set-
+ting, we also explore the performance of our ap-
+proach in few-shot and zero-shot settings. We de-
+scribe our implementation details in Section A in
+Appendix.
+3.1 Datasets and Knowledge Sources
+We test our approach on Wizard of Wikipedia
+(WoW; (Dinan et al., 2019)) and RD(Li et al.,
+2018). Basic dataset statistics are listed in Table 2.
+Wizard of Wikipedia. This dataset (Dinan et al.,
+2019) is collected on Amazon Mechanical Turk.Dataset Train Valid Test
+WoW 18,430Seen - 981 965
+Unseen - 967 968
+RD 8,004 1,001 1,001
+Each conversation happens between a “wizard”
+who has access to knowledge about a speciﬁc topic,
+and an “apprentice” who is interested in the topic.
+The wizard’s response is grounded on a Wikipedia
+article in each turn. The data is split as a training
+set, a validation set, and a test set. The test set has
+two subsets: Test Seen and Test Unseen. Test Seen
+contains conversations whose topics are seen in the
+training set, while topics in Test Unseen are not
+seen in the training or validation set. To extract the
+essential knowledge in each dialogue turn, we ﬁrst
+keep the top ﬁve passages retrieved by the TF-IDF
+retriever in Shuster et al. (2021). Then we use an
+Open Information Extraction (OpenIE) annotator
+to extract the top three triples from the passages
+as our essential knowledge. The pre-processing is
+conducted with the code published on ParlAI.
+RD.RD(Li et al., 2018) is also col-
+lected on Amazon Mechanical Turk. Two crowd-
+workers, a “movie seeker” and “movie recom-
+mender,” are randomly paired. The recommender
+has access to a movie database and can recom-
+mend movies based on movie information, such
+as actors and movie genres. There are 6,924 dif-
+ferent movies mentioned in 51,699 movie slots in
+the dataset. We follow Li et al. (2018) to split the
+dataset into training, validation, and test sets. Since
+recommenders use movie-related knowledge when
+they recommend movies to seekers, we use it as the
+essential knowledge for a given turn in this dataset.
+We experiment with three knowledge sources: (1)
+We query the movie names mentioned in the dia-
+logue context and retrieve similar movies from the
+knowledge graph DBpedia , mentioned in Section
+2.3, and then input the similar movies in a triple for-
+mat as the essential knowledge. (2) We query the
+movie names mentioned in the context and retrieve
+movie comments from MovieLens ., then use the
+keywords in the comments as the essential knowl-
+edge. (3) We use the output of the recommender209module in KGSF (Zhou et al., 2020a), which is the
+state-of-the-art system on this dataset.
+3.2 Baselines
+We compare the known best models from different
+datasets in the following experiments. For the Wiz-
+ard of Wikipedia dataset, we choose the retrieval-
+augmented generation (RAG) model from Shuster
+et al. (2021). It retrieves wiki documents and gen-
+erates responses based on the documents. We com-
+pare PLUG with this document-based generation
+method to see the impact of our essential knowl-
+edge format. We choose the RAG model also using
+T5 as the baseline for a fair comparison.
+For the RDdataset, we choose the current
+state-of-the-art: KBRD (Chen et al., 2019) and
+KGSF (Zhou et al., 2020a) as our baselines. Both
+use a recommender module to predict the recom-
+mendation item in the next turn and a generation
+model to generate the response. All baseline re-
+sults are from Zhou et al. (2021). To investigate the
+best performance of our approach, We also use the
+recommender from KGSF as a knowledge source
+in our system and compare it with other knowledge
+sources we mentioned in Section 3.1. As an ab-
+lation study, we also explore the performance of
+vanilla T5 on both tasks to see the performance
+gain brought by our pre-training process.
+3.3 Metrics
+For evaluation, we report the performance with
+standard automatic metrics: BLEU-4 (B4) (Pap-
+ineni et al., 2002), ROUGE-L (RL) (Lin, 2004), and
+unigram overlap (F1) of the generated responses.
+Besides that, for the Wizard of Wikipedia dataset,
+we follow Shuster et al. (2021) to report the over-
+lapping unigrams between the model’s generation
+and the knowledge on which the human grounded
+during dataset collection (KF1), attempting to cap-
+ture whether a model is speaking knowledgeably.
+On the other hand, for the RDdataset, we fol-
+low previous work (Chen et al., 2019; Zhou et al.,
+2020a; Wang et al., 2021) to report distinct-n (Dist-
+n) at the sentence level to evaluate the diversity of
+the model’s generation. We also evaluate whether
+the ground truth movie recommendation can be
+found in the generated response and report it as the
+recommendation item recall in responses (Rec).
+3.4 Fully-Supervised Results
+We ﬁrst evaluate PLUG with all training examples
+in the training sets to compare its performance withother state-of-the-art systems. Additionally, we
+experiment with using golden knowledge in the
+input to explore the upper bound of our method.
+Table 3 shows the Wizard of Wikipedia Test
+Seen and Test Unseen results. We can see that
+PLUG with retrieved knowledge achieves better
+BLEU-4, ROUGE-L, and F1 scores than the RAG
+method and the model without adding knowledge
+in the input, on both seen and unseen topics. It
+suggests that our essential knowledge format helps
+the model generate responses to ground knowledge
+better. We also observe that PLUG outperforms the
+model without pre-training on all metrics, which
+means our pre-training can boost this task.
+We list RD’s results in Table 4. We com-
+pare our approach to the state-of-the-art systems
+and T5-Large models without pre-training. Addi-
+tionally, we include a comparison to models with
+different knowledge sources as described in Section
+3.1. It shows that our best model (PLUG +KGSF)
+achieves the new state-of-the-art results on the rec-
+ommendation item recall metric and distinct met-
+rics. This result is understandable given that our
+approach is built upon pre-trained language mod-
+els. Similarly, we also observe noticeable perfor-
+mance gains for the pre-training on this task. How-
+ever, compared to systems with currently available
+knowledge sources, it is immediately apparent that
+the system with golden knowledge outperforms the
+current state-of-the-art on all metrics by a large mar-
+gin. This huge gap implies that current knowledge
+retrievers are the main bottleneck for the conversa-
+tional recommendation task. We will discuss more
+details in Section 3.7.
+Overall, we observe noticeable improvement
+brought by pre-training on both tasks, but it is less
+signiﬁcant than expected. It implies that the knowl-
+edge grounding pattern in the response is limited;
+a complete training set is more than enough for the
+T5-Large model to learn the generation task. We
+will discuss more details in zero-shot and few-shot
+settings in the following subsections.
+3.5 Zero-Shot and Few-Shot Results
+We focus on zero-shot and few-shot settings be-
+cause it is more realistic to evaluate dialogue sys-
+tems. Speciﬁcally, we randomly sample 10/50/500
+dialogues with different topics from the training
+sets and observe performance on the complete test
+sets. We also evaluate under a zero-shot setting.
+We experiment with knowledge retrieved by exist-210
+ing retrievers on both tasks to set a realistic set-
+ting. We compare our models to those without pre-
+training to explore how our pre-training beneﬁts
+the model’s few-shot learning capability. Wizard
+of Wikipedia’s experiments results are in Figure 2,
+andRD’s results are in Figure 3. Note that for
+Wizard of Wikipedia, topics in original Test Seen
+set may not be seen during training in this setting
+since we only use a small portion of data in the
+original training set. We use original Test Seen and
+Test Unseen sets to compare with fully-supervised
+results. As can be seen in Figure 2 (a)-(c), 3 (a)-
+(b), PLUG maintains a higher BLEU-4, ROUGE-L,
+and F1 scores on both tasks when training with
+less than 500 dialogues. It means PLUG obtains
+knowledge-grounded generation ability from pre-
+training and can generalize to different tasks.
+Figure 2 (d) shows that models without pre-
+training achieve a higher knowledge F1 score un-
+der a zero-shot setting for the Wizard of Wikipediadataset. In contrast, it achieves a deﬁcient per-
+formance on the language quality-related met-
+rics, which implies that models only copy knowl-
+edge words but generate gibberish responses with-
+out training. Nevertheless, PLUG still gener-
+ates knowledge-grounded responses with a lower
+knowledge F1 score out-of-the-box. This result
+also suggests that we should only consider knowl-
+edge F1 scores when the model has decent scores
+on language quality metrics.
+For the RDdataset, Figure 3 (d) shows that
+there is not as much improvement in recommenda-
+tion item recall brought by pre-training when com-
+pared to BLEU-4 and ROUGE-L on a zero-shot set-
+ting. However, we observe a noticeable difference
+between PLUG and the T5 model, which means
+PLUG learns to generate with grounded knowledge
+faster than the T5 model. The unusually high DIST-
+4 of T5 in Figure 3 (d) is caused by diverse but
+irrelevant responses. It is also demonstrated by low
+BLEU-4 and ROUGE-L scores in Figure 3 (a) and
+Figure 3 (b), and the decrease of DIST-4 when we
+increase the training data size.
+3.6 Human Evaluation
+We conduct a human evaluation on Wizard of
+Wikipedia to assess the overall quality of the re-
+sponses of our model compared to T5 and RAG.
+Speciﬁcally, we randomly select 100 responses for
+each model with the same context from Test Seen
+and Test Unseen. For the few-shot setting, we use
+the models trained with 50 dialogues. We hire211
+workers on Amazon Mechanical Turk to rate mod-
+els’ responses on a 0 - 2 scale with three metrics:
+Fluency, Coherence, and Knowledge. The order of
+the systems shown to workers is shufﬂed to avoid
+confounding practice effects. Three different work-
+ers evaluate each dialogue turn. Table 5 reports
+average metrics scores. We observe that responses
+from our fully-supervised model are more ﬂuent
+and coherent than those from RAG, which beneﬁts
+from our simple but effective essential knowledge
+representation. We can also see signiﬁcant improve-
+ment on all metrics for PLUG under a zero-shot
+setting compared to the T5 model. Performance
+improvement under the few-shot setting is less than
+in the zero-shot setting, but PLUG still outperforms
+T5 on all metrics, which aligns with the result in
+automatic evaluation. Interestingly, we observe
+that responses from the model trained with 50 dia-
+logues have already been very ﬂuent and coherent,
+which is even higher than those from the fully-
+supervised model. However, responses from the
+fully-supervised model contain the most appropri-
+ate knowledge, which suggests that the model has
+learned how to generate high-quality responses in
+a few-shot setting, but it continues to learn how to
+ground on knowledge with more training samples.
+3.7 Discussion and Analysis
+To investigate the enormous performance gap be-
+tween models with golden knowledge and retrievedknowledge in Table 4, we compare the performance
+of models with different knowledge sources on the
+RDdataset. Speciﬁcally, we mix the golden
+movies information and the retrieved movie in-
+formation retrieved in the training/validation/test
+set to simulate knowledge sources with differ-
+ent recall performances. We experiment with
+0/20/40/60/80/100 percent of the golden knowl-
+edge. 0 means all training samples includes re-
+trieved knowledge (a ﬂawed knowledge source),
+100 means all training samples include golden
+knowledge (a perfect knowledge source). To have a
+more realistic setting, we compare the performance
+of PLUG and T5 under the few-shot setting (trained
+on 50 dialogues), as shown in Figure 4.
+We ﬁnd that the performance gain for both mod-
+els is linear with respect to the performance of
+the knowledge source, whereas PLUG has a better
+boost on the BLEU-4 score and recommendation
+recall score. The curve with a higher slope shows
+the potential beneﬁt from our pre-training method
+when better knowledge sources are available in the
+future. Furthermore, the gap on DIST-4 between
+PLUG and T5 is almost the same as golden knowl-
+edge increases, but the DIST-4 of T5 surprisingly
+drops when no golden knowledge is available. It
+means that T5 requires a better knowledge source
+in the training set to generate diverse responses
+under a few-shot setting, while PLUG has learned
+that ability in the pre-training process and gener-
+ates diverse responses out-of-the-box. We also note
+that the performance boost with a better knowl-
+edge source is much more than the generation tech-
+nology in previous work. This massive gap may
+shed light on the research direction of knowledge-
+grounded dialogue tasks for future efforts.
+4 Related Work
+Knowledge-grounded dialogue is becoming an in-
+creasingly important topic, with datasets proposed
+to model its occurrence on different tasks. Dia-
+logues in these datasets are based on various for-212
+.
+mats of knowledge, such as documents in open-
+domain conversations (Ghazvininejad et al., 2018;
+Dinan et al., 2019; Gopalakrishnan et al., 2019),
+movie database in movie recommendation con-
+versations (Li et al., 2018; Hayati et al., 2020),
+or knowledge graph in recommendation conversa-
+tions(Moon et al., 2019; Liu et al., 2021b).
+One of the principal challenges in knowledge-
+grounded conversations is incorporating knowledge
+into dialogue systems. Recent work investigates
+different techniques of learning a better knowledge
+representation to fuse knowledge in the response
+generation process. Ghazvininejad et al. (2018)
+separately encoded the dialogue history and docu-
+ments to infuse the response with external world
+facts. Chen et al. (2019); Wang et al. (2021); Zhou
+et al. (2020a) joined a knowledge graph represen-
+tation in a response generation module. Zhu et al.
+(2017) combined the knowledge from the database
+with the user intent and fed it into the decoder. Un-
+like these studies, we use a single encoder for both
+dialogue context and knowledge.
+In order to improve the systems’ performance
+on unseen topics and train knowledge-grounded
+dialogue in a low-resource setting, researchers in-
+vestigate pre-training methods for the knowledge-
+grounded tasks. Zhao et al. (2020a) pre-trained
+the dialogue generation model with ungrounded
+dialogues and the knowledge encoder with the
+Wikipedia dump separately. Li et al. (2020) pro-
+posed a pre-trained latent variable model to learn
+the way that the knowledge is expressed in the re-
+sponse. Liu et al. (2021a) built a document encoder
+and a dialogue context encoder, then pre-trained
+them separately in multiple stages. The knowledge
+encoder in these studies is pre-trained separately
+and only accepts the same knowledge format, while
+we pre-train our model with essential knowledge
+in the text format, thus ﬁtting different knowledge
+sources in the downstream tasks. Madotto et al.
+(2020) independently trained adaptors (Houlsbyet al., 2019) for different types of knowledge. In
+comparison, we use a uniﬁed essential knowledge
+representation in our model. Zhao et al. (2020b)
+and Guu et al. (2020) pre-trained language models
+with knowledge selection modules but only focused
+on document-based generation, limiting their mod-
+els to document-based knowledge sources.
+Inspired by the success of pre-trained language
+models for a variety of natural language process-
+ing tasks (Devlin et al., 2019; Radford et al., 2019;
+Yang et al., 2019; Ma et al., 2021), another line
+of work investigates learning knowledge through
+language models’ parameters (Petroni et al., 2019;
+Rosset et al., 2020; Roberts et al., 2020). In our
+pre-training process, we aim to learn extra knowl-
+edge and, more importantly, learn how to generate
+response grounding on the essential knowledge.
+Two recent studies are most closely related to
+our work. Chen et al. (2020) proposed a pre-trained
+model for data to text tasks. They uniﬁed the knowl-
+edge format in the pre-training data and down-
+stream tasks, however only depend on the graph
+structure and do not work on knowledge-grounded
+dialogues. Shuster et al. (2021) applied the docu-
+ment retrieval augmentation method (Lewis et al.,
+2020b) on open-domain knowledge-grounded dia-
+logues. However, they do not do pre-training and
+rely on Wikipedia documents in the decoder, limit-
+ing their model to document-based dialogues. We
+use uniﬁed essential knowledge instead of docu-
+ments in our pre-training, making our model more
+generalizable. Our approach can be seen as gen-
+eralizing both lines of work, and showing for the
+ﬁrst time that a pre-trained model is effective for
+various knowledge-grounded tasks with different
+knowledge formats.
+5 Conclusion and Future Work
+We present a knowledge-grounded pre-trained lan-
+guage model PLUG that can be applied to various
+knowledge-grounded dialogue tasks. It subsumes213different knowledge sources into a simple but ef-
+fective uniﬁed essential knowledge representation.
+Evaluation results on two benchmarks indicate that
+our model performs better in zero-shot and few-
+shot settings and can generalize to different knowl-
+edge grounded tasks.
+As future work, we would like to augment
+our pre-training datasets with more knowledge
+sources, and apply our method to other knowledge-
+grounded tasks such as question answering. An-
+other interesting direction would be to develop bet-
+ter information retrievers since experiments show
+that the retriever is the main bottleneck in the
+knowledge-grounded dialogues.
+References214215216A Implementation Details
+We process the Reddit monthly submissions and
+comments dump from 2011 to 2017, consisting of
+over 894k knowledge-grounded dialogue turns. As
+detailed in Section 2.3.1, we set the threshold as
+0.35 in the semantic ranking. After ﬁltering with
+our hierarchical information extraction method,
+over 321k dialogue turns remain. All dialogue
+turns in the OpenDialKG dataset are used in the pre-
+training. Each dialogue turn is processed to form a
+sequence of tokens consisting of three segments: di-
+alogue context, essential knowledge, and response.
+We keep the top-three triples/keywords as our es-
+sential knowledge in pre-training and downstream
+tasks. PLUG is implemented with Huggingface
+Pytorch Transformers(Wolf et al., 2020) and ini-
+tialized with the 800M-parameter T5 model. We
+use Adam (Kingma and Ba, 2014) with weight
+decay for pre-training. Training examples are trun-
+cated to ensure a maximal length of 512. Models
+are pre-trained on 8 Nvidia V100 GPUs until we
+observe no progress on validation data or up to 20
+epochs. The best conﬁguration of hyper-parameters
+is selected through cross-validated grid-search.
+B Ethical Considerations
+It is essential to consider potential ethical issues
+in knowledge-grounded dialogue systems. In our
+work, PLUG is pre-trained on a large-scale dataset
+Reddit Conversation, which is crawled from the
+internet. We follow Galley et al. (2018) to ﬁlter out
+dialogues that have profanity content. However,
+it is still possible to include inappropriate content
+in the pre-training dataset. In processing the Red-
+dit Conversation dataset during pre-training, we
+have carefully designed rules to remove knowl-
+edge that has profanity words. Additionally, the
+T5 model may have seen inappropriate content in
+its pre-training tasks, and it may generate wrong
+responses even if we input appropriate knowledge.
+Considerable additional work is needed to detect
+profanity content when we generate with a pre-
+trained language model. In addition to these ethical
+considerations, we have sought to better conduct
+our human evaluation by transparently communi-
+cating with crowd-workers about data use and study
+intent and compensating workers at a reasonable
+hourly wage.C Human Evaluation Interface
+Figure 5 shows the interface of an example in our
+human evaluation.217
+.218

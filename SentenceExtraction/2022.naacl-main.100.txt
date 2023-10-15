@@ -1,1 +1,747 @@
-1396 Proceedings of the 2022 Conference of the North American Chapter of the Association for Computational Linguistics : Human Language Technologies , pages 1396 1412 July 10 - 15 , 2022 © 2022 Association for Computational Linguistics 1397 1398 1399 1400 1401 1402 1403 1404 1405 1406 1407 1408 1409 1410 1411 1412 
+
+Patrick FernandesAntónio FarinhasRicardo ReiJosé G. C. de Souza
+Perez OgayoGraham NeubigAndré F. T. MartinsCarnegie Mellon UniversityInstituto Superior Técnico (Lisbon ELLIS Unit)Instituto de TelecomunicaçõesINESC-IDUnbabel
+Abstract
+Despite the progress in machine translation
+quality estimation and evaluation in the last
+years, decoding in neural machine translation
+(NMT) is mostly oblivious to this and cen-
+ters around finding the most probable trans-
+lation according to the model (MAP decoding),
+approximated with beam search. In this pa-
+per, we bring together these two lines of re-
+search and propose quality-aware decoding for
+NMT, by leveraging recent breakthroughs in
+reference-free and reference-based MT evalu-
+ation through various inference methods like
+N-best reranking and minimum Bayes risk de-
+coding. We perform an extensive comparison
+of various possible candidate generation and
+ranking methods across four datasets and two
+model classes and find that quality-aware de-
+coding consistently outperforms MAP-based
+decoding according both to state-of-the-art au-
+tomatic metrics (COMET and BLEURT) and
+to human assessments. Our code is available
+athttps://github.com/deep-spin/
+qaware-decode .
+1 Introduction
+The most common procedure in neural machine
+translation (NMT) is to train models using maxi-
+mum likelihood estimation (MLE) at training time,
+and to decode with beam search at test time, as a
+way to approximate maximum-a-posteriori (MAP)
+decoding. However, several works have questioned
+the utility of model likelihood as a good proxy for
+translation quality (Koehn and Knowles, 2017; Ott
+et al., 2018; Stahlberg and Byrne, 2019; Eikema
+and Aziz, 2020). In parallel, significant progress
+has been made in methods for quality estimation
+and evaluation of generated translations (Specia
+et al., 2020; Mathur et al., 2020b), but this progress
+is, by and large, not yet reflected in either training
+or decoding methods. Exceptions such as minimum
+risk training (Shen et al., 2016; Edunov et al., 2018)Figure 1: Quality-aware decoding framework. First,
+translation candidates are generated according to the
+model. Then, using reference-free and/or reference-
+based MT metrics, these candidates are ranked , and the
+highest ranked one is picked as the final translation.
+come at a cost of more expensive and unstable train-
+ing, often with modest quality improvements.
+An appealing alternative is to modify the decod-
+ing procedure only, separating it into two stages:
+candidate generation (§2.1; where candidates are
+generated with beam search or sampled from the
+whole distribution) and ranking (§2.2; where they
+are scored using a quality metric of interest, and the
+translation with the highest score is picked). This
+strategy has been explored in approaches using
+N-best reranking (Ng et al., 2019; Bhattacharyya
+et al., 2021) and minimum Bayes risk (MBR) de-
+coding (Shu and Nakayama, 2017; Eikema and
+Aziz, 2021; Müller and Sennrich, 2021). While
+this previous work has exhibited promising results,
+it has mostly focused on optimizing lexical metrics
+such as BLEU or METEOR (Papineni et al., 2002;
+Lavie and Denkowski, 2009), which have limited
+correlation with human judgments (Mathur et al.,
+2020a; Freitag et al., 2021a). Moreover, a rigorous
+apples-to-apples comparison among this suite of
+techniques and their variants is still missing, even
+though they share similar building blocks.
+Our work fills these gaps by asking the question:
+“Can we leverage recent advances in MT qual-
+ity evaluation to generate better translations?
+If so, how can we most effectively do so? ”
+To answer this question, we systematically explore1396NMT decoding using a suite of ranking proce-
+dures. We take advantage of recent state-of-the-
+art learnable metrics, both reference-based, such
+as COMET and BLEURT (Rei et al., 2020a; Sel-
+lam et al., 2020), and reference-free (also known
+asquality estimation ; QE), such as TransQuest
+and OpenKiwi (Ranasinghe et al., 2020; Kepler
+et al., 2019). We compare different ranking strate-
+gies under a unified framework, which we name
+quality-aware decoding (§3). First, we analyze
+the performance of decoding using N-best rerank-
+ing, both fixed according to a single metric and
+learned using multiple metrics, where the coeffi-
+cients for each metric are optimized according to a
+reference-based metric. Second, we explore rank-
+ing using reference-based metrics directly through
+MBR decoding. Finally, to circumvent the expen-
+sive computational cost of the latter when the num-
+ber of candidates is large, we develop a two-stage
+ranking procedure, where we use N-best rerank-
+ing to pick a subset of the candidates to be ranked
+through MBR decoding. We explore the interac-
+tion of these different ranking methods with various
+candidate generation procedures including beam
+search, vanilla sampling, and nucleus sampling.
+Experiments with two model sizes and four
+datasets (§4) reveal that while MAP-based de-
+coding appears competitive when evaluating with
+lexical-based metrics (BLEU and ChrF), the story
+is very different with state-of-the-art evaluation
+metrics, where quality-aware decoding shows sig-
+nificant gains, both with N-best reranking and
+MBR decoding. We perform a human-study to
+more faithfully evaluate our systems and find that,
+while performance on learnable metrics is not al-
+ways predictive of the best system, quality-aware
+decoding usually results in translations with higher
+quality than MAP-based decoding.
+2 Candidate Generation and Ranking
+We start by reviewing some of the most commonly
+used methods for both candidate generation and
+ranking under a common lens.
+2.1 Candidate Generation
+An NMT model defines a probability distribution
+p(y|x)over a set of hypotheses Y, conditioned
+on a source sentence x, where θare learned pa-
+rameters. A translation is typically predicted usingMAP decoding, formalized as
+ˆy= arg maxlogp(y|x). (1)
+In words, MAP decoding searches for the most
+probable translation under p(y|x),i.e., the mode
+of the model distribution. Finding the exact ˆy
+is intractable since the search space Yis combi-
+natorially large, thus, approximations like beam
+search (Graves, 2012; Sutskever et al., 2014) are
+used. However, it has been shown that the transla-
+tion quality degrades for large values of the beam
+size (Koehn and Knowles, 2017; Yang et al., 2018;
+Murray and Chiang, 2018; Meister et al., 2020),
+with the empty string often being the true MAP
+hypothesis (Stahlberg and Byrne, 2019).
+A stochastic alternative to beam search is to draw
+samples directly from p(y|x)with ancestral sam-
+pling, optionally with variants that truncate this dis-
+tribution, such as top- ksampling (Fan et al., 2018)
+orp-nucleus sampling (Holtzman et al., 2020) –
+the latter samples from the smallest set of words
+whose cumulative probability is larger than a pre-
+defined value p. Deterministic methods combining
+beam and nucleus search have also been proposed
+(Shaham and Levy, 2021).
+Unlike beam search, sampling is not a search
+algorithm nor a decision rule – it is not expected
+for a single sample to outperform MAP decoding
+(Eikema and Aziz, 2020). However, samples from
+the model can still be useful for alternative decod-
+ing methods, as we shall see. While beam search
+focus on high probability candidates, typically sim-
+ilar to each other, sampling allows for more explo-
+ration , leading to higher candidate diversity .
+2.2 Ranking
+We assume access to a set ¯Y ⊆ Y containing N
+candidate translations for a source sentence, ob-
+tained with one of the generation procedures de-
+scribed in §2.1. As long as Nis relatively small, it
+is possible to (re-)rank these candidates in a post-
+hoc manner, such that the best translation maxi-
+mizes a given metric of interest. We highlight two
+different lines of work for ranking in MT decod-
+ing: first, N-best reranking , using reference-free
+metrics as features; second, MBR decoding , using
+reference-based metrics.
+2.2.1 N-best Reranking
+In its simplest form (which we call fixed reranking),
+asingle feature fis used ( e.g., an estimated quality1397score), and the candidate that maximizes this score
+is picked as the final translation,
+ˆy= arg maxf(y). (2)
+When multiple features [f, . . . , f]are available,
+one can tune weights [w, . . . , w]for these fea-
+tures to maximize a given reference-based evalua-
+tion metric on a validation set (Och, 2003; Duh and
+Kirchhoff, 2008) – we call this tuned reranking. In
+this case, the final translation is
+ˆy= arg max/summationtextwf(y). (3)
+2.2.2 Minimum Bayes Risk (MBR) Decoding
+While the techniques above rely on reference-free
+metrics for the computation of features, MBR de-
+coding uses reference-based metrics to rank candi-
+dates. Unlike MAP decoding, which searches for
+the most probable translation, MBR decoding aims
+to find the translation that maximizes the expected
+utility (equivalently, that minimizes risk, Kumar
+and Byrne 2002, 2004; Eikema and Aziz 2020).
+Let again ¯Y ⊆ Y be a set containing Nhypotheses
+andu(y, y)a utility function measuring the simi-
+larity between a hypothesis y∈ Y and a reference
+y∈¯Y(e.g, an automatic evaluation metric such
+as BLEU or COMET). MBR decoding seeks for
+ˆy= arg maxE[u(Y, y)]/bracehtipupleft /bracehtipdownright/bracehtipdownleft /bracehtipupright
+≈/summationtextu(y, y),(4)
+where in Eq. 4 the expectation is approximated as
+a Monte Carlo (MC) sum using model samples
+y, . . . , y∼p(y|x).In practice, the transla-
+tion with the highest expected utility can be com-
+puted by comparing each hypothesis y∈¯Yto all
+the other hypotheses in the set.
+3 Quality-Aware Decoding
+While recent works have explored various combi-
+nations of candidate generation and ranking pro-
+cedures for NMT (Lee et al., 2021; Bhattacharyya
+et al., 2021; Eikema and Aziz, 2021; Müller and
+Sennrich, 2021), they suffer from two limitations:
+•The ranking procedure is usually based on simple
+lexical-based metrics (BLEU, chrF, METEOR).Although these metrics are well established and
+inexpensive to compute, they correlate poorly
+with human judgments at segment level (Mathur
+et al., 2020b; Freitag et al., 2021c).
+•Each work independently explores N-best
+reranking or MBR decoding, making unclear
+which method produces better translations.
+In this work, we hypothesize that using more
+powerful metrics in the ranking procedure may lead
+to better quality translations. We propose a unified
+framework for ranking with both reference-based
+(§3.1) and reference-free metrics (§3.2), indepen-
+dently of the candidate generation procedure. We
+explore four methods with different computational
+costs for a given number of candidates, N.
+Fixed N-best Reranker. AnN-best reranker us-
+ing a single reference-free metric (§3.2) as a feature,
+according to Eq. 2. The computational cost of this
+ranker is O(N×C), where Cdenotes the
+cost of running an evaluation with a metric M.
+Tuned N-best Reranker. AnN-best reranker us-
+ing as features allthe reference-free metrics in §3.2,
+along with the model log-likelihood logp(y|x).
+The weights in Eq. 3 are optimized to maximize
+a given reference-based metric Musing MERT
+(Och, 2003), a coordinate-ascent optimization al-
+gorithm widely used in previous work. Note that
+Mis used for tuning only; at test time, only
+reference-free metrics are used. Therefore, the de-
+coding cost is O(N×/summationtextC).
+MBR Decoding. Choosing as the utility function
+a reference-based metric M(§3.1), we estimate
+the utility using a simple Monte Carlo sum, as
+shown in Eq. 4. The estimation requires computing
+pairwise comparisons and thus the cost of running
+MBR decoding is O(N×C).
+N-best Reranker →MBR. Using a large num-
+ber of samples in MBR decoding is expensive
+due to its quadratic cost. To circumvent this is-
+sue, we explore a two-stage ranking approach: we
+first rank all the candidates using a tuned N-best
+reranker, followed by MBR decoding using the top
+Mcandidates. The computational cost becomes
+O(N×/summationtextC+M×C). The first ranking
+stage prunes the candidate list to a smaller, higher
+quality subset, making possible a more accurate
+estimation of the utility with less samples, and po-
+tentially allowing a better ranker than plain MBR
+for almost the same computational budget.13983.1 Reference-based Metrics
+Reference-based metrics are the standard way to
+evaluate MT systems; the most used ones rely on
+the lexical overlap between hypotheses and ref-
+erence translations (Papineni et al., 2002; Lavie
+and Denkowski, 2009; Popovi ´c, 2015). However,
+lexical-based approaches have important limita-
+tions: they have difficulties recognizing correct
+translations that are paraphrases of the reference(s);
+they ignore the source sentence, an important indi-
+cator of meaning for the translation; and they do
+not always correlate well with human judgments,
+particularly at segment-level (Freitag et al., 2021c).
+In this work, apart from BLEU (computed us-
+ing SacreBLEU(Post, 2018)) and chrF, we use
+the following state-of-the-art trainable reference-
+based metrics for both ranking and performance
+evaluation of MT systems:
+•BLEURT (Sellam et al., 2020; Pu et al., 2021),
+trained to regress on human direct assessments
+(DA; Graham et al. 2013). We use the largest
+multilingual version, BLEURT-20 , based on the
+RemBERT model (Chung et al., 2021).
+•COMET (Rei et al., 2020a), based on XLM-R
+(Conneau et al., 2020), trained to regress on qual-
+ity assessments such as DA using both the ref-
+erence and the source to assess the quality of a
+given translation. We use the publicly available
+model developed for the WMT20 metrics shared
+task ( wmt20-comet-da ).
+These metrics have shown much better correla-
+tion at segment-level than previous lexical metrics
+in WMT metrics shared tasks (Mathur et al., 2020b;
+Freitag et al., 2021c). Hence, as discussed in §2.2,
+they are good candidates to be used either indi-
+rectly as an optimization objective for learning the
+tuned reranker’s feature weights, or directly as a
+utility function in MBR decoding. In the former,
+the higher the metric correlation with human judg-
+ment, the better the translation picked by the tuned
+reranker. In the latter, we approximate the expected
+utility in Eq. 4 by letting a candidate generated by
+the model be a reference translation – a suitable
+premise ifthe model is good in expectation.
+3.2 Reference-free Metrics
+MT evaluation metrics have also been developed
+for the case where references are not available –they are called reference-free orquality estimation
+(QE) metrics. In the last years, considerable im-
+provements have been made to such metrics, with
+state-of-the-art models having increasing correla-
+tions with human annotators (Freitag et al., 2021c;
+Specia et al., 2021). These improvements enable
+the use of such models for ranking translation hy-
+potheses in a more reliable way than before.
+In this work, we explore four recently pro-
+posed reference-free metrics as features for N-best
+reranking, all at the sentence-level:
+•COMET-QE (Rei et al., 2020b), a reference-free
+version of COMET (§3.1). It was the winning
+submission for the QE-as-a-metric subtask of the
+WMT20 shared task (Mathur et al., 2020b).
+•TransQuest (Ranasinghe et al., 2020), the win-
+ning submission for the sentence-level DA pre-
+diction subtask of the WMT20 QE shared task
+(Specia et al., 2020). Similarly to COMET-QE
+this metric predicts a DA score.
+•MBART-QE (Zerva et al., 2021), based on the
+mBART (Liu et al., 2020) model, trained to pre-
+dict both the mean and the variance of DA scores.
+It was a top performer in the WMT21 QE shared
+task (Specia et al., 2021).
+• OpenKiwi-MQM (Kepler et al., 2019; Rei et al.,
+2021), based on XLM-R, trained to predict the
+multidimensional quality metric (MQM; Lom-
+mel et al. 2014).This reference-free metric
+was ranked second on the QE-as-a-metric subtask
+from the WMT 2021 metrics shared task.
+4 Experiments
+4.1 Setup
+We study the benefits of quality-aware decoding
+over MAP-based decoding in two regimes:
+•A high-resource, unconstrained, setting with
+large transformer models (6 layers, 16 atten-
+tion heads, 1024 embedding dimensions, and
+8192 hidden dimensions) trained by Ng et al.
+(2019) for the WMT19 news translation task
+(Barrault et al., 2019), using English to German
+(EN→DE) and English to Russian ( EN→RU)
+language pairs. These models were trained on1399
+over 20 million parallel and 100 million back-
+translated sentences, being the winning submis-
+sions of that year’s shared task. We consider the
+non-ensembled version of the model and use new-
+stest19 for validation and newstest20 for testing.
+•A more constrained scenario with a small trans-
+former model (6 layers, 4 attention heads, 512
+embedding dimensions, and 1024 hidden dimen-
+sions) trained from scratch in Fairseq (Ott et al.,
+2019) on the smaller IWSLT17 datasets (Cettolo
+et al., 2012) for English to German ( EN→DE)
+and English to French ( EN→FR), each with
+a little over 200k training examples. We chose
+these datasets because they have been extensively
+used in previous work (Bhattacharyya et al.,
+2021) and smaller model allows us to answer
+questions about how the training methodology
+affects ranking performance (see § 4.2.2). Fur-
+ther training details can be found in Appendix A.
+We use beam search with a beam size of 5 as our
+decoding baseline because we found that it resulted
+in better or similar translations than larger beam
+sizes. For tuned N-best reranking, we use Tra-
+vatar’s (Neubig, 2013) implementation of MERT
+(Och, 2003) to optimize the weight of each feature,
+as described in §3.2. Finally, we evaluate each sys-
+tem using the metrics discussed in §3.1, along with
+BLEU and chrF (Popovi ´c, 2015).
+4.2 Results
+Overall, given all the metrics, candidate generation,
+and ranking procedures, we evaluate over 150 sys-
+tems per dataset. We report subsets of this data
+separately to answer specific research questions,
+and defer to Appendix B for additional results.4.2.1 Impact of Candidate Generation
+First, we explore the impact of the candidate gener-
+ation procedure and the number of candidates.
+Which candidate generation method works best,
+beam search or sampling? We generate candi-
+dates with beam search, vanilla sampling, and nu-
+cleus sampling. For the latter, we use p= 0.6
+based on early results showing improved perfor-
+mance for all metrics.ForN-best reranking, we
+use up to 200 samples; for MBR decoding, due to
+the quadratic computational cost, we use up to 100.
+Figure 2 shows BLEU and COMET for differ-
+ent candidate generation and ranking methods for
+theEN→DEWMT20 and IWSLT17 datasets,
+with increasing number of candidates. The base-
+line is represented by the dashed line. To assess the
+performance ceiling of the rankers, we also report
+results with an oracle ranker for the reported met-
+rics, picking the candidate that maximizes it. For
+thefixed N-best reranker, we use COMET-QE as
+a metric, albeit the results for other reference-free
+metrics are similar. Performance seems to scale
+well with the number of candidates, particularly for
+vanilla sampling and for the tuned N-best reranker
+and MBR decoder. (Lee et al., 2021; Müller and
+Sennrich, 2021). However, all the rankers using
+vanilla sampling severely under-perform the base-
+line in most cases (see also §4.2.2). In contrast,
+the rankers using beam search or nucleus sampling
+are competitive or outperform the baseline in terms
+of BLEU, and greatly outperform it in terms of
+COMET. For the larger models, we see that the per-
+formance according to the lexical metrics degrades
+with more candidates. In this scenario, rankers us-1400
+ing nucleus sampling seem to have an edge over
+the ones that use beam search for COMET.
+Based on the findings above, and due to gener-
+ally better performance of COMET over BLEU
+for MT evaluation (Kocmi et al., 2021), in follow-
+ing experiments we use nucleus sampling with the
+large model and beam search with the small model.
+4.2.2 Impact of Label Smoothing
+How does label smoothing affect candidate gener-
+ation? Label smoothing (Szegedy et al., 2016) is
+a regularization technique that redistributes proba-
+bility mass from the gold label to the other target
+labels, typically preventing the model from becom-
+ing overconfident (Müller et al., 2019). However,
+it has been found that label smoothing negatively
+impacts model fit, compromising the performance
+of MBR decoding (Eikema and Aziz, 2020, 2021).
+Thus, we train a small transformer model without
+label smoothing to verify its impact in the perfor-
+mance of N-best reranking and MBR decoding.
+Figure 3 shows that disabling label smoothing re-
+ally helps when generating candidates using vanilla
+sampling. However, the performance degrades for
+candidates generated using nucleus sampling when
+we disable label smoothing, hinting that the pruning
+mechanism of nucleus sampling may help mitigate
+the negative impact of label smoothing in sampling
+based approaches. Even without label smoothing,
+vanilla sampling is not competitive with nucleus
+sampling or beam search with label smoothing,
+thus, we do not experiment further with it.
+4.2.3 Impact of Ranking and Metrics
+We now investigate the usefulness of the metrics
+presented in §3 as features and objectives for rank-
+ing. For N-best reranking, we use all the available
+candidates (200) while, for MBR, due to the com-
+putational cost of using 100 candidates, we report
+results with 50 candidates only (we found that rank-
+ing with tuned N-best reranking with N= 100 and
+MBR with N= 50 takes about the same time). We
+report results in Table 1, and use them to answersome specific research questions.
+Which QE metric works best in a fixed N-best
+reranker? We consider a fixed N-best reranker
+with a single reference-free metric as a feature (see
+Table 1, second group). While none of the metrics
+allows for improving the baseline results in terms
+of the lexical metrics (BLEU and chrF), rerankers
+using COMET-QE or MBART-QE outperform the
+baseline according to BLEURT and COMET, for
+both the large andsmall models. Due to the afore-
+mentioned better performance of these metrics for
+translation quality evaluation, we hypothesize that
+these rankers produce better translations than the
+baseline. However, since the sharp drop in the
+lexical metrics is concerning, we will verify this
+hypothesis in a human study, in §4.2.4.
+How does the performance of a tuned N-best
+reranker vary when we change the optimization
+objective? We consider a tuned N-best reranker
+using as features allthe reference-free metrics in
+§3.2, and optimized using MERT. Table 1 (3
+group) shows results for EN→DE. For the small
+model, all the rankers show improved results over
+the baseline for all the metrics. In particular, opti-
+mizing for BLEU leads to the best results in the lex-
+ical metrics, while optimizing for BLEURT leads
+to the best performance in the others. Finally, opti-
+mizing for COMET leads to similar performance
+than optimizing for BLEURT. For the large model,
+although none of the rerankers is able to outper-
+form the baseline in the lexical metrics, we see
+similar trends as before for BLEURT and COMET.
+How does the performance of MBR decoding vary
+when we change the utility function? Table 1
+(4group) shows the impact of the utility func-
+tion (BLEU, BLEURT, or COMET). For the small
+model, using COMET leads to the best perfor-
+mance according to all the metrics except BLEURT
+(for which the best result is attained when optimiz-
+ing itself). For the large model, the best result
+according to a given metric is obtained when using
+that metric as the utility function.
+How do (tuned) N-best reranking and MBR com-
+pare to each other? Looking at Table 1 we see
+that, for the small model, N-best reranking seems
+to perform better than MBR decoding in all the
+evaluation metrics, including the one used as the
+utility function in MBR decoding. The picture is
+less clear for the large model, with MBR decoding1401
+achieving best values for a given fine-tuned metric
+when using it as the utility; this comes at the cost of
+worse performance according to the other metrics,
+hinting at a potential “ overfitting ” effect. Overall,
+N-best reranking seems to have an edge over MBR
+decoding. We will further clarify this question with
+human evaluation in § 4.2.4.
+Can we improve performance by combining N-
+best reranking with MBR decoding? Table 1
+shows that, for both the large and the small model,
+the two-stage ranking approach described in §3
+leads to the best performance according to the
+fine-tuned metrics. In particular, the best result
+is obtained when the utility function is the same as
+the evaluation metric. These results suggest that
+a promising research direction is to seek more so-
+phisticated pruning strategies for MBR decoding.
+4.2.4 Human Evaluation
+Which metric correlates more with human judg-
+ments? How risky is it to optimize a metric and
+evaluate on a related metric? Our experiments
+suggest that, overall, quality-aware decoding pro-
+duces translations with better performance across
+most metrics than MAP-based decoding. However,
+for some cases (such as fixed N-best reranking and
+most results with the large model), there is a con-
+cerning “metric gap” between lexical-based and
+fine-tuned metrics. While the latter have shown to
+correlate better with human judgments, previous
+work has not attempted to explicitly optimize these
+metrics, and doing so could lead to ranking systemsthat learn to exploit “pathologies” in these metrics
+rather than improving translation quality. To inves-
+tigate this hypothesis, we perform a human study
+across all four datasets. We ask annotators to rate,
+from 1 (no overlap in meaning) to 5 (perfect trans-
+lation), the translations produced by the 4 ranking
+systems in §3, as well as the baseline translation
+and the reference. Further details are in App. C.
+We choose COMET-QE as the feature for the fixed
+N-best ranker and COMET as the optimization
+metric and utility function for the tuned N-best
+reranker and MBR decoding, respectively. The rea-
+sons for this are two-fold: (1) they are currently
+the reference-free and reference-based metrics with
+highest reported correlation with human judgments
+(Kocmi et al., 2021), (2) we saw the largest “metric
+gap” for systems based on these metrics, hinting of
+a potential “overfitting” problem (specially since
+COMET-QE and COMET are similar models).
+Table 2 shows the results for the human eval-
+uation, as well as the automatic metrics. We see
+that, with the exception of T-RR w/ COMET, when
+fine-tuned metrics are explicitly optimized for, their
+correlation with human judgments decreases and
+they are no longer reliable indicators of system-
+level ranking. This is notable for the fixed N-best
+reranker with COMET-QE, which outperforms the
+baseline in COMET for every single scenario, but
+leads to markedly lower quality translations. How-
+ever, despite the potential for overfitting these met-
+rics, we find that tuned N-best reranking, MBR,
+and their combination consistently achieve better1402
+translation quality than the baseline, specially with
+the small model. In particular, N-best reranking
+results in better translations than MBR, and their
+combination is the best system in 2 of 4 LPs.
+4.2.5 Improved Human Evaluation
+To further investigate how quality-aware decoding
+performs when compared to MAP-based decoding,
+we perform another human study, this time based
+on expert-level multidimensional quality metrics
+(MQM) annotations (Lommel et al., 2014). We
+asked the annotators to identify all errors and inde-
+pendently label them with an error category ( accu-
+racy,fluency , and style, each with a specific set of
+subcategories) and a severity level ( minor ,major ,
+andcritical ). In order to obtain the final sentence-
+level scores, we require a weighting scheme on
+error severities. We use weights of 1,5, and 10
+tominor ,major , and critical errors, respectively,
+independently of the error category. Further details
+are in App. D. Given the cost of performing a hu-
+man study like this, we restrict our analysis to the
+translations generated by the large models trained
+on WMT20 (EN →DE and EN →RU).
+Table 3 shows the results for the human evalua-
+tion using MQM annotations, including both error
+severity counts and final MQM scores. As hinted
+in §4.2.4, despite the remarkable performance of
+the F-RR with COMET-QE in terms of COMET
+(see Table 2), the quality of the translations de-
+creases when compared to the baseline, suggesting
+the possibility of metric overfitting when evaluating
+systems using a single automatic metric that was
+directly optimized for (or a similar one). However,
+for both language pairs, the T-RR with COMET
+and the two stage approach (T-RR + MBR withCOMET) achieve the highest MQM score. In ad-
+dition, these systems present the smallest number
+of errors when combining both major and critical
+errors.
+Although the performance of all systems is com-
+parable for EN →DE, both the T-RR and the T-
+RR+MBR decoding markedly reduce the number
+of grammatical register errors related to using pro-
+nouns and verb forms that are not compliant with
+the register required for that translation, at the cost
+of increasing the number of lexical selection errors
+(see Figure 4). For EN →RU, however, the num-
+ber of lexical selection errors produced when using
+the T-RR or the T-RR+MBR decoding is approxi-
+mately a half of the ones produced by the baseline
+(see Figure 5). In this case, this comes at appar-
+ently almost no cost in other error types, leading to
+significantly better results, as shown in Table 3.
+5 Related Work
+Reranking. Inspired by the work of Shen et al.
+(2004) on discriminative reranking for SMT, Lee
+et al. (2021) trained a large transformer model us-
+ing a reranking objective to optimize BLEU. Our
+work differs in which our rerankers are much sim-
+pler and therefore can be tuned on a validation set;
+and we use more powerful quality metrics instead
+of BLEU. Similarly, Bhattacharyya et al. (2021)
+learned an energy-based reranker to assign lower
+energy to the samples with higher BLEU scores.
+While the energy model plays a similar role to a QE
+system, our work differs in two ways: we use an
+existing, pretrained QE model instead of training
+a dedicated reranker, making our approach appli-
+cable to any MT system without further training;
+and the QE model is trained to predict human as-1403
+sessments, rather than BLEU scores. Leblond et al.
+(2021) compare a reinforcement learning approach
+to reranking approaches (but not MBR decoding, as
+we do). They investigate the use of reference-based
+metrics and, for the reward function, a reference-
+free metric based on a modified BERTScore (Zhang
+et al., 2020). This new multilingual BERTScore
+is not fine-tuned on human judgments as COMET
+and BLEURT and it is unclear what its level of
+agreement with human judgments is. Another line
+of work is generative reranking , where the reranker
+is not trained to optimize a metric, but rather as a
+generative noisy-channel model (Yu et al., 2017;
+Yee et al., 2019; Ng et al., 2019).
+Minimum Bayes Risk Decoding. MBR decod-
+ing (Kumar and Byrne, 2002, 2004) has recently
+been revived for NMT using candidates generated
+with beam search (Stahlberg et al., 2017; Shu and
+Nakayama, 2017) and sampling (Eikema and Aziz,
+2020; Müller and Sennrich, 2021). Eikema and
+Aziz (2021) also explore a two-stage approach for
+MBR decoding. Additionally, there is concurrent
+work by Freitag et al. (2021b) on using neural
+metrics as utility functions during MBR decod-
+ing: however they limit their scope to MBR with
+reference-based metrics, while we perform a more
+extensive evaluation over ranking methods and met-
+rics. Amrhein and Sennrich (2022) also concur-
+rently explored using MBR decoding with neural
+metrics, but with the purposes of identifying weak-
+nesses in the metric (in their case COMET), simi-
+larly to the metric overfitting problem we discussed
+in §4.2.4. A comparison with N-best re-ranking
+was missing in these works, a gap our paper fills.
+A related line of work is minimum risk training
+(MRT; Smith and Eisner 2006; Shen et al. 2016),
+which trains models to minimize risk, allowing ar-
+bitrary non-differentiable loss functions (Edunov
+et al., 2018; Wieting et al., 2019) and avoiding ex-
+posure bias (Wang and Sennrich, 2020; Kiegelandand Kreutzer, 2021). However, MRT is consider-
+ably more expensive and difficult to train and the
+gains are often small. Incorporating our quality
+metrics in MRT is an exciting research direction.
+6 Conclusions and Future Work
+We leverage recent advances in MT quality esti-
+mation and evaluation and propose quality-aware
+decoding for NMT. We explore different candidate
+generation and ranking methods, with a comprehen-
+sive empirical analysis across four datasets and two
+model classes. We show that, compared to MAP-
+based decoding, quality-aware decoding leads to
+better translations, according to powerful automatic
+evaluation metrics and human judgments.
+There are several directions for future work. Our
+ranking strategies increase accuracy but are sub-
+stantially more expensive, particularly when used
+with costly metrics such as BLEURT and COMET.
+While reranking-based pruning before MBR decod-
+ing was found helpful, additional strategies such
+as caching encoder representations (Amrhein and
+Sennrich, 2022) and distillation (Pu et al., 2021)
+are promising directions.
+Acknowledgments
+We would like to thank Ben Peters, Wilker Aziz,
+and the anonymous reviewers for useful feedback.
+This work was supported by the P2020 program
+MAIA (LISBOA-01-0247- FEDER-045909), the
+European Research Council (ERC StG DeepSPIN
+758969), the European Union’s Horizon 2020 re-
+search and innovation program (QUARTZ grant
+agreement 951847), and by the Fundação para a
+Ciência e Tecnologia through UIDB/50008/2020.
+References14041405140614071408
+A Training Details
+For the experiments using IWSLT17, we train a small transformer model (6 layers, 4 attention heads, 512
+embedding dimensions, and 1024 hidden dimensions) from scratch, using Fairseq (Ott et al., 2019). We
+tokenize the data using SentencePiece (Kudo and Richardson, 2018), with a joint vocabulary with 20000
+units. We train using the Adam optimizer (Kingma and Ba, 2015) with β= 0.9andβ= 0.98and use
+an inverse square root learning rate scheduler, with an initial learning rate of 5×10and with a linear
+warm-up in the first 4000 steps. For models trained with label smoothing, we use the default value of 0.1.
+B Additional Results
+For completeness, we include in Table 4 results to evaluate the impact of the metrics presented in §3 as
+features and objectives for ranking using the other language pairs: EN→RU(large model) and EN→FR
+(small model).
+C Human Study
+In order to perform human evaluation, we recruited professional translators who were native speakers
+of the target language on the freelancing site Upwork.300 sentences were evaluated for each language
+pair, sampled randomly from the test sets after a restriction that sentences were no longer than 30 words.
+All translation hypotheses for a single source sentence were first deduplicated, and then shown to the
+translator side-by-side in randomized order to avoid any ordering biases.
+Sentences were evaluated according to a 1-5 rubric slightly adapted from that of Wieting et al. (2019):
+1. There is no overlap in the meaning of the source sentence whatsoever.
+2. Some content is similar but the most important information in the sentence is different.
+3. The key information in the sentence is the same but the details differ.
+4. Meaning is essentially equal but some expressions are unnatural.
+5. Meaning is essentially equal and the sentence is natural.1409D MQM Framework
+Human evaluations were performed by Unbabel’s PRO Community, made of professional translators and
+linguists with relevant experience in linguistic annotations and translation errors annotations. In order to
+properly assess translations quality, annotators must be native speakers of the target language and with a
+proven high proficiency of the source language, so that they can properly capture errors and their nuances.
+The systems’ outputs were evaluated by using the annotation framework adopted internally at Unbabel,
+which is an adaptation of the MQM Framework (Lommel et al., 2014).
+We asked the annotators to identify all errors and independently label them with an error category and a
+severity level. We consider three categories (each of them containing a set of different subcategories)
+that may affect the quality of the translations:
+•Accuracy , if the target text does not accurately reflect the source text ( e.g., changes in the meaning,
+addition/omission of information, untranslated text, MT hallucinations);
+•Fluency , if there are issues that affect the reading and the comprehension of the text ( e.g., grammar and
+spelling errors);
+•Style , if the text has stylistic problems ( e.g., gramatical and lexical register).
+Additionally, each error is labeled according to three severity levels (minor ,major , and critical ), de-
+pending on the way they affect the accuracy, the fluency, and the style of the translation. The final
+sentence-level score is obtained using a weighting scheme where minor, major, and critical errors are
+weighted as 1,5, and 10, respectively.
+Figures 4 and 5 show the counts of errors breakdown by typology and severity level for EN →DE and
+EN→RU, respectively.141014111412

@@ -1,1 +1,999 @@
-1836 Proceedings of the 2022 Conference of the North American Chapter of the Association for Computational Linguistics : Human Language Technologies , pages 1836 1853 July 10 - 15 , 2022 © 2022 Association for Computational Linguistics 1837 1838 1839 1840 1841 1842 1843 1844 1845 1846 1847 1848 1849 1850 1851 1852 1853 
+
+Rajat Kumar, Mayur Patidar, Vaibhav Varshney, Lovekesh Vig, Gautam Shroff
+TCS Research, New Delhi, India
+{k.rajat2, patidar.mayur, varshney.v,
+lovekesh.vig, gautam.shroff}@tcs.com
+Abstract
+Intent Detection is a crucial component of Dia-
+logue Systems wherein the objective is to clas-
+sify a user utterance into one of the multiple
+pre-defined intents. A pre-requisite for devel-
+oping an effective intent identifier is a training
+dataset labeled with all possible user intents.
+However, even skilled domain experts are often
+unable to foresee all possible user intents at de-
+sign time and for practical applications, novel
+intents may have to be inferred incrementally
+on-the-fly from user utterances. Therefore, for
+any real-world dialogue system, the number
+of intents increases over time and new intents
+have to be discovered by analyzing the utter-
+ances outside the existing set of intents. In this
+paper, our objective is to i) detect known intent
+utterances from a large number of unlabeled
+utterance samples given a few labeled samples
+and ii) discover new unknown intents from the
+remaining unlabeled samples. Existing SOTA
+approaches address this problem via alternate
+representation learning and clustering wherein
+pseudo labels are used for updating the repre-
+sentations and clustering is used for generating
+the pseudo labels. Unlike existing approaches
+that rely on epoch-wise cluster alignment, we
+propose an end-to-end deep contrastive clus-
+tering algorithm that jointly updates model pa-
+rameters and cluster centers via supervised and
+self-supervised learning and optimally utilizes
+both labeled and unlabeled data. Our proposed
+approach outperforms competitive baselines on
+five public datasets for both settings: (i) where
+the number of undiscovered intents is known in
+advance, and (ii) where the number of intents is
+estimated by an algorithm. We also propose a
+human-in-the-loop variant of our approach for
+practical deployment which does not require
+an estimate of new intents and outperforms the
+end-to-end approach.
+1 Introduction
+Modern dialogue systems (Louvan and Magnini,
+2020) are increasingly reliant on intent detectionFigure 1: An instance of user logs, where the intent
+detection model is trained on two known intents, i.e.,
+iandi. After manual analysis of user logs a human
+reviewer has discovered two new intents iandiand
+assigned utterance u21to an existing intent, i.e., i.
+to classify a user utterance into one of the multiple
+known user intents. Intent detection is typically
+modeled as a multi-class classification problem
+where labeled data comprising of utterances for
+each known intent is manually created by domain
+experts. However, most real-world applications
+have to cope with evolving user needs and new
+functionality is routinely introduced into the dia-
+logue system resulting in a continuously increasing
+number of intents over time. Even for seasoned do-
+main experts estimating future user requirements at
+design time is challenging and these often have to
+be discovered from recent user logs which contain
+information corresponding to past user utterances,
+model response (i.e., predicted intent), implicit
+(confidence or softmax probability), and explicit
+(user clicks on a thumbs up or thumbs down icon)
+feedback as shown in Fig 1. The intent detection
+model presented in Fig. 1 is trained on two ini-
+tial intents ( I,I) from the banking domain using
+labeled data created by domain experts. Filtered
+user logs containing implicit and explicit feedback
+were shared with domain experts, who, discovered
+two new intents ( I,I) and mapped the filtered
+utterances to these new intents. Additionally, ex-
+perts also have to identify and discard utterances
+that are outside the domain of the dialog system.1836The remaining user logs are the primary source of
+evolving user needs and the process of identifying
+utterances belonging to “new intents”/“unknown in-
+tents” from user logs is referred to as Intent Discov-
+ery/Intent Mining (Chatterjee and Sengupta, 2020;
+Zhang et al., 2021b). However, manually moni-
+toring user logs is not scalable and our objective
+in this paper is to present novel SOTA techniques
+to perform automated and semi-automated intent
+detection and discovery over user logs given only a
+few labeled utterances from known intents in addi-
+tion to unlabeled utterances from both known and
+unknown intents.
+Several classical (MacQueen, 1967; Chidananda
+Gowda and Krishna, 1978; Ester et al., 1996) and
+deep learning (Xie et al., 2016a; Zhang et al.,
+2021a) based clustering methods have been used
+for intent discovery. Chatterjee and Sengupta
+(2020) modeled intent discovery from unlabeled ut-
+terances as an unsupervised clustering problem and
+proposed a variant of DBSCAN (Ester et al., 1996)
+for clustering but do not employ any representa-
+tion learning and rely heavily on manual evalua-
+tion. Zhang et al. (2021a) use a contrastive learning
+(Chen et al., 2020) based unsupervised approach for
+joint representation learning and clustering where
+performance largely depends on the quality of an
+auxiliary target distribution (Xie et al., 2016a). Lin
+et al. (2020) and Zhang et al. (2021c) model intent
+detection and discovery as a semi-supervised learn-
+ing problem where the objective is to detect known
+intents and discover new intents given 1) a few la-
+beled utterances from known intents along with
+2) unlabeled utterances from known and new in-
+tents. This is similar to our problem of intent detec-
+tion and discovery from user logs. Deep-Aligned
+(Zhang et al., 2021c) is the current SOTA approach
+for intent detection and discovery alternately per-
+forming representation learning and clustering by
+utilizing pseudo-labeled data obtained from clus-
+tering for representation learning. Deep-Aligned
+uses k-means (MacQueen, 1967) as the clustering
+algorithm of choice and updates a BERT (Devlin
+et al., 2019) backbone’s parameters in the process.
+As k-means may assign different cluster ids to the
+same set of data points over different iterations the
+authors propose an alignment algorithm to align
+clusters obtained in consecutive epochs. Thus, an
+incorrect cluster alignment over epochs may lead
+to a significant drop in clustering accuracy. Addi-
+tionally, they make the unrealistic assumption ofa uniform distribution over intents to estimate the
+number of intents.
+In this paper, we propose a novel end-to-
+endDeepSemi-Supervised Contrastive Clustering
+(DSSCC-E2E) algorithm for intent detection and
+discovery from user logs. DSSCC-E2E is moti-
+vated by recent advances in self-supervised (Chen
+et al., 2020; Wu et al., 2020; Li et al., 2021) and su-
+pervised contrastive learning (Khosla et al., 2020;
+Gunel et al., 2021) applied to Computer vision and
+natural language processing. We model intent de-
+tection and discovery as a form of semi-supervised
+contrastive clustering wherein we jointly update
+backbone representations and cluster centers by
+minimizing the distance between the distribution
+over clusters of similar utterances and maximiz-
+ing the same for dissimilar utterances via a semi-
+supervised variant of supervised contrastive (Sup-
+Con) loss(Khosla et al., 2020). For contrastive
+learning, we use the contextual augmenter (Ma,
+2019) to create pairs of augmentations (positive
+pairs/ similar utterances) corresponding to each un-
+labeled utterance from known and unknown intents.
+For labeled utterances, we use pairs of utterances
+with the same intent to create positive pairs. To
+improve the accuracy of intent detection, we up-
+date representations based on labeled utterances
+by minimizing the cross-entropy loss. To avoid
+the trivial solution that assigns all utterances to the
+same cluster (Hu et al., 2017), similar to Van Gans-
+beke et al. (2020); Li et al. (2021) we also add an
+entropy term to the loss function which distributes
+utterances uniformly across the clusters.
+Existing semi-supervised approaches(Lin et al.,
+2020; Zhang et al., 2021c) including DSSCC-E2E
+and some unsupervised approaches (MacQueen,
+1967; Zhang et al., 2021a) for intent discovery re-
+quire an estimate of the number of new intents (m)
+present in the user logs. Incorrect estimates for m
+can lead to noisy clusters (i.e., a cluster which con-
+tains utterances from multiple intents), which then
+require substantial manual effort to split cleanly.
+Unsupervised approaches (Ester et al., 1996; Chat-
+terjee and Sengupta, 2020) often lead to a large
+number of clusters due to poor semantic utter-
+ance representations. For practical deployment,
+we propose a human-in-loop variant of DSSCC-
+E2E called DSSCC-HIL which does not estimate
+mand instead creates multiple dense clusters via
+DBSCAN. Domain experts can then merge these
+clusters with minimal manual effort such that each1837merged cluster represents an intent.
+Our key contributions are: (1) We propose a
+novel deep semi-supervised contrastive clustering-
+based approach for intent detection and discovery
+from user logs. (2) DSSCC-E2E does not require
+epoch-wise cluster alignment, is end-to-end train-
+able, and fully utilizes both the labeled and un-
+labeled utterances for novel intent discovery. (3)
+DSSCC-E2E outperforms competitive baselines on
+five public datasets in the following settings: (3.1)
+Number of intents are known in advance. (3.2)
+Number of intents is estimated by an algorithm. (4)
+For realistic deployment, we propose a human in
+the loop intent detector DSSCC-HIL , which does
+not need to estimate the number of new intents. (5)
+With minimal manual effort, DSSCC-HIL outper-
+forms existing approaches on the intent discovery
+task.
+2 Related Work
+2.1 Self-supervised and Supervised
+Representation Learning
+Different self-supervised pre-training tasks have
+been proposed to pre-train PLMs, such as Masked
+language modeling (MLM) (Devlin et al., 2019),
+and MAsked Sequence to Sequence pre-training
+(MASS)(Song et al., 2019). Reimers and Gurevych
+(2019); Gao et al. (2021) fine-tune BERT on a
+supervised contrastive learning objective to learn
+better sentence embeddings. Zhang et al. (2021a)
+use SBERT (Reimers and Gurevych, 2019) as a
+PLM to learn clustering friendly representations in
+an unsupervised scenario by using instance-level
+contrastive representation learning (Chen et al.,
+2020) and clustering in a joint-fashion. We pro-
+pose a deep semi-supervised contrastive learning
+approach for intent detection and discovery where
+we jointly update PLM representations and cluster
+centers. We leverage the idea of unsupervised con-
+trastive clustering (Li et al., 2021) for images to
+semi-supervised contrastive clustering of text and
+use a modified version of the supervised contrastive
+loss function (Khosla et al., 2020) to jointly update
+model parameters and cluster centers.
+We also compare the proposed approach with
+existing unsupervised and semi-supervised ap-
+proaches for clustering in Appendix A.1.
+3 Problem Description
+Consider a set of nknown intents with a
+few labeled utterances per intent I =
+{I, I, ..., I}where I={/uniontext(u, y)},D=/uniontextIand user logs D={/uniontext(u)}which
+contain unlabeled user utterances from both known
+and unknown intents. The objective is to de-
+tect and discover existing and new/unknown in-
+tents from a test set, Dgiven a training set
+D =D∪ D(andD) which con-
+tains utterances from both known and unknown
+intents. D={I∪I}andI=
+{I, I, ..., I}where mrepresents the num-
+ber of new intents, I=I∪Iand|I|=
+n+mrepresents the total number of known and un-
+known intents. Iis similar to I except
+it only contains the new set of utterances for known
+intents from user logs. In a realistic scenario the
+number of “new intents” mpresent in user logs are
+not known apriori. We perform experiments in two
+scenarios (i) The number of known and new intents
+is known in advance and (ii) The number of new
+intents has to be inferred from the user logs.
+4 Proposed Approach
+As shown in Fig. 2, we propose a two-phase algo-
+rithm for intent detection and discovery from user
+logs. In the first phase of DSSCC , the parameters
+of a pre-trained language model (PLM) are up-
+dated based on labeled data from known intents. In
+the second phase, we perform joint representation
+learning and clustering by updating the cluster cen-
+ters and PLM parameters via semi-supervised con-
+trastive learning. In addition to contrastive learning,
+DSSCC also uses labeled utterances to update PLM
+representations via cross-entropy loss. Further, the
+entropy of the intent distribution is maximized to1838
+.
+alleviate the issue of empty clusters, i.e., when all
+utterances become part of a single cluster.
+In a realistic scenario, the number of unknown
+intents mpresent in user logs is not known in ad-
+vance so we use the approach proposed by Zhang
+et al. (2021c) to estimate mand use DSSCC-E2E
+for intent detection and discovery. The approach
+uses a PLM to get utterance representations and
+run K-means with a very high value of k=Kand
+only count clusters with cluster cardinality greater
+than|D|/Kto estimate k. However in prac-
+tice, we find that even this estimation method is
+often incorrect, and in section 4.5, we describe how
+we derive DSSCC-HIL from DSSCC-E2E to ad-
+dress this problem with a small amount of manual
+supervision. We use the Hungarian (Kuhn and Yaw,
+1955) algorithm to align clusters with known and
+unknown intents and report performance. In the
+rest of the paper, we use DSSCC and DSSCC-E2E
+interchangeably and use DSSCC-HIL to refer to
+the human-in-the-loop variant of our approach.
+4.1 Phase-1: Fine-tuning of PLM using
+labeled utterances from known intents
+To leverage the labeled utterances from known in-
+tents for intent detection and discovery, in the first
+phase of DSSCC , we use these to update the pa-
+rameters of the PLM, as shown in Phase-1 of Fig.
+2. We fine-tune the PLM by minimizing the cross-
+entropy loss over a batch Bof size Nconsisting of
+labeled utterances from known intents, as shown in
+Eq. 1 and 2.
+p(I|u) =softmax (h∗W+b)(1)
+L=−1
+N/summationdisplay/summationdisplayy·log(p(I|u))(2)
+In Eq. 1, hdenotes a d-dimensional representation
+of the tutterance ( u) in a batch Bobtained from
+the PLM and W∈R,brepresent the weights
+and bias of a linear layer respectively. In Eq. 2,
+p(I|u)denotes the probability of assigninguto the iknown intent and yis 1 only for the
+true intent and zero otherwise. After fine-tuning the
+PLM on labeled utterances, we discard the linear
+layer and use the PLM with updated weights in the
+second phase of DSSCC .
+4.2 Phase-2: Deep Clustering
+In the second phase, we use both labeled and un-
+labeled utterances to perform representation learn-
+ing and clustering jointly via semi-supervised con-
+trastive learning. To maintain intent detection ac-
+curacy on known intents, we also update represen-
+tations and cluster centers by minimizing cross-
+entropy loss on labeled utterances from known in-
+tent.
+4.2.1 Semi-supervised Representation
+Learning and Clustering
+In addition to labeled utterances from known in-
+tents, we also use unlabeled utterances from both
+known and unknown intents to improve perfor-
+mance on intent detection and discovery, as shown
+in Phase-2 of Fig. 2. To learn better cluster rep-
+resentations, instead of minimizing the distance
+between utterances belonging to the same intent,
+we minimize the distance between their correspond-
+ing cluster distributions. Conversely, we maximize
+the distance between cluster distributions for clus-
+ters corresponding to different intents. In contrast
+to self-supervised (Chen et al., 2020) or supervised
+contrastive (Khosla et al., 2020) learning, for semi-
+supervised learning a batch Bof size Nmay con-
+tain both labeled and unlabeled utterances. As
+shown in Fig. 3, similar to self-supervised con-
+trastive learning, we create a pair of augmentations
+(u, u) or positive pairs corresponding to the t
+or anchor utterance ( u) inBto obtain B, which
+contains two augmented utterances corresponding
+to each utterance in B. To generate augmentations
+for a labeled utterance, we randomly sample two
+utterances from the same intent and use them as
+augmentations whereas for an unlabeled utterance,
+we generate two augmented pairs by performing
+contextual augmentation(Kobayashi, 2018; Ma,
+2019), as shown in Fig. 3. In contextual augmenta-
+tion, given an utterance, we randomly mask a few
+words and use BERT’s masked-language modeling
+(MLM) objective to generate words corresponding
+to masked positions. If u, uare augmentations
+of a labeled utterance uthenP(u)is defined as1839the set of utterances belonging to the same intent
+asuinBwhereas N(u)will contain the all
+2N-1 utterances excluding u(note that N(u)
+andP(u))may have utterances in common). If
+u, uare augmentations of an unlabeled utter-
+ance uthen P(u)will only contain uand
+N(u)will contain all 2 N-1 utterances exclud-
+ingu. We update PLM parameters and cluster
+centers by minimizing the Semi-Supervised Con-
+trastive (SSC) loss as shown in Eq. 3.
+L=/summationdisplay−1
+|P(u)|/summationdisplay
+logexp/parenleftbig
+p(I|u)·p(I|u)/τ/parenrightbig
+/summationtextexp(p(I|u)·p(I|u)/τ);(3)
+In Eq. 3, ( ·) symbol and τdenotes dot product
+and scalar temperature parameter respectively. To
+get the distribution over intents/clusters ( I/C), i.e.,
+p(I|u)for the tutterance in Bwe apply a
+linear transformation over hand normalize via
+softmax, p(I|u) =softmax (h∗C+b). Each
+column Cof a linear layer C∈Racts
+as a cluster center, where Cis the d-dimensional
+representation of the icluster and ( m+n) rep-
+resents the total number of known and unknown
+intents.
+To avoid the trivial solution that assigns all utter-
+ances to the same cluster Hu et al. (2017), similar
+to Van Gansbeke et al. (2020); Li et al. (2021) we
+also add an entropy term to the loss function and
+maximize it which distributes utterances uniformly
+across the clusters, as shown in Eq. 4 and Eq. 6.
+L=−/summationdisplayp(I)∗logp(I) (4)
+p(I) =/summationtextp(I|u), where p(I|u)
+denotes the probability of an utterance ubeing
+assigned to the iintent.
+4.2.2 Supervised Representation Learning
+To maintain intent detection accuracy on known
+intents, we also update the cluster centers and PLM
+parameters by minimizing cross-entropy loss over
+labeled utterances from known intents, as shown
+in Eq. 5 where yis 1 only for the target intent
+and zero otherwise. Unlike in phase-1, Bcan con-
+tain labeled and unlabeled utterances from known
+intents and unlabeled utterances from unknown in-
+tents but we ignore the unlabeled utterances duringbackpropagation.
+L=−1
+N/summationdisplay/summationdisplayy·log(p(I|u)) (5)
+4.3 Training
+We train DSSCC in two phases, in the first phase we
+fine-tune the PLM using labeled utterances from
+known intents as mentioned in Eq. 2. In the second
+phase, we do representation learning and clustering
+jointly by minimizing a combination of SSC loss,
+and cross-entropy loss. Further, to avoid the trivial
+solution of all the utterances getting assigned to a
+single cluster, the entropy over the intent distribu-
+tion is maximized, as shown in Eq. 6. λis a scalar
+hyper-parameter which controls the contribution of
+LinL.
+L=L+L−λ∗ L (6)
+4.4 Inference
+We propose two ways of utilizing representations
+learned by DSSCC for intent detection and discov-
+ery.
+Clustering via learned cluster centers (DSSCC-
+CH) Cluster assignment is based on similarity be-
+tween cluster and utterance representations, i.e.,
+argmaxp(I|u).
+K-means over representations (DSSCC-KM ) We
+get the representations ( h) for each utterance in
+Dfrom the PLM and use K-means for cluster-
+ing.
+4.5 Intent discovery with Human-in-the-loop
+(DSSCC-HIL )
+Existing approaches including DSSCC assume
+knowledge of the number of unknown intents ( m)
+to achieve good performance. This is not a realistic
+assumption and despite SOTA performance,
+significant manual effort is still needed to denoise
+the discovered clusters. However, the manual
+effort can be drastically reduced if we can generate
+dense clusters with high purity and assign a
+natural language description to each cluster. These
+descriptions can be used by a domain expert
+to merge similar clusters (i.e., a set of clusters
+with similar descriptions) or split a noisy cluster
+into multiple sub-clusters. Merging clusters
+requires much less manual effort than splitting
+as merging does not require examining every
+utterance in the cluster. Thus, if we can obtain1840a set of pure clusters (i.e., a cluster where the
+majority of the utterances belong to a single intent
+) then the domain expert only needs to examine
+a few representative utterances per cluster before
+merging similar clusters.
+To obtain better representations for clustering, we
+use phase-1 of DSSCC without any modification.
+To obtain pure clusters, unlike phase-2 of DSSCC ,
+we perform representation learning and clustering
+in an alternate fashion and use DBSCAN for gener-
+ating a large number of pure clusters. We assume
+that the utterances which are part of the same
+cluster belong to the same intent and use this fact to
+create a pair of augmentations for a given utterance
+along with contextual augmentation. Due to the
+unknown value of m, we perform semi-supervised
+contrastive representation learning at the utterance
+level, as shown in Eq. 7. The model parameters
+are updated according to L=L+L, where
+LandLis defined in Eq. 5 and 7 respectively.
+Cluster Merger Algorithm After phase-2,
+we run DBSCAN and obtain a set of clusters
+including the outlier cluster. For each cluster
+(except the outlier) we randomly sample p
+utterances and use them as cluster descriptions.
+The cluster representation is obtained as the mean
+of these utterance representations. So, now each
+cluster has its own description and representation.
+Now we randomly pick one cluster as the query
+cluster ( q) and get its snearest neighbors based
+on cosine-similarity and ask “Which of these s
+clusters should be merged with q”? to a domain
+expert. Based on the domain expert’s response
+we merge similar clusters, recalculate the cluster
+representations, and assign a cluster description
+ofqto this newly created cluster. We repeat this
+process till the domain expert finds no candidate
+for thirty consecutive query clusters. One iteration
+of the cluster merging algorithm is illustrated in
+Fig 4.
+Now we treat each cluster as an intent and train
+a logistic classifier to label utterances that belong
+to the outlier cluster. We use the same classifier for
+intent detection on the test set.
+L=/summationdisplay−1
+|P(u)|/summationdisplay
+logexp/parenleftbig
+u·u)/τ/parenrightbig
+/summationtextexp(u·u)/τ);(7)
+5 Experimental Setup
+In this section, we describe the various baselines,
+datasets, and evaluation metrics used in our experi-
+ments.
+5.1 Baseline Approaches
+We use unsupervised K-means (MacQueen, 1967),
+Agglomerative Clustering (AG) (Chidananda
+Gowda and Krishna, 1978), DEC (Xie et al.,
+2016b), SAE-KM (Xie et al., 2016b), DCN (Yang
+et al., 2017), DAC (Chang et al., 2017), Deep-
+Cluster (Caron et al., 2018), SCCL (Zhang et al.,
+2021a) and semi-supervised PCK-means (Basu
+et al., 2004), BERT-KCL (Hsu et al., 2018), BERT-
+MCL (Hsu et al., 2019), BERT-DTC (Han et al.,
+2019), CDAC+ (Lin et al., 2020), DeepAligned
+(Zhang et al., 2021c) clustering approaches as
+baselines. SCCL andDeepAligned are the state-
+of-the-art approaches for unsupervised and semi-
+supervised clustering respectively. Details about
+unsupervised and semi-supervised baselines are
+included in Appendix A.1.
+5.2 Dataset Description
+We evalaute DSSCC on five datasets with a
+varying number of intents. We use BANK-
+ING77 (Casanueva et al., 2020), CLINC150 (and
+CLINC150), (Larson et al., 2019) SNIPS
+(Coucke et al., 2018), StackOverflow Xu et al.
+(2015) and, DBPedia (Zhang and LeCun, 2015).
+ForBANKING77 andCLINC150 we use the same
+train, val and test split as Zhang et al. (2021c) and
+forSNIPS ,StackOverflow andDBPedia we follow
+the same split as Lin et al. (2020). For more details,
+please refer to Appendix A.318415.3 Evaluation Metrics
+Similar to previously reported results (Lin et al.,
+2020; Zhang et al., 2021c), we use Clustering Ac-
+curacy (ACC ) (Yang et al., 2010), Normalized Mu-
+tual Information (NMI ) (Strehl and Ghosh, 2002)
+andAdjusted Rand Index (ARI) (Hubert and Ara-
+bie, 1985) as evaluation metrics. All metrics range
+from 0 to 100 and higher values of a metric indicate
+superior clustering results. Further details of the
+experimental setup are provided in Appendix A.4.
+Due to space constraints, we report ACC, NMI only
+but in Appendix, we use all three metrics to report
+results.
+6 Results And Discussion
+We present results comparing DSSCC with unsuper-
+vised and semi-supervised clustering approaches
+for scenarios where 1) the system is aware of the
+number of unknown intents, 2) the system is un-
+aware of the number of unknown intents. We fur-
+ther report results of DSSCC-HIL and compare it
+with DSSCC-E2E .
+6.1 Intent detection and discovery when the
+number of new intents mis provided
+For the semi-supervised scenario, we assume x%
+of the total intents are known apriori, also referred
+to as the Known Intent Ratio (KIR). For each
+known intent, 10% of the utterances are labeled
+and the rest are unlabeled. For a fair comparison,
+we also use the same BERT-based PLM as other
+baselines. DSSCC outperforms all unsupervised
+baselines on both BANKING77 and CLINC150
+datasets by significant margins suggesting that for
+known intents, supervision in the form of a few
+labeled utterances leads to better intent represen-
+tations, as shown in Table 1. DSSCC also outper-
+forms semi-supervised baselines on BANKING77
+and CLINC150 for all cases except for the NMI
+metric on the CLINC150 dataset for KIRs 50% and
+75%.
+For K-means , we use SBERT Reimers
+and Gurevych (2019) as our PLM instead of
+BERT to obtain utterance representations and find
+that it outperforms K-means by a signif-
+icant margin, as shown in Table 1. This sug-
+gests that utterance representations from SBERT
+are more suitable for clustering than BERT-
+based representations. Motivated by these re-
+sults we compared BERT and SBERT repre-
+sentations in Table 2 and found that DSSCC
+(Ours) outperforms DSSCC (Ours) ,
+DeepAligned and DeepAligned by a
+significant margin on both datasets for all evaluated
+intent ratios. DeepAligned outperforms
+DeepAligned on BANKING77 by a signifi-
+cant margin but we observe the opposite result on
+CLINC150. For the remaining experiments, we
+use SBERT as our PLM in DSSCC and compare it
+with DeepAligned and DeepAligned .
+We evaluated DSSCC on three other public
+datasets for intent detection and discovery, and
+found that DSSCC outperforms DeepAligned on
+all three datasets except for NMI on DBPedia for
+known intent ratios of 75% , as shown in Table 10.
+Results of DSSCC on intent detection and1842
+discovery are separately reported in Table 11.
+6.2 Intent detection and discovery with
+unknown number of new intents m
+We evaluate DSSCC for the realistic scenario when
+the number of new ( m) intents present in user
+logs is not provided to the system apriori, i.e.,
+the total number of intents ( T=n+m) is not
+known in advance and the system has to infer the
+number of clusters present in user logs. We use
+an existing algorithm proposed by Zhang et al.
+(2021c) which refines an initial guess Kto ar-
+rive at the final estimate K. As shown in
+the Table 3, DSSCC outperforms DeepAligned for
+K∈ {2∗ T,3∗ T,4∗ T } except for the NMI
+metric on the CLINC150 dataset for K=450 and
+K=600 although results are competitive. As com-
+pared to the scenario where the total number of
+intents Tare known (last row in Table 3), on an
+average there is drop of 6.20% in ACC, 1.61% in
+NMI on CLINC150 and a drop of 4.39% in ACC,
+0.47% in NMI on BANKING77. These results sug-
+gest that the performance of DSSCC does not drop
+significantly even when the total number of intents
+in user logs are not known in advance.
+6.3 DSSCC-HIL
+We evaluate DSSCC-HIL in a realistic scenario
+where the number of new intents is not known and
+KIR=75%. As shown in Table 4, we get 333and
+523.7clusters after phase-2 of DSSCC-HIL with
+average cluster purity of 96.96% and98.30% cor-
+responding to B77 and C150 respectively. Average
+purity refers to average clustering accuracy where
+we use ground-truth labels and based on majority
+voting, assign an intent label to the predicted clus-
+ter. For merging similar clusters, we show ( s=5)
+candidate clusters per query to the domain expert
+who is asked to choose clusters that are similar
+to the query cluster. Here, we have used oracleground truth cluster labels instead of a domain ex-
+pert to answer these queries. For B77 and C150,
+259.3and349.5queries are required (avg over 10
+runs) to merge similar clusters respectively where
+the domain expert has to read 12 utterances (2 per
+cluster) per query. As a result, we obtain 81and
+152.59clusters (intents) for B77 and C150 which
+are close to the actual number of intents i.e., 77
+and150respectively. Then a classifier is trained
+with these intents and prediction is done on the test
+set.DSSCC-HIL achieved an ACC of 81.21% and
+88.93% on B77 and C150 respectively which is
+significantly higher than the ACC of DSSCC-E2E .
+Also, DSSCC-HIL is able to discover all intents in
+the ground truth. We also employ a cluster merging
+strategy with DSSCC-E2E i.e.,DSSCC-E2E+HIL
+and got an improvement of 2%for C150 but neg-
+ative results for B77. This is due to better initial
+cluster purity (P) of C150 (i.e. 87.73%) versus
+B77 (i.e. 79.92%), as the merging of noisy clusters
+intuitively leads to a decrease in ACC. This obser-
+vation supports the fact that, for merging clusters
+by a domain expert, a good initial cluster purity is
+required. Due to comparatively low purity initial
+clusters, HIL does not help much in DSSCC-E2E .
+6.4 Ablation Study
+As part of the ablation study, we answer the fol-
+lowing questions “Do we need both phase-1 and1843phase-2 in DSSCC ?”, “Does joint training on mul-
+tiple loss functions in phase-2 affect clustering ac-
+curacy ?”, “Do we need different values of Entropy
+Weight ( λ) (Eq. 6) for different datasets?”, “How
+does the presence of out-of-scope (oos) utterances
+in user logs affect DSSCC performance”? and
+present our observations. To answer these ques-
+tions we perform ablation studies on CLINC150
+and BANKING77.
+“Do we need both phase-1 and phase-2 in
+DSSCC? " As shown in Table 5, KIR=75%, fine-
+tuning of the PLM on labeled utterances from
+known intents in phase-1 is more vital for BANK-
+ING77 as compared to CLINC150 because without
+phase-1 there is a significant drop in performance
+on the BANKING77 dataset ( DSSCC w/o phase-
+1vsDSSCC ). Whereas there is an improvement
+of 4.39% in ACC, 1.15% in NMI and 4.86% due
+to phase-2 on CLINC150 ( DSSCC w/o phase-1
+vsDSSCC ), which suggests that both phase-1 and
+phase-2 of DSSCC are important for a generic so-
+lution. In the case of BANKING77 , performance
+largely depends on labeled utterances from known
+intents and there is not much improvement due to
+phase-2, which may be attributed to its complexity
+as all intents are semantically closer and belong
+to the Banking domain as compared to CLINC150
+where utterances belong to 10 different domains (
+utility, travel, etc.). But when we perform the same
+ablation with fewer known intents i.e., KIR=25%,
+then both phase-1 and phase-2 are equally impor-
+tant to achieve good performance. This suggests
+that DSSCC phase-2 is more important when there
+are fewer known intents and fewer labeled utter-
+ances per known intent.
+“Does joint training on multiple loss functions in
+phase-2 affect clustering accuracy"? As shown
+in Table 5, we also perform an ablation on different
+loss functions used in phase-2 and found that Semi-
+supervised contrastive ( ssc) loss ( DSSCC w/o ssc
+vsDSSCC ), entropy maximization ( em) (DSSCC
+w/o em vsDSSCC ) and supervised-representation
+learning ( srl) loss ( DSSCC w/o srl vsDSSCC ) all
+affect the clustering performance on CLINC150
+and BANKING77. The reason for the most drop
+in ACC and NMI in the case of ( DSSCC w/o em )
+is that, when entropy maximization is not done,
+the probability distribution over clusters for unla-
+beled utterances is decided only by the supervised-
+representation learning ( srl) loss. Therefore, all the
+utterances become part of known intent clustersand the clusters for unknown intents remain empty.
+“Do we need different values of Entropy Weight
+(λ) (Eq. 6) for different datasets?” In Table 7,
+we report DSSCC-E2E results on CLINC150 and
+BANKING77 with different values of λ. And we
+observe that a value of λ ϵ[10, 14] yields the best
+results across datasets.
+“How does the presence of out-of-scope (oos)
+utterances in user logs affect DSSCC perfor-
+mance”? We use oos utterances as part of user
+logs in CLINC150 dataset and evaluate DSSCC.
+As shown in Table 6, there is a small drop in perfor-
+mance because a few oos utterances are classified to
+belong to the set of actual intents. This observation
+shows that even with presence of oos utterances,
+DSSCC is able to maintain it’s performance. Man-
+ual intervention may be required in practice to filter
+clusters containing oos queries.
+7 Conclusion
+In this work, we propose a semi-supervised con-
+trastive learning approach for intent detection and
+discovery from user logs. The proposed approach
+optimally utilizes both labeled and unlabeled ut-
+terances to outperform SOTA approaches for both
+scenarios where the total number of intents is either
+known in advance or has to be estimated. We also
+propose a variant of our approach which does not
+need to estimate the number of new intents and
+yields pure clusters which are merged by domain
+experts based on the cluster descriptions. Future
+work will focus on, (i) “How to get better cluster
+descriptions?” (ii) “How to optimally select query
+and corresponding candidate clusters?” and (iii)
+“How to discover new intents with minimum human
+effort with a long-tail distribution over new intents
+in user logs?”1844References18451846
+A Appendix
+A.1 Unsupervised and Semi-supervised
+Clustering
+A.1.1 Unsupervised Clustering
+Building upon classical clustering techniques such
+asK-means (MacQueen, 1967) and Agglomer-
+ative Clustering (AG) (Chidananda Gowda and
+Krishna, 1978) several deep learning-based clus-
+tering techniques have recently been proposed in
+the literature. DEC (Xie et al., 2016b) is a two-
+step deep unsupervised clustering algorithm where
+the first step involves training a stacked autoen-
+coder (SAE) and the second step involves updatingthe SAE encoder and the cluster centers based on
+high confidence assignment of an utterance to clus-
+ter while using an auxiliary target distribution. In
+SAE-KM (Xie et al., 2016b), k-means is used to
+cluster the representations obtained from the en-
+coder of the (SAE). DCN (Yang et al., 2017) is a
+joint deep unsupervised clustering algorithm per-
+forming joint representation learning and cluster-
+ing.DAC (Chang et al., 2017) recasts the cluster-
+ing problem into a binary pairwise classification
+framework to determine whether pairs of samples
+belong to the same cluster or not and the cosine sim-
+ilarity between pairs of samples is used to create
+pseudo-training data. DeepCluster (Caron et al.,
+2018) jointly learns the parameters of a neural net-
+work and the cluster assignments of the resulting
+features. DeepCluster iteratively groups the fea-
+tures with a standard clustering algorithm such as
+k-means and uses the subsequent assignments as
+supervision to update the weights of the network.
+STC (Xu et al., 2017) is an approach for short-text
+clustering where learned representations are clus-
+tered using k-means. Self-Train (Hadifar et al.,
+2019) extends DEC for short-text clustering and
+uses weighted average of pre-trained word embed-
+dings (Mikolov et al., 2013) to get text representa-
+tions. Rakib et al. (2020) alternately use classifica-
+tion and outlier detection to improve the accuracy
+of existing short-text clustering algorithms. SCCL
+Zhang et al. (2021a) jointly perform representation
+learning and clustering via contrastive representa-
+tion learning and minimize a modified version of
+the clustering loss proposed by Xie et al. (2016b).
+A.1.2 Semi-supervised Clustering
+PCK-means (Basu et al., 2004) is a semi-
+supervised clustering algorithm where labeled sam-
+ples are used as pairwise constraints to improve
+clustering performance. KCL (Hsu et al., 2018) is
+a two-stage image clustering algorithm that uses
+a binary classification model trained on labeled
+data in the first phase to measure pair-wise im-
+age similarity and in the second stage, a clus-
+tering model is trained on unlabeled data by us-
+ing the output of the binary classification model
+for supervision. The network is trained using a
+Kullback-Leibler divergence-based contrastive loss
+(KCL). Meta Classification Likelihood MCL (Hsu
+et al., 2019) leverages pairwise similarity between
+samples and optimizes a binary classifier for pair-
+wise similarity prediction and through this process
+learns a multi-class classifier as a submodule. DTC1847
+(Han et al., 2019) extend DEC to a semi-supervised
+scenario and also improve upon DEC by enforc-
+ing a representation bottleneck, temporal ensem-
+bling, and consistency. CDAC+ (Lin et al., 2020)
+is an end-to-end clustering method that incorpo-
+rates pairwise constraints obtained from labeled
+utterances as prior knowledge to guide the clus-
+tering process and clusters are further refined by
+forcing the model to learn from high confidence as-
+signments. DeepAligned (Zhang et al., 2021c) use
+labeled utterances from known intents to update
+BERT parameters and in the second step perform
+representation learning and K-means clustering al-
+ternately by minimizing cross-entropy loss over la-
+beled and pseudo-labeled utterances treating each
+k-means cluster as one intent.
+A.2 Representation of an utterance from
+PLM
+We get the representation h =
+mean-pooling ([CLS, T, T, ..., T])of an utter-
+anceuconsisting of ltokens from BERT/SBERT
+by applying mean-pooling over representations
+of all tokens including CLS , where Tdenotes
+representation corresponding to jtoken.A.3 Dataset Description and Details
+We evaluate DSSCC on five datasets with a varying
+number of intents. And all of them are available
+in english language and released under creative
+Commons licences.
+BANKING77 (Casanueva et al., 2020) is a
+fine-grained intent detection dataset from the
+banking domain comprising of 13,083 customer
+queries labelled with 77 intents.
+CLINC150 (Larson et al., 2019) is a crowdsourced
+multi-domain (10 domains such as utility, travel
+etc.) intent detection dataset comprised of
+23,700 queries with 22,500 in-scope queries
+labelled with 150 intents and 1,200 out-of-scope
+queries. For our experiments, we use both sets-
+CLINC150 which contains only in-scope queries,
+and CLINC-150 which contains both in-scope
+and out-of-scope queries and we use the balanced
+version of the dataset.
+SNIPS (Coucke et al., 2018) consists of 16000
+crowd-sourced user utterances distributed across
+7 intents. Out of 16k, 14484 utterances has been
+used for experimental purpose in the past.
+StackOverflow : This dataset was originally
+released as part of a kaggle competition. Xu
+et al. (2015) used a subset of this dataset for
+short-text clustering. The dataset consists of 20,
+000 technical question titles distributed across 20
+intents with 1k questions per intent.
+DBPedia (Zhang and LeCun, 2015) is an ontology
+classification dataset constructed by picking 141848non-overlapping classes from DBpedia 2014
+Lehmann et al. (2015). Wang et al. (2016) used a
+subset of this dataset consisting of 14000 samples
+distributed across 14 classes.
+We mention dataset statistics in table 9. We
+mention the train, validation, and test split details,
+that were used while performing the experiments
+for each dataset. Based, on the lenandT(n+m)
+attributes, we can see the variation and complexity
+of these datasets.
+A.4 Training Details
+For the first phase, we follow the same pre-training
+steps outlined by Zhang et al. (2021c). For the
+second phase of DSSCC-E2E , an embedding of
+dimension ( d∗(n+m)), is used for the cluster
+centers where a ddimensional representation of an
+utterance uis obtained from the PLM and n+m
+represents the total number of clusters correspond-
+ing to known and new intents. For the HIL ap-
+proach, two different linear heads/layers are used -
+one with dimension ( d∗(128) ) for Instance-Level
+Contrastive Learning and second with dimension
+(d∗(n)) for Supervised Representation Learning.
+For simulating a real-world problem of intent de-
+tection and discovery from user logs, we follow the
+experimental setting similar to Zhang et al. (2021c)
+where they assume that x% ∈{25%, 50%, 75%}
+of the total intents for a given dataset is known (we
+denote this number by n) where x is also referred
+to as the known intent ratio (KIR). The remain-
+ing number of intents ( m) are considered novel.
+Accordingly, each dataset is divided into a D,
+DandDwhere D contains 10% of la-
+beled utterances per known intent and unlabeled
+utterances from both known and unknown intents.
+D,Dconsists of utterances from known and
+new intents. We do two sets of experiments – one
+with a known value of n+m(number of total
+intents) and another one where the total number
+of intents is not known in advance. For a given
+dataset and KIR, we run the same experiment on
+ten different seeds and report the average ACC,
+NMI, and ARI on D.For DSSCC-E2E, we use
+DSSCC-CH ,DSSCC-KM for intent detection and
+discovery and report the best results based on ma-
+jority voting over ACC ,NMI andARI. In a realistic
+scenario when ground truth is not available, one
+can use the Silhouette Score (Rousseeuw, 1987)
+to decide which inference strategy to use. For theHIL approach, we get predictions from DBSCAN
+clustering after model convergence and perform in-
+ference after running the cluster merger algorithm.
+We use existing checkpoints of bert-base-uncased(Devlin et al., 2019) and stsb-roberta-base-v2
+(Reimers and Gurevych, 2019) as our PLM. Similar
+to (Zhang et al., 2021c), we freeze all but the last
+transformer layer parameters in our PLM for both
+phases to improve training efficiency and speed up
+the training process. We use the Adam optimizer
+(Kingma and Ba, 2014) to update PLM parameters
+and the learning rate is set to 5e-5 for PLM, 5e-3
+for cluster centers in case of DSSCC-E2E and 5e-3
+for both heads in case of HIL Approach . For all
+of our experiments, the batch size is kept at 400.
+ForDSSCC-E2E , the entropy weight( λ) is set as
+14.0. Whereas, For HIL, the minimum samples and
+epsilon for DBSCAN is kept as 3.0 and 0.09 respec-
+tively. We run all experiments on an Nvidia Titan
+A100 GPU. We use classification accuracy on the
+Dset for known intents as converge criteria for
+Phase 1. And for Phase 2 of DSSCC-E2E , we calcu-
+late the Silhouette Score Rousseeuw (1987) given
+utterance representations and corresponding pre-
+dicted cluster-ids on D. Whereas, for Phase 2
+ofHIL, we converge when the number of predicted
+clusters by DBSCAN clustering is minimum. We
+use early stopping with a patience value of 20.0 for
+both phases. For semi-supervised contrastive repre-
+sentation learning, similar to Zhang et al. (2021a),
+we use contextual augmenter Kobayashi (2018) to
+generate augmentations corresponding to unlabeled
+utterances where z% of the words in an utterance
+are substituted with similar words. We use a suit-
+able value of z% for different datasets based on
+average utterance length as mentioned in the ta-
+ble 8 following the observations from Zhang et al.
+(2021a). We do this to preserve the semantics of
+an utterance while at the same time, substituting
+words in an utterance to create augmentations. We
+report the best results averaged over ten different
+seeds based on the inference details as mentioned
+in section 4.4. For our codebase, we have adapted
+existing SupContrastloss in the semi-supervised
+setting and also utilized data creation steps from
+Zhang et al. (2021c).1849A.5 Results on Intent Detection and Discovery
+We have also reported results on five public datasets
+with our proposed approach on intent detection and
+intent discovery separately for the case when m
+is known, are shown in table 11. If we assume
+that intent detection and discovery are two sepa-
+rate problems, we decouple the results from our
+joint approach (after training) to see the contri-
+bution of DSSCC on both tasks. It is clear from
+the results that, even with very few labeled utter-
+ances from known intents, our model maintains
+the performance on the known intents with at least
+83% clustering accuracy on all five datasets. From
+the results on Intent Discovery, except for BANK-
+ING77, DSSCC (Ours) gets at least 74% clustering
+accuracy on 4 datasets. The low performance on in-
+tent discovery in BANKING77 is attributed to the
+complexity of the dataset where all intents are part
+of one larger domain, i.e., Banking. Whereas, in
+CLINC150, the intents belong to multiple domains
+as mentioned in section A.3.
+A.6 DSSCC-KM vs DSSCC-CH
+We use both inference strategies, i.e., DSSCC-
+KM and DSSCC-CH to obtain results for all
+experiments described in section 6 and report
+ACC ,NMI and ARI as shown in Table 12, 13
+and 15. DSSCC-CH outperforms DSSCC-KM on
+CLINC150, SNIPS and StackOverflow whereas
+DSSCC-KM gives better results on BANKING77
+and DBPedia. This inconsistency between the be-
+haviour of DSSCC-CH andDSSCC-KM can be
+attributed to complexity of a given dataset, i.e.,
+DSSCC-KM outperforms DSSCC-CH on BANK-
+ING77 (single domain dataset) and DBpedia
+whereas DSSCC-CH outperforms DSSCC-KM on
+CLINC150 (multi-domain dataset).
+In realistic scenario where ground truth is not
+available, one can use Silhouette Score (SS) to
+choose between DSSCC-CH andDSSCC-KM . As
+shown in Fig. 6, when the difference between SS
+corresponding to DSSCC-CH andDSSCC-KM is
+significant, then one should choose inference strat-
+egy which gives higher SS. And when the differ-
+ence between SSscore corresponding to DSSCC-
+CHandDSSCC-KM is not significant, then one
+can choose DSSCC-CH for inference, as shown
+in Fig 5. Above mentioned approach for inference
+strategy selection correlates with the selection done
+by majority voting (over ACC ,NMI andARI).
+A.7 Representations from SBERT vs
+DSSCC
+To showcase the effectiveness of representations
+learnt by DSSCC , we plot the utterance em-
+beddings ( h) with ground truth labels for all five
+datasets as shown in Fig. 7 and Fig. 8. Initial and fi-
+nal representations correspond to utterance embed-
+dings obtained from SBERT andDSSCC
+respectively. It can be observed that for all five
+datasets, intents are clearly separable with final rep-
+resentations as compared to initial representations.1850185118521853

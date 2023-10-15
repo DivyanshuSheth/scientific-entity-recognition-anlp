@@ -1,1 +1,993 @@
-602 Proceedings of the 2022 Conference on Empirical Methods in Natural Language Processing , pages 602 631 December 7 - 11 , 2022 © 2022 Association for Computational Linguistics 603 604 605 606 607 608 609 610 611 612 613 614 615 616 617 618 619 620 621 622 623 624 625 626 627 628 629 630 631 
+
+Tianbao XieChen Henry WuPeng ShiRuiqi ZhongTorsten Scholak
+Michihiro YasunagaChien-Sheng WuMing ZhongPengcheng YinSida I. Wang
+Victor ZhongBailin WangChengzu LiConnor BoyleAnsong NiZiyu Yao
+Dragomir RadevCaiming XiongLingpeng KongRui Zhang
+Noah A. SmithLuke ZettlemoyerTao YuThe University of Hong KongCarnegie Mellon UniversityUniversity of WaterlooUC BerkeleyServiceNow ResearchStanford UniversitySalesforce ResearchUIUCGoogle ResearchFacebook AI ResearchUniversity of EdinburghShanghai AI LabYale UniversityGeorge Mason UniversityPenn State UniversityAllen Institute for Artiﬁcial IntelligenceUniversity of Washington
+Abstract
+Structured knowledge grounding (SKG) lever-
+ages structured knowledge to complete user
+requests, such as semantic parsing over
+databases and question answering over knowl-
+edge bases. Since the inputs and outputs
+of SKG tasks are heterogeneous, they have
+been studied separately by different communi-
+ties, which limits systematic and compatible
+research on SKG. In this paper, we overcome
+this limitation by proposing the U SKG
+framework, which uniﬁes 21 SKG tasks into
+a text-to-text format, aiming to promote sys-
+tematic SKG research, instead of being exclu-
+sive to a single task, domain, or dataset. We
+use U SKG to benchmark T5 with dif-
+ferent sizes and show that T5, with simple
+modiﬁcations when necessary, achieves state-
+of-the-art performance on almost all of the 21
+tasks. We further demonstrate that multi-task
+preﬁx-tuning improves the performance on
+most tasks, largely improving the overall per-
+formance. U SKG also facilitates the
+investigation of zero-shot and few-shot learn-
+ing, and we show that T0, GPT-3, and Codex
+struggle in zero-shot and few-shot learning
+for SKG. We also use U SKG to con-
+duct a series of controlled experiments on
+structured knowledge encoding variants across
+SKG tasks. U SKG is easily extensible
+to more tasks, and it is open-sourced at https:
+//github.com/hkunlp/unifiedskg .
+1 Introduction
+Structured knowledge (e.g., web tables, knowledge
+graphs, and databases) stores large amounts of data
+in organized structures, forming a basis for a wide
+range of applications, e.g., medical diagnosis, per-
+sonal assistants, and customer relations manage-ment. Accessing and searching data in structured
+knowledge typically requires mastering query lan-
+guages through professional training. To promote
+the efﬁciency of data access, structured knowledge
+grounding (SKG) systems ground user requests
+in structured knowledge and produce various out-
+puts, including computer programs (e.g., SQL and
+SPARQL), table cell values, and natural language
+responses (Figure 1). For example, semantic pars-
+ing (Zelle and Mooney, 1996; Zettlemoyer and
+Collins, 2005) converts natural language questions
+into formal programs; knowledge-base question an-
+swering (Berant et al., 2013) derives answers from
+tables or knowledge graphs.
+SKG has attracted signiﬁcant interest and has
+been studied through different tasks deﬁned by dif-
+ferent communities. Recent developments in tasks,
+models, and datasets for SKG have led to task-
+speciﬁc modeling advances, making each task’s
+progress seemingly unique and incompatible. A
+main reason is that SKG tasks are heterogeneous .
+Different types of structured knowledge, such as
+databases or knowledge graphs, lead to highly spe-
+cialized encoders (Lin et al., 2019; Herzig et al.,
+2020; Wang et al., 2020; Yasunaga et al., 2021).
+Some SKG tasks, e.g., semantic parsing, use cus-
+tomized decoders to generate programs (Yin and
+Neubig, 2018; Ren et al., 2021). Therefore, instead
+of solving common challenges in SKG research,
+improvements in SKG have been prone to be exclu-
+sive to a single task, domain, or dataset.
+In this paper, we propose the U SKG
+framework to advocate for a unifying view of 21
+SKG tasks across six task families and multiple
+data domains (Table 1). U SKG standardizes
+datasets, models, code, experiments, and evalua-
+tion metrics into a single framework. By casting
+user requests, structured knowledge, and outputs602
+into the text-to-text format (Raffel et al., 2020), it
+promotes model advances where new tasks can be
+framed with our standardized abstraction, and new
+models can be easily applied to diverse SKG tasks.
+While previous works also cast SKG tasks into the
+text-to-text format (Hosseini-Asl et al., 2020; Shaw
+et al., 2021; Liu et al., 2021), their independent
+choices of pretrained language models (PLMs),
+input-output formats, and frameworks make our
+uniﬁcation non-trivial. U SKG is easily ex-
+tensible to more SKG tasks, and it is open-sourced
+to promote community-wide progress.
+Using U SKG as a benchmark, we show
+that ﬁnetuning T5 (with constrained decoding or
+reranking when necessary) on individual tasks
+achieves state-of-the-art (sota) results on almost
+all of the 21 tasks, establishing a powerful and
+reproducible starting point for SKG research. T5
+performance also increases with size on most tasks.
+U SKG facilitates multi-task learning on
+SKG, enabling knowledge sharing and cross-task
+generalization. Although simple multi-task learn-
+ing has mixed results, we show that multi-task
+learning with preﬁx-tuning (Li and Liang, 2021)
+beneﬁts most tasks and largely improves the overall
+performance, on both T5-base and T5-large.
+U SKG is a challenging testbed for few-
+shot (Brown et al., 2020; Ye et al., 2021a) and
+zero-shot learning (Zhong et al., 2021; Wei et al.,
+2021; Sanh et al., 2021) with PLMs. Our experi-
+ments show that models like T0 (Sanh et al., 2021)
+struggle in zero-shot learning on SKG tasks, and
+GPT-3 (Brown et al., 2020) and Codex (Chen et al.,
+2021a) struggle in few-shot learning on SKG tasks.
+U SKG enables a series of controlled ex-periments on structured knowledge encoding. We
+ﬁnd that T5 is sensitive to encoding variations, and
+the sensitivity varies across tasks. U SKG
+aims to facilitate more general and robust struc-
+tured knowledge encoding methods. Finally, we
+conduct a comprehensive error analysis across
+SKG tasks. Although the errors made by PLMs
+decrease with the model size, T5-3B may still gen-
+erate invalid outputs.
+In summary, we 1) unify and benchmark 21 SKG
+tasks under the U SKG framework to evalu-
+ate diverse grounding goals and structured knowl-
+edge sources, 2) demonstrate (near) sota perfor-
+mance of T5 on all the uniﬁed SKG tasks, using
+a single, general-purpose approach, 3) show the
+beneﬁt of knowledge sharing across SKG tasks
+via multi-task preﬁx-tuning, and 4) analyze recent
+modeling contributions (zero-shot, few-shot, and
+structured knowledge encoding) on these tasks. We
+hope U SKG enables the design of new mod-
+els and learning algorithms that generalize to di-
+verse SKG tasks and to identify their challenges.
+2 Related Work
+SKG with PLMs PLMs have been applied to sev-
+eral SKG tasks. To encode structured knowledge,
+prior work linearized the structured knowledge and
+concatenated it with the text (Hwang et al., 2019;
+Liu et al., 2020; Hosseini-Asl et al., 2020; Liu et al.,
+2021), which has been augmented by positional
+encoding (e.g., row/column embedding) (Herzig
+et al., 2020; Yin et al., 2020a) and template-based
+linearization (Chen et al., 2020a,b; Oguz et al.,
+2021), and planning (Su et al., 2021). Recently,
+cell-column alignment is modeled by manipulating603
+the attention matrix of transformers (Zhang et al.,
+2020; Eisenschlos et al., 2021). Hierarchical encod-
+ing is another way to represent the structure, e.g.,
+Wang et al. (2021b) used tree-based transformers
+to represent the structure of the tables; Iida et al.
+(2021) used transformers to encode row and col-
+umn representations; Chen et al. (2021b) used hier-
+archical transformers to encode KG triples. SKG’s
+outputs include, but are not limited to, structured
+meaning representations (e.g., logic forms, SQL),
+dialogue states, natural language, answer sets, and
+Boolean values. Among them, structured mean-
+ing representation is challenging for PLMs because
+they are originally trained on natural language. To
+bridge this gap, Shin et al. (2021) adopted the in-
+sights from Berant and Liang (2014) and Marzoev
+et al. (2020) and proposed to convert formal lan-
+guage into an English-like representation, decode
+with GPT-3, and map back to formal language au-
+tomatically. We do not focus on these techniques
+in this work; instead, we unify all tasks and system-
+atically compare them.
+Task format uniﬁcation Recent years witnessed
+the trend of unifying related but different tasks into
+a shared format. McCann et al. (2018) uniﬁed vari-
+ous tasks as question answering. Yin et al. (2020b)
+and Wang et al. (2021a) uniﬁed few-shot learning
+as textual entailment. PLUR (Chen et al., 2021c)
+uniﬁed program learning, understanding, and repair
+tasks into a graph-to-sequence format. In this paper,
+we focus on the text-to-text format (Raffel et al.,
+2020) due to its ﬂexibility. Different from unifyingtasks that only take text as input, a core challenge
+in unifying SKG tasks into the text-to-text format
+is to linearize structured knowledge. Notably, Uni-
+ﬁedQA (Khashabi et al., 2020) uniﬁed QA tasks,
+while U SKG covers a broader scope of six
+task families for systematic exploration.
+Cross-task generalization with PLMs Multi-
+task learning and transfer learning go beyond task
+boundaries, view different tasks as related, and
+have been shown to outperform single-task learning
+(Aghajanyan et al., 2021a; Vu et al., 2021). Large
+PLMs show potential for zero-shot and few-shot
+learning, e.g., GPT-2 (Radford et al., 2019) and
+GPT-3 (Brown et al., 2020), which can be improved
+by multi-task learning (Zhong et al., 2021), e.g.,
+FLAN (Wei et al., 2021), T0 (Sanh et al., 2021),
+and CrossFit (Ye et al., 2021a). ExT5 (Aribandi
+et al., 2021) shows that scaling up multi-task learn-
+ing helps improve pretraining efﬁciency and down-
+stream performances. U SKG facilitates the
+investigation of multi-task, zero-shot, and few-shot
+learning on SKG tasks.
+3 The U SKG Framework
+3.1 Task Uniﬁcation
+The guiding principle of U SKG’s task se-
+lection is diversity. We unify 21 SKG tasks across
+six task families and multiple domains (Table 1).
+Our task families include:
+•Semantic parsing converts questions to logical
+forms (Zelle and Mooney, 1996; Zettlemoyer and
+Collins, 2005).604
+•Question answering derives answers to natural
+language questions based on structured data (Be-
+rant et al., 2013).
+•Data-to-text generation describes structured
+data in natural language (Novikova et al., 2017).
+•Fact veriﬁcation checks if a statement is true
+based on the structured data (Chen et al., 2020b).
+•Conversational tasks require understanding of
+not only the user’s last request but also the full
+interaction history between users and machines
+(Budzianowski et al., 2018; Eric et al., 2019; Yu
+et al., 2019a).
+•Formal language to text translation describes
+formal language in natural language (Chen et al.,
+2020d).
+All these tasks take as input xa user request, a
+structured knowledge input, and an optional (di-
+alogue) context to predict an output y. Figure 2
+illustrates how we convert the input xto an in-
+put sequence ˜xand the output yto an output se-
+quence ˜yby means of “linearization” (Liu et al.,
+2021), enabling the uniﬁcation of diverse forms of
+structured knowledge. We provide more details,
+examples, and input length analysis in the Appen-
+dices F and G. Our code implementation uses Hug-
+ging Face’s Transformers (Wolf et al., 2020) and
+Datasets (Lhoest et al., 2021) toolkits.
+3.2 Modeling
+The simplest usage of U SKG is to train on
+individual tasks. In this case, we minimize the
+negative log-likelihood loss averaged over tokens
+in each batch. For decoding, we use beam search
+by default. U SKG also facilitates explo-
+ration of multi-task learning, few-shot, and zero-
+shot learning with PLMs, and details are presented
+in the corresponding parts in Section 4.4 Experiments and Analysis
+4.1 Results on Individual Tasks
+We apply T5 models (Raffel et al., 2020) on each
+individual task in U SKG. For model train-
+ing, we set the maximum number of epochs as
+50–200, depending on the dataset size. We use
+early stopping and model selection on the devel-
+opment set. More details are shown in Appendix
+D.1. For each task, we report one commonly used
+metric in Table 2. See Appendix B for all metrics.
+Comparison with previous sota Table 2 shows
+that vanilla T5-3B outperforms most previous
+sota models not trained on extra unsupervised in-
+domain data. Some semantic parsing sota models,
+denoted asin Table 2, are also T5 with con-
+strained decoding (Scholak et al., 2021) or rerank-
+ing (Ye et al., 2021b). This shows that a generalist
+architecture like T5, when scaled up to a certain
+size, can be as good as task-speciﬁc architectures
+for SKG, suggesting the potential of larger PLMs.
+Model scalability In general, T5 performance
+increases with the model size, but this trend varies
+across task families. Semantic parsing, QA, and
+fact veriﬁcation tasks get large beneﬁts from in-
+creased sizes, while text generation does not. See
+Section 4.5 for a human evaluation for text genera-
+tion tasks. Also, the gap between T5-base (220M)
+and T5-large (770M) is larger than the gap between
+T5-large (770M) and T5-3B (3B).
+Effect of pretraining on structured knowledge
+Some smaller models pretrained on structured
+knowledge (Liu et al., 2021) show competitive
+performance as T5-3B, suggesting that pretrain-
+ing with structured data is beneﬁcial for SKG. This
+result calls for structured knowledge pretraining
+that generalizes to different SKG tasks across do-
+mains, which can be systematically explored using
+U SKG.605
+Effect of pretraining on non-SKG tasks T0-3B
+(Sanh et al., 2021) is initialized from T5-3B and
+pretrained on multiple tasks that (in most cases) do
+not use structured knowledge as input (non-SKG
+tasks). Exploring the performance of T0-3B on
+SKG tasks helps us understand the relationship
+between SKG tasks and non-SKG tasks. Table 3
+shows that T0-3B under-performs T5-3B on se-
+mantic parsing and outperforms T5-3B on dialogue
+state tracking and fact veriﬁcation. We note that
+T0-3B is pretrained on dialogue QA, dialogue sum-
+marization, and NLI tasks; therefore, pretraining
+on non-SKG tasks might not be useful for SKG
+unless we add similar SKG tasks to pretraining.4.2 Multi-Task Learning
+U SKG facilitates the exploration of multi-
+task learning. In this part, we systematically study
+multi-task learning on all 21 uniﬁed tasks. We ﬁnd
+that SKG beneﬁts from multi-task preﬁx-tuning on
+both T5-base and T5-large, showing that the bene-
+ﬁts from multi-task learning is scalable in terms of
+the model size. The baselines we use include:
+Single-task ﬁnetuning (ST-F) , which is ﬁnetun-
+ing on individual tasks, same as Section 4.1.
+Single-task preﬁx-tuning (ST-P; Li and Liang,
+2021 ), which learns lightweight task-speciﬁc pa-606rameters while keeping the PLM ﬁxed. We set the
+preﬁx length as 10. Clive et al. (2021) also used
+preﬁx-tuning on T5 for data-to-text generation.
+Multi-task ﬁnetuning (MT-F) , which combines
+the training data of all tasks with temperature mix-
+ing (Raffel et al., 2020; after hyperparameter tuning
+with a few steps, we set the temperature as 2). We
+select model weights based on the average metric
+on all tasks’ development set.
+Table 4 shows that ST-P is comparable to ST-F
+on nearly all tasks. However, we ﬁnd that it takes
+about 5–10 times as many training steps (See Ap-
+pendix E), which is similarly observed for prompt-
+tuning (Lester et al., 2021). We also observe that
+MT-F leads to mixed results. For many tasks, MT-F
+is even worse than ST-F.
+Multi-task preﬁx-tuning (MT-P) Our explana-
+tion for the mixed results of MT-F is that the inputs
+of SKG tasks contain different structured knowl-
+edge from diverse domains, making it difﬁcult to
+learn shared parameters effectively. To address this
+challenge, we ﬁrst pretrain a preﬁx on all tasks,
+freezing T5 and using the same temperature mix-
+ing as MT-F. In the second step, we initialize each
+task’s preﬁx with this pretrained preﬁx and opti-
+mize the preﬁx while freezing T5. This initializa-
+tion step is similar to the prompt transfer explored
+in Vu et al. (2021). Following ST-P, we set the
+preﬁx length as 10.
+Table 4 shows that multi-task preﬁx-tuning out-
+performs single-task ﬁnetuning and single-task
+preﬁx-tuning on most tasks, and it largely outper-
+forms the naive multi-task learning baseline. It
+demonstrates that SKG tasks can be studied to-
+gether to share data and knowledge.
+Exploring task knowledge transfer U- SKG facilitates studying knowledge transfer
+between SKG tasks. Given two tasks, task A and
+task B , we ﬁrst train the model on task A and then
+continue training on task B. Table 5 shows that
+tasks beneﬁt from other tasks with the same data
+source (e.g., tasks that all use Wikipedia tables as
+structured knowledge). We do not observe posi-
+tive transfer between parallel tasks (e.g., semantic
+parsing tasks with different structured knowledge
+and different output) and subtask (e.g., question
+answering can be viewed as the execution semantic
+parses) when data sources are different. Compared
+to the positive results in Table 4, results in this part
+indicate that manually selecting source and target
+tasks may not be efﬁcient for multi-task learning.
+4.3 Zero-Shot and Few-Shot Learning
+The text-to-text uniﬁcation of U SKG en-
+ables us to investigate zero/few-shot learning on
+SKG with large PLMs.
+Zero-shot learning setting Zero-shot learning
+enables models to solve tasks with natural language
+descriptions without training samples. We follow
+T0 (Sanh et al., 2021) to create similar natural lan-
+guage instructions for the unseen tasks. Our in-
+structions are provided in Appendix D.3.
+Few-shot learning settings Brown et al. (2020)
+showed that large PLMs could be few-shot learners607
+by encoding a few training samples as “context”
+to learn without gradient updates. We use GPT-
+3 (Brown et al., 2020) and Codex (Chen et al.,
+2021a) to explore such few-shot learning for SKG.
+To stay within our budget, for GPT-3, we report the
+performance on 100 random dev. set samples. We
+explore two settings for few-shot learning.
+In the ﬁrst setting, we randomly sample few-shot
+examples from the training set; these examples are
+shared by all dev. set samples, denoted as random
+in Table 6. For sequences that are too long for
+Codex (4096) and GPT-3 (2048), we use as many
+examples as possible and make sure that there is at
+least one example (truncated if needed).
+In the second setting, we follow Gao et al. (2021)
+to select few-shot examples from the training set.
+We call this setting few-shot with example selection ,
+denoted as select in Table 6. We use the pretrained
+SBERT (Reimers and Gurevych, 2020) for sen-
+tence embeddings of the user request input (for
+tasks that only have structured input, we embed the
+linearized structured input) and sample ﬁve most
+similar examples measured by cosine similarity.
+Further details (e.g., prompts and task instructions)
+are provided in Appendix D.4.
+SKG is challenging for zero/few-shot learning.
+Table 6 shows that zero-shot performance is very
+poor on most tasks (Spider and MultiWoZ are
+even 0). It also shows a large gap between few-
+shot learning and ﬁnetuning for Spider, WikiTQ,
+MWoZ, and TabFact, while the gap is smaller for
+generation tasks. For few-shot learning, example
+selection based on similarity outperforms random
+selection, but the gap is usually smaller than 10
+points out of 100. It is also interesting to compare
+the results between synthesis tasks (Spider), which
+requires predicting programs, and induction tasks
+(WikiTQ and TabFact), where a model directly out-
+puts answers (Devlin et al., 2017). We ﬁnd that
+PLMs generally struggle more when adapting to
+induction tasks (e.g., close to random-guess on the
+binary classiﬁcation task TabFact), reminiscent of
+recent attempts in program synthesis and induc-
+tion using PLMs (Austin et al., 2021). For GPT-3
+and Codex, better zero-shot performances can be
+expected by better prompt design.
+4.4 Structured Knowledge Encoding
+Structured knowledge encoding has been widely
+explored (Bogin et al., 2019; Lin et al., 2019; Agar-
+wal et al., 2020; Saxena et al., 2020; Yasunaga and
+Liang, 2020; Yasunaga et al., 2022; and others de-
+tailed in Section 2). We hope that U SKG
+can promote systematic study of general structured
+knowledge encoding. To this end, this part focuses
+on the linearization of structured knowledge.
+Does the order of user input, structured knowl-
+edge, and context matter? To explore the effect
+of the order of user input, structured knowledge,
+and context, we rerun the single-task experiments
+while switching the order of these components in
+both the training and development set. Table 7
+shows that placing the text before structured knowl-
+edge ( rs) is better than the opposite ( sr), which is
+consistent across SKG tasks. Our explanation is
+that the position of the text is relatively ﬁxed in rs,608
+helping the decoder to learn stable attention over
+the text. Also, placing the context in between the
+text and structured knowledge yields better results.
+Is T5 sensitive to structured knowledge order-
+ing? Order-insensitivity is common for most struc-
+tured knowledge, e.g., permutation of columns in
+a table preserves the meaning. To study this in-
+sensitivity, we evaluate T5-large on a manipulated
+development set where the order of schema (for
+database), column (for table), or slots and values
+(for ontology) is reversed. Table 8 shows that tasks
+with cross-domain tables and databases are less
+order-sensitive, while models are very sensitive to
+the order of ontology. Other types of robustness
+(e.g., robustness to cell values irrelevant to the an-
+swer) remain an open question in U SKG.
+Is it beneﬁcial to represent structured knowl-
+edge as natural language? SKG data is not typi-
+cally used to pretrain PLMs. Given ample training
+data, PLMs adapt well to SKG tasks, as shown
+in Table 2. However, under the low-resource set-
+ting, converting structured data to natural language
+might be helpful. For Spider, we use a shared tem-
+plate to convert structured data to natural language.
+For TabFact and WikiSQL, we randomly selected
+236 tables shared by both datasets and manually
+labeled templates to convert each row into a sen-
+tence. Examples of the templates are shown in
+Appendix I. These templates produce about 1000
+samples for each task, divided into training and
+test sets. We ﬁnd that, in WikiSQL, the conversion
+to natural language stabilizes and accelerates the
+training process. Table 9 shows that conversion
+to natural language improves the performance on
+WikiSQL, has no signiﬁcant inﬂuence on TabFact,
+and slightly degrades the performance on Spider.
+4.5 Human Evaluation for Generation Tasks
+For each generation task, we randomly sample 100
+development set samples and ask human annotators
+to judge the correctness of each output, using a 0-1
+score. Details are provided in Appendix D.5. Table
+10 shows that automatic metrics do not always re-
+ﬂect human evaluation, calling for better automatic
+metrics to truly reﬂect the model’s ability on gen-
+eration tasks. Larger models are not always better,
+and detailed error analysis is provided below.
+4.6 Error Analysis
+Error analysis based on output validity Uncon-
+strained decoding from PLMs may generate invalid
+outputs . For semantic parsing, we divide wrong
+outputs into invalid outputs (i.e., not executable
+when the output is SQL, and not parse-able when
+the output is s-expression or TOP-representation)
+andvalid but wrong answers . Figure 3 shows that,
+for SQL semantic parsing, a large number of errors
+are caused by invalid outputs, and the number of in-
+valid outputs gradually decreases with the increase
+of model size. This phenomenon is also observed
+by Scholak et al. (2021), who used constrained de-
+coding to improve the validity, largely improving
+the parsing performance. For s-expression seman-
+tic parsing, invalid outputs take up 30–50% of all
+wrong outputs, and increasing the model size does
+not reduce invalidity signiﬁcantly. For fact veriﬁ-
+cation tasks, valid outputs are “entailed” and “re-
+futed”. We observe that T5 always generates valid
+outputs. For question answering, we do not include
+the validity analysis since the validity check for an
+answer is non-trivial and could be imprecise.
+Error analysis for text generation tasks For
+generation tasks, we consider four types of errors:
+missing information (required information is not609
+shown in the output), contradiction (the output is
+contradictory to the input), 3) hallucination (the
+output contains information that cannot be veriﬁed
+by the input), and 4) ungrammatical . Figure 3
+shows that the proportion of ungrammatical outputs
+is generally less than 5%. Missing information and
+contradiction are common errors made by T5, and
+performance gains generally come from reducing
+contradiction. Hallucination is not a common error
+made by T5 except for the highlighted-table-to-text
+task (ToTTo), where T5 tends to output information
+of non-highlighted cell values.
+Case study We summarize some interesting ob-
+servations about the model output (more in Ap-
+pendix H). Compared with T5-base and T5-large,
+T5-3B’s outputs for text generation tasks tend to be
+more diverse and creative as shown in Appendix
+H.2 and H.7. Also, T5-3B sometimes leverages do-
+main knowledge to summarize facts in some tasks
+such as DART (e.g., describing rating 5 out of 5 as
+low), while the other two copy the original expres-
+sions in the input, as shown in Appendix H.5 and
+H.6. However, this ability puts T5-3B in the risk
+of manipulating information and meaning of user
+request as shown in Appendix H.3.2 and H.4.
+5 Conclusions
+In this paper, we propose the U SKG frame-
+work to promote systematic research on struc-tured knowledge grounding by unifying 21 SKG
+tasks. Using U SKG as a benchmark, we
+demonstrate that ﬁnetuning T5 on individual tasks
+achieves state-of-the-art results on almost all 21
+tasks. We show that multi-task preﬁx-tuning bene-
+ﬁts most SKG tasks, largely improving the overall
+performance. For structured knowledge encoding,
+we ﬁnd that the effectiveness of encoding varia-
+tions varies across tasks. Moreover, U SKG
+is a challenging testbed for zero-shot and few-shot
+learning, shown by the poor results of large PLMs.
+6 Limitations
+U SKG establishes a powerful and repro-
+ducible starting point for SKG research. New mod-
+els can be easily applied to diverse SKG tasks, and
+new tasks can be easily framed based on our stan-
+dardized abstraction. U SKG promotes a
+systematic study on more general and robust ad-
+vances in structured knowledge encoding, multi-
+task learning, zero-shot learning, and few-shot
+learning for SKG tasks. It also would be interest-
+ing to explore general pretraining methods within
+U SKG, which potentially beneﬁt all the uni-
+ﬁed tasks. When the structured knowledge is too
+large for GPU memory, we truncate them based on
+heuristic rules, calling for future study on 1) incor-
+porating retrieval component in SKG, 2) designing
+sparse attention in T5 for structured knowledge or
+other means to improve model efﬁciency.
+U SKG currently provides the correct type
+of structured knowledge for each task. However,
+how a system searches for the correct structured
+knowledge resources, takes appropriate action, and
+integrates information and results from multiple
+structured sources given a user request is still under-
+explored, which are a prerequisite for building a
+uniﬁed multi-purpose SKG system.
+Since we select popular tasks from each task
+family, we risk disproportionality in terms of the
+data language, domain and population, and we ac-
+tively welcome diverse, multi-lingual tasks to be
+added into U SKG. Also, the error analysis
+of SKG can more ﬁne-grained, and we hope our
+ﬁndings can promote future work on systematically
+studying and decomposing the behavior of PLMs
+on SKG tasks. Furthermore, training and evalua-
+tion data should reﬂect the intents and linguistic
+phenomena in the real world (de Vries et al., 2020),
+suggesting more realistic tasks to be added into
+U SKG.610References611612613614615616A Contributions
+Code implementation Tianbao Xie and Chen
+Henry Wu implemented the code base of the U- SKG framework and experiment pipeline. The
+code of PICARD and advice from Torsten Scholak
+sped up the implementation.
+Task uniﬁcation Tianbao Xie, Peng Shi, Michi-
+hiro Yasunaga, Chen Henry Wu, and Ming Zhong
+implemented the 21 tasks into the text-to-text for-
+mat, adapted the metrics, and veriﬁed the perfor-
+mances.
+Paper writing Chen Henry Wu and Tianbao
+Xie ﬁnished most part of the paper. Michihiro
+Yasunaga, Peng Shi, and Chengzu Li added re-
+sults and analysis for their corresponding parts.
+Peng Shi drafted related work on SKG with PLMs.
+Torsten Scholak, Pengcheng Yin, Rui Zhang, Ruiqi
+Zhong, Victor Zhong, Michihiro Yasunaga, Connor
+Boyle, Chien-Sheng Wu, Sida Wang, Bailin Wang,
+Ansong Ni, Ziyu Yao, Lingpeng Kong, Caiming
+Xiong, Dragomir Radev, Noah A. Smith, and Luke
+Zettlemoyer carefully reviewed the paper and gave
+feedback for multiple rounds.
+Experiments Chen Henry Wu, Tianbao Xie,
+and Chien-Sheng Wu conducted experiments on
+individual tasks and multi-task learning. Tian-
+bao conducted the zero-shot learning experiments.
+Chengzu Li and Tianbao Xie conducted the few-
+shot learning experiments. Tianbao Xie conducted
+experiments on the ordering of sequence inputs and
+order-sensitivity. Chengzu Li, Connor Boyle, and
+Peng Shi conducted the experiments on converting
+structured knowledge into natural language.
+Human evaluation Chen Henry Wu organized
+the human evaluation. Torsten Scholak, Rui Zhang,
+Chengzu Li, Connor Boyle, Tianbao Xie, Peng
+Shi, Tao Yu, and Chen Henry Wu were the human
+participants.
+Error analysis and case study Tianbao Xie,
+Chen Henry Wu, and Michihiro Yasunaga designed
+and conducted the error analysis for semantic pars-
+ing and generation tasks. Authors who participated
+in the human annotation selected the cases for case
+study.
+Discussion We had three separate weekly meet-
+ings, and everyone in the project attended one of
+them. Torsten Scholak, Ruiqi Zhong, Pengcheng
+Yin, Victor Zhong, Peng Shi, Rui Zhang, Sida
+Wang, and Lingpeng Kong actively provided ad-
+vice. Torsten Scholak provided signals that preﬁx-
+tuning would be comparable to ﬁne-tuning. RuiqiZhong gave advice on analyzing the effect of model
+size, Pengcheng Yin and Peng Shi gave advice on
+analysis on converting structured knowledge into
+natural language. Pengcheng Yin helped interpret
+experimental results. Ziyu Yao suggested that we
+report both sota (w/ extra) and sota (w/o extra) for
+a fair comparison. Victor Zhong and Bailin Wang
+gave valuable suggestions on multi-task learning
+and task transfer analysis. Luke Zettlemoyer, Noah
+A. Smith, Caiming Xiong, and Dragomir Radev
+gave valuable comments on research questions and
+experimental design.
+Computing resources We thank Salesforce Re-
+search, an Amazon Research Award, ServiceNow
+Research, and Yale NLP for providing computing
+resources generously.
+Tao Yu designed and led the research.
+Acknowledgments
+We thank Yifei Min and Libo Qin for their early-
+stage discussion. We thank Panupong Pasupat and
+William W. Cohen for their valuable feedback on
+our initial draft. We thank Qian Liu for his TPX
+code and advice on question answering tasks. We
+thank wandb for free logging and OpenAI for free
+Codex usage.617B Results with Full Metrics
+For the KVRET dataset, instead of the version
+used in our main tables, we re-run another more
+widely used pre-processed version (Madotto et al.,
+2018; Wu et al., 2019; Qin et al., 2020) on T5-base,
+T5-large and T5-3b. Results are shown in Table 13.
+C Input and Output Length Analysis
+Linearization of large structured knowledge input
+(e.g., large tables and KGs) can be arbitrarily long,
+which needs to be truncated to ﬁt in GPUs with a
+limited size. The input and output are tokenized
+by T5Tokenizer in Huggingface’s Transformers.
+We visualize the length distribution in Figure 5,
+and details are presented in Table 14. Among the
+datasets with very long inputs, we choose Wik-
+iTableQuestion to study the impact of input length.
+We visualize the table length distribution and per-
+formances with different input truncation lengths in
+Figure 6. We observe that the accuracy increases as
+the input becomes longer, motivating future work to
+study how to effectively encode large structured in-
+put, e.g., leveraging sparse attention (Zaheer et al.,
+2020).618
+D Experimental Setup
+D.1 Implementation Details
+We use T5 (Raffel et al., 2020) as our backbone
+language model. Each experiment For T5-3B ex-
+periments, we use Deepspeedto save memory.
+We use batch size 32 as default, except WikiTQ,
+WikiSQL, and TabFact, for which for use batch
+size 128 because we found it to work signiﬁcantly
+better. We use the Adafactor optimizer for T5-base
+and T5-large, and AdamW for T5-3b. We evaluate
+on the development set for each 500 steps and use
+the average development set metric for best check-619
+point selection. For all tasks, we set learning rate
+to 5e-5 and used linear learning rate decay. All
+experiments are done on NVIDIA Tesla V100 and
+NVIDIA Tesla A100.
+D.2 Metric Details
+For most semantic parsing tasks, we report the ex-
+act match accuracy of logical forms, and for task
+has test suite (Zhong et al., 2020), we add test suite
+metric to represent model’s performance; an ex-
+ception is WebQSP, for which we follow previous
+work to execute the parses and report the F1 score.
+For QA, we report the exact match accuracy of
+answer sets. For data-to-text generation, we re-port sacre-BLEU (Post, 2018).We use each task’s
+representative metric used by previous works. For
+fact veriﬁcation, we report the accuracy. For high-
+ﬁdelity NLG, we report BLEC (Shu et al., 2021),
+which is the exact match between keywords in the
+formal language and the natural language. Unless
+speciﬁed, we use T5-large and report the develop-
+ment set performance.
+D.3 T0 Zero-shot Experimental Details
+For each task in U SKG we search Sanh et al.
+(2021) for the most similar instructions(if there is
+no one for use, we create one follow their writing620
+style), make our input in that format and directly
+test on T0 3B. The speciﬁc instructions are shown
+below.
+D.4 GPT3 and Codex Details
+D.4.1 Hyperparameter Settings
+Temperature For GPT3 and Codex, we set the
+decoding temperature to 0 (i.e., greedy decoding
+without sampling) for Spider, WikiTQ, MultiWoZ
+and TabFact. We observe a drop of 10% in the
+exact match metric when set the temperature to 1
+by default in OpenAI. For Codex, we tune the tem-
+perature from 0 to 1 in a step of 0.1 for DART,
+SQL2Text, and no signiﬁcant difference is ob-
+served. For GPT3, we do not tune on that to stay
+within our budget.
+Max output length We set max output length to
+256 for Spider, WikiTQ, MultiWoZ and SQL2Text,
+while 4 for TabFact to contain more length in the
+input side(the concept of max length in GPT3 and
+Codex is the sum of input tokens length and output
+tokens length). We set “\n” as the stop token.
+D.4.2 Prompts
+We use simple prompt words for each task to con-
+catenate the request, linearized structured knowl-
+edge, and context together. For example, for
+each example in WikiTQ, we format it as “ ex-
+amples \n\n[linearized table] || Write a answer for
+[request] \nThe answer is:”, and make GPT3 and
+Codex make the completion as prediction. We
+do experiments on Spider with different format of
+forming structured knowledge (e.g., linearization,
+description), but get a similar result. Better us-621age of GPT3 and Codex under the U SKG
+framework is an interesting direction.
+D.5 Human Evaluation
+Participants of our human evaluation are eight of
+the authors of this paper. They are familiar with
+the tasks being evaluated. The human evaluation
+guideline is shown below.D.6 Hyperparameters
+Shown in Table 17. For semantic parsing tasks, the
+decoding was done under the greedy search, where
+we set the beam size to 1 specially. For tasks with
+a long linearized sequence, we used 1024 as input
+length to hold the maximum of input; reasons are
+explained in App. C.
+E Training Details
+Here we show comparisons of ﬁnetuning and
+preﬁx-tuning on aspect of training. For preﬁx-
+tuning, we use random initialization as done by Li
+and Liang (2021). In general, preﬁx-tuning needs
+more steps than ﬁnetuning but has the ability to
+reach comparable results with continued training.
+F Task Uniﬁcation
+F.1 Term Deﬁnition
+Highlighted tables A highlighted table contains
+a table, table metadata (such as the title), and a set
+of highlighted cells which entails the text descrip-
+tion (Parikh et al., 2020).
+Relation-triples Relation triples are a set of
+subject-predicate-object triples to capture rich re-
+lationships in the data. Many data-to-text tasks
+such as DART (Nan et al., 2021b) take these rela-
+tion triples as inputs and generate natural language
+from them.
+Knowledge Graph A knowledge graph is a
+multi-relational graph composed of entities (nodes)
+and relations (different types of edges). Each edge
+is represented as a triple of the form (head entity,
+relation, tail entity), also called a fact, indicating
+that two entities are connected by a speciﬁc relation
+(Wang et al., 2017).
+Dialogue State and Ontology A dialogue state
+sat any turn tin a dialogue comprises the sum-
+mary of the dialogue history until turn t, such that
+scontains all sufﬁcient information for the system
+to choose the next action. (Williams et al., 2016)
+Speciﬁcally, it captures the user goals in the con-
+versation in the form of (slot, value) pairs. The
+set of possible slots is predeﬁned in the ontology
+O, typically domain-dependent, while the values
+assumed by each slots are provided by the user as
+a dialogue goal.622
+F.2 Linearization
+•Tables. Following Liu et al. (2021), we linearize
+the table into a sequence. By inserting several
+special tokens to indicate the table boundaries, a
+linearized table can be represented as “col: c, ...,
+crow 1 : rrow 2 : r...r”,NandMare
+the number of columns and rows.
+•Highlighted tables. Following Parikh et al.
+(2020), we represent each highlighted cell by
+concatenating its value, column headers, and row
+headers. The table is represented as the concate-
+nation of the page title, section title, and repre-
+sentations of all highlighted cells.
+•Relation-triples and knowledge graphs. Fol-
+lowing Nan et al. (2021b), each relation-triple
+is linearized as “ sub:rela:obj”, and different
+triples are joined by “ | ”. The subgraph retrieved
+from the knowledge graph is treated as a list of
+relation-triples and we use the same formulation.
+•Ontology. Following Hosseini-Asl et al. (2020)
+and Lin et al. (2021), for each slot in ontology,
+each slot along with its all possible values is for-
+matted as “ slot:value, ...value”, different
+slot-values are joined by “ | ”
+F.3 Output Format
+When the output is natural language orformal lan-
+guage we do not modify it because it is already insequence format; a set of answers , we use a comma
+followed by a space to join the answers; a Boolean
+value , we map True to “entailed” and False to “re-
+futed”; a dialogue state , we follow Hosseini-Asl
+et al. (2020) to place its slot-value pairs sequen-
+tially.
+G Input and Output Examples for Each
+Task
+G.1 Spider
+Structured Input:
+Request Input:
+Sequence Output:
+G.2 GRAILQA
+Structured Input:623
+Request Input:
+Sequence Output:
+G.3 CompWebQ
+Structured Input:
+Request Input:
+Sequence Output:
+G.4 WebQsp
+Structured Input:
+Request Input:
+Sequence Output:
+G.5 MTOP
+Structured Input:624Request Input:
+Sequence Output:
+G.6 WikiSQL
+Structured Input:
+Request Input:
+Sequence Output:
+G.7 WikiTableQuestions
+Structured Input:
+Request Input:
+Sequence Output:
+G.8 HybridQA
+Structured Input:
+Request Input:
+Sequence Output:
+G.9 MultiModalQA
+Structured Input:
+Request Input:
+Sequence Output:
+G.10 FeTaQA
+Structured Input:625
+Request Input:
+Sequence Output:
+G.11 DART
+Structured Input:
+Request Input:
+Sequence Output:
+G.12 ToTTo
+Structured Input:
+Request Input:
+Sequence Output:
+G.13 MultiWoZ2.1
+Structured Input:
+Request Input:
+Context:
+Sequence Output:
+G.14 KVRET
+Structured Input:626
+Request Input:
+Context:
+Sequence Output:
+G.15 SParC
+Structured Input:
+Request Input:
+Context:
+Sequence Output:
+G.16 CoSQL
+Structured Input:
+Request Input:Context:
+Sequence Output:
+G.17 SQA
+Structured Input:
+Request Input:
+Context:
+Sequence Output:
+G.18 TabFact
+Structured Input:
+Request Input:
+Sequence Output:627G.19 FEVEROUS
+Structured Input:
+Request Input:
+Sequence Output:
+G.20 SQL2Text
+Structured Input:
+Request Input:
+Sequence Output:
+G.21 Logic2Text
+Structured Input:
+Request Input:
+Sequence Output:H Case study
+H.1 Spider case
+H.1.1 Case 1:
+Structured Input:
+Request Input:
+Sequence Output:
+T5-base prediction (incorrect):
+T5-large prediction (correct):
+T5-3B prediction (correct):
+H.1.2 Case 2:
+Structured Input:
+Request Input:
+Sequence Output:
+T5-base prediction (incorrect):
+T5-large prediction (correct):628T5-3B prediction (correct):
+H.1.3 Case 3:
+Structured Input:
+Request Input:
+Sequence Output:
+T5-base prediction (incorrect):
+T5-large prediction (incorrect):
+T5-3B prediction (correct):
+H.2 FeTaQA case
+Structured Input:
+Request Input:
+Sequence Output:
+T5-base prediction (incorrect):T5-large prediction (incorrect):
+T5-3B prediction (correct):
+H.3 KVRET case
+H.3.1 Case 1:
+Structured Input:
+Request Input:
+Context Input:
+Sequence Output:
+T5-base prediction (correct):
+T5-large prediction (incorrect):
+T5-3B prediction (incorrect):
+H.3.2 Case 2:
+Structured Input:629Request Input:
+Context Input:
+Sequence Output:
+T5-base prediction (correct):
+T5-large prediction (correct):
+T5-3B prediction (incorrect):
+H.4 SQL2Text case
+Query:
+Sequence Out:
+T5-base prediction (incorrect):
+T5-large prediction (correct):
+T5-3B prediction (incorrect):
+H.5 DART case
+Structured Input:
+Sequence Output:T5-base prediction (correct):
+T5-large prediction (correct):
+T5-3B prediction (correct):
+H.6 Logic2Text case
+Structured Input:
+Request Input:
+Sequence Output:
+T5-base prediction (incorrect):
+T5-large prediction (incorrect):
+T5-3B prediction (correct):
+H.7 ToTTo case
+Structured Input: See Figure 7.
+Sequence Output:
+T5-base prediction (incorrect):630
+T5-large prediction (incorrect):
+T5-3B prediction (correct):
+I Natural Language Template Examples
+I.1 Spider Template
+Overall Description Template:
+Primary Key Template:
+Table Description Template:
+Foreign Keys Description Template:
+I.2 TabFact Template
+Template Examples:
+I.3 WikiSQL Template
+Template Example:631

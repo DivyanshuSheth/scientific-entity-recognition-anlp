@@ -1,1 +1,736 @@
-10659 Proceedings of the 2022 Conference on Empirical Methods in Natural Language Processing , pages 10659 10670 December 7 - 11 , 2022 © 2022 Association for Computational Linguistics 10660 10661 10662 10663 10664 10665 10666 10667 10668 10669 10670 
+
+Tianhao Shen, Mingtong Liu, Ming Zhou, Deyi XiongCollege of Intelligence and Computing, Tianjin University, Tianjin, ChinaBeijing Lanzhou Technology Co., Ltd., Beijing, China
+{thshen,dyxiong}@tju.edu.cn ,
+{liumingtong,zhouming}@langboat.com
+Abstract
+Negative samples have not been efficiently ex-
+plored in multilingual dense passage retrieval.
+In this paper, we propose a novel multilingual
+dense passage retrieval framework, mHFN, to
+recover and utilize hard and false negative sam-
+ples. mHFN consists of three key components:
+1) a multilingual hard negative sample aug-
+mentation module that allows knowledge of
+indistinguishable passages to be shared across
+multiple languages and synthesizes new hard
+negative samples by interpolating representa-
+tions of queries and existing hard negative sam-
+ples, 2) a multilingual negative sample cache
+queue that stores negative samples from pre-
+vious batches in each language to increase
+the number of multilingual negative samples
+used in training beyond the batch size limit,
+and 3) a lightweight adaptive false negative
+sample filter that uses generated pseudo labels
+to separate unlabeled false negative samples
+and converts them into positive passages in
+training. We evaluate mHFN on Mr. TyDi,
+a high-quality multilingual dense passage re-
+trieval dataset covering eleven typologically di-
+verse languages, and experimental results show
+that mHFN outperforms strong sparse, dense
+and hybrid baselines and achieves new state-
+of-the-art performance on all languages. Our
+source code is available at https://github.
+com/Magnetic2014/mHFN .
+1 Introduction
+Passage retrieval, which matches relevant passages
+to queries, is an important task in Information Re-
+trieval (IR). It can be also integrated as a core com-
+ponent to solve many Natural Language Processing
+(NLP) problems, e.g., open domain question an-
+swering (Chen et al., 2017), fact checking (Thorne
+et al., 2018), etc. Powered by large scale pretrained
+language models (e.g. BERT (Devlin et al., 2019),RoBERTa (Liu et al., 2019), and T5 (Raffel et al.,
+2020)), dense passage retrieval, which explores
+dense vector representations to match relevant pas-
+sages, has attracted growing interest (Gao et al.,
+2020; Khattab and Zaharia, 2020; Karpukhin et al.,
+2020; MacAvaney et al., 2020a; Qu et al., 2021;
+Zhan et al., 2021; Xu et al., 2022; Gao et al., 2021a).
+Dense passage retrieval models usually adopt a
+bi-encoder (also known as dual-encoder) architec-
+ture, one encoder for encoding queries, the other
+for learning passage representations, which can be
+computed offline. With dense representations of a
+query and document, passage ranking is recast as
+a nearest neighbor search problem that can be effi-
+ciently solved by similarity search toolkits tailored
+for dense vectors, such as Faiss (Johnson et al.,
+2019).
+Dense passage retrieval models are usually
+trained via Contrastive Learning (CL), which en-
+courages query representations to be close to pos-
+itive (i.e., relevant) passages and away from neg-
+ative (i.e., irrelevant) passages in the learned se-
+mantic space. Many previous studies demonstrate
+the effectiveness of CL in dense passage retrieval
+(Karpukhin et al., 2020; Qu et al., 2021; Xu et al.,
+2022). Under this CL-based dense passage retrieval
+setting, using more negative samples has proved
+beneficial to models (Wu et al., 2020; Chen et al.,
+2020; He et al., 2020; Giorgi et al., 2021; Gao
+et al., 2021c). Specifically, hard negative samples
+(i.e., negative samples which are similar to positive
+samples) are more desirable than ordinary nega-
+tive samples for tuning the dense representations of
+queries and passages (Qu et al., 2021; Zhan et al.,
+2021).
+As multilingual pretrained language models
+(e.g., mBERT (Devlin et al., 2019)) have exhib-
+ited cross-lingual generalization and knowledge
+transfer from high-resource to low-resource lan-
+guages, it is natural to extend the monolingual DPR
+model (Karpukhin et al., 2020) to multilingual DPR10659(e.g., mDPR (Zhang et al., 2021)) by replacing the
+monolingual backbone model with a multilingual
+pretrained language model. Such a multilingual set-
+ting is promising for languages without sufficient
+training data.
+Unfortunately, negative samples are not effi-
+ciently explored in existing multilingual dense pas-
+sage retrieval models. First, current multilingual
+dense passage retrieval models develop hard neg-
+ative samples for each language in a separate and
+independent way, which is unable to share the com-
+mon features of indistinguishable passages across
+languages. Second, in order to increase the number
+of negative samples, the in-batch and cross-batch
+negative technique are widely used in dense pas-
+sage retrieval (Karpukhin et al., 2020; Qu et al.,
+2021), where negative samples are sampled from
+the same batch as positive samples and shared
+across all GPUs. However, this will quickly ex-
+haust GPU memory with growing negative samples,
+hence making it difficult to increase the number of
+negative samples further. Third, as the number of
+negative samples increases, false negative samples
+(i.e., unlabeled relevant passages) will also grow in
+number, which would make it harder for training to
+converge and mislead the direction of optimization
+since false negative samples are actually positive.
+As shown in the Figure 1, it is desirable to make
+representations of unlabeled false negative samples
+close to positive samples and keep hard negative
+samples as distant as possible.
+In this paper, our key interest lies in a multilin-
+gual dense passage retrieval task, where a unified
+retrieval model is used to retrieve in-language (i.e.,
+in the same language as the given query) relevant
+passages for multiple languages. To efficiently uti-
+lize negative samples (especially hard and false
+negative samples) and solve the aforementioned is-
+sues, we propose mHFN, a new multilingual dense
+passage retrieval framework with Hard and False
+Negative samples. To model hard negative sam-
+ples, we propose a multilingual hard negative sam-
+ple augmentation module that shares hard negative
+samples across languages and generates synthetic
+negative sample representations. In this way, we
+force the model to learn efficient features to distin-
+guish between positive and hard negative samples
+that are similar to each other. To handle false nega-
+tive samples, we introduce a multilingual negative
+sample cache queue that stores negative samples
+from previous batches in each language as candi-
+dates. An adaptive false negative sample filter is
+then adopted to filter out the unlabeled false neg-
+ative samples from in-batch and cached negative
+samples. The filtered false negative samples are
+further used as positive samples to boost training.
+mHFN achieves a balance between the quantity
+and quality of negative samples by recovering the
+most valuable negative samples (i.e., hard and false
+negative samples) from all negative samples.
+Our contributions can be summarized as follows:
+•We propose a multilingual hard negative sam-
+ple augmentation module to share hard neg-
+ative samples across languages and generate
+diverse augmented negative samples, which
+improves both the quantity and quality of hard
+negative samples.
+•In order to add more candidate negative sam-
+ples beyond the batch size limit, we present a
+multilingual negative cache queue to store neg-
+ative samples in each language. This queue
+is dynamically updated to keep the encoded
+representations in the similar hidden space
+and consistent with the encoder in the current
+training step.
+•To adaptively separate the unlabeled false neg-
+ative samples from all candidate negative sam-
+ples, we propose a lightweight adaptive false
+negative sample filter, which uses generated
+pseudo labels to filter out false negative sam-
+ples. The recovered false negative samples
+are used as positive instances to speed up the
+convergence of training.
+•Experimental results show that mHFN signifi-
+cantly outperforms state-of-the-art baselines,
+by 7.9% and 6.5% in average MRR@100 and
+Recall@100 over all languages respectively
+on Mr. TyDi (Zhang et al., 2021), a high-
+quality multilingual passage retrieval bench-
+mark dataset.106602 Related Work
+Monolingual Dense Passage Retrieval The past
+few years have witnessed growing interest in mono-
+lingual dense passage retrieval. DPR (Karpukhin
+et al., 2020) is built on a bi-encoder architecture,
+which is initialized with BERT (Devlin et al., 2019)
+and outperforms early dense retrieval methods.
+RocketQA (Qu et al., 2021) first mines hard neg-
+ative samples with a trained retrieval model and
+then uses the mined negative samples to re-train
+the model. However, RocketQA requires a pre-
+trained cross-encoder to filter out false negative
+samples, which is not efficient and must be trained
+in advance. TAS-B (Hofstätter et al., 2021) is also
+a retrieval model using the bi-encoder architecture.
+It utilizes topic-aware sampling to improve train-
+ing with in-batch negative samples, and applies
+a dual-teacher supervision paradigm to achieve
+better knowledge distillation from both a cross-
+encoder and a ColBERT (Khattab and Zaharia,
+2020) teacher model simultaneously. Other studies
+further apply hard negative sample mining to train
+dense passage retrieval models. Gao et al. (2021b)
+and Karpukhin et al. (2020) use BM25 (Robertson
+et al., 2009) top passages as hard negative sam-
+ples. ANCE (Xiong et al., 2021) enhances hard
+negative sampling by dynamically mining hard
+negative samples in the training phase. However,
+it requires periodically rebuilding the index and
+refreshing hard negative samples, which greatly
+increases computational cost. Zhan et al. (2021)
+combine static BM25 hard negative samples with
+dynamic hard negative samples retrieved from the
+entire corpus by the model at the current training
+step.
+Multilingual and Cross-lingual Dense Passage
+Retrieval Researchers have been utilizing cross-
+lingual knowledge transfer to enhance monolingual
+retrieval for low-resource languages since the ad-
+vent of multilingual pretrained language models.
+Both MacAvaney et al. (2020b) and Shi et al. (2020)
+investigate zero-shot transfer using a cross-encoder
+architecture, in which they first fine-tune mBERT
+on the source language, then apply the model to
+the target language directly. However, the cross-
+encoder architecture they use is slow in practice. In
+contrast, bi-encoders equipped with nearest neigh-
+bor vector search tools such as Faiss (Johnson et al.,
+2019) run much faster than cross-encoders since the
+dense representations can be computed and indexedin advance. Asai et al. (2021b) also utilize mBERT
+to perform retrieval in the many-to-many scenario.
+By retrieving in a multilingual pool, they train a
+model to answer a query in any specific languages.
+However, this diverges from our setting, where we
+solely focus on using a unified model to conduct
+in-language retrieval for multiple languages.
+For datasets, Mr. TyDi(Zhang et al., 2021) col-
+lects queries and passages in eleven typologically
+diverse languages from Wikipedia. To the best of
+our knowledge, it is the only publicly available
+dataset that can be used for our multilingual pas-
+sage retrieval experiments. Other datasets, such
+as XOR-TyDi (Asai et al., 2021a) and CLIRMa-
+trix (Sun and Duh, 2020), focus on cross-lingual
+retrieval instead. Based on the Mr. TyDi dataset,
+Zhang et al. (2022) empirically investigate the best
+practice of training multilingual dense passage re-
+trieval models. However, they have not studied the
+impact of the number of negative samples and the
+side effect of false negative samples.
+3 Methodology
+In this section, we elaborate the proposed mHFN,
+as illustrated in Figure 2, which aims to utilize
+hard and false negative samples in multilingual
+dense passage retrieval. It is comprised of three
+essential components: a multilingual hard negative
+sample augmentation module that shares hard neg-
+ative knowledge across languages, a multilingual
+negative sample cache queue that stores extra nega-
+tive samples in each language beyond the limit of
+in-batch negative samples, and an adaptive false
+negative sample filter that filters out unlabeled false
+negative samples from candidate negative samples
+during training.
+3.1 The Bi-Encoder Architecture
+Our multilingual passage retrieval model mHFN is
+developed with the bi-encoder architecture, where
+a retrieval model uses a query encoder E(·)and a
+passage encoder E(·)to obtain the query and pas-
+sage representations respectively. The dot product
+between the query qand a candidate passage pcan
+then be computed as their similarity:
+sim(q,p) =E(q)·E(p) (1)
+For a query q, the top-k most similar passages
+will be retrieved. In order to achieve efficient re-
+trieval, it is preferable to separate the encoding10661
+process of queries and that of passages, and the
+passage representations are precomputed in prac-
+tice.
+3.2 Multilingual Hard Negative Sample
+Augmentation
+In order to incorporate hard negative samples into
+multilingual retrieval models, a simple solution is
+to treat each language independently. In this case,
+hard negative samples are computed and main-
+tained in each language separately like a monolin-
+gual retrieval model. This method is used in mDPR
+(Zhang et al., 2021). However, if we consider hard
+negative samples as a knowledge source that indi-
+cates the most confused answers for the retrieval
+model, they shall be shared across multiple lan-
+guages, which will make passage representations
+of low-resource languages more discriminative to
+differentiate between positive and negative samples
+with the help from high-resource languages.
+To achieve this goal, we propose a multilingual
+hard negative sample augmentation module. This
+module has three components: translator ,index
+gatherer & dispatcher , and hard negative sam-
+ple augmenter , which collectively enable multi-
+ple languages to share hard negative “knowledge”so that low-resource languages can benefit from
+high-resource language data to improve the overall
+modeling capability.
+As shown in Figure 2, we first use the translator
+(based on MarianNMT (Junczys-Dowmunt et al.,
+2018)) to translate the entire dataset from corre-
+sponding source language lto other languages
+l,···, lto construct pseudo parallel corpora.
+Then, as a standard practice (Karpukhin et al., 2020;
+Zhang et al., 2021, 2022), we use BM25 (Robert-
+son et al., 2009) to retrieve top-30 non-positive
+results as hard negative samples (denoted as H)
+for each language. With these hard negative sam-
+ples, for each query in the source language q,
+we combine all corresponding indices of negative
+samples for those pseudo parallel queries gener-
+ated from the original query (index gatherer). Then
+we dispatch these indices to each language (index
+dispatcher). This will make the embedded hard
+negative knowledge shared across languages, espe-
+cially for low-resource ones:
+I=∪{j|p∈ H}, (2)
+H={p|j∈ I} (3)10662where s= 1,2,···, n.His the combined hard
+negative set, and pis the j-th negative passage in
+the hard negative sample set of language l.
+Inspired by Kalantidis et al. (2020), we further
+linearly interpolate representations of queries and
+randomly chosen hard negative samples to provide
+synthetic hard negative samples (hard negative sam-
+ple augmenter):
+˜h=αE(q) +βE(p) +γE(p),(4)
+h=˜h
+∥˜h∥(5)
+where qis a query, and p,pare two random hard
+negative samples in H.EandEdenote query
+encoder and passage encoder respectively. his
+the synthetic hard negative sample representation
+and will be added to the combined hard negative
+sample set H.α∈(0,0.5), β∈(0,1), γ∈(0,1)
+are interpolation coefficients which satisfy α+β+
+γ= 1. Note that following (Kalantidis et al., 2020),
+we set α∈(0,0.5)to guarantee that the query’s
+contribution is always smaller than those of hard
+negative samples.
+3.3 Multilingual Negative Sample Cache
+Queue
+Existing in-batch negative sampling method tech-
+nique enables retrieval models to use other samples
+in the current mini-batch as negative samples to
+make full use of training data with little training
+cost (Karpukhin et al., 2020). In this method, the
+number of negative samples depends on the mini-
+batch size, which is bounded by GPU memory.
+To further increase the number of negative sam-
+ples from multiple languages under the multilin-
+gual setting, we propose a multilingual negative
+sample cache queue to help improve the encoded
+representations, as shown in Figure 2.
+First, we build multiple batches where data in
+the same batch are always in the same language,
+which will be helpful to training because it pre-
+vents in-batch negative sampling from being de-
+generated into a language detection task, where
+the model tries to distinguish positive passages (in
+one language) from negative samples (in another
+language), as pointed by Zhang et al. (2022).
+Then, we maintain multiple cache queues as ex-
+ternal negative sample pools, where each language
+lhas its own queue Q. When we train the retrieval
+model with a batch Bin language l, for each query
+qinB, we filter out the in-batch negative samplesalong with the passage representations stored in Q
+via the false negative sample filter introduced in
+section 3.4 to obtain true negative samples. These
+true negative samples are combined with the origi-
+nal and synthetic hard negative samples for train-
+ing. When the model completes training with the
+current batch Bfor language l, all passage repre-
+sentations (including both positive and negative)
+introduced will be added into Qfor subsequent
+training with gradient disconnected. Considering
+the number of languages may be large, in order
+to keep multilingual scalability, we maintain these
+queues in RAM’s pinned memory instead of GPU
+memory, which allows GPU devices to directly
+fetch them without CPU call. In our pilot experi-
+ment, this practice makes little compromise on the
+training speed since CUDA uses Direct Memory
+Access (DMA) to transfer pinned memory to GPU,
+and only one queue is loaded into GPU memory
+each time. This multilingual negative sample cache
+queue significantly enlarges the number of nega-
+tive samples for multiple languages. The size of the
+cache queue for each language is only limited to a
+capacity threshold Cwhich depends on the memory
+size and can be much larger than the batch size. If
+a cache queue is full, the earliest representations in
+the cache queue will be dequeued to achieve rolling
+updates.
+3.4 Adaptive False Negative Sample Filter
+In passage retrieval datasets, annotated positive pas-
+sages only occupy a small portion, and a large num-
+ber of actually positive passages are unlabeled and
+thus treated as negative ones (Qu et al., 2021). This
+becomes a problem for CL-based dense passage
+retrieval models because the models will falsely
+push apart the queries from these false negative
+samples, making training hard to converge. Cur-
+rent approaches in monolingual retrieval, such as
+RocketQA (Qu et al., 2021), still require a cross-
+encoder-based false negative sample filter to gen-
+erate pseudo labels for unlabeled data and then
+filter out the false negative samples. However,
+cross-encoders are quite inefficient in both training
+and inference, especially for multilingual retrieval
+datasets at a potentially larger scale.
+In order to efficiently filter out false negative
+samples, we propose an adaptive false negative
+sample filter. Particularly, for each query qin
+batchB, we combine positive passages, in-batch
+negative samples and cached negative samples into10663a passage set P, and use K-means to group these
+passages into Kclusters. To avoid manual tuning
+forK, we use gap statistic (Tibshirani et al., 2001)
+to automatically determine the optimal Kfor data.
+We then use Gumbel-Softmax (Jang et al., 2017)
+to randomly assign pseudo labels, where the proba-
+bility of each label Lis the normalized similarity
+with each cluster center c:(6) (7)
+where g,···, g∼Gumbel (0,1), and τdenotes
+the temperature hyper-parameter which controls
+the closeness between Gumbel-Softmax distribu-
+tion and the categorical distribution. The proba-
+bility of each pseudo label tends to be uniform as
+τincreases and become one-hot otherwise. We
+choose the index of the maximum yas the pseudo
+label for each passage. After assigning the pseudo
+labels, we treat the negative samples which have
+the same pseudo label as the positive passages as
+false negative passages, and exclude them from the
+negative passage set.
+We further use τto control the confidence of
+label assignment. Since passage representations are
+not optimized at the beginning of training, pseudo
+labels are relatively unreliable. So the τshould be
+higher to achieve more random label assignments.
+As training continues, passage representations are
+gradually optimized, so pseudo labels should be
+assigned with higher confidence (i.e., with a lower
+τ) at this moment. Thus, we apply a decaying
+schedule on τto control the confidence by training
+steps:
+τ=τ
+# Training steps(8)
+where τis relatively large to make Gumbel-
+Softmax distribution close to uniform distribution
+at early training steps.
+3.5 Loss Function
+We use the NCE loss to optimize the mHFN model.
+Since false negative samples are actually positive,
+we can treat them as positive passages when calcu-
+lating the loss function to achieve better utilization:
+L=−/summationdisplayloge
+e+/summationtexte
+−/summationdisplayloge
+e+/summationtexte(9)
+where q,pandpindicate the query, corre-
+sponding positive and negative passages respec-
+tively. Lis the pseudo label of the corresponding
+positive passages for q.
+The confidence is relatively low at the beginning
+of training. Hence, we only use false negative
+samples as positive passages in the loss function
+(i.e., the second term in the loss function) when the
+confidence becomes relatively higher after 20% of
+training steps.
+4 Experiments
+4.1 Dataset and Evaluation Metrics
+We chose Mr. TyDi (Zhang et al., 2021) to evalu-
+ate our proposed model. Mr. TyDi (Zhang et al.,
+2021) is a multilingual retrieval benchmark dataset
+constructed from TyDi QA (Clark et al., 2020), a
+question answering dataset covering eleven typo-
+logically diverse languages. Given a query, the goal
+of Mr. TyDi is to find relevant passages in a pool
+of Wikipedia passages in the same language. The
+detailed statistics of the dataset are shown in Table
+1, which are copied from the original Mr. TyDi
+paper. Following the original setting in Mr. TyDi,
+we report MRR@100 and Recall@100 on the test
+set of each language.10664
+4.2 Baselines
+In the original Mr. TyDi benchmark (Zhang et al.,
+2021), there are three types of baselines: sparse,
+dense, and hybrid. The sparse baselines are im-
+plemented with Pyserini (Lin et al., 2021) using
+BM25 (Robertson et al., 2009), along with a “tuned”
+BM25 baseline which optimizes MRR@100 by tun-
+ing the default BM25 parameters kandbon the
+development set. We denote these two baselines as
+BM25 (default) andBM25 (tuned) respectively.
+The dense baseline is mDPR (Zhang et al., 2021),
+which is a neural model fine-tuned on the Natu-
+ralQuestions dataset (Kwiatkowski et al., 2019)
+using the DPR (Karpukhin et al., 2020) pipeline
+and mBERT encoder. The hybrid baseline is a com-
+bination of the dense baseline and the tuned BM25
+sparse baseline, which is denoted by mDPR (hy-
+brid) . The final fusion score of the hybrid baseline
+is calculated by s +α·s , where s
+ands represent the normalized scores from
+the sparse and dense retrieval baseline respectively.
+The hyper-parameter αis also tuned on the devel-
+opment set by optimizing MRR@100. Following
+the above setting, we also report the performance
+of our hybrid model, which uses the same fusion
+strategy as the hybrid baseline on our model and
+the tuned BM25 baseline.
+Considering that the dense baseline is under zero-
+shot setting (i.e., not trained on Mr. TyDi), for afair comparison, we report the result of mDPR fine-
+tuned on Mr. TyDi training set from Zhang et al.
+(2022) as an additional baseline. We denote this
+model as mDPR (FT) . The implementation details
+are shown in Appendix 4.3.
+4.3 Implementation Details
+Our models were built upon Tevatron (Gao et al.,
+2022), a lightweight and efficient dense passage
+retrieval toolkit. Following Zhang et al. (2022), we
+use the same built-in procedure in Tevatron to con-
+duct preprocessing on the Mr. TyDi dataset. The
+query encoder and passage encoder were initial-
+ized using mBERT-base (110M parameters) with
+shared parameters. We used AdamW optimizer for
+optimization, and the learning rate was set to 5e-5.
+The initial temperature hyper-parameter τwas set
+to 100. The multilingual negative sample cache
+queue had a default maximum capacity Mof 20k
+for each language l.
+In all experiments, we trained the model with 2k
+steps on 4 NVIDIA A6000 48GB GPUs. The batch
+size was set to 256 for each GPU. All experimental
+results reported were averaged over 5 runs with
+different random seeds.
+4.4 Main Results
+We show the main results of mHFN on the Mr.
+TyDi dataset in Table 2. As can be seen, mHFN10665surpasses all baseline models by a large margin
+and achieves state-of-the-art performance for all
+languages on the Mr. TyDi dataset. Specifically,
+the sole mHFN model outperforms over tuned
+BM25, mDPR, mDPR (hybrid) and mDPR (FT)
+by 38.1%/18.1%, 44.7%/33.6%, 25.6%/12.1% and
+7.9%/6.5% in average MRR@100/Recall@100,
+respectively. The hybrid model of mHFN and
+BM25 takes a step further to improve the average
+MRR@100 and Recall@100 over all languages
+by 4.1% and 0.9% compared to the sole mHFN
+model.
+5 Analysis
+5.1 Ablation Study
+In order to further analyze the effectiveness of
+each component, we conduct three ablation stud-
+ies to quantify the contribution of various factors:
+the multilingual hard negative sample augmenta-
+tion, multilingual negative sample cache queue, and
+adaptive false negative sample filter.
+Effect of the multilingual hard sample nega-
+tive augmentation To demonstrate the effective-
+ness of the multilingual hard negative sample aug-
+mentation module, we show the results of mHFN
+without the index gatherer & dispatcher, hard neg-
+ative sample augmenter, and both. As Table 2
+shows, the removal of the multilingual hard nega-
+tive sample augmentation module (including both
+the index gatherer & dispatcher and hard nega-
+tive sample augmenter) leads to a significant per-
+formance drop of average 3.7% MRR@100 and
+5.8% Recall@100 on all languages. Specifically,
+the removal of the index gatherer & dispatcher
+results in a drop of average 2.3% and 3.1% in
+MRR@100 and Recall@100 in all languages re-
+spectively. Especially, the three languages which
+have the smallest amount of training data (Ko-
+rean, Bengali, and Swahili) suffer from the largest
+performance drop of 3.7%/6.8%, 3.4%/4.8%, and
+2.6%/3.8% in MRR@100/Recall@100. These re-
+sults suggest that the index gatherer & dispatcher
+can share knowledge of hard negative samples
+across languages, which is beneficial to mHFN,
+especially for low-resource languages. We also
+observe a similar performance drop for the hard
+negative sample augmenter. This is because the
+hard negative sample augmenter can dynamically
+synthesize new hard negative samples based on ex-
+isting static (i.e. generated before the actual train-
+ing phase) BM25 hard negative samples duringtraining, which enriches the diversity of negative
+samples and thus benefits the model.
+Effect of the multilingual negative sample cache
+queue We also conducted an ablation study on
+the multilingual negative sample cache queue to
+demonstrate the effectiveness of incorporating
+more negative samples into multilingual dense pas-
+sage retrieval. As can be seen in Table 2, the per-
+formance of mHFN with the multilingual negative
+sample cache queue is better than that without it.
+Specifically, we observe an average 2.6% and 3.9%
+drop in MRR@100 and Recall@100 respectively
+in all languages. These results indicate that the mul-
+tilingual negative sample cache queue can increase
+the number of negative samples for each language,
+which leads to a better performance of mHFN. We
+further analyzed the impact of the size of the cache
+queue on performance. The experimental results
+show that the performance can be improved with
+a larger cache queue, especially with the adaptive
+false negative sample filter.
+Effect of the false negative sample filter We
+conducted another ablation study to demonstrate
+the effectiveness of the adaptive false negative sam-
+ple filter. As shown in Table 2, its absence leads
+to a significant performance drop of average 3.0%
+MRR@100 and 4.0% Recall@100 in all languages.
+We speculate that it is likely to bring noise that will
+falsely guide the model to distinguish unlabeled
+positive samples from labeled positive samples if
+we simply use in-batch and cached negative sam-
+ples. As a comparison, we propose an adaptive
+negative sample filter to dynamically filter out false
+negative samples and use them as positive passages
+to further improve the multilingual dense passage
+retrieval, and results show that the false negative
+sample filter can further improve the performance
+based on the multilingual negative sample cache
+queue with quality-enhanced negative passages.
+5.2 Case Study And Visualization
+We provide two examples of mHFN vs. mDPR in
+Table 3.
+In the first example, both mDPR and mHFN
+exclude hard negative samples from the top 100
+retrieval results. The example-relevant false nega-
+tive sample is excluded by mDPR from the top 100
+retrieval results, while mHFN ranks the relevant
+false negative sample in the second place. This is
+because the valuable false negative samples can be
+discovered and filtered out by mHFN, which will10666
+then be used as positive samples to achieve better
+retrieval.
+In the second example, mHFN also gives a much
+higher ranking to the labeled positive answer. Es-
+pecially, the average rank of hard negative samples
+(20.67) is even higher than the labeled positive an-
+swer (43). The top 100 retrieval results of mDPR
+contain more hard negative samples than mHFN.
+This is because our multilingual hard negative sam-
+ple augmentation module can share the knowledge
+of indistinguishable passages across languages, and
+then synthesize various hard negative samples to
+further improve the discrimination between posi-
+tive and negative samples.
+The visualization of the earned representations
+of queries, hard negative samples, and false neg-
+ative samples of mHFN vs. mDPR is shown in
+Figure 1. It is clear that our model is capable of
+separating hard and false negative samples from
+ordinary negative samples.
+5.3 Analysis on the Size of the Multilingual
+Negative Sample Cache Queue
+An important variable in our model is the size of the
+multilingual negative sample cache queue M. We
+conducted experiments to investigate its effect. We
+show the results of mHFN with different lengths of
+cache queue in Figure 3. It can be seen that the aver-age MRR@100 and Recall@100 over all languages
+can be improved with increasing queue size (i.e.,
+an increasing number of negative samples). How-
+ever, the overall performance basically remains
+unchanged when the size > 8k if the false negative
+sample filter is not used, whereas the performance
+is stably improving along the increasing queue size
+if the false negative sample filter is present. We
+conjecture that as the number of negative samples
+increases, more false negative cases are also intro-
+duced, which may hurt training. The false negative
+sample filter can be considered as a purifier that
+separates the adaptive false negative samples from
+all candidate negative samples and thus enhances
+the overall quality of negative samples.
+6 Conclusion
+In this paper, we have presented a novel multilin-
+gual dense passage retrieval model, mHFN, which
+efficiently explores hard and false negative samples.
+It can 1) efficiently share hard negative samples
+across languages and generate augmented high-
+quality hard negative samples, 2) increase the num-
+ber of multilingual negative samples, and 3) adap-
+tively filter out unlabeled false negative samples
+from all candidate negative samples for effective
+training.
+Experiments and in-depth analysis validate the
+effectiveness of mHFN and demonstrate that it out-
+performs the strong sparse, dense, and hybrid base-
+lines, setting new state-of-the-art results on the Mr.
+TyDi dataset.
+Acknowledgements
+This work was partially supported by Zhejiang Lab
+(No. 2022KH0AB01). We would like to thank
+the anonymous reviewers for their insightful com-
+ments.10667Limitations
+Although we propose a multilingual negative sam-
+ple cache queue to mitigate the limit of GPU mem-
+ory, several powerful GPUs are still necessary to
+speed up training. Additionally, as the corpus is
+much larger than the training data, it is also time-
+consuming to encode the entire corpus in the eval-
+uation phase, which makes real-time evaluation
+much more difficult with a huge corpus for most
+pretrained model-based dense passage retrieval
+models. For example, it takes us more than 10
+hours to evaluate a checkpoint on a single NVIDIA
+A6000 GPU for all languages in the Mr. TyDi
+dataset. There are some possible solutions, like
+sampling a random subset of the corpus for approx-
+imate evaluations, or evaluating asynchronously
+with a specialized validation toolkit such as Async-
+val(Zhuang and Zuccon, 2022). We leave this
+issue to our future work.
+Ethics Statement
+mHFN is trained on the Mr. TyDi dataset, which
+is originated from Wikipedia. Since Wikipedia
+can be edited by anyone, it may contain inappro-
+priate content at the time of dataset construction.
+Therefore, we advise users to carefully examine the
+ethical implications of the retrieved results and to
+apply our retrieval model with caution in real-world
+scenarios. However, since there is a highly active
+community of volunteers to inspect the content and
+ensure the overall correctness, appropriateness, and
+quality of Wikipedia, our mHFN has lower ethical
+risk compared to the dense passage retrieval models
+trained with uncensored web-crawled data. Also,
+due to the characteristics of the dense passage re-
+trieval task, the ethical risk of mHFN is also lower
+than generative auto-regressive language models
+(Bender et al., 2021). Meanwhile, mHFN achieves
+high-quality dense passage retrieval for eleven ty-
+pologically diverse languages, which contributes to
+the equality and diversity of language technology.
+References106681066910670

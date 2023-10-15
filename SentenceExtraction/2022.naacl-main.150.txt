@@ -1,1 +1,950 @@
-2055 Proceedings of the 2022 Conference of the North American Chapter of the Association for Computational Linguistics : Human Language Technologies , pages 2055 2078 July 10 - 15 , 2022 © 2022 Association for Computational Linguistics 2056 2057 2058 2059 2060 2061 2062 2063 2064 2065 2066 2067 2068 2069 2070 2071 2072 2073 2074 2075 2076 2077 2078 
+
+Guangyi Liu, Zichao Yang, Tianhua Tao, Xiaodan Liang,
+Junwei Bao, Zhen Li, Xiaodong He, Shuguang Cui, Zhiting HuChinese University of Hong Kong, Shenzhen,Carnegie Mellon University,Tsinghua University,Sun Yat-Sen University,JD AI Research,UC San Diego
+Abstract
+Neural text generation models are typically
+trained by maximizing log-likelihood with the
+sequence cross entropy (CE) loss, which en-
+courages an exact token-by-token match be-
+tween a target sequence with a generated se-
+quence. Such training objective is sub-optimal
+when the target sequence is not perfect, e.g.,
+when the target sequence is corrupted with
+noises, or when only weak sequence supervi-
+sion is available. To address the challenge, we
+propose a novel Edit-Invariant Sequence Loss
+(EISL ), which computes the matching loss of
+a target n-gram with all n-grams in the gen-
+erated sequence. EISL is designed to be ro-
+bust to various noises and edits in the target
+sequences. Moreover, the EISL computation
+is essentially an approximate convolution op-
+eration with target n-grams as kernels, which
+is easy to implement and efficient to compute
+with existing libraries. To demonstrate the ef-
+fectiveness of EISL , we conduct experiments
+on a wide range of tasks, including machine
+translation with noisy target sequences, unsu-
+pervised text style transfer with only weak train-
+ing signals, and non-autoregressive generation
+with non-predefined generation order. Exper-
+imental results show our method significantly
+outperforms the common CE loss and other
+strong baselines on all the tasks. EISL has a
+simple API that can be used as a drop-in re-
+placement of the CE loss.
+1 Introduction
+Neural text generation models have ubiquitous ap-
+plications in natural language processing, includ-
+ing machine translation (Bahdanau et al., 2015,
+Sutskever et al., 2014, Wu et al., 2016, Vaswani
+et al., 2017), summarizations (Nallapati et al., 2016,
+See et al., 2017), dialogue systems (Li et al., 2016),
+etc. They are typically trained by maximizing the
+log-likelihood of the output sequence conditioning
+on the inputs with the cross entropy (CE) loss. TheFigure 1: Invariance exists in both image and text, e.g.,
+image is invariant to translation (top), and text is robust
+to many forms of edits (bottom).
+CE loss can be easily factorized into individual
+loss terms and can be optimized efficiently with
+stochastic gradient descent. Due to its computa-
+tional efficiency and ease to implement, the train-
+ing paradigm has played an important role in build-
+ing successful large text generation models (Lewis
+et al., 2020, Radford et al., 2019). However, the
+CE loss minimizes the negative log-likelihood of
+only the reference output sequence, while all other
+sequences are equally penalized through normaliza-
+tion. This is over-restrictive since for a given refer-
+ence target sentence, many possible paraphrases are
+semantically close, hence should not completely
+be treated as negative samples. For example, as
+shown in Figure 1, a cat is on the red
+blanket should be treated equally with on the
+red blanket there is a cat . A model
+trained with CE loss falls short of modeling such
+type of invariance for text.
+The problem is even exaggerated when the super-
+vision from a target sequence is not perfect (Pinnis,
+2018). On one hand, there could be noises in the
+reference sequence which makes itself not a valid
+sentence. As in the last example shown in Figure 1,
+there is a repetition error in the target sequence,
+which is common in human generated text. With2055
+the CE loss, the model is forced to copy all tokens
+including the error, and assign a high loss for the
+grammatically correct sequence. The exact tokens
+matching renders the CE loss sensitive to noises in
+the target, as shown in Figure 2. On the other hand,
+there are many problems with only weak supervi-
+sion for target sequences (Tan et al., 2020, Wang
+et al., 2021, Lin et al., 2020). For example, in tasks
+of unsupervised text style transfer (Jin et al., 2022)
+aiming to rewrite a sentence from one style to an-
+other, the original sentence offers weak supervision
+for the content (rather than the style). Yet using a
+CE loss here is problematic since it encourages the
+model to copy every original token.
+Prior works have tried to address this problem us-
+ing reinforcement learning (RL) (Guo et al., 2021,
+O’Neill and Bollegala, 2019, Wieting et al., 2019).
+For example, policy gradient was used to optimize
+sequence rewards such as BLEU metric (Ranzato
+et al., 2016, Liu et al., 2017). Such algorithms
+assign high rewards to sentences that are close to
+the target sentence. Though it is a valid objective
+to optimize, policy optimization faces significant
+challenges in practice. The high variance of gradi-
+ent estimate makes the training extremely difficult,
+and almost all previous attempts rely on fine-tuning
+from models trained with CE loss, often with un-
+clear improvement (Wu et al., 2018).
+In this paper, we propose an alternative loss to
+overcome the above weakness of CE loss, but re-
+serve all nice properties such as being end-to-end
+differentiable, easy to implement, and efficient to
+compute, which hence can be used as a drop-in re-
+placement or combined with CE. The loss is based
+on the observation that a viable candidate sequence
+shares many sub-sequences with the target. Our
+loss, called edit-invariant sequence loss (EISL ),
+models the matching of each reference n-gram
+across all n-grams in a candidate sequence. Thedesign is motivated by the translation invariance
+properties of ConvNets on images (see Figure 3),
+and captures the edit invariance properties of text
+n-grams in calculating the loss. Figure 2 shows the
+invariance property of EISL in comparison with
+CE. Appealingly, we show the conventional CE
+loss is a special case of EISL —when nequals
+to the sequence length, EISL calculates the exact
+sequence matching loss and reduces to CE. More-
+over, the computations of EISL is essentially a
+convolution operation of candidate sequence using
+target n-grams as kernels, which is very easy to
+implement with existing deep learning libraries.
+To demonstrate the effectiveness of EISL loss,
+we conduct experiments on three representative
+tasks: machine translation with noisy training tar-
+get, unsupervised text style transfer (only weak ref-
+erences are available), and non-autoregressive gen-
+eration with flexible generation order . Experiments
+demonstrate EISL loss can be easily incorporated
+with a series of sequence models and outperforms
+CE and other popular baselines across the board.
+2 Related Work
+Deep neural sequence models such as recurrent
+neural networks (Sutskever et al., 2014, Mikolov
+et al., 2010) and transformers (Vaswani et al., 2017)
+have achieved great progress in many text genera-
+tion tasks like machine translation (Bahdanau et al.,
+2015, Vaswani et al., 2017). These models are
+typically trained with the maximum-likelihood ob-
+jective, which can lead to sub-optimal performance
+due to CE’s exact sequence matching assumption.
+There are lots of works trying to overcome this
+weakness. For examples, some works (Ranzato
+et al., 2016, Rennie et al., 2017, Liu et al., 2017,
+Shen et al., 2016, Smith and Eisner, 2006) proposed
+to use policy gradient or minimum risk training
+to optimize the expected BLEU metric (Papineni2056et al., 2002a). Due to the high variance and unsta-
+bleness in RL training, a variety of training tricks
+are used in practice. Wieting et al. (2019) devel-
+oped a new reward function based on semantic
+similarity for translation. Guo et al. (2021) intro-
+duced soft Q-learning for more efficient RL train-
+ing. On the other hand, Zhukov and Kretov (2017),
+Casas et al. (2018) made the initial attempts to
+develop differentiable BLEU objectives, making
+soft approximations to the count of n-gram match-
+ing in the original BLEU formulation. Shao et al.
+(2018, 2021, 2020) minimized the n-gram differ-
+ence between the model outputs and targets in non-
+autoregressive generation.
+Another line of research that is relevant to our
+work is learning with noisy labels in classification
+(Zhang and Sabuncu, 2018, Xu et al., 2019, Wang
+et al., 2019b, Hu et al., 2019). For text generation,
+Nicolai and Silfverberg (2020) proposed student
+forcing to substitute teacher forcing, which can al-
+leviate the influence of noise in the target sequence
+during decoding. Kang and Hashimoto (2020) pro-
+posed loss truncation, which adaptively removes
+high-loss examples considered as invalid data. Our
+empirical study shows substantial improvement of
+our approach over the previous ones.
+3 Edit-Invariant Sequence Loss
+In this section, we first review the conventional
+cross-entropy (CE) loss for sequence learning, and
+point out its weakness, especially when the target
+sequence is edited. We then introduce the EISL
+loss which gives a model the flexibility to learn
+from sub-sequences in a target sequence.
+We first establish notations for the sequence gen-
+eration setting. Let (x,y)be a paired data sample
+where xis the input and y= (y, ..., y)is the
+reference target sequence. Define y= (y, ..., y)
+as a candidate sentence. Our goal is to build a
+model p(y|x)that scores a candidate sequence
+ywith parameter θ. In the sequel, we omit the
+condition xand the subscript θfor simplicity.
+3.1 The Difficulty of Cross Entropy Loss
+The standard approach to learn the sequence model
+is to minimize the negative log-likelihood (NLL)
+of the target sequence, i.e., minimizing the CE
+lossL(θ) =−logp(y). The CE loss assumes
+exact matching of a candidate sequence ywith the
+target sequence y. In other words, it maximizes
+the probability of only the target sequence ywhile
+penalizing all other possible sequence outputs thatmight be close but different with y.
+The assumption can be problematic in many
+practical scenarios: (1)For a given target sentence,
+there could be many ways of paraphrasing the sen-
+tence such as word reordering, synonyms replace-
+ment, active to passive rewriting, etc. Many of the
+paraphrases are viable candidate sequences, and/or
+share many sub-sequences with the reference sen-
+tence, and thus should not be treated completely as
+negative samples. Similar to the translation invari-
+ance which is shown to be effective in image mod-
+eling, a sequence loss that is robust to the shift and
+edits of sub-sequences in the reference sequence
+is preferred in order to model the rich variations
+of sequences; (2)The edit-invariance property is
+particularly desirable when the reference target se-
+quence is corrupted with noise or is only weak
+sequence supervision. For instance, in Figure 3,
+the word isis repeated twice, which is one of the
+common errors in typing. Using CE loss in the
+noisy target setting forces the model to learn the
+data errors as well. In contrast, a sequence loss
+robust or invariant to the shift of sub-sequences
+assigns a high probability to the correct sentence
+even though it does not match the noisy target ex-
+actly. The loss thus offers flexibility for the model
+to select right information for learning.
+3.2 EISL: Edit-Invariant Sequence Loss
+Motivated by the above discussion, in this section,
+we draw inspirations from the convolution opera-
+tion that enables translation invariance in image
+modeling (Figure 3, left), and propose an edit-
+invariant sequence loss (EISL) as illustrated in Fig-
+ure 3 (right). Intuitively, for instance, given a 4-
+gram on the red blanket , because there is
+no extra knowledge to determine the position of the
+4-gram in the noisy target sequence, we compute
+the losses across all positions in the noisy target
+sequence and aggregate. This is essentially a con-
+volution over the target noisy sequence with the
+given n-gram as a convolution kernel.
+We now derive the EISL loss in more details.
+Lety= (y, ..., y)denote a sub-sequence of
+ythat starts from index aand ends at index b−1,
+which is of length b−a. Thus ydenotes the i-
+thn-gram in the reference y. Denote C(y,y)
+as the number of times this n-gram occurs in y:
+where 1(·)is the indicator function that takes value2057
+1if the n-grams match, and 0otherwise. Intu-
+itively, for a text generation model, we would like
+to maximize the occurrence of an n-gram from the
+reference in the target sequence. For a given prob-
+abilistic model p(y)(we omit the parameter θ
+wherever the meaning is clear), the expected value
+ofC(y,y)can be computed as follow:
+Thus, for each i-thn-gram in the reference, a
+straightforward way to define the learning objective
+is to minimize the negative log value of its expected
+occurrence, i.e., −logE[C(y,y)].
+The above loss requires computation of the
+marginal probability p(y=y)of an n-
+gram, which is intractable in practice. We therefore
+derive an upper bound of the loss and use it as the
+surrogate to minimize in training. We denote the
+upper bound surrogate as our EISL loss. Specifi-
+cally, since for a given i,p(y=y) =/summationtextp(y)p(y=y|y), then:
+The detailed derivation is attached in Appendix A.1.
+Notice that the EISL loss involves only the condi-
+tional distribution p(y=y|y)which
+is convenient to compute—we first sample tokens
+from the model up to the iposition, then compute
+NLL of the reference n-gram yoccurring atposition iunder the model distribution. The full n-
+gram EISL loss is then defined by averaging across
+alln-gram positions in the reference:
+In practice, inspired by the standard BLEU metric
+(more in section 3.3), we could also straightfor-
+wardly combine different n-gram losses depending
+on tasks:
+where wis the weight of the n-gram loss. The rule
+of thumb is that a n-gram EISL loss with lower nis
+more robust to noises, as shown in our experiments.
+Following BLEU, we found that simply using equal
+weights for different n-grams up to n= 4 often
+produces good performance.
+As discussed shortly, it is appealing that the n-
+gram EISL loss is indeed a direct generalization
+of the CE loss on the n-gram level: we sum the
+CE loss of an n-gram over all candidate sequence
+positions by conditioning on samples from the
+model. Besides, the derivation of the upper bound
+makes no assumption on the probability function
+p(y), hence holds for both autogressive and non-
+autoregressive sequence models as demonstrated
+in our experiments.
+Position Selection Minimizing the gram match-
+ing loss over all positions can make the model
+assign equal probabilities at all positions, which
+causes the training to collapse. We further adapt
+the loss to enable the model to automatically learn
+the positions of reference n-grams. For notation
+simplicity, let gdenote the conditional proba-
+bility p(y=y|y)involved above
+(Eq.3). We can vectorize the probability to get
+g= [g, ..., g], spanning all potential
+positions in the candidate sequence. We then
+normalize the probability vector gby Gumbel2058
+softmax (Jang et al., 2017), denoted as q=
+Gumbel_softmax (g), which we use as the
+weight for every n-gram positions. We multiply
+the weight with the original log probability to get
+the new adjusted loss:
+The loss can roughly be viewed as the “entropy”
+of the unnormalized probabilities g, which has
+minimal value if the mass of the probability is
+assigned to one location only. Intuitively, if an
+gis large, then it is likely iis the correct posi-
+tion for the reference n-gram, hence the weight
+for this position should also be large. This is
+like the greedy exploitation in reinforcement learn-
+ing (Mnih et al., 2015). On the other hand, to
+overcome over-exploitation, the Gumbel softmax
+introduces randomness in the weight assignment,
+which helps balance the exploitation-exploration
+trade-off in position selection for the model.
+Efficient Approximate Computation: EISL
+as Convolution We show the EISL loss can be
+computed efficiently using the common convolu-
+tion operator, with very little additional cost com-
+pared with the CE loss. The computation involves
+moderate approximation if the generation model
+is an autoregressive model, and is exact in the
+case of a non-autoregressive model (e.g., as in
+section 4.3). We first discuss the easy case when
+the model is a non-autoregressive model, where
+we have g=p(y=y|y) =/producttextp(y=y). Denote Vas the vo-
+cabulary size. Let P= [p,p, ...p]be the prob-
+ability output by the model across positions, where
+p∈Ris the probability output after softmax
+ati-th position, and each pis independent witheach other. On this basis, we compute the key
+quantity loggin Eq. 6 as the direct output of the
+convolution operator. As shown in Figure 4, we
+can get loggby applying convolution on logP,
+withyas the kernels:
+where Onehot (·)maps each token to its corre-
+sponding one-hot representation and Conv (·,·)is
+the convolution operation with the first argument as
+input and the second as the kernel. We transform P
+into log domain to turn the probability multiplica-
+tion into log probability summations, where Conv
+can be directly applied. As shown in Figure 4,
+logPis of shape V×TandOnehot (y)is
+of shape V×n, soConv (logP,Onehot (y))
+is an one-dimensional convolution on the sequence
+axis. Formally, the i-th convolutional output is:
+After obtaining gby convolution, the EISL
+loss in Eq. 6 can be easily calculated. We now
+discuss the case of autoregressive model, where
+by definition we have g=/producttextp(y=
+y|y,y). The dependence on both
+yandyin each conditional makes exact
+estimation of loggvery complicated and costly.
+We thus introduce the approximation where we
+approximate gas/tildewideg=/producttextp(y=
+y|y). That is, instead of conditioning
+ony, we use the model-generated tokens
+yas the condition. This simple approxi-
+mation enables us to define the probability output2059
+Pas in the non-autoregressive case, by just per-
+forming a forward pass of the model (i.e., sampling
+a token yfor each position iand feeding it to
+the next step to get p). We can then apply the
+same convolution operator to approximately obtain
+loggas in Eq. 7. Besides the great gain of com-
+putational efficiency, we note that the approxima-
+tion is also effective, especially due to the position
+selection discussed above. Specifically, for each
+reference n-gram y, the position selection in
+effect (softly) picks those large-value g(while
+dropping other low-value ones) to evaluate the loss.
+A large gvalue indicates the candidate yis
+highly likely to match the reference y, mean-
+ing that using yin replacement of yis a
+reasonable approximation for evaluating the above
+conditionals. We provide empirical analysis of the
+approximation in Appendix A.8, where we show
+the efficient approximate EISL loss values are very
+close to the exact EISL values.
+3.3 Connections with Common Techniques
+CE is a special case of EISL A nice property of
+EISL is that it subsumes the standard CE loss as
+a special case. To see this, set n=T(the target
+sequence length), and we have:
+The connection shows the generality of EISL . As a
+generalization of CE, it enables learning at arbitrary
+n-gram granularity.Connections between BLEU and EISL Both
+our method and the popular BLEU (Papineni et al.,
+2002b) metric use n-grams as the basis in formula-
+tion. Here we articulate the connections and differ-
+ence between the two. Let us first take a review of
+the BLEU metric. Specifically, BLEU is defined as
+a weighted geometric mean of n-gram precisions:
+where BP is a brevity penalty depending on the
+lengths of yandy;Nis the maximum n-gram
+order (typically N= 4); {w} are the weights
+which usually take 1/N;precis the n-gram pre-
+cision, gram(y)is the set of unique n-gram sub-
+sequences of y; andC(s,y)is the number of times
+a gram soccurs in yas defined in Eq. 1. The
+conventional formulation above enumerates over
+unique n-grams in y. In contrast, we enumerate
+over token indexes in calculating the n-gram match-
+ing loss. BLEU considers the n-gram precisions
+and has a penalty term while EISL simply maxi-
+mizes the log probability of n-gram matchings.
+The non-differentiability of BLEU makes it hard
+to optimize directly, hence most prior attempts re-
+sort to reinforcement learning algorithms and use
+BLEU as the reward (Ranzato et al., 2016, Liu
+et al., 2017). There are also some works trying to2060introduce differentiable BLEU metric using approx-
+imation like (Zhukov and Kretov, 2017). However,
+such losses are often too complicated and have not
+yet demonstrated to perform well in practice.
+4 Experiments
+In this section, we present the experimental results
+on three text generation settings to test EISL ’s
+effectiveness, including learning from noisy text,
+learning from weak sequence supervision, and non-
+autoregressive generation models that require flex-
+ibility in generation orders. More details of the
+experimental setting are provided in Appendix A.2.
+4.1 Learning from Noisy Text
+To test the robustness to noise, we evaluate on the
+task of machine translation with noisy training tar-
+get, in which we train the models with noisy se-
+quence targets and evaluate with clean test data.
+Setup We test EISL loss on Multi30k and
+WMT18 raw corpus. We use German-to-English
+(de-en) dataset from Multi30k (Elliott et al., 2016),
+which contains 29k training instances. As inspired
+by Shen et al. (2019), to simulate various noises
+in the real data, we introduce four types of noises:
+shuffle, repetition, blank, and the synthetical noise,
+i.e., the combination of the aforementioned three
+types of noise. The noises are only added to the
+training target sequences. To verify the validity
+of EISL on real noisy data, we also use German-
+to-English (de-en) dataset from WMT18 raw cor-
+pus, which is a very noisy de-en corpus crawled
+from the web. We randomly select different num-
+ber of training samples to test the influence of the
+data scale. We use a Transformer-based pretrained
+model BART-base (Lewis et al., 2020) and adopt
+greedy decoding in training and beam search (beam
+size= 5) in evaluation. We compare EISL loss
+with CE loss, Policy Gradient (PG), and Loss Trun-
+cation (LT). We also conduct ablation experiments
+to explore the effect of different n-grams in EISL
+loss. We use both BLEU (Papineni et al., 2002b)
+and BLEURT, an advanced model-based metric
+(Sellam et al., 2020), as the automatic metrics for
+evaluation. Due to space limit, we report BLEU re-
+sults in the main paper, and defer BLEURT results
+in the appendix, where we can see BLEURT leads
+to the same conclusion as BLEU.
+Results The results on noisy Multi30k are pre-
+sented in Figure 5. The proposed EISL loss pro-
+vides significantly better performance than CE loss
+and PG on all the noise types, especially on the
+high-level noise end. For synthetical noise as
+shown in Figure 5(d), it’s interesting to see that
+CE and PG completely fail when the noise level is
+beyond 6, but model trained with EISL has high
+BLEU score, demonstrating EISL can select use-
+ful information to learn despite high noise. This
+validates that the proposed EISL is much less sen-
+sitive to the noise than the traditional CE loss and
+policy gradient training method. The results of dif-
+ferent n-gram are shown in Figure 5(e). As the
+noise increases, the importance of lower grams,
+e.g.,1-gram, is more obvious. The results on real
+noisy data, WMT18 raw data, are shown in Fig-
+ure 6. EISL loss achieves better performance than
+CE loss and PG, and the difference is getting larger
+when the training data scale increases. This again
+demonstrates EISL could learn more valid informa-
+tion in rather noisy data, while CE loss which only2061considers whole-sentence matching could struggle
+on noisy data. In Appendix A.3, we provide more
+results (e.g., comparison with loss truncation (Kang
+and Hashimoto, 2020)) and case studies.
+4.2 Learning from Weak Supervisions: Style
+Transfer
+We experiment on transferring two types of text
+styles (Jin et al., 2022), namely sentiment and po-
+litical slant, to verify EISL can learn from weak
+sequence supervisions.
+Setup We use the Yelp review dataset and politi-
+cal dataset. Yelp contains almost 250k negative sen-
+tences and 380K positive sentences, of which the
+ratio of training, valid and test is 7 : 1 : 2 . Li et al.
+(2018) annotated 1000 sentences as ground truth
+for better evaluation. The political dataset is com-
+prised of top-level comments on Facebook posts
+from all 412 members of the United States Senate
+and House who have public Facebook pages (V oigt
+et al., 2018). The data set contains 270K demo-
+cratic sentences and 270K republican sentences.
+And there exists no ground truth for evaluation. The
+data preprocessing follows Tian et al. (2018). The
+structured content preserving model (Tian et al.,
+2018) is adopted as the base model.
+Following previous work, we compute automatic
+evaluation metrics: accuracy, BLEU score, perplex-
+ity (PPL) and POS distance. We also perform hu-
+man evaluations on Yelp data to further test the
+transfer quality.
+Results As sentiment results are shown in Ta-
+ble 1, the BLEU gets improved from 65.71 to 68.51
+with EISL loss. On the premise of the correctness
+of sentiment transfer, EISL loss plays a critical
+role to guarantee lexical preservation. In the mean-
+while, all of BLEU(human), PPL, and POS dis-
+tance get improved. It is not surprising that EISL
+loss helps generate sentences more fluently and
+select the more appropriate words conditions on
+the content information. As the human evaluation
+results are shown in Table 1, the model with EISL
+loss performs better, in accord with the automatic
+metrics. After analyzing the generated samples, we
+found EISL loss could drive the model to adopt the
+words which fit the scene better and could under-
+stand more semantics but not just replace some key-
+words. See some examples in the Appendix A.4.1.
+We report the results of political data in Ap-
+pendix A.4.2. Our method outperforms all models
+on BLEU, PPL, and POS distance with comparableaccuracy. For a more fair comparison with the base
+model, our EISL loss improves the base model on
+all four metrics, including the accuracy.
+The results demonstrate the effectiveness of
+EISL for weak supervision task, improving both
+transfer accuracy fluency and content preservation.
+4.3 Learning Non-Autoregressive Generation
+Non-autoregressive neural machine translation
+(NAT, (Gu et al., 2018)) is proposed to predict
+tokens simultaneously in a single decoding step,
+which aims at reducing the inference latency. The
+non-autoregressive nature makes it extremely hard
+for models to keep the order of words in the sen-
+tences, hence CE often struggles with NAT prob-
+lems. In experiments, we show EISL is superior
+to CE in NAT which requires modeling flexible
+generation order of the text.
+Setup We use English-to-German dataset from
+WMT14 (Luong et al., 2015), which contains 4.5M
+training instances. We apply our proposed EISL
+loss on both fully NAT models (Gu et al., 2018, Sun
+et al., 2019) and iterative NAT models (Lee et al.,
+2018, Gu et al., 2019, Ghazvininejad et al., 2019),
+showing its general applicability and superiority,
+and we also compare with a wide range of recent
+methods (Shao et al., 2020, Wang et al., 2019a,
+Li et al., 2019, Ghazvininejad et al., 2020). We
+evaluate with both BLEU and BLEURT metrics.
+Results We first summarize the comparison of
+BLEU between EISL loss and CE loss in Table 2
+(comparison of BLEURT is in Appendix A.5.2).
+The proposed EISL improves the model perfor-
+mance on both the KD and original datasets.
+More specifically, for fully NAT models (Vanilla-
+NAT and NAT-CRF), EISL gives strong improve-
+ment. For iterative NAT models (iNAT, LevT, and
+CMLM), EISL also significantly outperforms the
+baselines when the iteration step is restricted to a
+small level as suggested by Kasai et al. (2020). (We
+show in Appendix A.5.1 that, with increasing itera-
+tion steps, the difference fades away. However, as
+studied in Kasai et al. (2020), iterative NAT models
+with many iteration steps do not hold the intrinsic
+advantage of speed since Transformer baselines
+with a shallow decoder can achieve comparable
+speedup and only at the sacrifice of minor perfor-
+mance drop.) Table 3 provides more comparison of
+with recent strong baselines. Specifically, we apply
+our EISL on the CMLM base model (Ghazvinine-
+jad et al., 2019) which shows strong superiority. We2062
+provide qualitative analysis in Appendix A.5.3.
+5 Conclusions
+We have developed Edit-Invariant Sequence Loss
+(EISL ) for end-to-end training of neural text gener-
+ation models. The proposed method is insensitive
+to the shift of n-grams in target sequences, hence
+suitable for training with noisy data and weak su-
+pervisions, where CE loss fails easily. We show
+CE loss is a special case of EISL and build the
+connection of EISL with BLEU metric and con-
+volution operation, which both have the invariant
+property. Experiments on translation with noisy
+target, text style transfer, and non-autoregressive
+neural machine translation demonstrate the supe-
+riority of our method. The more general appli-
+cations and superiority of EISL on other diverse
+text generation problems as well as fundamental
+challenges, such as compositional generalization
+(Andreas et al., 2019) and causal invariance (Hu
+and Li, 2021) in language, remain to be explored
+further, which we are excited to study in the future.
+References2063206420652066A Appendix
+A.1 Additional Derivation
+For a given i,
+p(y=y)
+=/summationdisplayp(y)p(y=y|y),
+then we derive the detail of Eq. 3 in Eq. 9, where
+the first inequality holds since T−n+ 1≥0; and
+the second inequality holds by Jensen’s inequality.
+A.2 Detailed Experimental Setup
+A.2.1 Learning from Noisy Text
+We use a Transformer-based pretrained model
+BART-base (Lewis et al., 2020), containing 6 layers
+in the encoder and decoder. We train the model us-
+ing the Adam optimizer with learning rate 3×10
+with polynomial decay and the maximum number
+of tokens is 6000 in one step. The models are
+trained on one Tesla V100 DGXS with 32GB mem-
+ory. We start with CE training using teacher forcing
+for fast initialization. We then switch to combined
+1- and 2-gram EISL with weight 0.8 : 0.2, which
+we select using the validation set. We adopt greedy
+decoding in training and beam search (beam size
+= 5) in evaluation. We use fairseq(Ott et al.,
+2019) to conduct the experiments. We compare
+EISL loss with CE loss and Policy Gradient (PG),
+where PG is used to finetune the best CE model.
+Teacher forcing is employed in CE training.
+A.2.2 Learning from Weak Supervisions:
+Style Transfer
+We use the Adam optimizer with learning rate
+5×10, the batch size is 128 and the model
+is trained on one Tesla V100 DGXS 32GB. We
+compare the results between the base model and
+the model with EISL . Specifically, on top of the
+base model, we add the EISL loss (a combination
+of2,3and4-gram with the same weights 1/3) to
+reduce the discrepancy between the transferred sen-
+tence generated by language model and the original
+sentence. We assign EISL loss with weight 0.5.
+Following previous work, we compute automatic
+evaluation metrics: accuracy, BLEU score, perplex-
+ity (PPL) and POS distance. For accuracy, we adopt
+a CNN-based classifier, trained on the same train-
+ing data, to evaluate whether the generated sentence
+possesses the target style. Then we measure BLEUscore and BLEU(human) score of transferred sen-
+tences against the original sentences and ground
+truth, respectively. PPL metric is evaluated by GPT-
+2 (Radford et al., 2019) base model after finetuning
+on the corresponding dataset, with the goal to as-
+sess the fluency of the generated sentence. POS
+distance is used to measure the model’s semantics
+preserving ability (Tian et al., 2018).
+We also perform human evaluations on Yelp data
+to further test the transfer quality. We first ran-
+domly select 100 sentences from the test set, use
+these sentences as input and generate sentences
+from the base model (Tian et al., 2018) and our
+model. Then for each original sentence, we present
+the outputs of the base model and ours in random
+order. The three annotators are asked to evalu-
+ate which sentence is preferred as the transferred
+sentence of the original sentence, in terms of con-
+tent preservation and sentiment transfer. They can
+choose either output or select the same quality. We
+measure the percentage of times each model out-
+performs the other.
+A.2.3 Learning Non-Autoregressive
+Generation
+We use the Adam optimizer with learning rate
+5×10with inverse square root scheduler. We
+apply sequence-level knowledge distillation to the
+dataset, which can reduce the complexity of the
+dataset, making it easier for the model to learn and
+improving the performance. The models are first
+trained by CE loss for fast initialization, then fo-
+cus on 2-gram, 3-gram, and 4-gram with the same
+weights. Fairseq (Ott et al., 2019) is adopted to
+conduct the experiments. We average the last 5
+checkpoints as the final model.
+A.3 Additional Results of Learning from
+Noisy Text
+A.3.1 Results of BLEURT Metric
+In this section, we evaluate the results of CE, PG
+and EISL on BLEURT (Sellam et al., 2020) metric.
+We use the recommended BLEURT-20 checkpoint.
+It gives a score for every sentence pair, and we
+averaged the scores to get the final score. The
+results are shown in Figure 7. Both BLEU metric
+and BLEURT metric show the superiority of our
+proposed EISL loss.
+A.3.2 Comparison with Loss Truncation
+The Loss Truncation (LT (Kang and Hashimoto,
+2020)), method adaptively removes high log loss2067l(θ) =−log/summationdisplayp(y=y), (9)
+=−log1
+T−n+ 1/summationdisplay/summationdisplayp(y)p(y=y|y)−log(T−n+ 1),
+≤ −log1
+T−n+ 1/summationdisplay/summationdisplayp(y)p(y=y|y),
+≤ −1
+T−n+ 1/summationdisplay/summationdisplayp(y) logp(y=y|y),
+=−1
+T−n+ 1E/summationdisplaylogp(y=y|y),
+=L(θ),
+examples as a way to optimize for distinguishabil-
+ity. In this section, We’d like to show the com-
+parisons with Loss Truncation. We evaluated two
+variants of LT: (1) LT_Pre which first trains the
+model with CE loss and then adds LT for further
+training, and (2) LT which directly trains the model
+with CE loss and LT together. Hyperparameters
+were selected on the validation set. For simplic-
+ity, we remove the PG curves (Figure 5), and the
+comparison results with LT are shown in Figure 8.
+We can see Loss Truncation can sometimes
+slightly improve over CE, especially when the data
+is clean or with low/moderate noise. However, by
+simply ignoring high-loss data, LT is not good at
+handling data with high noise (which often leads
+to high loss). In comparison, our proposed EISL
+achieves a substantial improvement in the presence
+of high noise.
+A.3.3 Reasons of Better Performance with
+Lower-gram EISL
+In this section, we discuss the reason of why the
+performance of using lower grams is better than
+higher-gram EISL in Figure 5(e).
+Lower-gram EISL is less sensitive to noise. For
+example, 1-gram EISL focuses mostly on match-
+ing individual tokens without caring much about
+the order of tokens; while a high-gram EISL (e.g.,
+consider the extreme case of T-gram where Tis
+the target length) reduces to CE (as discussed in
+Sec 3.3) and is highly sensitive to noise. Thus, in
+the presence of high data noise, lower-gram EISL
+would be more robust and perform better.Besides, on low-noise data (e.g., noise-level =
+0 or 1), lower-gram EISL performs comparably
+with higher-gram EISL, both close to the CE per-
+formance. This is because we pretrained the model
+with CE (as mentioned in the experimental setup),
+and finetuning with EISL (either with lower- or
+higher-grams) would not change the performance
+a lot given the low-noise data.
+A.3.4 Cases Study
+As shown in Table 8, 9, 10, 11 and 12, we randomly
+sample some examples from generated sentences
+of the models trained with different types of noise
+on Multi30k dataset. For the sake of convenience,
+we use abbreviations in the tables, i.e., SC, RR,
+BR and NL are short for Shuffle Count, Repetition
+Ratio, Blank Ratio and Noise Level (for Synthetical
+Noise), respectively.
+Shuffle Noise When there exist a few shuffle
+noises, e.g., SC = 3, CE loss may lead word redu-
+plicated (Example 1 and Example 2) and slightly
+wrong word order (Example 4 and Example 5), and
+there are some information mistranslated ( beautiful
+in Example 4) or extra irrelevant information added
+(black in Example 5). As shuffle count increases,
+the aforementioned problems are increasingly se-
+vere, resulting the generated sentences meaning-
+less. Especially, there are some words untranslated
+in PG examples ( eingezäunten in Example 1, ir-
+gendwo in Example 2, haben in Example 5, ). But
+EISL loss could keep the content consistency and
+grammatical correctness as far as possible.2068
+Repetition Noise The main problem of the mod-
+els trained by CE and PG with repetition noises
+is that the models can’t filter the repetition noise
+out in training samples, and try to learn the wrong
+distribution, leading to generate reduplicated words
+frequently (Example 1-5). Specifically, the exam-
+ples of CE and PG in RR = 50% are very repre-
+sentative. However, it’s amazing that EISL can
+almost avoid such a problem even the repetition ra-
+tio achieves 50%. Meanwhile, the main semantics
+is preserved and the grammar is correct.
+Blank Noise When adding blank noise, some to-
+kens in targets will be substituted as unkso the
+targets will lose some information. We could mea-
+sure from two aspects: one is the term frequency
+of meaningless token unkin generated sentences,and the other is the meaningful contents preserved
+by the models. Obviously, EISL loss handles better
+than CE loss on both aspects. Especially, when BR
+= 20% , unlike models with CE, models with PG
+and EISL barely generate the unktoken, and could
+translate the core content (Example 1-5). As BR in-
+creases, EISL could preserve more key information
+and produce less unkthan CE and PG. Moreover,
+PG performs rather poor when BR is high (like BR
+= 45% ), and it almost loses all information (Exam-
+ple 1-5) and generates some confusing words ( teil
+in Example 1, afroamerikanischer andirgendwo in
+Example 3, beachaufsichtgebäude in Example 4,
+andholzstück in Example 5).
+Synthetical Noise We then evaluate the results
+of models trained by synthetical noise. Such a2069
+situation combines aforementioned three types of
+noises. One most highlighted advantage of EISL
+is that the generated sentences are almost gram-
+matically correct and include main content as far
+as possible. However, CE can only stiffly joint
+some words, and can’t guarantee the grammatical
+correctness (word order, word repetition and so
+on). PG performs worst, involving all the problems
+in CE cases and the meaningless word generation
+problem (Example 1-5).
+A.4 Additional Results of Text Style Transfer
+A.4.1 Examples on Yelp dataset
+Some examples of generated sentences are given
+in Table 4. The model with EISL can select more
+appropriate adjective and improve the quality of the
+sentences. In the first example, the model should
+transfer the negative adjectives cold andwatery to
+some positive adjectives that describe food. Ob-
+viously, the delicious is more appropriate than ex-
+cellent . In the second example, the base model
+reverses both notandstop, leading to wrong sen-
+timent and inconsistent content. While the model
+with EISL could avoid such a situation and generate
+more suitable sentence.
+A.4.2 Results on Political dataset
+Since the instances from democratic data and re-
+publican data are quite different, names of politi-
+cians have high correlation with the political slant.
+Therefore the BLEU score and POS distance have
+a big gap with the sentiment results. The results
+are shown in Table 5.A.5 Additional Results of Non-Autoregressive
+Generation
+A.5.1 Results of Iterative NAT Models
+As shown in Figure 9, with the increasing of itera-
+tion steps, the difference fades away.
+A.5.2 Results of BLEURT Metric
+To show the superiority of our method, We
+also evaluate on recent text generation metric,
+BLEURT (Sellam et al., 2020). BLEURT is an
+evaluation metric for Natural Language Generation.
+It takes a pair of sentences as input, a reference
+and a candidate, and it returns a score that indicates
+to what extent the candidate is fluent and conveys
+the mearning of the reference. We use the recom-
+mended BLEURT-20 checkpoint. It gives a score
+for every sentence pair, and we averaged the scores
+to get the final score. The results are shown in
+Table 6.
+A.5.3 Qualitative Analysis on NAT
+Experiments
+Given the non-autoregressive nature (i.e., all to-
+kens are generated simultaneously), the one-to-one
+matching of CE loss can lead to severe mismatch-
+ing. We consider the example: the predicted sen-
+tence is a cat is on the red blanket
+and the target sentence is a cat is sitting
+on the red blanket . The "on the red blan-
+ket" part of the prediction will be corrected to
+match the target positions, and this may lead to
+overcorrection (e.g., "on the red red blanket .").
+Repetition is often a sign of overcorrection. How-
+ever, with EISL, this situation will not happen be-
+cause the phrase will be matched to appropriate2070
+target tokens. Let’s have a look at a real example
+in Figure 10.
+Take the non-autoregressive model
+CMLM (Ghazvininejad et al., 2019) for ex-
+ample, we evaluate the translation of CMLM
+models trained by CE and EISL. As shown
+in Figure 11, our proposed EISL can reduce
+repetition to a large extent.A.6 Efficiency Analysis
+Complexity analysis Given Ttokens, the time
+complexity of CE loss is O(T), while the com-
+plexity of n-gram EISL loss is O(n(T−n+
+1))≈O(T), assuming small nis used in prac-
+tice (e.g., n∈ {1,2,3,4}). However, in practice,
+the computation cost of the loss (either CE or EISL)
+isnegligible compared to the cost of model forward
+and backward during training. Thus, the extra cost
+introduced by the EISL loss is rather minor.
+Empirical comparison of time cost To quan-
+tify the computational cost of different methods,
+we adopt CE and EISL on top of the same model
+and setting, and evaluate the consumed time for 1
+training epoch. For comparison on both small and
+large dataset, we evaluate on Multi30k (29k train-
+ing data, 1k test data) and 1M scale WMT-18 raw
+corpus (1M training data, 3k test data). The mod-
+els are tested on one Tesla V100 DGXS with 32
+GB memory, the batch size is 128, max number of
+tokens is 6000 and update frequency is 4. For each
+method, we test 6 times and average the results as
+final time. The results are shown in Figure 12.
+Empirical total time cost of EISL training As
+discussed in the experiments in the paper, we first
+pretrain the model with the CE loss until conver-
+gence, and then finetune with the EISL loss. Here
+we report the total time cost of each stage, based
+on the WMT-18 translation setting as described in
+Section 4.1. The results are shown in Table 7. As2071
+the data size increases, the convergence time of
+both pretraining and finetuning grows. The time
+cost of the finetuning stage is less than half of that
+of the pretraining stage.
+A.7 Hyperparameters
+Regarding which n-grams to use and their weights
+win the EISL loss, we found in our experiments
+that the default values largely following the stan-
+dard BLEU metric (i.e., maximum n= 4 with
+equal weights) work well. Specifically, we use
+n∈ {2,3,4}and equal weights w= 1/3as our
+default values. Most of our experiments adopt the
+default values which achieve consistent substantial
+improvement over CE and other rich baselines as
+shown in our experiments. (except for the synthetic
+experiment where we show the effect of different n-
+grams including those selected using the validation
+set).
+Besides, in our experiments, we first pretrain
+the model with the CE loss (i.e., EISL with n=
+Tand teacher forcing, see Section 3.3) and then
+finetune with the EISL loss. We simply do the CE
+pretraining until convergence before switching to
+the EISL finetuning. Therefore, there is no need of
+tuning for the training iterations of pretraining.
+A.8 Analysis of Efficient Implementation
+In order to validate the efficiency and accuracy
+of our approximation (for autoregressive models)discussed in Section 3.2, we conduct the analysis
+experiments, showing that the approximate (and
+efficient) EISL loss values are very close to exact
+(but expensive) EISL value. We use the same set-
+ting as section 4.1, and finetune the model with
+our efficient approximate EISL loss on Multi30k.
+Throughout the course of training, we record the
+loss values of both the exact implementation and
+our approximate implementation. As shown in Fig-
+ure 13(a) and (b), the tendency of two losses is very
+close to each other. We also plot the absolute dif-
+ference of the two losses as shown in Figure 13(c).
+We can see the difference decreases as training pro-
+ceeds. The observations validate the effectiveness
+of our approximate implementation.
+We note that training the model with the exact
+loss is costly, which necessitates our approxima-
+tion. Specifically, for n-gram loss, we need to run
+the forward pass of the decoder (T−n)times,
+and keep the whole computation graph for back-
+propagation, which will consume much more time
+and memory. Even for only loss evaluation (with-
+out the backward pass), we found the runtime of
+the exact loss is about 15 times longer than that of
+the efficient approximate implementation based on
+convolution operator.2072207320742075207620772078

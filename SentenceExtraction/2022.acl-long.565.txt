@@ -1,1 +1,750 @@
-8214 Proceedings of the 60th Annual Meeting of the Association for Computational Linguistics Volume 1 : Long Papers , pages 8214 8236 May 22 - 27 , 2022 c(cid:13)2022 Association for Computational Linguistics 8215 8216 8217 8218 8219 8220 8221 8222 8223 8224 8225 8226 8227 8228 8229 8230 8231 8232 8233 8234 8235 8236 
+
+Nikolay Malkin
+Mila / Université de MontréalZhen Wang
+Ohio State UniversityNebojsa Jojic
+Microsoft Research
+Abstract
+Long-range semantic coherence remains a
+challenge in automatic language generation
+and understanding. We demonstrate that large
+language models have insufﬁciently learned
+the effect of distant words on next-token pre-
+diction. We present coherence boosting , an in-
+ference procedure that increases a LM’s focus
+on a long context. We show the beneﬁts of
+coherence boosting with pretrained models by
+distributional analyses of generated ordinary
+text and dialog responses. It is also found that
+coherence boosting with state-of-the-art mod-
+els for various zero-shot NLP tasks yields per-
+formance gains with no additional training.
+1 Introduction
+Language models (LMs) are commonly evaluated
+for their ability to generate, rank, or classify co-
+herent spans of text. Long-range semantic coher-
+ence is a unifying feature of modern NLP bench-
+marks and applications, whether they are about pro-
+ducing short answers to questions, ranking answer
+choices by their consistency with world knowledge,
+or generating long responses.
+Large nonspecialized LMs, such as GPT-2 and
+-3 (Radford et al., 2019; Brown et al., 2020), some-
+times fail to understand or use the semantic link
+between a text and its prompt or long-range context
+(Fig. 1). Samples from these LMs have an unnatu-
+rally low density of words that require many tokens
+of context to predict (§4.1), and the scores that the
+models give to completions of prompts indicate
+that they are oversensitive to recent context (§5).
+We hypothesize that these failures arise from
+modeling choices and distribution shift. Specif-
+ically, autoregressive LMs are typically ﬁt to a
+multi-objective problem: simultaneously maximiz-
+ing token likelihoods conditioned on many lengths
+of truncated context (§2.1). Yet, at generation orscoring time, likelihoods are conditioned on the en-
+tire prompt or previously generated string, specif-
+ically selected to be coherent or even guaranteed
+to inﬂuence the output. The two common solu-
+tions – ﬁnetuning models on one or multiple tasks
+(Khashabi et al., 2020; Sanh et al., 2022) and im-
+proving models or prompts to facilitate in-context
+learning (Brown et al., 2020; Schick and Schütze,
+2021) – do not directly target the problem of long-
+range coherence.
+This paper proposes coherence boosting , a sim-
+ple inference-time procedure that increases the ef-
+fect of distant words on predicted token distribu-
+tions and is applicable in both generation and rank-
+ing settings. A pretrained model is viewed as an en-
+semble of experts that produce token distributions
+conditioned on varying lengths of context. These
+experts are log-linearly mixed to form a predictor
+that is superior to the base model (§2).
+Coherence boosting greatly improves prediction
+of words that depend on a long context, as evi-
+denced by state-of-the-art results on tasks specially
+meant to assess models’ attention to distant words
+(§3). In generation of generic text and dialog re-
+sponses, we show that coherence boosting brings
+the frequency of occurrence of such words close
+to that seen in natural text (§4). Beyond genera-
+tion, we study diverse multiple-choice tasks (§5),
+in which examples are known to be highly coher-
+ent. Coherence boosting does not modify the base
+model and depends on a single parameter than can
+be estimated in one pass through a validation set,
+yet is a competitive adaptation algorithm.
+1.1 Background and related work
+Balance between satisfaction of short-range sta-
+tistical constraints and maintenance of long-range
+structure was a central question of language gen-
+eration long before neural language modeling. To
+compensate for the sparsity of the learning sig-
+nal for long-range inﬂuences, =-gram models and8214
+early neural language models used ‘backing-off’
+schemes that interpolate between predictors with
+different context lengths (Chen and Goodman,
+1996; Bengio et al., 2003). Neural language model-
+ing brought a need for recurrent units with better
+numerical properties for propagating information
+over long distances (Hochreiter and Schmidhuber,
+1997; Cho et al., 2014) and eventually saw the rein-
+troduction of alignment variables (Brown et al.,
+1993) into generation in the form of attention (Bah-
+danau et al., 2015; Vaswani et al., 2017). Attention
+is at the core of Transformer LMs, including GPT.
+Language models are being trained on and
+adapted to ever-longer input sequences (Beltagy
+et al., 2020; Zaheer et al., 2020; Roy et al., 2021;
+Press et al., 2022), but they remain undersensi-
+tive to distant content or syntax (Khandelwal et al.,
+2018; Sun et al., 2021) and are easily fooled by re-
+cency bias in few-shot prompts (Zhao et al., 2021)
+or multi-turn conversations (Sankar et al., 2019).
+Recent work has continued to study inference-
+time procedures that prevent text sampled from
+LMs from degenerating into nonsense. Most of
+these procedures, such as tempered sampling and
+top-:/top-?truncation (Fan et al., 2018; Holtzman
+et al., 2019), independently modify the output dis-tribution at each generation step to decrease its
+entropy and diminish its low-likelihood tail. Holtz-
+man et al. (2019) and Meister and Cotterell (2021)
+found that such local modiﬁcations increase the
+quality of long generated sequences; we adopt and
+extend their methodology in §4.1.
+For dialog systems, Li et al. (2016) propose a
+decoding scheme that maximizes a mutual informa-
+tion criterion, which explicitly optimizes for depen-
+dence of generated text on prompts – a special case
+of coherence boosting. In multiple-choice tasks,
+where a model must choose one of several given
+completions of a prompt, Brown et al. (2020) ob-
+serve that selecting the completion that maximizes
+the conditional likelihood of the completion fol-
+lowing the prompt often favors completions having
+high unconditional likelihood (likelihood follow-
+ing an empty or dummy prompt) and, for some
+tasks, chooses to divide the scores of candidate an-
+swers by their unconditional likelihoods. This is
+also a special case of coherence boosting.
+Such scoring modiﬁcations are more thoroughly
+studied by Zhao et al. (2021); Holtzman et al.
+(2021). The latter attributes the problem to ‘sur-
+face form competition’: there are many variants of
+the correct completion that together may capture a8215large part of probability mass, but the form of the
+given answer choice alone is not the most likely.
+However, we show that other causes are at play:
+surface form competition is impossible when the
+completion is known to be a single token and the
+range of choices is the whole vocabulary (§3), and
+it is not applicable to open-ended generation (§4).
+2 Coherence boosting
+In this section, 5is an autoregressive LM over a
+vocabulary+with learnable parameters \, taking
+as input a variable number of tokens (up to a maxi-
+mum context length ") and producing a vector of
+next-token likelihoods:
+5¹FF;\º2¹+º FF2+
+where¹+ºis the probability simplex over +. We
+will write the F-th component of this output vector
+as a conditional likelihood, 5¹FjFF;\º.
+We denote by 5the model evaluated on only
+thelast:input tokens, ignoring earlier tokens:
+5¹FF;\º:=5¹FF;\º
+Coherence boosting for next-token prediction.
+Coherence boosting for a model 5selects real-
+valued weights "=¹UUUºand pro-
+duces a new language model 5, deﬁned by
+5¹FF;\º
+:=softmax ÕUlog5¹FF;\º!
+(1)
+where logis taken element-wise, or, equivalently,
+5¹FjFF;\º/Ö5¹FjFF;\º
+This is a weighted product-of-experts model, where
+the ‘experts’ are copies of the base model 5evalu-
+ated on different context lengths.
+Because evaluating 5is expensive, we use sparse
+weights ", as the expression (1) depends only on
+those5for whichU<0. In Fig. 1 and in the ex-
+periments, we allow "to have only two nonzero en-
+tries: when computing likelihoods of words follow-
+ing a sequence of length =, we consider weighted
+products of5:=5(the full context) and an 5
+with:=(a short context, either of ﬁxed length
+or decided by prompt structure as in §4.2).
+As its name suggests, the form of coherence
+boosting in (1) bears a resemblance to log-linearboosting for multiclass classiﬁcation (Friedman
+et al., 2000). However, our weak classiﬁers are
+pretrained and share all of their parameters, not
+obtained by an iterative procedure of training on
+reweighted data, and we permit negative weights.
+Coherence boosting for answer selection. In
+multiple-choice problems, a LM must choose the
+best answer following a context, which consists of
+a premise or passage followed by a shorter premise-
+free context (either a short phrase, such as “An-
+swer:”, that incites the LM to generate an answer
+in the right format, or a hypothesis that depends on
+the premise). The full context is the concatenation
+of the premise and the premise-free context (§E).
+By the autoregressive factorization, the model
+5assigns conditional likelihoods to sequences of
+tokens following context. A typical model for an-
+swer selection ranks the candidate answers 0(se-
+quences of tokens) by 5¹0jfull context ;\ºand
+outputs the highest-ranked 0.Coherence boosting
+chooses a parameter Uand ranks the choices by:
+log5¹0jfull context ;\º¸
+¸Ulog5¹0jpremise-free context ;\º(2)
+This is a log-linear combination of two models: 5
+evaluated with full context and with a partial con-
+text. WhenU=0, ranking by (2) is equivalent to
+ranking by the base model. When U= 1, it is
+equivalent to dividing the base model’s score by
+the score of each answer conditioned on the prompt
+(short context), and thus to maximizing pointwise
+mutual information between the premise and the an-
+swer conditional on the premise-free context. Un-
+like Brown et al. (2020); Holtzman et al. (2021),
+our formulation allows the premise-free context to
+include information speciﬁc to the example, not
+only a domain-speciﬁc dummy prompt.
+We expect coherence boosting to correct for an
+oversensitivity to the premise-free context, and thus
+the optimalUwill typically be negative (see §5).
+2.1 Why should boosting models be better
+than full-length predictors?
+Multi-objective training. As we will now see,
+the training of the model 5simultaneously ﬁts all of8216the predictors 5, which share parameters \. Each
+training iteration samples a sequence (or batch of
+sequences) of a chosen maximum length "¸1
+from the data distribution Dand minimizes the
+average negative log-likelihood (NLL) of allwords
+following the parts of the sequence that precede
+them: the optimization criterion is:
+E1
+"Õ log5¹FjFF;\º
+IfDis uniform over all length-( "¸1) subse-
+quences of a training corpus, any given word is
+equally to likely to appear in all positions within a
+sampled sequence, and the criterion is equal toÕ1
+"E» log5¹FjFF;\º¼|                                         {z                                         }(3)
+This is a uniform scalarization of an "-task prob-
+lem: the:-th objectiveL¹\ºis the expected NLL
+of a word in the corpus following :context words.
+This situation is different from that seen at
+generation time. If the text generated so far is
+FFF, the distribution from which the next
+wordFis sampled is 5¹FF;\º– only
+the ensemble member using full context is used.
+However, if the string FFFhad been seen
+in training,5would have been trained to predict
+Fgiven all partial contexts , with equal weight
+given to all prediction losses. Thus, 5is trained to
+make predictions on data it never sees in evalua-
+tion, and may be prevented from optimally learning
+to use long context: parameters that locally opti-
+mize (3) are locally Pareto-optimal for the setof
+prediction lossesLL, but not necessarily
+optimal for any individual L. An ensemble of the
+5(:=) may be a better predictor than 5alone.
+(See §A for further analysis of when this occurs.)
+Undertraining. The parameters \are shared by
+the predictors 5, and modeling power must be
+spread among the losses L¹\º. The short-context
+predictors are easier to ﬁt, while sequences in
+which long context affects the prediction are rare.
+We expect sensitivity to long context, and precision
+in modeling its effect, to be especially diminished
+if the model is undertrained.
+Distribution shift. While the training procedure
+causes a bias against the inﬂuence of longer con-
+texts on generation, we see the opposite bias in
+downstream tasks (question answering, natural lan-
+guage inference, adversarial probes for common
+sense): Many modern NLP benchmarks try to chal-
+lenge models to use long context (§3, §5).
+3 Experiments: LAMBADA
+The LAMBADA dataset (Paperno et al., 2016) tests
+LMs’ understanding of long-range dependencies
+by measuring the prediction of the ﬁnal words in
+passages of several sentences. The task explicitly
+requires reasoning over a broad context: humans
+can reliably guess the last word when given a whole
+passage, but not when given only the last sentence.
+We perform experiments with the GPT family of
+models, closely replicating the evaluation setting
+of Radford et al. (2019).We predict the ﬁnal word
+as the top-ranked token under the boosted model
+55, where5is the model taking the full
+available context and :Uare the chosen length
+and coefﬁcient of the short context. To choose :
+andU, we do a grid search on the validation set
+and apply the best values to the testing set.
+Results. Table 1 shows the accuracies and opti-
+mal parameter values :U. Coherence boosting
+vastly reduces prediction error for all models. In
+particular, the boosted GPT-2 Small performs better
+than the original GPT-3 2.7B. The boosted GPT-3
+175B achieves a new state of the art.8217
+Other than the impressive performance gain, we
+highlight two observations. (1)The optimal Uis
+always negative, indicating that the optimal mixture
+of models penalizes the inﬂuence of short-range
+context relative to long-range context. (2)With in-
+creasing model size, the optimal Uand:become
+closer to 0. This means that bigger models capture
+long-range coherence better than small models, as
+they have less need to penalize the effect of short
+context. (Fig. 2 shows the accuracy curves for all
+models by sweeping Uwith a ﬁxed :. The peak
+clearly moves to the left as model size grows.)
+4 Experiments: Language generation
+4.1 Generic text
+The experiment in this section extends that of Holtz-
+man et al. (2019). A selection of 5000 articles from
+WebText (Radford et al., 2019) is taken as a ref-
+erence corpus of human-written text. A language
+model (for us, GPT-2 Large) is prompted to gen-
+erate text conditioned only on the ﬁrst sentence of
+each of these articles, up to a maximum of 200
+tokens, yielding 5000 machine-generated texts.
+The human-written and machine-generated texts
+are compared by four automatic metrics: perplex-
+ityunder the base LM, self-BLEU-4 (Zhu et al.
+(2018); the mean BLEU-4 score of a generated
+text with respect to all other generated texts as
+references), Zipf coefﬁcient (the linear regression
+coefﬁcient between log-rank and log-frequency of
+generated tokens) and repetition (the fraction of
+generated texts that end in a repeating sequence of
+tokens). It is desirable for a model and inference
+procedure to produce text that is as close as possi-
+ble in these metrics to the human-written reference.
+To measure long-range semantic coherence in
+the generated text, we deﬁne three new metrics:
+Long-range repetition (LR):For a whole num-
+ber=and document , let(¹ºbe the number of
+distinct tokens in , and let'¹ºbe the numberof distinct tokens for which the distance between
+their ﬁrst and last occurrence in is at least=po-
+sitions. The long-range repetition score LRof a
+corpusfgis a macro-average:
+LR:=Í'¹º
+Í(¹º
+This simple measure of lexical coherence favors
+repetition of words long after they are ﬁrst used, but
+gives lower weight to documents that degenerate
+into repetition of a short span.
+Long-dependent token frequency (LTF): A
+long-dependent token is one to which the base LM
+assigns a likelihood of at least 20% given its full
+context, but a likelihood of less than 5% given only
+the 20 tokens of context preceding it. We compute
+the frequency of long-dependent tokens among all
+generated tokens.
+Long-short likelihood difference ( X):The mean
+difference in likelihoods assigned to tokens by the
+base LM conditioned on full context and condi-
+tioned on 20 tokens of context.
+Although some choices of constants are needed
+to deﬁne LTF andX, we intend them to be intuitive
+summaries of long-range coherence in the absence
+of established metrics. In particular, 20 tokens
+is close to the length of one sentence in typical
+English text.
+We sample 5000 document completions from
+GPT-2 Large following sampling procedures with
+a range of boosting schemes. We consider models
+of the form55 , for:2f8163264gand
+U2f 04 02 01 005 00250g. (Such
+a parametrization of boosting parameters was cho-
+sen to ensure that when the context has length less
+than:– or the distant context has very little effect
+on the next word – the boosted model becomes
+equivalent to the untempered 5.) Top-?trunca-
+tion with?=095is applied to all models.8218
+Results. Metrics of two of the best models, with
+:=32U= 005and:=64U= 01, are
+shown in Table 2. In particular, the latter model
+generates text that is closer to the human refer-
+ence, or equally close, to the pure top- ?sampling
+(U=0) baseline in all metrics, with the greatest
+improvement seen in the coherence measures.
+Fig. 3 shows the dependence of selected metrics
+on:andU. Coherence boosting brings all metrics
+closer to those of human text. As :increases, the
+optimalUgrows in magnitude. This is expected:
+the predictive effect of tokens more than :positions
+away decreases with :(5approaches5).
+We also note that a simple sampling with tem-
+perature 0.9 performs better than top- ?sampling in
+most of the coherence metrics. This suggests that
+the improvements accomplished by top- ?trunca-
+tion come at the cost of introducing a bias towards
+tokens that are predictable from a short context.
+Coherence boosting corrects this bias without sac-
+riﬁcing the gains in other measures.
+An example of human, top- ?, and coherence
+boosting outputs is shown in Table D.1.
+4.2 Dialog systems
+This experiment is based on the Dialog System
+Technology Challenge 7 (DSTC7) (Galley et al.,
+2019), which benchmarks generation of dialog re-sponses conditioned on one or more turns of conver-
+sation context. As a base model, we use DialoGPT
+(Zhang et al., 2020c), a GPT-2 Small variant that
+demonstrated strong results on this task.
+Dialog systems’ responses to the 2208 conver-
+sation promptsare scored against human-written
+reference responses (ﬁve for each example). Fol-
+lowing Zhang et al. (2020c), we use the =-gram
+overlap metrics NIST (Doddington, 2002), BLEU
+(Papineni et al., 2002), and METEOR (Lavie and
+Agarwal, 2007), as well as two intrinsic measures
+of=-gram diversity from Li et al. (2016); Zhang
+et al. (2018): Distinct-=andEntropy-=. It is de-
+sirable for a dialog system to reach scores close to
+those of the human responses in all metrics.
+In addition to the decoding algorithms consid-
+ered by (Zhang et al., 2020c) – beam search and
+greedy decoding – we consider greedy decoding
+with a coherence boosting model. As long and
+short predictors, we use DialoGPT conditioned
+on the full conversation context and on only the
+(context-free) response generated so far . That is,
+if the conversation context is (and the text gen-
+erated so far is FF, thenFis predicted
+using the model 55, evaluated on the string
+(hsepiFF, wherehsepiis the turn separa-8219
+tor token. We consider U2f0 01 08g.
+Results. Table 3 shows the metrics of the boost-
+ing models that reach the peak average NIST and
+BLEU scores ( U= 03andU= 07). Increasing
+the magnitude of Uleads to responses that are more
+relevant to the prompt (higher BLEU and NIST)
+and more diverse than those from greedy decoding.
+As Ugrows large, the boosting model favors cre-
+ative responses that are relevant to the prompt (high
+NIST), but simple responses that are common in
+the reference data become unlikely (low BLEU).
+We observed that the responses with U= 07,
+despite the superior metrics, are more likely to
+be ungrammatical and innovate words in an effort
+to use tokens relevant to the prompt. In practice,
+improving dialog systems with coherence boosting
+may require techniques to prevent these side effects,
+such as repetition penalties or relaxation of greedy
+decoding to low-temperature sampling.
+Finally, we note that the learning of DialoGPT
+was initialized with a pretrained GPT-2 and uses
+GPT-2’s end-of-text token as the turn separator.
+This choice may reduce DialoGPT’s attention to
+past turns, as tokens preceding the end-of-text to-
+ken are never informative in GPT-2’s training data.
+5 Experiments: Language understanding
+We evaluate coherence boosting on zero-shot lan-
+guage understanding and inference tasks, where
+examples are expected to be highly coherent.
+We study 15 datasets in 5 categories of tasks.
+(1) Cloze tasks :StoryCloze (Mostafazadeh et al.,
+2016), HellaSwag (Zellers et al., 2019), and
+COPA (Roemmele et al., 2011). (2) Question an-
+swering :CommonsenseQA (CsQA) (Talmor et al.,
+2019), OpenBookQA (OBQA) (Mihaylov et al.,2018), ARC Easy / Challenge (ARC-E/C) (Clark
+et al., 2018), and PIQA (Bisk et al., 2020). (3)
+Text classiﬁcation :SST-2/5 (Socher et al., 2013),
+TREC (V oorhees and Tice, 2000), AGNews (Zhang
+et al., 2015). (4) Natural language inference :
+RTE (Dagan et al., 2005), CB(De Marneffe et al.,
+2019), and BoolQ (Clark et al., 2019). (5) Fact
+knowledge retrieval :LAMA (Petroni et al., 2019).
+All tasks except LAMA are formulated as
+multiple-choice problems. We convert text clas-
+siﬁcation and inference tasks to multiple-choice
+tasks by choosing meaningful answer words, e.g.,
+“True”/“False”. The prediction is made by selecting
+the choice with the highest LM likelihood.
+For in-context learning of GPT models, prompt
+formats greatly impact performance. We follow
+previous work (Brown et al., 2020; Zhao et al.,
+2021; Holtzman et al., 2021) to create natural
+prompts to enlarge the effectiveness of in-context
+learning, but we do not aim to optimize the full and
+context-free prompt format: our goal is to evaluate
+coherence boosting models with a ﬁxed prompt.
+The prompt formats we use are listed in Table E.1.
+As described in §2, within each prompt we identify
+apremise-free context , which is used as the context
+for the short-range model in coherence boosting.
+For each dataset, we pick the optimal value Uof
+the parameter Uon the validation set and report the
+accuracy on testing set. (If no testing set is publicly
+available, we choose Uon a subset of the training
+set and report the ﬁnal number on the validation
+set.) Across all experiments, we do not put any
+few-shot examples in the prompt.
+For the knowledge retrieval task, we follow Zhao
+et al. (2021)’s data split of LAMA and evaluate
+GPT models on facts whose missing answers are at
+the end of the sentence (to ﬁt the nature of autore-
+gressive language models). We limit the prompt
+length to be larger than 5 tokens and rerun the
+model from Zhao et al. (2021) on the new data.8220
+Results: Multiple-choice tasks. Results of
+three representative base models on all multiple-
+choice tasks are presented in Table 4. (Results for
+all models are in Tables F.1 and F.2.) We compare
+our best model with two baselines, U=0(5)
+andU= 1. The former one is the original full-
+context model, while the latter is, for most tasks,
+a form of unconditional probability normalization
+as performed by Brown et al. (2020); Holtzman
+et al. (2021). We also compare our best model with
+other inference methods (Holtzman et al., 2021;Min et al., 2021) in Tables F.3 and F.4.
+By comparing the third column with the ﬁrst
+two columns within each model in Table 4, we
+can see that our method with the selected Ugen-
+erally improves the accuracy on all tasks. Some
+of the improvements are dramatic, where boosted
+GPT-2 Small outperforms GPT-2 XL’s base model
+(e.g., CsQA, OBQA, ARC-C) and is even compa-
+rable with GPT-3 175B’s base model (e.g., SST-2,
+SST-5, RTE). We make similar conclusions when
+comparing coherence boosting with other inference
+methods in Tables F.3 and F.4.
+We observe that the optimal Udepends on tasks
+and models (fourth column within each model),
+which means that Ucannot be heuristically set to
+0or 1as in past work. This ﬁnding suggests
+the necessity of searching for an optimal U. We
+visualize the accuracy curve by varying Uin the
+testing set of all datasets. We show the curve for
+StoryCloze in Fig. 4 and present similar ﬁgures for
+all tasks in Figs. F.1 and F.2.
+Consistent with the results on LAMBADA (§3),
+the optimalUis usually negative, and its absolute
+value tends to decrease with the model size. We
+selected the optimal Uby the validation set, but
+future work may explore automatic and adaptive
+methods for setting this parameter. Notice that all
+experiments required only a single pass through
+the data to compute answer likelihoods conditioned8221
+on full and premise-free contexts – no iterative
+gradient-based ﬁnetuning was applied.
+Results: Knowledge retrieval. Unlike LAM-
+BADA, where long contexts are required for infer-
+ring the last word, LAMA contains much shorter
+sentences for knowledge facts, i.e., (subject, re-
+lation, object). A recent study (Cao et al., 2021)
+shows that the prediction is biased by the relation in
+the short context, i.e., the answer to a prompt (e.g.,
+“Dante was born in ___”) can be induced by the
+relation (“was born in”) without the subject. Co-
+herence boosting mitigates the inﬂuence of those
+short contexts by making the prediction dependent
+on a longer context containing the subject.
+We present results for all models on LAMA in
+Table 5. We also compare our model with contex-
+tual calibration (CC) (Zhao et al., 2021), which
+processes the LM’s output probabilities with a log-
+linear model.Coherence boosting with the se-
+lectedUand:outperforms both the base model
+and CC by signiﬁcant margins.
+6 Extensions and future work
+We suggest three promising research directions:
+Coherence tuning. The need to evaluate the base
+LM with multiple contexts in coherence boosting
+introduces cost and complexity at inference time.
+It may be desirable instead to modify the weights
+of the base model to improve long-range coherence
+properties. In §B, we describe a ‘self-tuning’ al-
+gorithm that achieves this without training on any
+data created for this purpose .
+New domains and architectures. In this paper,
+we mainly considered coherence boosting with
+decoder-only Transformer LMs trained on generictext, but future work should consider other archi-
+tectures and target domains. In §C, we give prelim-
+inary results on the text summarization domain.
+Although we expect recency bias to be less pro-
+nounced in LMs that use separate attention mod-
+ules to process the prompt and the output – such as
+encoder-decoder models for translation or summa-
+rization – procedures inspired by coherence boost-
+ing may prove effective in domains where a strong
+causal link between prompt and output is known
+to exist. Such domains include language gener-
+ation conditioned on structured data (Yao et al.,
+2020; Mager et al., 2020; Moosavi et al., 2021) and
+model-guided reasoning in formal languages, such
+as proof or program synthesis (Polu and Sutskever,
+2020; Chen et al., 2021; Li et al., 2022).
+Efﬁcient search proposals. Procedures that
+force LMs to be more focused on a prompt, or a spe-
+ciﬁc part of it, when generating or ranking tokens
+can beneﬁt algorithms that search for combinations
+of words through sampling. It would be interesting
+to use coherence boosting in non-autoregressive
+text generation algorithms, such as to accelerate
+the mixing of MCMC methods for constrained text
+generation (Miao et al., 2019; Zhang et al., 2020b;
+Malkin et al., 2021).
+7 Conclusion
+We have illustrated the hyposensitivity of pre-
+trained language models to long-range context and
+proposed a simple inference-time remedy. We hope
+to see coherence boosting used as a simple alter-
+native or complement to ﬁnetuning procedures in
+zero-shot applications of pretrained LMs.
+Acknowledgments
+The authors are grateful to Sudha Rao, Matt
+Richardson, and Huan Sun for valuable discussions
+about this project. We thank the anonymous re-
+viewers for their comments and suggestions.8222Ethics statement
+We hope and expect to see a nonnegative net soci-
+etal impact from better text generation and ranking
+algorithms in general and from this work in partic-
+ular. As we have shown, there is room to improve
+the inference procedures used with small language
+models, which incur lower costs than training and
+evaluation of large models. However, researchers
+should bear in mind the risks and potential misuse
+of automatic generation of long-form text.
+References8223822482258226A On multi-objective training and log-linear weights
+The section extends the discussion in §2.1.
+Recall that the language model 5is trained on the multi-objective loss (3):Õ_E» log5¹FjFF;\º¼
+|                                                         {z                                                         } _=1
+"
+As we saw in the main text, the scalarization weights _are uniform as a consequence of the training
+regime. However, evaluation procedures effectively give nonuniform weight to the "prediction losses.
+Some vector calculus. Denote by ˆ\¹,ºa local optimum of the above optimization problem for general
+linear combination weights ,=¹__º. Under suitable regularity conditions, the gradient of the
+combined loss vanishes:
+Õ_mL¹\º
+m\=0 (4)
+Assuming the Hessian Aof the optimization criterionÍ_L¹\ºis nonsingular, we can implicitly
+differentiate (4) with respect to ,to obtain the matrix derivative
+mˆ\¹,º
+m,= Am¹L¹\ºL¹\ºº
+m\ (5)
+The local dependence of the losses on the scalarization weights can be expressed as a bilinear form
+evaluated onand:
+mL¹ˆ\¹,ºº
+m_=mL
+m\mˆ\¹,º
+m_= mL
+m\AmL
+m\ (6)
+Because ˆ\is a local minimizer,  Ais negative deﬁnite. In particular, anyis negative. This
+expresses the intuitive fact that if an inﬁnitesimally higher weight is given to some prediction loss in
+optimization, the value of this loss at the optimum will be inﬁnitesimally lower.
+For concreteness, consider how the highest-length prediction loss L¹ˆ\¹,ººchanges when _is
+increased and the _(9<8) are decreased with rate proportional to _, whileÍ_is kept constant. That
+is, let #=
+ _ _Í_ _ _
+. Then
+3L¹ˆ\¹,¸C#ºº
+3C=ÕmL
+m_V= mL
+m\AÕmL
+m\V= mL
+m\AmL
+m\Õ_0 (7)
+where the last two equalities follow from (6) and (4), respectively, and the inequality holds because Ais
+positive deﬁnite. So we have shown that, in nondegenerate cases, the L¹\ºterm of the optimization
+criterion decreases under the locally optimal weights \when_is inﬁnitesimally increased in this way.
+Log-linear mixture of predictors. Returning to coherence boosting, suppose that we aim to build
+out of the predictors 5¹ ;\ˆ¹,ººa new predictor 6that would have lower negative log-likelihood on
+prediction of a word given the maximum-length context:
+E» log6¹FjFFº¼E
+ log5¹FjFF;ˆ\¹,ºº
+
+As we just saw, using this predictor in place of 5achieves the same direction of movement in the
+prediction loss as optimizing with higher weight _.8227A naïve guess – not a proper predictor, as its outputs do not sum to 1 – would lightly perturb 5by
+log-linearly mixing small multiples of the 5weight weights Vsumming to 0:
+6¹FFº=exp 
+log5¹FF;ˆ\¹,ºº¸CÕVlog5¹ ˆ\¹,ºº!
+
+Then, by linearity of expectation,
+3
+3CEh
+ log6¹FjFFºi
+=ÕVE
+ log5¹FjFF;ˆ\¹,ºº
+=ÕVL¹ˆ\¹,ºº (8)
+This quantity is negative if, for example, L¹ˆ\¹,ººis minimal among the L¹ˆ\¹,ºº.
+Reintroducing the normalization condition, we deﬁne a candidate function 6as the normalization of
+6overFand compute, with the aid of (8) and using that the 6are normalized to simplify the
+derivative of logÍexp:
+3
+3CEh
+ log6¹FjFFºi
+=ÕVL¹ˆ\¹,ºº¸3
+3CElogÕ6¹FjFFº
+=ÕVL¹ˆ\¹,ºº¸EÕ*ÕVlog5¹FF;ˆ\¹,ºº 5¹FF;ˆ\¹,ºº+
+=ÕVL¹ˆ\¹,ºº ÕVE
+ 5¹FF;ˆ\¹,ººk5¹FF;ˆ\¹,ºº
+ (9)
+where the last line used thatÍV=0.
+In practice, we are interested in sparse log-linear mixtures. Taking V=1,V= 1for a single:, and
+all otherV=0, we conclude that the boosted model proportional to 55is a better predictor than 5
+alone if the difference between prediction losses LandLis greater than the average KL divergence
+between the predictions 5and5.
+B From coherence boosting to coherence tuning
+As mentioned in the main text, algorithms that modify the weights of a pretrained LM to increase effect
+of distant words, mimicking coherence boosting, are an interesting direction for future work. Here we
+propose an algorithm, coherence tuning , that achieves this without training on any specialized data.
+Initializing with the pretrained model 5¹ j ;\º, the algorithm iterates the following training steps to
+bring the LM closer to its coherence-boosted version 5:
+(1) Generate a sequence FFfrom the current model 5¹ j ;\º.
+(2)Compute all next-token distributions under the coherence-boosted version of the current model
+(5¹FF;\º) and under the current model without boosting ( 5¹FF;\º).
+(3)Gradient step on KL¹5¹FF;\ºk5¹FF;\ºº, where the ﬁrst distribution 5is treated as
+constant. This step may be restricted only to :near the end of the sequence.
+We provide a batched implementation in Fig. B.1 in lieu of pseudocode. This coherence tuning code,
+which performs 32 gradient steps on batches of 32 sequences of length 32, runs in a few minutes on
+modern hardware, amortizing the overhead cost of coherence boosting while achieving comparable results
+on the WebText article completion task (second-to-last row of Table 2).8228
+C GPT-2 summarization experiments
+In §4 of the main text, we applied coherence boosting to generic text and dialogue response generation.
+Another interesting task that also requires long-range coherence is text summarization, in which the
+model is often expected to attend to the ﬁrst few sentences to summarize a long article. Thus, we provide
+preliminary experiments for zero-shot abstractive summarization by applying our proposed method to
+GPT-2 models.
+Experiment details. We take the two most popular summarization datasets, CNN/DM (See et al., 2017)
+and XSum (Narayan et al., 2018), where both contain recent articles and the summaries for the latter are
+more abstractive than the former. Following standard design (Radford et al., 2019), we append the tokens
+“TL;DR: ” at the end of each article to induce summarization behavior of GPT models. We leverage the
+GPT-2 XL model and let it continue generating 100 tokens with greedy decoding. We take the ﬁrst three
+sentences for CNN/DM articles and the ﬁrst two sentences for XSum articles as their summaries. We use
+the preprocessed data and metric calculation from Zhong et al. (2020) and report the standard ROUGE
+scores in Table C.1.
+To apply our proposed coherence boosting method, similarly to the method used for dialogue response
+generation, we deﬁne the short context as the newly generated text after the “ TL;DR: ” tokens. That is,
+at any time step during the summarization, the long context is the full article with the so-far generated
+summary, and the short context is only the generated summary.
+Results. As we can see from Table C.1, our proposed CB method improves most of the metrics on both
+datasets. On the CNN/DM dataset, CB yields improvements of up to 3 ROUGE points. We believe such
+a signiﬁcant improvement is due to the article structure of the CNN/DM dataset. Speciﬁcally, the ﬁrst
+three sentences in CNN/DM articles can provide pretty good summaries for a large portion of articles
+and have been considered as a very strong baseline for summarization models (Zhong et al., 2020). This8229CNN/DM XSum
+ROUGE-1 ROUGE-2 ROUGE-L ROUGE-1 ROUGE-2 ROUGE-L
+GPT-2 XL 26.671 7.792 23.926 21.346 4.360 16.880
+CB,U= 01 28.027 8.658 25.179 21.580 4.265 17.025
+CB,U= 02 28.995 9.293 26.066 21.571 4.200 17.026
+CB,U= 03 29.502 9.528 26.442 21.405 4.045 16.848
+CB,U= 04 29.772 9.663 26.644 21.150 3.876 16.613
+CB,U= 05 29.872 9.625 26.658 20.773 3.703 16.288
+CB,U= 06 29.827 9.500 26.524 20.379 3.525 16.010
+CB,U= 07 29.742 9.392 26.399 20.063 3.437 15.776
+CB,U= 08 29.703 9.304 26.242 19.661 3.305 15.460
+CB,U= 09 29.481 9.109 25.990 19.387 3.195 15.256
+long-range information in the ﬁrst few sentences is hard to capture for GPT models, and this difﬁculty can
+be alleviated by coherence boosting.
+Such structure might be less pronounced in the XSum dataset, thus leading to a smaller improvement
+from coherence boosting. The difference between the datasets is also reﬂected in the best value of U. The
+optimalUfor the CNN/DM dataset is around  0.5, while the best Ufor XSum is around  0.2, which
+indicates that boosting has less effect on XSum.
+Finally, we note that the performance with GPT models presented here is far lower than that of state-of-
+the-art summarization-speciﬁc models, such as ﬁnetuned BART models (Lewis et al., 2020; Zhang et al.,
+2020a). We leave the use of coherence boosting with such encoder-decoder models to future work.8230D Example WebText completion
+An example of human, top- ?, and coherence boosting outputs is shown in Table D.1. All outputs for all
+boosting schemes are included in the code repository.8231E Prompt formats for multiple-choice tasks8232F Additional results8233823482358236

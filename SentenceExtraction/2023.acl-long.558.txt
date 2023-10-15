@@ -1,1 +1,954 @@
-10038 Proceedings of the 61st Annual Meeting of the Association for Computational Linguistics Volume 1 : Long Papers , pages 10038–10055 July 9 - 14 , 2023 © 2023 Association for Computational Linguistics 10039 10040 10041 10042 10043 10044 10045 10046 10047 10048 10049 10050 10051 10052 10053 10054 10055 
+
+Jinheon BaekAlham Fikri AjiJens LehmannSung Ju Hwang
+KAISTMBZUAIAmazon
+{jinheon.baek, sjhwang82}@kaist.ac.kr
+alham.fikri@mbzuai.ac.ae jlehmnn@amazon.com
+Abstract
+There has been a surge of interest in utilizing
+Knowledge Graphs (KGs) for various natural
+language processing/understanding tasks. The
+conventional mechanism to retrieve facts in
+KGs usually involves three steps: entity span
+detection, entity disambiguation, and relation
+classiﬁcation. However, this approach requires
+additional labels for training each of the three
+subcomponents in addition to pairs of input
+texts and facts, and also may accumulate errors
+propagated from failures in previous steps. To
+tackle these limitations, we propose a simple
+knowledge retrieval framework, which directly
+retrieves facts from the KGs given the input
+text based on their representational similarities,
+which we refer to as Direct Fact Retrieval (Di-
+FaR). Speciﬁcally, we ﬁrst embed all facts in
+KGs onto a dense embedding space by using a
+language model trained by only pairs of input
+texts and facts, and then provide the nearest
+facts in response to the input text. Since the
+fact, consisting of only two entities and one re-
+lation, has little context to encode, we propose
+to further reﬁne ranks of top- kretrieved facts
+with a reranker that contextualizes the input
+text and the fact jointly. We validate our Di-
+FaR framework on multiple fact retrieval tasks,
+showing that it signiﬁcantly outperforms rele-
+vant baselines that use the three-step approach.
+1 Introduction
+Knowledge graphs (KGs) ( Bollacker et al. ,2008 ;
+Vrandecic and Krötzsch ,2014 ;Lehmann et al. ,
+2015 ), which consist of a set of facts represented
+in the form of a (head entity, relation, tail entity)
+triplet, can store a large amount of world knowl-
+edge. In natural language applications, language
+models (LMs) ( Devlin et al. ,2019 ;Brown et al. ,
+2020 ) are commonly used; however, their knowl-
+edge internalized in parameters is often incomplete,
+inaccurate, and outdated. Therefore, several recent
+works suggest augmenting LMs with facts from
+KGs, for example, in question answering ( Oguz
+et al.,2022 ;Ma et al. ,2022 ) and dialogue genera-
+tion ( Galetzka et al. ,2021 ;Kang et al. ,2022b ).
+However, despite the broad applications of the
+KGs, the existing mechanism for retrieving facts
+from them are, in many cases, unnecessarily com-
+plex. In particular, to retrieve facts from KGs, ex-
+isting work ( Fu et al. ,2020 ;Lan et al. ,2021 ;Wang
+et al. ,2021 ) relies on three sequential steps, con-
+sisting of span detection, entity disambiguation,
+and relation classiﬁcation, as illustrated in Fig-
+ure1a. For example, given an input text: "Where
+was Michael Phelps born?", they ﬁrst detect a span
+of an entity within the input, which corresponds to
+"Michael Phelps". Then, they match the entity men-
+tion in the input to an entity id in the KG. Those
+two steps are often called entity linking. Finally,
+among 91 relations associated with the entity of
+Michael Phelps, they select one relation relevant to
+the input, namely "place of birth".
+The aforementioned approach has a couple of10038drawbacks. First, all three sub-modules in the ex-
+isting pipeline require module-speciﬁc labels in
+addition to query-triplet pairs for training. How-
+ever, in real-world, high-quality training data is
+limited, and annotating them requires signiﬁcant
+costs. Second, such a pipeline approach is prone to
+error propagation across steps ( Singh et al. ,2020 ;
+Han et al. ,2020 ). For example, if the span detection
+fails, the subsequent steps, such as relation classiﬁ-
+cation, are likely to make incorrect predictions as
+well. Third, certain modules, that match entities in
+queries to KGs or predict relations over KGs, are
+usually not generalizable to emerging entities and
+relations and cannot be applied to different KGs. It
+would be preferable to have a method that does not
+require KG-speciﬁc training and inference.
+To tackle these limitations, we propose to di-
+rectly retrieve the relevant triplets related to a natu-
+ral language query by computing their similarities
+over a shared representation space (see Figure 1b).
+The design of our direct retrieval framework is
+motivated by a pioneering work of open-domain
+question answering with documents ( Karpukhin
+et al.,2020 ), which showed the possibility of dense
+retrieval with simple vector similarities between
+the question and document embeddings. However,
+in contrast to the document retrieval scenario where
+documents have sufﬁcient contexts to embed, it is
+unclear whether the LM can still effectively em-
+bed facts represented in the short triplet form for
+retrieval. Also, compared to the document retrieval
+which additionally requires a reader to extract only
+the relevant piece of knowledge, our fact retriever
+itself can directly provide the relevant knowledge.
+To realize our fact retriever, we train it by maxi-
+mizing similarities between representations of rel-
+evant pairs of input texts and triplets while min-
+imizing irrelevant pairs, where we use LMs for
+encoding them. We note that this process requires
+only text-triplet pairs without using extra labels,
+unlike the conventional pipeline approach for fact
+retrieval. After training, we index all triplets in the
+KG with the trained encoder in an ofﬂine manner,
+and, given the input query, we return the nearest
+triplets over the embedding space. This procedure
+simpliﬁes the conventional three steps for retriev-
+ing facts from KGs into one. To further efﬁciently
+search the relevant triplets, we approximate the
+similarity calculation with vector quantization and
+hierarchical search based on clustering ( Johnson
+et al.,2021 ). We further note that, since we embedtriplets using the LM, our retriever can generalize
+to different KGs without any modiﬁcation, unlike
+some conventional retrieval systems that require
+additional training to learn new KG schema about
+distinct entities and relations types. We refer to our
+framework as DirectFactRetrieval ( DiFaR ).
+We experimentally demonstrate that our direct
+retrieval on KGs works well; however, the fact
+represented in the triplet form has a limited con-
+text, since it consists of only two entities and one
+relation. Also, similarity calculation with the in-
+dependently represented input text and triplets is
+arguably simple, and might be less effective. There-
+fore, to further improve the retriever performance,
+we additionally use a reranker, whose goal is to
+calibrate the ranks of retrieved triplets for the input
+text. In particular, we ﬁrst retrieve knearest facts
+with the direct retriever, and then use another LM
+which directly measures the similarity by encoding
+the input text and the triplet simultaneously. More-
+over, another objective of the reranker is to ﬁlter
+out irrlevant triplets, which are the most confusing
+ones in the embedding space of the direct retriever.
+Therefore, to effectively ﬁlter them, we train the
+reranker to minimize similarities between the input
+text and the most nearest yet irrelevant triplets.
+We evaluate our DiFaR framework on fact re-
+trieval tasks across two different domains of ques-
+tion answering and dialogue, whose goals are to
+retrieve relevant triplets in response to the given
+query. The experimental results show that our Di-
+FaR framework outperforms relevant baselines that
+use conventional pipeline approaches to retrieve
+facts on KGs, and also show that our reranking strat-
+egy signiﬁcantly improves retrieval performances.
+The detailed analyses further support the efﬁcacy
+of our DiFaR framework, with its great simplicity.
+Our contributions in this work are as follows:
+•We present a novel direct fact retrieval (Di-
+FaR) framework from KGs, which leverages
+only the representational similarities between
+the query and triplets, simplifying the con-
+ventional three steps: entity detection, disam-
+biguation, and relation classiﬁcation, into one.
+•We further propose a reranking strategy, to
+tackle a limitation of little context in facts, for
+direct knowledge retrieval, which is trained
+with samples confused by the direct retriever.
+•We validate our DiFaR on fact retrieval tasks,
+showing that it signiﬁcantly outperforms base-
+lines on unsupervised and supervised setups.100392 Background and Related Work
+Knowledge Graphs Knowledge Graphs (KGs)
+are factual knowledge sources ( Bollacker et al. ,
+2008 ;Vrandecic and Krötzsch ,2014 ), containing
+a large number of facts, represented in a sym-
+bolic triplet form: (head entity, relation, tail entity).
+Since some natural language applications require
+factual knowledge ( Schneider et al. ,2022 ), existing
+literature proposes to use knowledge in KGs, and
+sometimes along with language models (LMs) ( De-
+vlin et al. ,2019 ). To mention a few, in question
+answering domains, facts in KGs can directly be
+answers for knowledge graph question answering
+tasks ( Lukovnikov et al. ,2017 ;Chakraborty et al. ,
+2019 ), but also they are often augmented to LMs
+to generate knowledge-grounded answers ( Zhang
+et al. ,2019 ;Kang et al. ,2022a ). Similarly, in di-
+alogue generation, some existing work augments
+LMs with facts from KGs ( Galetzka et al. ,2021 ;
+Kang et al. ,2022b ). However, prior to utilizing
+facts in KGs, fact retrieval – selection of facts
+relevant to the input context – should be done in
+advance, whose results substantially affect down-
+stream performances. In this work, we propose a
+conceptually simple yet effective framework for
+fact retrieval, motivated by information retrieval.
+Information Retrieval The goal of most infor-
+mation retrieval work is to retrieve relevant docu-
+ments in response to a query (e.g., question). Early
+work relies on term-based matching algorithms,
+which count lexical overlaps between the query and
+documents, such as TF-IDF and BM25 ( Robertson
+et al.,1994 ;Robertson and Zaragoza ,2009 ). How-
+ever, they are vulnerable to a vocabulary mismatch
+problem, where semantically relevant documents
+are lexically different from queries ( Nogueira et al. ,
+2019 ;Jeong et al. ,2021 ). Due to such the issue,
+recently proposed work instead uses LMs ( Devlin
+et al.,2019 ;Liu et al. ,2019 ) to encode queries and
+documents, and uses their representational similar-
+ities over a latent space ( Karpukhin et al. ,2020 ;
+Xiong et al. ,2021 ;Qu et al. ,2021 ). They suggest
+their huge successes are due to the effectiveness of
+LMs in embedding documents. However, they fo-
+cus on lengthy documents having extensive context,
+and it is unclear whether LMs can still effectively
+represent each fact, succinctly represented with two
+entities and one relation in the triplet form, for its
+retrieval. In this work, we explore this new direc-
+tion by formulating the fact retrieval problem as the
+information retrieval problem done for documents.Knowledge Retrieval from KGs Since KGs
+have a large number of facts, it is important to
+bring only the relevant piece of knowledge given
+an input query. To do so, one traditional approach
+uses neural semantic parsing-based methods ( Yih
+et al. ,2015 ;Dong and Lapata ,2016 ;Bao et al. ,
+2016 ;Luo et al. ,2018 ) aiming to translate natural
+language inputs into logical query languages, such
+as SPARQLandλ-DCS ( Liang ,2013 ), executable
+over KGs. However, they have limitations in re-
+quiring additional labels and an understanding of
+logical forms of queries. Another approach is to
+use a pipeline ( Bordes et al. ,2014 ;Hao et al. ,2017 ;
+Mohammed et al. ,2018 ;Chen et al. ,2019 ;Wang
+et al. ,2021 ) consisting of three subtasks: entity
+span detection, entity disambiguation, and relation
+classiﬁcation. However, they similarly require ad-
+ditional labels on training each subcomponent, and
+this pipeline approach suffers from errors that are
+propagated from previous steps ( Singh et al. ,2020 ;
+Han et al. ,2020 ). While recent work ( Oguz et al. ,
+2022 ) proposes to retrieve textual triplets from KGs
+based on their representational similarities to the in-
+put text with the information retrieval mechanism,
+they still rely on entity linking (e.g., span detection
+and entity disambiguation) ﬁrst, thus identically
+having limitations of the pipeline approach. An-
+other recent work ( Ma et al. ,2022 ) merges a set of
+facts associated with each entity into a document
+and performs document-level retrieval. However,
+the document retrieval itself can be regarded as en-
+tity linking, and also the overall pipeline requires
+an additional reader to extract only the relevant en-
+tity in retrieved documents. In contrast to them, we
+directly retrieve facts from the input query based
+on their representational similarities, which simpli-
+ﬁes the conventional three-step approach including
+entity linking into one single retrieval step.
+3 DiFaR: Direct Fact Retrieval
+3.1 Preliminaries
+We formally deﬁne a KG and introduce a conven-
+tional mechanism for retrieving facts from the KG.
+Knowledge Graphs LetEbe a set of entities and
+Rbe a set of relations. Then, one particular fact is
+deﬁned as a triplet: t= (e,r,e)∈ E × R × E ,
+where eandeare head and tail entities, respec-
+tively, and ris a relation between them. Also, a
+knowledge graph (KG) Gis deﬁned as a set of fac-10040tual triplets: G={(e,r,e)} ⊆ E ×R×E . Note
+that this KG is widely used as a useful knowledge
+source for many natural language applications, in-
+cluding question answering and dialogue genera-
+tion ( Oguz et al. ,2022 ;Ma et al. ,2022 ;Galetzka
+et al. ,2021 ;Kang et al. ,2022b ). However, the
+conventional mechanism to access facts in KGs is
+largely complex, which may hinder its broad appli-
+cations, which we describe in the next paragraph.
+Existing Knowledge Graph Retrieval The in-
+put of most natural language tasks is represented
+as a sequence of tokens: x= [w,w,...,w].
+Suppose that, given the input x,tis a target triplet
+to retrieve. Then, the objective of the conventional
+fact retrieval process for the KG G(Bordes et al. ,
+2014 ;Wang et al. ,2021 ) is, in many cases, formal-
+ized as the following three sequential tasks:
+wherep(m|x)is the model for mention detec-
+tion withmas the detected entity mention within
+the input x,p(e|m,x)is the model for entity dis-
+ambiguation, and p(t|e,x,G)is the model for re-
+lation classiﬁcation, all of which are individually
+parameterized by φ,ψ, andθ, respectively.
+However, there is a couple of limitations in such
+the three-step approaches. First, they are vulnera-
+ble to the accumulation of errors, since, for exam-
+ple, if the ﬁrst two steps consisting of span detec-
+tion and entity disambiguation are wrong and we
+are ending up with the incorrect entity irrelevant to
+the given query, we cannot ﬁnd the relevant triplet
+in the ﬁnal relation prediction stage. Second, due
+to their decomposed structures, three sub-modules
+are difﬁcult to train in an end-to-end fashion, while
+requiring labels for training each sub-module. For
+example, to train p(m|x)that aims to predict the
+mention boundary of the entity within the input text,
+they additionally require annotated pairs of the in-
+put text and its entity mentions: {(x,m)}. Finally,
+certain modules are usually limited to predicting
+entities Eand relations Rspeciﬁc to the particular
+KG schema, observed during training. Therefore,
+they are not directly applicable to unseen entities
+and relations, but also to different KGs.
+3.2 Direct Knowledge Graph Retrieval
+To tackle the aforementioned challenges of the ex-
+isting fact retrieval approaches on KGs, we presentthe direct knowledge retrieval framework. In par-
+ticular, our objective is simply formulated with the
+single sentence encoder model Ewithout intro-
+ducing extra variables (e.g., mande), as follows:
+t= arg maxf(E(x),E(t)), (2)
+wherefis a non-parametric scoring function that
+calculates the similarity between the input text
+representation E(x)and the triplet representa-
+tionE(t), for example, by using the dot product.
+Note that, in Equation 2, we use the sentence en-
+coderEto represent the triplet t. To do so, we
+ﬁrst symbolize the triplet as a sequence of tokens:
+t= [w,w,...,w], which is constructed by en-
+tity and relation tokens, and the separation token
+(i.e., a special token, [SEP]) between them. Then,
+we simply forward the triplet tokens to Eto ob-
+tain the triplet representation. While we use the
+single model for encoding both input queries and
+triplets, we might alternatively represent them with
+different encoders, which we leave as future work.
+Training After formalizing the goal of our direct
+knowledge retrieval framework in Equation 2, the
+next step is to construct the training samples and the
+optimization objective to train the model (i.e., E).
+According to Equation 2, the goal of our model is
+to minimize distances between the input text and
+its relevant triplets over an embedding space, while
+minimizing distances of irrelevant pairs. There-
+fore, following the existing dense retrieval work
+for documents ( Karpukhin et al. ,2020 ), we use a
+contrastive loss as our objective to generate an ef-
+fective representation space, formalized as follows:
+min−logexp(f(E(x),E(t)))/summationtextexp(f(E(x),E(t))),(3)
+whereτcontains a set of pairs between the input
+text and all triplets in the same batch. In other
+words, (x,t+)∈τis the positive pair to maximize
+the similarity, whereas, others are negative pairs to
+minimize. Also, exp(·)is an exponential function.
+Inference During the inference stage, given the
+input text x, the model should return the relevant
+triplets, whose embeddings are closest to the input
+text embedding. Note that, since E(x)andE(t)
+in Equation 2are decomposable, to efﬁciently do
+that, we represent and index all triplets in an ofﬂine
+manner. Note that, we use the FAISS library ( John-
+son et al. ,2021 ) for triplet indexing and similarity10041calculation, since it provides the extremely efﬁcient
+search logic, also known to be applicable to billions
+of dense vectors; therefore, suitable for our fact re-
+trieval from KGs. Moreover, to further reduce the
+search cost, we use the approximated neighborhood
+search algorithm, namely Hierarchical Navigable
+Small World Search with Scalar Quantizer. This
+mechanism not only quantizes the dense vectors to
+reduce the memory footprint, but also builds the
+hierarchical graph structures to efﬁciently ﬁnd the
+nearest neighborhoods with few explorations. We
+term our DirectFactRetrieval method as DiFaR .
+3.3 Reranking for Accurate Fact Retrieval
+The fact retrieval framework outlined in Section 3.2
+simpliﬁes the conventional three subtasks used to
+access the knowledge into the single retrieval step.
+However, contrary to the document retrieval case,
+the fact is represented with the most compact triplet
+form, which consists of only two entities and one
+relation. Therefore, it might be suboptimal to rely
+on the similarity, calculated by the independently
+represented input text and triplets as in Equation 2.
+Also, it is signiﬁcantly important to ﬁnd the correct
+triplet within the small k(e.g.,k= 1) of the top-k
+retrieved triplets, since, considering the scenario
+of augmenting LMs with facts, forwarding several
+triplets to LMs yields huge computational costs.
+To tackle such challenges, we propose to further
+calibrate the ranks of the retrieved triplets from our
+DiFaR framework. Speciﬁcally, we ﬁrst obtain the
+knearest facts in response to the input query over
+the embedding space, by using the direct retrieval
+mechanism deﬁned in Section 3.2. Then, we use
+another LM, E, that returns the similarity score
+of the pair of the input text and the retrieved triplet
+by encoding them simultaneously, unlike the fact
+retrieval in Equation 2. In other words, we ﬁrst con-
+catenate the token sequences of the input text and
+the triplet: [x,t], where [·]is the concatenation op-
+eration, and then forward it to E([x,t]). By doing
+so, the reranking model Ecan effectively consider
+token-level relationships between two inputs (i.e.,
+input queries and triplets), which leads to accurate
+calibration of the ranks of retrieved triplets from
+DiFaR, especially for the top- kranks with small k.
+For training, similar to the objective of DiFaR
+deﬁned in Section 3.2, we aim to maximize the
+similarities of positive pairs: {(x,t)}, while mini-
+mizing the similarities of irrelevant pairs: {(x,t)}\
+{(x,t)}. To do so, we use a binary cross-entropyloss. However, contrary to the previous negative
+sampling strategy deﬁned in Section 3.2where we
+randomly sample the negative pairs, in this reranker
+training, we additionally manipulate them by using
+the initial retrieval results from our DiFaR. The
+intuition here is that the irrelevant triplets, included
+in theknearest neighbors to the input query, are
+the most confusing examples, which are yet not
+ﬁltered by the DiFaR model. Hereat, the goal of
+the reranking strategy is to further ﬁlter them by re-
+ﬁning the ranks of the kretrieved triplets; therefore,
+to achieve this goal, we include them as the nega-
+tive samples during reranker training. Formally, let
+˜τ=/braceleftbig
+(x,˜t)/bracerightbig
+is a set of pairs of the input query x
+and itsknearest facts retrieved from DiFaR. Then,
+the negative samples for the reranker are deﬁned by
+excluding the positive pairs, formalized as follows:
+˜τ\ {(x,t)}. Note that constructing the negative
+samples with retrieval at every training iteration is
+costly; therefore, we create them at intervals of sev-
+eral epochs (e.g., ten), but also we use only a subset
+of triplets in KGs during retrieval. Our framework
+with the reranking strategy is referred to as Direct
+FactRetrieval with Reranking ( DiFaR).
+4 Experimental Setups
+We explain datasets, models, metrics, and imple-
+mentations. For additional details, see Appendix A.
+4.1 Datasets
+We validate our DirectFactRetrieval ( DiFaR ) on
+fact retrieval tasks, whose goal is to retrieve rele-
+vant triplets over KGs given the query. We use four
+datasets on question answering and dialogue tasks.
+Question Answering The goal of KG-based
+question answering (QA) tasks is to predict factual
+triplets in response to the given question, where pre-
+dicted triplets are direct answers. For this task, we
+use three datasets, namely SimpleQuestions ( Bor-
+des et al. ,2015 ), WebQuestionsSP (WebQSP) ( Be-
+rant et al. ,2013 ;Yih et al. ,2016 ), and Mintaka ( Sen
+et al. ,2022 ). Note that SimpleQuestions and We-
+bQSP are designed with the Freebase KG ( Bol-
+lacker et al. ,2008 ), ad Mintaka is designed with
+the Wikidata KG ( Vrandecic and Krötzsch ,2014 ).
+Dialogue In addition to QA, we evaluate our Di-
+FaR on KG-based dialogue generation, whose one
+subtask is to retrieve relevant triplets on the KG
+that provides factual knowledge to respond to a10042
+user’s conversation query. We use the OpenDialKG
+data ( Moon et al. ,2019 ), designed with Freebase.
+Knowledge Graphs Following Diefenbach et al.
+(2017 ) and Saffari et al. (2021 ), we use the Wiki-
+data KG ( Vrandecic and Krötzsch ,2014 ) for our
+experiments on QA, and use their dataset process-
+ing settings. For OpenDialKG, we use Freebase.
+4.2 Baselines and Our Models
+We compare our DiFaR framework against other
+relevant baselines that involve subtasks, such as
+entity detection, disambiguation, and relation pre-
+diction. Note that most existing fact retrieval work
+either uses labeled entities in queries, or uses addi-
+tional labels for training subcomponents; therefore,
+they are not comparable to DiFAR that uses only
+pairs of input texts and relevant triplets. For evalu-
+ations, we include models categorized as follows:
+Retrieval with Entity Linking: It predicts rela-
+tions over candidate triplets associated with identi-
+ﬁed entities by the entity linking methods, namely
+spaCy (Honnibal et al. ,2020 ),GENRE (De Cao
+et al. ,2021 ),BLINK (Wu et al. ,2020 ;Li et al. ,
+2020 ), and ReFinED (Ayoola et al. ,2022 ) for Wiki-
+data; GrailQA (Gu et al. ,2021 ) for Freebase.
+Factoid QA by Retrieval: It retrieves entities
+and relations independently based on their similari-
+ties with the input query ( Lukovnikov et al. ,2017 ).
+Our Models: OurDirectKnowledgeRetrieval
+(DiFaR ) directly retrieves the nearest triplets to
+the input text on the latent space. DiFaR with
+Reranking (DiFaR)is also ours, which includes
+a reranker to calibrate retrieved results.Retrieval with Gold Entities: It uses labeled
+entities in inputs and retrieves triplets based on their
+associated triplets. It is incomparable to others.
+4.3 Evaluation Metrics
+We measure the retrieval performances of models
+with standard ranking metrics, which are calculated
+by ranks of correctly retrieved triplets. In particular,
+we use Hits@K which measures whether retrieved
+Top-K triplets include a correct answer or not, and
+Mean Reciprocal Rank ( MRR ) which measures
+the rank of the ﬁrst correct triplet for each input
+text and then computes the average of reciprocal
+ranks of all results. Following exiting document
+retrieval work ( Xiong et al. ,2021 ;Jeong et al. ,
+2022 ), we consider top-1000 retrieved triplets when
+calculating MRR, since considering ranks of all
+triplets in KGs are computationally prohibitive.
+4.4 Implementation Details
+We use a distilbertas a retriever for all models,
+and a lightweight MiniLM modelas a reranker,
+both of which are pre-trained with the MSMARCO
+dataset ( Nguyen et al. ,2016 ). During reranking, we
+sample top-100 triplets retrieved from DiFaR. We
+use off-the-shelf models for unsupervised settings,
+and further train them for supervised settings.
+5 Experimental Results and Analyses
+Main Results We ﬁrst conduct experiments on
+question answering domains, and report the results
+in Table 1. As shown in Table 1, our DiFaR with10043
+Reranking (DiFaR) framework signiﬁcantly out-
+performs all baselines on all datasets across both
+unsupervised and supervised experimental settings
+with large margins. Also, we further experiment
+on dialogue domain, and report results in Table 2.
+As shown in Table 2, similar to the results on QA
+domains, our DiFaRframework outperforms the
+relevant baselines substantially. These results on
+two different domains demonstrate that our DiFaR
+framework is highly effective in fact retrieval tasks.
+To see the performance gains from our reranking
+strategy, we compare the performances between
+our model variants: DiFaR and DiFaR. As shown
+in Table 1and Table 2, compared to DiFaR, DiFaR
+including the reranker brings huge performance im-
+provements, especially on the challenging datasets:
+Mintaka and OpenDialKG. However, we consis-
+tently observe that our DiFaR itself can also show
+superior performances against all baselines except
+for the model of Factoid QA by Retrieval on the
+SimpleQuestions dataset. The inferior performance
+of our DiFaR on this SimpleQuestions dataset is
+because, its samples are automatically constructed
+from facts in KGs; therefore, it is extremely simple
+to extract entities and predict relations in response
+to the input query. On the other hand, our DiFaR
+framework sometimes outperforms the incompa-
+rable model: Retrieval with Gold Entities, which
+uses the labeled entities in the input queries. This
+is because this model is restricted to retrieve the
+facts that should be associated with entities in input
+queries; meanwhile, our DiFaR is not limited to
+query entities thanks to the direct retrieval scheme.
+Analyses on Zero-Shot Generalization Our Di-
+FaR can be generalizable to different datasets with
+the same KG, but also to ones with other KGs
+without any modiﬁcations. This is because it re-
+trieves triplets based on their text-level similarities
+to input queries and does not leverage particular
+schema of entities and relations, unlike the existing
+entity linking methods. To demonstrate them, we
+perform experiments on zero-shot transfer learn-
+ing, where we use the model, trained on the We-
+bQSP dataset with the Wikidata KG, to different
+datasets with the same KG and also to ones with
+the different Freebase KG. As shown in Table 3,
+our DiFaR frameworks are effectively generaliz-
+able to different datasets and KGs; meanwhile, the
+pipeline approaches involving entity linking are not
+generalizable to different KGs, and inferior to ours.
+Analyses on Single- and Multi-Hops To see
+whether our DiFaR frameworks can also perform
+challenging multi-hop retrieval that requires select-
+ing triplets not directly associated with entities in
+input queries, we breakdown the performances by
+single- and multi-hop type queries. As shown in
+Figure 2, our DiFaR can directly retrieve relevant
+triplets regardless of whether they are associated
+with entities in input queries (single-hop) or not
+(multi-hop), since it does not rely on entities in
+queries for fact retrieval. Also, we observe that our
+reranking strategy brings huge performance gains,
+especially on multi-hop type queries. However, due
+to the intrinsic complexity of multi-hop retrieval,
+its performances are relatively lower than perfor-
+mances in single-hop cases. Therefore, despite the
+fact that the majority of queries are answerable with
+single-hop retrieval and that our DiFaR can handle
+multi-hop queries, it is valuable to further extend10044
+the model for multi-hop, which we leave as future
+work. We also provide examples of facts retrieved
+by our DiFaR framework in Table 4. As shown in
+Table 4, since LMs, that is used for encoding both
+the question and the triplets for retrieval, might
+learn background knowledge about them during
+pre-trainnig, our DiFaR framework can directly re-
+trieve relevant triplets even for complex questions.
+For instance, in the ﬁrst example of Table 4, the LM
+already knows who was the us president in 1963,
+and directly retrieves whose religion. Additionally,
+we provide more retrieval examples of our DiFaR
+framework in Appendix B.2with Table 6for both
+single- and multi-hop questions.
+Analyses on Reranking with Varying K While
+we show huge performance improvements with our
+reranking strategy in Table 1and Table 2, its perfor-
+mances and efﬁciencies depend on the number of
+retrieved Top-K triplets. Therefore, to further ana-
+lyze it, we vary the number of K, and report the per-
+formances and efﬁciencies in Figure 3. As shown
+in Figure 3, the performances are rapidly increas-
+ing until Top-10 and saturated after it. Also, the
+time for reranking is linearly increasing when we
+increase the K values, and, in Top-10, the reranking
+mechanism takes only less than 20% time required
+for the initial retrieval. These results suggest that it
+might be beneﬁcial to set the K value as around 10.
+Sensitivity Analyses on Architectures To see
+different architectures of retrievers and rerankers
+make how many differences in performances, we
+perform sensitivity analyses by varying their back-
+bones. We use available models in the huggingface
+model library. As shown in Table 5, we observe
+that the pre-trained backbones by the MSMARCO
+dataset ( Nguyen et al. ,2016 ) show superior per-
+formances compared to using the naive backbones,
+namely DistilBERT and MiniLM, on both retriev-
+ers and rerankers. Also, performance differences
+between models with the same pre-trained dataset
+(e.g., MSMARCO-TAS-B and MSMARCO-Distil)
+are marginal. These two results suggest that the
+knowledge required for document retrieval is also
+beneﬁcial to fact retrieval, and that DiFaR frame-
+works are robust across different backbones.
+Analyses on Entity Linking While our DiFaR
+framework is not explicitly trained to predict entity
+mentions in the input query and their ids in the KG,
+during the training of our DiFaR, it might learn the
+knowledge on matching the input text to its entities.
+To demonstrate it, we measure entity linking perfor-
+mances by checking whether the retrieved triplets
+contain the labeled entities in the input query. As
+shown in Figure 4, our DiFaR surprisingly outper-
+forms entity linking models. This might be because
+there are no accumulation of errors in entity linking
+steps, which are previously done with mention de-
+tection and entity disambiguation, thanks to direct
+retrieval with end-to-end learning; but also the fact
+in the triplet form has more beneﬁcial information
+to retrieve contrary to the entity retrieval.100456 Conclusion
+In this work, we focused on the limitations of the
+conventional fact retrieval pipeline, usually con-
+sisting of entity mention detection, entity disam-
+biguation and relation classiﬁcation, which not only
+requires additional labels for training each subcom-
+ponent but also is vulnerable to the error propaga-
+tion across submodules. To this end, we proposed
+the extremely simple Direct Fact Retrieval (DiFaR)
+framework. During training, it requires only pairs
+of input texts and relevant triplets, while, in infer-
+ence, it directly retrieves relevant triplets based on
+their representational similarities to the given query.
+Further, to calibrate the ranks of retrieved triplets,
+we proposed to use a reranker. We demonstrated
+that our DiFaR outperforms existing fact retrieval
+baselines despite its great simplicity, but also ours
+with the reranking strategy signiﬁcantly improves
+the performances; for the ﬁrst time, we revealed
+that fact retrieval can be easily yet effectively done.
+We believe our work paves new avenues for fact
+retrieval, which leads to various follow-up work.
+Limitations
+In this section, we faithfully discuss the current lim-
+itations and potential avenues for future research.
+First of all, while one advantage of our Direct
+Fact Retrieval (DiFaR) is its simplicity, this model
+architecture is arguably simple and might be less
+effective in handling very complex queries ( Sen
+et al. ,2022 ). For example, as shown in Figure 2,
+even though our DiFaR framework can handle the
+input queries demanding multi-hop retrieval, the
+performances on such queries are far from perfect.
+Therefore, future work may improve DiFaR by in-
+cluding more advanced techniques, for example,
+further traversing over the KG based on the re-
+trieved facts from our DiFaR. Also, while we use
+only the text-based similarities between queries
+and triplets with LMs, it is interesting to model
+triplets over KGs based on their graph structures
+and blend their representations with representations
+from LMs to generate more effective search space.
+Also, we focus on retrieval datasets in English.
+Here we would like to note that, in fact retrieval,
+most datasets are annotated in English, and, based
+on this, most existing work evaluates model per-
+formances on English samples. However, handling
+samples in various languages is an important yet
+challenging problem, and, as future work, one may
+extend our DiFaR to multilingual settings.Ethics Statement
+For an input query, our Direct Fact Retrieval (Di-
+FaR) framework enables the direct retrieval of the
+factual knowledge from knowledge graphs (KGs),
+simplifying the conventional pipeline approach con-
+sisting of entity detection, entity disambiguation,
+and relation classiﬁcation. However, the perfor-
+mance of our DiFaR framework is still not perfect,
+and it may retrieve incorrect triplets in response
+to given queries. Therefore, for the high-risk do-
+mains, such as biomedicine, our DiFaR should be
+carefully used, and it might be required to analyze
+retrieved facts before making the critical decision.
+Acknowledgements
+We thank the members of the End-to-End Reason-
+ing team of Alexa AI at Amazon and the anony-
+mous reviewers for their constructive and insightful
+comments. Any opinions, ﬁndings, and conclu-
+sions expressed in this material are those of the
+authors and do not necessarily reﬂect the previous
+and current funding agencies of the authors. The
+part of Jinheon Baek’s graduate study and, accord-
+ingly, this work was supported by the Institute of
+Information & communications Technology Plan-
+ning & Evaluation (IITP) grant funded by the Korea
+government (MSIT) (No.2019-0-00075, Artiﬁcial
+Intelligence Graduate School Program (KAIST)
+and No.2021-0-02068, Artiﬁcial Intelligence Inno-
+vation Hub), and the Engineering Research Center
+Program through the National Research Foundation
+of Korea (NRF) funded by the Korea Government
+(MSIT) (NRF-2018R1A5A1059921).
+References1004610047100481004910050A Additional Experimental Setups
+Here we provide additional experimental setups.
+A.1 Datasets
+Question Answering In KG-based question an-
+swering datasets, there exist pairs of questions and
+their relevant triplets, and we use them for train-
+ing and evaluating models. We use the follow-
+ing three datasets: SimpleQuestions ( Bordes et al. ,
+2015 ), WebQuestionsSP (WebQSP) ( Berant et al. ,
+2013 ;Yih et al. ,2016 ), and Mintaka ( Sen et al. ,
+2022 ), and here we describe them in details. First
+of all, the SimpleQuestions dataset is designed with
+the Freebase KG ( Bollacker et al. ,2008 ), which
+consists of 19,481, 2,821, and 5,622 samples on
+training, validation, and test sets. Similarly, the
+WebQSP dataset, which is a reﬁned from the We-
+bQuestions dataset by ﬁltering out samples with
+invalid annotations, is annotated with the Freebase
+KG, consisting of 2,612 and 1,375 samples on train-
+ing and test sets, and we further sample 20% of
+training samples for validation. Lastly, the Mintaka
+dataset is recently designed for complex question
+answering, which is collected from crowdsourcing
+and annotated with the Wikidata KG ( Vrandecic
+and Krötzsch ,2014 ). Among eight different lan-
+guages, we use questions in English, which consist
+of 14,000, 2,000, and 4,000 samples for training,
+validation, and test sets, respectively.
+Dialogue Similar to the KG-based question an-
+swering datasets, the dataset on KG-based dialogue
+generation domain has pairs of the input query and
+its relevant triplets, where the input query consists
+of the user’s utterance and dialogue history, and
+the annotated triplets are the useful knowledge
+source to answer the query. For this dialogue do-
+main, we use the OpenDialKG dataset ( Moon et al. ,
+2019 ), which is collected with two parallel corpora
+of open-ended dialogues and a Freebase KG. We
+randomly split the dataset into training, validation,
+and test sets with ratios of 70%, 15%, and 15%,
+respectively, and preprocess it following Kang et al.
+(2022b ), which results in 31,145, 6,722, and 6,711
+samples on training, validation, and test sets.
+Knowledge Graphs Following experimental se-
+tups of Diefenbach et al. (2017 ) and Saffari et al.
+(2021 ), we use the Wikidata KG ( Vrandecic and
+Krötzsch ,2014 ) for our experiments on question
+answering, since the Freebase KG ( Bollacker et al. ,
+2008 ) is outdated, and the recently proposed entitylinking models are implemented with the Wiki-
+data, i.e., they are not suitable for the Freebase KG.
+Speciﬁcally, to use the Wikidata KG for datasets
+designed with the Freebase KG (e.g., SimpleQues-
+tions and WebQSP), we use available mappings
+from the Freebase KG to the Wikidata KG ( Diefen-
+bach et al. ,2017 ). Also, we use the wikidata dump
+of Mar. 07, 2022, and follow the dataset prepro-
+cessing setting from Saffari et al. (2021 ). For the
+OpenDialKG dataset, since it does not provide the
+Freebase entity ids, we cannot map them to the
+Wikidata entity ids using the available entity map-
+pings. Therefore, for this dataset, we use original
+samples annotated with the Freebase KG.
+A.2 Baselines and Our Model
+In this subsection, we provide the detailed expla-
+nation of models that we use for baselines. Note
+that entity linking models are further coupled with
+the relation classiﬁcation module to predict triplets
+based on identiﬁed entities in input queries. We
+begin with the explanations of entity linkers.
+spaCy This model ( Honnibal et al. ,2020 ) sequen-
+tially predicts spans and KG ids of entities based
+on the named entity recognition and entity disam-
+biguation modules. We use the spaCy v3.4.
+GENRE This model ( De Cao et al. ,2021 ) ﬁrst
+predicts the entity spans and then generates the
+unique entities in an autoregressive manner. Note
+that this model is trained for long texts; therefore,
+it may not be suitable for handling short queries.
+BLINK This model ( Wu et al. ,2020 ) retrieves
+the entities based on their representational similari-
+ties with the input queries, and, before that, entity
+mentions in the input should be provided. We use a
+model further tuned for questions ( Li et al. ,2020 ).
+ReFinED This model ( Ayoola et al. ,2022 ) per-
+forms the entity mention detection and the entity
+disambiguation in a single forward pass. We use a
+model further ﬁne-tuned for questions.
+GrailQA Unlike the above entity linkers that are
+trained for the Wikidata KG, this model ( Gu et al. ,
+2021 ) is trained to predict entities in the Freebase
+KG. This model performs the entity detection and
+the disambiguation sequentially, which is similar
+to the entity linking mechanism of spaCy.10051Factoid QA by Retrieval This model is a base-
+line ( Lukovnikov et al. ,2017 ) that individually
+retrieves the entities and relations based on their
+embedding-level similarities to input queries. Then,
+it merges the retrieved entities and relations with
+the KG-speciﬁc schema to construct the triplets.
+DiFaR This is our fact retrieval framework that
+directly retrieves the facts on KGs based on their
+representational similarities to the input queries.
+DiFaRThis is our fact retrieval framework with
+the proposed reranking strategy, where we further
+calibrate the retrieved results from DiFaR.
+Retrieval with Gold Entities This is an incom-
+parble model to others, which uses labeled entities
+in input queries to predict relations based on them.
+A.3 Implementation Details
+In this subsection, we provide additional imple-
+mentation details that are not discussed in Sec-
+tion4.4. In particular, we use the distilbert ( Sanh
+et al.,2019 )as the retriever, and it consists of the
+66M parameters. Also, for the reranker, we use
+the MiniLM model ( Wang et al. ,2020 ), which
+consists of the 22M parameters. For supervised
+learning experiments, we train all models for 30
+epochs, with a batch size of 512 for question an-
+swering and 32 for dialogue, and a learning rate
+of 2e-5. Also, we optimize all models using an
+AdamW optimizer ( Loshchilov and Hutter ,2019 ).
+We implement all models based on the following
+deep learning libraries: PyTorch ( Paszke et al. ,
+2019 ), Transformers ( Wolf et al. ,2020 ), Sentence-
+Transformers ( Reimers and Gurevych ,2019 ), and
+BEIR ( Thakur et al. ,2021 ). For computing re-
+sources, we train and run all models with four
+GeForce RTX 2080 Ti GPUs and with Intel(R)
+Xeon(R) Gold 6240 CPU @ 2.60GHz having 72
+processors. Also, training of our DiFaR framework
+takes less than one day. Note that we report all
+results with the single run, since our DiFaR frame-
+work signiﬁcantly outperforms all baselines, but
+also it is costly to conduct multiple run experiments
+in the information retrieval experiment setting.B Additional Experimental Results
+Here we provide additional experimental results.
+B.1 Running Time Efﬁciency
+Note that, while we provide running time compar-
+isons between our DiFaR and DiFaRin Figure 3,
+it might be interesting to see more detailed running
+costs required for our dense fact retriever. As de-
+scribed in the Inference paragraph of Section 3.2,
+we index dense vectors with the Faiss library ( John-
+son et al. ,2021 ) that supports vector quantization
+and clustering for highly efﬁcient search. Speciﬁ-
+cally, following the common vector index setting in
+previous document retrieval work ( Karpukhin et al. ,
+2020 ;Lee et al. ,2021 ), we use the HNSW index
+type. Please refer to the documentation of the Faiss
+library, if you want to further explore different
+index types and their benchmark performances.
+We report running time efﬁciencies on the Open-
+DialKG dataset, which are measured on the server
+with Intel(R) Xeon(R) Gold 6240 CPU @ 2.60GHz
+having 72 processors (See Section A.3). First of all,
+during inference, we can process about 174 queries
+per second where we return the top 1,000 facts for
+each query. Also, the average time for encoding
+and indexing one fact takes about 1 ms, which can
+be not only boosted further with more paralleliza-
+tion but also done in an online manner. Lastly, the
+performance drop of the approximation search with
+Faiss from the exact search is only 0.0098 on MRR.
+B.2 Additional Retrieval Examples
+In this subsection, on top of the retrieval exam-
+ples provided in Table 4, we provide the additional
+examples of our DiFaR framework in Table 6.1005210053ACL 2023 Responsible NLP Checklist
+A For every submission:
+/squareA1. Did you describe the limitations of your work?
+Yes, see the Limitations section after the Conclusion section.
+/squareA2. Did you discuss any potential risks of your work?
+Yes, see the Ethics Statement section after the Conclusion section.
+/squareA3. Do the abstract and introduction summarize the paper’s main claims?
+Yes, see the Abstract and Introduction sections.
+/squareA4. Have you used AI writing assistants when working on this paper?
+Left blank.
+B/squareDid you use or create scientiﬁc artifacts?
+Yes, we describe them in Section 4 and Appendix A.
+/squareB1. Did you cite the creators of artifacts you used?
+Yes, we cite them in Section 4 and Appendix A.
+/squareB2. Did you discuss the license or terms for use and / or distribution of any artifacts?
+No, but we instead follow the licenses and cite the original papers that released artifacts.
+/squareB3. Did you discuss if your use of existing artifact(s) was consistent with their intended use, provided
+that it was speciﬁed? For the artifacts you create, do you specify intended use and whether that is
+compatible with the original access conditions (in particular, derivatives of data accessed for research
+purposes should not be used outside of research contexts)?
+No, but we instead cite the original papers for artifacts, and follow their licenses.
+/squareB4. Did you discuss the steps taken to check whether the data that was collected / used contains any
+information that names or uniquely identiﬁes individual people or offensive content, and the steps
+taken to protect / anonymize it?
+Not applicable. Left blank.
+/squareB5. Did you provide documentation of the artifacts, e.g., coverage of domains, languages, and
+linguistic phenomena, demographic groups represented, etc.?
+Not applicable. Left blank.
+/squareB6. Did you report relevant statistics like the number of examples, details of train / test / dev splits,
+etc. for the data that you used / created? Even for commonly-used benchmark datasets, include the
+number of examples in train / validation / test splits, as these provide necessary context for a reader
+to understand experimental results. For example, small differences in accuracy on large test sets may
+be signiﬁcant, while on small test sets they may not be.
+Yes, we provide them in Section 4.1 and Appendix A.
+C/squareDid you run computational experiments?
+Yes, see Section 5.
+/squareC1. Did you report the number of parameters in the models used, the total computational budget
+(e.g., GPU hours), and computing infrastructure used?
+Yes, we report them in Section 4, and Appendix A.10054/squareC2. Did you discuss the experimental setup, including hyperparameter search and best-found
+hyperparameter values?
+Yes, we describe them in Section 4 and Appendix A.
+/squareC3. Did you report descriptive statistics about your results (e.g., error bars around results, summary
+statistics from sets of experiments), and is it transparent whether you are reporting the max, mean,
+etc. or just a single run?
+Yes, we clearly provide them in Table 1 and Table 2, as well as in Appendix A.
+/squareC4. If you used existing packages (e.g., for preprocessing, for normalization, or for evaluation), did
+you report the implementation, model, and parameter settings used (e.g., NLTK, Spacy, ROUGE,
+etc.)?
+Yes, we report them in Section 4 and Appendix A.
+D/squareDid you use human annotators (e.g., crowdworkers) or research with human participants?
+Left blank.
+/squareD1. Did you report the full text of instructions given to participants, including e.g., screenshots,
+disclaimers of any risks to participants or annotators, etc.?
+Not applicable. Left blank.
+/squareD2. Did you report information about how you recruited (e.g., crowdsourcing platform, students)
+and paid participants, and discuss if such payment is adequate given the participants’ demographic
+(e.g., country of residence)?
+Not applicable. Left blank.
+/squareD3. Did you discuss whether and how consent was obtained from people whose data you’re
+using/curating? For example, if you collected data via crowdsourcing, did your instructions to
+crowdworkers explain how the data would be used?
+Not applicable. Left blank.
+/squareD4. Was the data collection protocol approved (or determined exempt) by an ethics review board?
+Not applicable. Left blank.
+/squareD5. Did you report the basic demographic and geographic characteristics of the annotator population
+that is the source of the data?
+Not applicable. Left blank.10055

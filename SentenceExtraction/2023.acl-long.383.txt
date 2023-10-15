@@ -1,1 +1,986 @@
-6931 Proceedings of the 61st Annual Meeting of the Association for Computational Linguistics Volume 1 : Long Papers , pages 6931–6946 July 9 - 14 , 2023 © 2023 Association for Computational Linguistics 6932 6933 6934 6935 6936 6937 6938 6939 6940 6941 6942 6943 6944 6945 6946 
+
+Hideo Kobayashi, Yufang HouandVincent NgHuman Language Technology Research Institute, University of Texas at Dallas, USAIBM Research Europe, Ireland
+{hideo,vince}@hlt.utdallas.edu
+yhou@ie.ibm.com
+Abstract
+We present PSBERT , aSBERT -
+based pre-trained model specialized for bridg-
+ing resolution. PSBERT is pre-trained
+with a novel objective that aims to learn the
+contexts in which two mentions are implic-
+itly linked to each other from a large amount
+of data automatically generated either heuristi-
+cally or via distance supervision with a knowl-
+edge graph. Despite the noise inherent in the
+automatically generated data, we achieve the
+best results reported to date on three evaluation
+datasets for bridging resolution when replacing
+SBERT with PSBERT in a state-
+of-the-art resolver that jointly performs entity
+coreference resolution and bridging resolution.
+1 Introduction
+Bridging is essential for establishing coherence
+among the entities within a text through non-
+identical semantic or encyclopedic relations (Clark,
+1975; Prince, 1981). As demonstrated in Example
+1, local coherence is established via the implicit
+link between the bridging anaphor (prices ) and its
+antecedent (meat, milk and grain ).
+(1)In June, farmers held onto meat, milk and
+grain , waiting for July’s usual state directed price
+rises. The Communists froze prices instead.
+The task of bridging resolution , which involves
+identifying all the bridging anaphors in a text and
+linking them to their antecedents, is crucial for
+machine comprehension of the relations between
+discourse entities for various downstream applica-
+tions, such as question answering (Anantha et al.,
+2021) and dialogue systems (Tseng et al., 2021).
+The most successful natural language learning
+paradigm to date is arguably the “pre-train and fine-
+tune" paradigm, where a model is first pre-trained
+on very large amounts of data in a task-agnostic,
+self-supervised manner and then fine-tuned using a
+potentially small amount of task-specific trainingdata in the usual supervised manner. This paradigm
+is ideally applicable to bridging resolution, where
+the amount of annotated training data is relatively
+small, especially in comparison to the related task
+of entity coreference resolution. In fact, by using
+SBERT (Joshi et al., 2020) to encode the input
+and fine-tuning it using bridging-annotated data,
+Kobayashi et al. (2022b) have managed to achieve
+the best results reported to date on two commonly-
+used evaluation datasets for bridging resolution,
+namely ISNotes (Markert et al., 2012) and BASHI
+(Rösiger, 2018).
+A natural question is: how can we build upon the
+successes of this pre-train and fine-tune framework
+for bridging resolution? Apart from achieving state-
+of-the-art results, Kobayashi et al. (2022b) show
+that bridging resolution performance deteriorates
+when SBERT is replaced with BERT (Devlin
+et al., 2019) as the encoder. While it is perhaps
+not surprising that SBERT achieves better res-
+olution results than BERT given its superior per-
+formance on a wide variety of natural language
+processing tasks, it is important to understand the
+reason. Recall that SBERT is an extension of
+BERT that is motivated by entity-based information
+extraction tasks such as entity coreference resolu-
+tion and relation extraction. These tasks typically
+involve the extraction of entity mentions, which are
+textspans . In order to learn span (as opposed to
+word) representations, SBERT is pre-trained
+with span-level masking and objectives. The key
+point here is that a pre-trained model tends to work
+better for a downstream task (which in our case
+is bridging resolution) if it is pre-trained with an
+objective that is in some sense related to the down-
+stream task.
+Motivated by this observation, we design a novel
+pre-training objective for bridging resolution that
+allows a model to learn the contexts in which two
+mentions are implicitly linked to each other. We
+subsequently use our objective to further pre-train6931SBERT in combination with its original ob-
+jectives, yielding PSBERT , a pre-trained
+model that is specialized for bridging resolution.
+Note that an important factor that contributes to
+the success of pre-training is the sheer amount of
+data on which the model is pre-trained: since pre-
+training tasks are designed to be self-supervised
+learning tasks, a very large amount of annotated
+training data can be automatically generated, thus
+allowing the model to potentially acquire a lot of
+linguistic and commonsense knowledge. To enable
+our model to learn the contexts that are indicative
+of bridging, we employ a large amount of data that
+can be automatically generated either heuristically
+(Hou, 2018a) or via distance supervision using a
+knowledge graph.
+While the vast majority of existing bridging re-
+solvers are evaluated in the rather unrealistic setting
+where gold mentions are assumed as input, we fol-
+low Kobayashi et al.’s (2022b) recommendation
+and evaluate our bridging resolver in both the (real-
+istic) end-to-end setting, where we assume raw text
+as input, and the gold mention setting, where gold
+mentions are given. When replacing SBERT
+with PSBERT in Kobayashi et al’s bridg-
+ing resolver, we achieve the best results reported
+to date on three datasets for bridging resolution,
+ISNotes, BASHI, and ARRAU RST (Poesio and
+Artstein, 2008), in both evaluation settings despite
+the large amount of noise inherent in our automati-
+cally generated data. To our knowledge, this is the
+first work that reports end-to-end bridging resolu-
+tion results on the ARRAU RST dataset.
+2 Related Work
+Bridging resolution. The two sub-tasks of bridg-
+ing resolution, namely bridging anaphora recogni-
+tionandbridging anaphora resolution , have been
+tackled separately. One line of research has mod-
+eled bridging anaphora recognition as a part of
+the information status (IS) classification problem
+where each discourse entity is assigned an IS cat-
+egory, with bridging being one of the categories
+(Rahman and Ng, 2011, 2012; Hou et al., 2013a;
+Hou, 2020b). In contrast, bridging anaphora resolu-
+tion focuses on identifying the antecedents for gold
+bridging anaphors (Poesio et al., 2004; Hou et al.,
+2013b; Pandit et al., 2020). There have been several
+studies addressing full bridging resolution, which
+involves recognizing bridging anaphors and deter-
+mining their antecedents. These works includerule-based approaches (Hou et al., 2014; Rösiger
+et al., 2018), learning-based approaches (Hou et al.,
+2018; Yu and Poesio, 2020), and hybrid approaches
+(Kobayashi and Ng, 2021; Kobayashi et al., 2022a).
+A comprehensive overview of these approaches can
+be found in Kobayashi and Ng (2020).
+Recent studies have begun tackling bridging
+resolution and its sub-tasks in the end-to-end set-
+ting. For example, Hou (2021) uses a combina-
+tion of neural mention extraction and IS classifi-
+cation models for bridging anaphora recognition.
+Furthermore, Hou (2020a) proposes an approach
+of rephrasing bridging anaphors as questions and
+training question-answering models to directly ex-
+tract antecedents from their previous contexts. Fi-
+nally, there are a few works that propose models
+for full bridging resolution in the end-to-end set-
+ting (Kim et al., 2021; Kobayashi et al., 2021; Li
+et al., 2022) in the 2021 and 2022 CODI-CRAC
+shared tasks on Anaphora, Bridging, and Discourse
+Deixis in Dialogue (Khosla et al., 2021; Yu et al.,
+2022). Recently, Kobayashi et al. (2022b) conduct
+a systematic evaluation of bridging resolvers us-
+ing different standard encoders, including BERT
+(Devlin et al., 2019) and SBERT (Joshi et al.,
+2020), in the end-to-end setting.
+Enhanced pre-trained language models. BERT
+(Devlin et al., 2019), which is based on the Trans-
+former architecture (Vaswani et al., 2017), has re-
+cently attracted significant attention. Researchers
+have proposed methods to enhance it for a wide
+range of downstream tasks. One line of research
+focuses on improving the masking schemes and the
+training objectives when pre-training models for
+tasks such as question answering and sentence se-
+lection (Ram et al., 2021; Ye et al., 2020; Di Liello
+et al., 2022). Another line of work focuses on in-
+corporating external knowledge into pre-trained
+models to solve knowledge-driven problems such
+as relation extraction (Liu et al., 2020; Qin et al.,
+2021).
+3 The Current State of the Art
+State-of-the-art results on ISNotes and BASHI
+are reported in Kobayashi et al. (2022b), who ex-
+tend Yu and Poesio’s (2020) multi-task learning
+(MTL) approach to bridging resolution by (1) us-
+ingSBERT to encode the input and (2) in-
+corporating the predictions made by a rule-based
+resolver into the MTL framework. Since we aim to
+create PSBERT , which specializes S-6932
+BERT for bridging resolution, and eventually re-
+place SBERT with PSBERT in the
+MTL framework, in this section we present Y&P’s
+MTL framework (Section 3.1), Kobayashi et al.’s
+extensions to the framework (Section 3.2), and the
+inner workings of SBERT (Section 3.3).
+3.1 The Multi-Task Learning Framework
+Y&P’s model takes as input a document Drepre-
+sented as a sequence of word tokens and the associ-
+ated set of mentions (which can be gold mentions
+or automatically extracted mentions), and performs
+joint bridging resolution and coreference resolu-
+tion, which we define below, in a MTL framework.
+Thebridging resolution task involves assigning
+spanian antecedent y∈ {1, ..., i−1, ϵ}, where
+the value of yis the id of span i’s antecedent,
+which can be a dummy antecedent ϵ(i.e.,iis not
+anaphoric) or one of the preceding spans. Y&P
+define the following scoring function:
+s(i, j) =/braceleftigg
+0 j=ϵ
+s(i, j)j̸=ϵ(1)
+where s(i, j)is a pairwise bridging score that in-
+dicates how likely span irefers to a preceding span
+j. The model predicts the antecedent of ito be
+y= arg maxs(i, j), where Y(i)is the
+set of candidate antecedents of i.
+Theentity coreference resolution task involves
+identifying the entity mentions that refer to the
+same real-world entity. Specifically, the goal is to
+find an antecedent for each span using a scoring
+function that can be defined in a similar way as the
+sfunction in the bridging resolution task.
+Figure 1 illustrates the structure of the MTL
+framework, which we describe in detail below.Span Representation Layer To encode the to-
+kens and the surrounding contexts of a gold men-
+tion, Y&P use a bidirectional LSTM (Hochre-
+iter and Schmidhuber, 1997) that takes as in-
+put the BERT and GloVe embeddings. They
+define g, the representation of span i, as
+[x;x;x;ϕ], where xand
+xare the hidden vectors of the start and end
+tokens of i,xis an attention-based head vec-
+tor and ϕis a span width feature embedding.
+Bridging Prediction Layer To predict bridging
+links, Y&P first calculate the pairwise score be-
+tween spans iandjas follows:
+s(i, j) =FFNN([g;g;g◦g;ψ])(2)
+where FFNN(·)represents a standard feedforward
+neural network, and ◦denotes element-wise mul-
+tiplication. This pairwise score includes g◦g,
+which encodes the similarity of iandj, and ψ,
+which denotes the distance between them.
+Coreference Prediction Layer To predict coref-
+erence links, Y&P calculate a pairwise score be-
+tween two spans that is defined analogously as
+in Equation 2 using another FFNN, FFNN. The
+model shares the first few hidden layers of FFNN
+and FFNNas well as the span representations.
+3.2 Extensions to the MTL Framework
+Kobayashi et al. (2022b) extend the MTL frame-
+work by replacing the LSTM encoder in Y&P with
+aSBERT encoder and proposing a hybrid ap-
+proach to bridging resolution that augments the
+MTL model with the predictions made by Rösiger
+et al.’s (2018) rule-based bridging resolver. To im-
+plement the hybrid approach, they first define a
+rule score function r(i, j)whose value is the preci-
+sion of the rule that posits a bridging link between
+spans iandj, and then incorporate this rule score
+function into Equation 1 as follows:
+s(i, j) =/braceleftigg
+0 j=ϵ
+s(i, j) +αr(i, j)j̸=ϵ(3)
+where αis a positive constant that controls the im-
+pact of the rule information on s. The model then
+usess(i, j)to rank the candidate antecedents of
+span i. Note that (1) if no rule posits iandjas
+bridging, r(i, j)is 0; (2) rule precision is computed
+on the training set; and (3) αis tuned on the devel-
+opment set.
+The loss function is the weighted sum of the
+losses of the bridging task ( L) and the coreference6933task ( L).LandLare defined as the negative
+marginal log-likelihood of all correct bridging an-
+tecedents and coreference antecedents, respectively.
+The weights associated with the losses are tuned
+using grid search to maximize the average bridging
+resolution F-scores on development data.
+3.3 SpanBERT
+The SBERT pre-trained model is an exten-
+sion of BERT aimed at better learning of the rep-
+resentations of text spans .Like BERT, S-
+BERT takes as input a sequence of subword tokens
+T= [t, ..., t]and produces a sequence of con-
+textualized vector representations T= [t, ...,t].
+Unlike BERT, which randomly selects individual
+tokens for masking (where each token selected for
+masking is replaced with a special [MASK ]to-
+ken), SBERT employs a span masking scheme
+where spans of tokens are masked in order to better
+learn span representations. SBERT employs
+two pre-training objectives:
+Masked Language Modeling (MLM) Given
+a masked span consisting of contiguous tokens
+(t, ..., t), the model is asked to predict for each
+masked token tin the span the original token us-
+ingt. The MLM loss, L , is the cross entropy
+loss.
+Span Boundary Objective (SBO) Given a
+masked span consisting of contiguous tokens
+(t, ..., t), the model is asked to predict for each
+token tin the masked span the original token using
+the contextualized vectors of two tokens, namely
+the token to the left of the span boundary and the
+one to the right of its span boundary (i.e., t
+andt), as well as the position embedding of
+the target token p. The SBO loss, L, is the
+cross-entropy loss.
+Figure 2 illustrates how MLM and SBO work
+via an example.
+4 PSBERT
+Next, we present PSBERT , an extension
+ofSBERT specialized for bridging resolution.
+To create PSBERT , we use SBERT
+as a starting point and add a pre-training step to it
+that would enable the model to learn the contexts
+in which two mentions are implicitly linked to each
+other from data that is automatically generated ei-
+ther heuristically or via distant supervision with the
+help of a knowledge graph. To do so, we will de-
+scribe how we obtain automatically generated data
+(Section 4.1), the masking scheme (Section 4.2),
+and the pre-training task (Section 4.3).
+4.1 Labeled Data Creation
+We aim to collect automatically labeled data that
+would enable the model to learn the contexts in
+which two mentions are implicitly linked. As noted
+in the introduction, a pre-training task tends to be
+more effective for improving a target task (which in
+our case is bridging resolution) if the pre-training
+task resembles the target task. Hence, we seek
+to collect automatically labeled data in which the
+two implicitly linked mentions are likely to have a
+bridging relation. We begin by (1) collecting noun
+pairs that are likely involved in a bridging relation
+in acontext-independent manner, and then (2) using
+these pairs to automatically label sentences.
+4.1.1 Collecting Noun Pairs
+We obtain noun pairs that are likely to be involved
+in a bridging relation heuristically (via the syntactic
+structures of noun phrases (NPs)) and via distance
+supervision (with ConceptNet), as described below.
+Syntactic Structures of NPs Following Hou
+(2018b), we extract noun pairs from the automati-
+cally parsed Gigaword corpus (Napoles et al., 2012)
+by using the syntactic structures of NPs. Specifi-6934cally, we first extract two NPs, X and Y , that are
+involved in the prepositional structure Xpreposi-
+tionY(e.g., "the door of the red house") or the
+possessive structure YsX(e.g., "Japan’s prime
+minister"), since Hou (2018b) has shown that these
+structures encode a variety of bridging relations.
+Then, we create a noun pair from each extracted
+(X,Y) pair using the head noun of Xand the head
+noun of Y. Note that the bridging relations captured
+in the resulting noun pairs, if any, are asymmetric.
+Typically, Xcorresponds to an anaphor while Y
+corresponds to its antecedent. For example, in "the
+door of the red house", the extracted XandYwould
+be "the door" and "the house", respectively.
+ConceptNet Next, we show how to extract noun
+pairs that are likely involved in a bridging relation
+from ConceptNet (Speer et al., 2017). The exploita-
+tion of knowledge bases for bridging resolution has
+largely focused on deriving features from WordNet
+(e.g., computing the lexical distance between two
+mentions) (Poesio et al., 2004) and using these fea-
+tures to improve weak baselines (e.g., Pandit et al.
+(2020) incorporate knowledge-based features into
+an SVM model rather than a neural model).
+ConceptNet is a knowledge graph that connects
+phrases with labeled edges. It is built on various
+sources such as Open Mind Common Sense (Singh,
+2002), Open Multilingual WordNet (Bond and Fos-
+ter, 2013), and "Games with a purpose" (V on Ahn
+et al., 2006). There are 34 relations (i.e., edge
+labels) in ConceptNet 5.5. For example, gearshift -
+carhas a POrelation label, meaning gearshift
+is part of a car. We obtain NP pairs in which two
+NPs are related through these ConceptNet relations,
+and for each NP pair (X,Y), we create a noun pair
+using the head noun of X and the head noun of Y .
+Since not all ConceptNet relations are useful
+for bridging resolution, we empirically identify the
+useful relations w.r.t. each evaluation dataset (e.g.,
+ISNotes) as follows. First, for each ConceptNet
+relation type r, we apply the noun pairs extracted
+from r(see the previous paragraph) to the train-
+ing portion of the dataset, positing a bridging link
+between two nouns in a training document if (1)
+their heads are related according to rand (2) they
+appear within two sentences of each other. Then,
+we compute a bridging resolution F-score w.r.t. r
+using the resulting bridging links. Finally, we sort
+the relation types in decreasing order of F-score
+and retain the top krelation types that collectively
+maximize the bridging resolution F-score on thetraining set. Only the noun pairs that are related
+through the selected relation types will be used to
+create automatically labeled data.
+The ConceptNet relation types selected for the
+three datasets (ISNotes, BASHI, ARRAU RST)
+can be found in Appendix A. The relation types
+that are used in all three datasets include R -T,S ,HA,IA,AL ,
+C O, and PO. Intuitively, all of these
+relation types are closely related to bridging.
+4.1.2 Generating Labeled Data
+The success of pre-training stems in part from learn-
+ing from very large amounts of labeled data. Au-
+tomatic generation of labeled data will enable us
+to easily generate a large amount of (noisily) la-
+beled data and allow the model to learn a variety
+of contexts in which two mentions are likely to
+have a bridging relation. In this subsection, we
+describe how we create automatically labeled in-
+stances, each of which is composed of one of the
+noun pairs collected in the previous subsection
+(through syntactic structures or ConceptNet) and
+the surrounding context.
+For each document in parsed Gigaword, we auto-
+matically posit a bridging link between two nouns
+if two conditions are satisfied. First, they appear
+in one of the noun pairs collected in the previous
+subsection. Second, they are no more than two sen-
+tences apart from each other (this is motivated by
+the observation that bridging links typically appear
+in a two-sentence window). There is a small caveat,
+however. Recall that the two nouns in a noun pair
+(X,Y) extracted from the syntactic structures play
+an asymmetric role, where Xis an anaphor and
+Yis its antecedent. So, when applying the first
+condition to the pairs collected from the syntactic
+structures, we consider the condition satisfied only
+ifXappears after Yin the associated document.
+For the noun pairs collected from ConceptNet, we
+do not have such a restriction since we do not mark
+which noun is the anaphor and which noun is the
+antecedent for each ConceptNet relation type.
+4.2 Masking
+Using the method described in the previous subsec-
+tion, we will be able to automatically annotate each
+Gigaword document with bridging links. Next, we
+describe the two masking schemes we employ in
+PSBERT , based on which we will define
+the pre-training tasks to predict the masked tokens
+in the next subsection.6935PSBERT assumes as input a segment
+of up to 512 tokens (which in our case is taken
+from an automatically annotated Gigaword docu-
+ment). We define two masking schemes to mask
+the tokens in a given segment. First, we employ
+span masking, as described in the SBO task in
+Section 3.3 where randomly selected spans of to-
+kens are replaced with the [MASK ]tokens. This
+masking strategy does not rely on the automatically
+identified bridging relations. Second, we define
+ananchor masking strategy, where we randomly
+choose the antecedents (i.e., anchors) in our auto-
+matically identified bridging relations and replace
+each (subword) token in each selected antecedent
+with the [MASK ]token.
+We consider both masking schemes important
+forPSBERT . As bridging resolution in-
+volves identifying relations between spans, span
+masking will ensure that the model learns good
+span representations. In contrast, anchor masking
+is designed to eventually enable the model to learn
+the contexts in which two nouns are likely involved
+in a bridging relation.
+Following previous work (Joshi et al., 2020),
+we mask at most 15% of the tokens in each input
+segment. In addition, we ensure that (1) among the
+masked tokens, p% will be masked using anchor
+masking, and the remaining ones will be masked
+using span masking; and (2) the tokens masked by
+the two masked schemes do not overlap. Based on
+experiments on development data, we set pto 20.
+4.3 Pre-Training Tasks
+PSBERT employs three pre-training tasks,
+MLM, SBO, and Associative Noun Objective
+(ANO). The MLM and SBO tasks are the same
+as those used in SBERT (see Section 3.3): we
+apply them to predict the tokens masked by both
+span masking and anchor masking.
+ANO is a novel pre-training task we define
+specifically to enable the model to learn knowledge
+of bridging. Unlike MLM and SBO, which we ap-
+ply to the masked tokens produced by both masking
+schemes, ANO is applicable only to the masked
+tokens produced by anchor masking. Specifically,
+given a sequence of input tokens T= [t, ..., t]
+and a masked anchor ancconsisting of subword
+tokens (t, ..., t), the goal of ANO is to pre-
+dict an anaphor ana consisting of subword tokens
+(t, ..., t).The probability that ana is associ-
+ated with ancis defined using their boundary to-
+kens (i.e., start and end tokens) as follows.
+P(ana|anc) =P(t|t)·P(t|t)(4)
+We calculate the probability of token tgiven to-
+kentin the sequence Tusing the contextualized
+vectors T= [t, ...,t]produced by SBERT.
+P(t|t) =exp(s(t,t))/summationtextexp(s(t,t))(5)
+where s(t,t), the similarity of tandt, is com-
+puted as (w◦t)·t,wis a trainable vector of
+parameters, ·is the dot product, and ◦is element-
+wise multiplication. Figure 3 illustrates ANO and
+anchor masking with an example.
+Given a set of masked anchors anc∈Aand
+anaphors associated with each anchor ana∈C,
+we define the loss L as follows.
+L =−log/productdisplay/summationdisplayP(ana|anc)(6)
+Finally, we compute the loss for PS-
+BERT Las the sum of the losses of its three pre-
+training objectives.
+L=L +L+L (7)
+5 Evaluation
+5.1 Experimental Setup
+Corpora. For evaluation, we employ three com-
+monly used corpora for bridging resolution, namely6936
+ISNotes, BASHI, and ARRAU RST. Table 1 shows
+statistics on these corpora. Because ISNotes and
+BASHI lack a standard train-test split, we perform
+five-fold cross validation on these corpora, using
+70% of the documents for model training, 10% for
+development, and 20% for model evaluation. For
+ARRAU RST, we use the official train-test split.
+Evaluation settings. We report results for bridg-
+ing resolution in the end-to-end setting, where only
+raw documents are given, and the gold mention set-
+ting, where gold mentions are given. In the end-to-
+end setting, we apply a mention detector to extract
+mentions.In the gold mention setting, we employ
+theharsh evaluation method (see Appendix B).
+Evaluation metrics. Bridging anaphor recogni-
+tion and resolution results are reported in precision,
+recall, and F-score. Recognition (Resolution) preci-
+sion is the proportion of predicted anaphors that are
+correctly recognized (resolved). Recognition (Res-
+olution) recall is the proportion of gold anaphors
+that are correctly recognized (resolved).
+Baseline systems. We employ five baselines.
+The first baseline is a state-of-the-art rule-based
+approach by Rösiger et al. (2018), denoted as
+Rules(R) in Table 2. For ISNotes and BASHI, we
+use Kobayashi et al.’s (2022b) re-implementation of
+Rules(R). For ARRAU RST, no publicly-available
+implementation of Rules(R) that can be applied to
+automatically extracted mentions is available, so
+we re-implement Rules(R) for ARRAU RST for
+both the end-to-end and gold mention settings.
+As our second baseline, we design a heuristic
+system based on the noun pairs extracted from the
+syntactic structures and ConceptNet, denoted as
+Rules(H). Specifically, we apply these noun pairs to
+the test set of each evaluation corpus as follows. If
+the two nouns in a pair appear within two sentences
+of each other in a test document, we check whether
+the cosine similarity of their representations (ob-tained using Hou’s (2018a) word embedding algo-
+rithm) exceeds a certain threshold.If so, we posit
+a bridging link between them. If the anaphor is
+being linked to more than one antecedent, we pick
+the antecedent that has the highest cosine similarity
+with it. Note that we use the noun pairs collected
+from both the syntactic structures and ConceptNet.
+The remaining baselines are all SBERT -
+based. The third and fourth baselines are the state-
+of-the-art SBERT -based resolver and its hy-
+brid version introduced in Section 3.2 (denoted as
+SBERT and SBERT(R) respectively in Table 2).
+The final baseline incorporates the similarity value
+computed by Rules(H) for each mention pair into
+SBERT(R), denoted as SBERT(R,H), as a set of 9
+binary features. Specifically, each binary feature
+is associated with a threshold, and a binary fea-
+ture fires if the similarity value is greater than the
+threshold associated with it. The 9 thresholds are
+–0.8, –0.6, –0.4, –0.2, 0.0, 0.2, 0.4, 0.6, and 0.8.
+Implementation details. To pre-train
+PSBERT , we initialize it with the
+SBERT -large checkpoint and continue pre-
+training on the Gigaword documents automatically
+labeled with bridging links. Recall that these links
+are created using the noun pairs extracted from
+two sources: syntactic structures and ConceptNet.
+Rather than always use both sources to create
+bridging links, we use dev data to determine
+whether we should use one (and if so, which one)
+or both of them. We optimize PSBERT
+using Adam (Kingma and Ba, 2014) for 4k
+steps with a batch size of 2048 through gradient
+accumulation, a maximum learning rate of 1e-4,
+and a linear warmup of 400 steps followed by a
+linear decay of the learning rate. The remaining
+parameters are the same as those in SBERT .
+Pre-training is performed on a machine with four
+A100 GPUs and lasts for a day.
+We fine-tune both SBERT andPS-
+BERT for up to 400 epochs with Adam (Kingma
+and Ba, 2014) in each dataset, with early stop-
+ping based on the development set. The version
+ofSBERT we use is SBERT -large. The
+learning rates for SBERT and PS-
+BERT are searched out of {1e-5, 2e-5, 3e-5 },
+while the task learning rates are searched out of
+{1e-4, 2e-4, 3e-4, 4e-4 }. We split each document
+into segments of length 384. Each model consid-6937ers up to the Kclosest preceding candidate an-
+tecedents. We search Kout of{50, 80, 100, 120,
+150}. We search the weight parameter for the rule
+score out of {50, 100, 150, 200 }. Following Yu and
+Poesio (2020), we downsample negative examples.
+The downsampling rate is searched out of {0.2,
+0.4, 0.6, 0.8 }. The remaining parameter values
+are the same as those reported in Kobayashi et al.
+(2022b). Fine-tuning is performed on a QUADRO
+RTX 6000 GPU machine and lasts for six hours.
+5.2 Results and Discussion
+End-to-end setting. The top half of each sub-
+table in Table 2 shows the end-to-end results. Con-
+sider first the baseline results. Two points deserve
+mention. First, in terms of F-score, SBERT(R,H)
+is considerably worse than SBERT(R) on all three
+datasets. These results suggest that using automati-
+cally extracted noun pairs as additional features for
+SBERT(R) fails to improve its performance, prob-
+ably because the noun pairs are too noisy to offer
+benefits when incorporated as features. Second,
+SBERT outperforms SBERT(R) on ARRAU RST.
+An inspection of the results reveals the reason: the
+rules designed by Rösiger et al. (2018) for ARRAU
+RST have low precision, thus adversely affecting
+the performance of SBERT(R) on ARRAU RST.
+The best resolution F-score is achieved by PS-
+BERT(R), which is created by replacing S-
+BERT with PSBERT in SBERT(R), on
+ISNotes and BASHI and by PSBERT, which is
+created by replacing SBERT with PS-
+BERT in SBERT, on ARRAU RST. PS-
+BERT considerably improves the best baseline in
+resolution F-score by 2.3 points on ISNotes, 1.3
+points on BASHI, and 1.5 points on ARRAU RST.
+PSBERT ’s recognition F-scores are also
+generally higher than those of the SBERT -
+based resolvers. Although the noun pairs fail to
+improve SBERT when used as features, our results
+show that using these noun pairs to create automati-
+cally labeled data for pre-training is a better method
+to exploit such noisy information. Overall, we man-
+age to achieve the best results to date on the three
+datasets using either PSBERT or PSBERT(R).
+Gold mention setting. Results for the gold men-
+tion setting are shown in the bottom half of each
+subtable in Table 2.Our observations on the end-
+to-end results are more or less applicable to the
+gold mention results, except that PSBERT(R) man-6938ages to achieve the best resolution F-score on all
+three datasets. These are the best resolution results
+obtained to date on these datasets for this setting.
+We conclude this subsection with two points
+that we believe deserve mention. First, all the
+PSBERT results reported in Table 2 are
+obtained using the version of the model that is
+trained on noun pairs from both the syntactic struc-
+tures and ConceptNet, as using the pairs from both
+sources always yields better resolution F-scores on
+the dev set than using the pairs from either source.
+Second, in order to confirm that PSBERT ’s
+superiority over SBERT is indeed attributable
+to the addition of ANO rather than the additional
+pre-training steps it receives, we further pre-train
+SBERT using MLM and SBO for as many
+epochs as we pre-train PSBERT and show
+thatSBERT ’s performance changes after fur-
+ther pre-training are negligible (see Appendix F).
+5.3 Analysis of Results
+Error analysis of the best end-to-end models.
+We conduct an error analysis of our top-performing
+end-to-end models, PSBERT(R) for ISNotes and
+BASHI and PSBERT for ARRAU RST, to gain ad-
+ditional insights into them. Overall, it appears that
+these models struggle to recognize the majority of
+the bridging anaphors, with the recall scores rang-
+ing between 25.6% and 39.5% on the three datasets.
+In addition, only a small percentage of the recall
+errors in bridging anaphora recognition are due
+to mention prediction errors: 3%, 1.3%, and 2%
+of the gold bridging anaphors are misclassified as
+non-mentions in ISNotes, BASHI, and ARRAU
+RST, respectively. These models consistently make
+more recall errors at identifying definite bridging
+anaphors (i.e., NPs modified by the definite arti-
+cle “the”) than other bridging anaphors across all
+datasets. For instance, on ISNotes, the recall scores
+of identifying definite bridging anaphors and other
+bridging anaphors are 31% and 45%, respectively.
+Next, we analyze the precision errors on ISNotes
+and ARRAU RST, as BASHI does not have men-
+tion annotations. Mention prediction errors (i.e.,
+misclassifying non-mentions as bridging anaphors)
+account for 8.7% and 10.9% of the precision errors
+on ISNotes and ARRAU RST, respectively. On
+ISnotes, the majority of the precision errors are
+caused by misclassifying newandoldmentions as
+bridging anaphors, accounting for 43% and 25% of
+the precision errors, respectively. On ARRAU RST,71% of the precision errors are due to newmentions
+being misclassified as bridging anaphors. These
+findings corroborate the results reported in previ-
+ous research on bridging recognition (Hou et al.,
+2018), which suggest that models often struggle
+to distinguish bridging anaphors from generic new
+mentions with simple syntactic structures.
+Comparison of PSBERT(R) and SBERT(R) on
+ISNotes and BASHI. We further compare our
+best end-to-end resolver, PSBERT(R), with the
+previous state-of-the-art resolver, SBERT(R). On
+ISNotes, PSBERT(R) predicts 35% more bridg-
+ing pairs than SBERT(R), resulting in a higher
+recall for recognizing bridging anaphors ( 39.5%
+vs.31.6%). Overall, PSBERT(R) is better than
+SBERT(R) at predicting bridging pairs in which
+the bridging anaphors are not modified by any deter-
+miners (i.e., bare NPs ), such as “guests” or “walls”.
+On BASHI, however, the trend is the opposite. PS-
+BERT(R) predicts 18% less bridging pairs than
+SBERT(R) but achieves a higher precision score for
+bridging anaphora recognition ( 43.0%vs.36.0%).
+Comparison of PSBERT and SBERT on AR-
+RAU RST. On ARRAU RST, we compare PS-
+BERT with SBERT in the end-to-end setting. Both
+models predict a similar number of bridging pairs,
+but PSBERT achieves a higher precision for bridg-
+ing anaphor recognition ( 31.1%vs.29.7%). We
+observe that PSBERT is better than SBERT at rec-
+ognizing bridging anaphors that are bare NPs , es-
+pecially proper names such as “ Seoul ”.
+6 Conclusion
+We designed a novel pre-training task for bridg-
+ing resolution using automatically annotated docu-
+ments that contain noun pairs that are likely to be
+linked via implicit relations, and demonstrated that
+our newly pre-trained model, PSBERT,
+effectively captures bridging relations. On three
+commonly-used datasets for bridging resolution,
+our new resolver based on PSBERT out-
+performed the previous state-of-the-art models and
+other strong baselines for full bridging resolution.
+In future work, we plan to apply PS-
+BERT to other language processing tasks, particu-
+larly relation extraction tasks, since the noun pairs
+extracted from the syntactic structures and Con-
+ceptNet are likely to have non-identical relations.6939Acknowledgments
+We thank the three anonymous reviewers for their
+insightful comments on an earlier draft of the paper.
+This work was supported in part by NSF Grants IIS-
+1528037 and CCF-1848608. Any opinions, find-
+ings, conclusions or recommendations expressed in
+this paper are those of the authors and do not nec-
+essarily reflect the views or official policies, either
+expressed or implied, of the NSF.
+Limitations
+There are at least two limitations. First, PS-
+BERT is specialized for the bridging resolution
+task, which could limit its applicability to other
+downstream tasks. Second, there are other pre-
+training objectives and knowledge sources that may
+be useful for bridging resolution (e.g., Wikidata),
+but we have designed only one pre-training objec-
+tive and employed only two knowledge sources.
+References69406941
+A ConceptNet Relation Types
+Table 3 shows the list of ConceptNet relation types
+selected for each of the three evaluation datasets
+based on their respective training data. Recall that
+we conduct five-fold cross-validation experiments
+on ISNotes and BASHI owing to the lack of an
+official train-test split. As a result, for ISNotes and
+BASHI, we end up with five sets of ConceptNet
+relation types, one from each of the five train-test
+splits. Rather than showing all five sets, we show in
+the table both the union and the intersection of the
+five sets of relation types for ISNotes and BASHI.
+B Harsh Evaluation Method
+When evaluating the resolvers in the gold men-
+tion setting, we use the "harsh" evaluation method
+that is also employed in some previous work (e.g.,
+Hou et al. (2018), Kobayashi et al. (2022b)). More
+specifically, in ISNotes and BASHI, some bridging
+anaphors have clausal antecedents that correspond6942
+toevents . While clausal antecedents are annotated,
+they are not annotated as gold mentions, and pre-
+vious studies differ in terms of how they should
+be handled. Some previous work (e.g., Hou et al.
+(2014), Hou et al. (2018)) chose not to include
+these clausal antecedents in the list of candidate an-
+tecedents while others (e.g., Rösiger et al. (2018),
+Yu and Poesio (2020)) did. Obviously, the setting
+in which gold clausal antecedents are not included
+in training/evaluation is harsher because it implies
+that anaphors with clausal antecedents will always
+be resolved incorrectly. We believe that including
+gold clausal antecedents during evaluation does
+not represent a realistic setting, and therefore only
+report results using the "harsh" setting when evalu-
+ating on gold mentions in this paper.
+C Re-Implementation of Rules(R) for
+ARRAU AST
+Recall that our first baseline, Rules(R), is Rösiger
+et al.’s (2018) rule-based resolver. As mentioned
+in Section 5.1, for ARRAU RST, no publicly-
+available implementation of Rules(R) that can be
+applied to automatically extracted mentions is avail-
+able. Consequently, we re-implement Rösiger et
+al.’s (2018) resolver, which was designed to oper-
+ate on gold mentions, and extend it so that it can
+operate on automatically extracted mentions. The
+extension, which is motivated by Kobayashi et al.
+(2022b), is fairly straightforward. While R ¨ösiger et
+al. use gold annotations (i.e., gold POS tags, gold
+parse trees, and gold entity types) when comput-
+ing the information needed by the rules, we use
+Stanford CoreNLP (Manning et al., 2014) to pro-
+vide automatic constituency and dependency parse
+trees and spaCy (Honnibal and Montani, 2017) to
+provide automatic part-of-speech tags and entity
+types. We apply the resulting rules to the mentions
+extracted by Hou’s (2021) neural mention extractor.
+The results in Table 4 show that our re-
+implementation of Rules(R) is comparable to
+Rösiger et al.’s (2018) implementation in recog-
+nition and resolution F-scores when applied to gold
+mentions. Note that since Rösiger et al. do not re-
+port end-to-end results, we are unable to compare
+the two resolvers in the end-to-end setting.
+When applying our re-implmentation to automat-
+ically extracted mentions, we find that resolution
+F-score drops by 7.7%. This performance drop
+stems primarily from mention extraction errors and
+imperfect feature computations. Below we pro-
+vide examples of recall errors and precision errors
+resulting from the application of our rules to auto-
+matically extracted mentions.
+A category of recall errors arises from imper-
+fect computation of semantic category informa-
+tion. As mentioned above, when applied to au-
+tomatically extracted mentions, the rules rely on
+the semantic category information automatically
+obtained using spaCy. However, when applied to
+gold mentions, the rules rely on the gold seman-
+tic categories defined in ARRAU RST, which are
+different from those provided by spaCy. For ex-
+ample, "abstract" and "concrete" are two semantic
+categories defined in ARRAU RST that indicate
+whether an entity refers to an abstract object or a
+concrete object, but neither of these category la-
+bels exist in spaCy. Consequently, when applied
+to gold mentions, the "Subset/Element-of" rule,
+which resolves an anaphor modified by an adjec-
+tive, a noun, or a relative clause to the closest candi-
+date antecedent in the preceding three sentences if
+the two mentions have the same semantic category
+and the same head, correctly identifies the bridging6943
+link between "rents" and "Manhattan retail rents",
+as both mentions possess the gold semantic cate-
+gory "abstract". On the other hand, no category
+labels are provided by spaCy for these two men-
+tions, so the rule does not posit these two mentions
+as having a bridging relation when it is applied to
+automatically extracted mentions. The rules in the
+end-to-end setting underperform their counterparts
+in the gold mention setting by 9.6% in recognition
+recall and by 7.1% in resolution recall.
+A category of precision errors arises from erro-
+neously identified mentions. For example, an end-
+to-end rule (wrongly) posits "federal district court
+in Dallas" and "the Fifth U.S. Circuit Court" as
+having a bridging relation, but "the Fifth U.S. Cir-
+cuit Court" is not a gold mention. The rules in the
+end-to-end setting underperform their counterparts
+in the gold mention setting by 5.3% in recognition
+precision and by 4.1% in resolution precision.
+D Statistics on Noun Pairs
+Recall from Section 4.1.1 that we collect noun pairs
+from both the syntactic structures and ConceptNet,
+which are subsequently applied to the Gigaword
+documents to automatically annotate them with
+bridging relations (Section 4.1.2). Table 5 shows
+the statistics on (1) the number of noun pairs that
+can be extracted from each of the two knowledge
+sources and (2) the number of bridging links that
+we obtain when applying the resulting noun pairs
+to the Gigaword documents. Since the ConceptNet
+relations we use to extract noun pairs from different
+datasets are not the same, the number of bridging
+links we can establish will depend on which set of
+relations we use. Hence, only the ranges are shown
+for ConceptNet in the table.
+E Results of Rules(R) for the Gold
+Mention Setting
+It is worth mentioning that the results of Rules(R)
+for the gold mention setting in Table 2 are
+lower than the corresponding results in Rösiger
+et al.’s (2018) paper. We attribute the performance
+differences to two reasons. First, we evaluate
+Rules(R) using the harsh evaluation method. Sec-
+ond, Rösiger et al. post-process their resolver’s
+output with gold coreference information.
+F Continued Pre-training of SBERT
+One may argue that the comparison between
+PSBERT andSBERT in our exper-
+iments is not entirely fair. Specifically, PS-
+BERT may have an unfair advantage over S-
+BERT because it is pre-trained for more epochs
+than SBERT . To investigate whether the per-
+formance improvement of PSBERT stems
+from the additional pre-training steps, we conduct
+an experiment to determine if SBERT(R) can be
+improved with additional pre-training. Specifically,
+we additionally pre-train SBERT(R) using MLM
+and SBO on the same dataset as PSBERT
+for as many epochs as we pre-train PS-
+BERT.
+Table 6 shows the SBERT(R) results on anaphor
+recognition and resolution (expressed in terms of
+F-score) before and after the additional pre-training
+steps. In the end-to-end setting, additionally pre-
+training SBERT(R) causes resolution F-score to
+change by –0.3–0.1 points. In the gold mention
+setting, the corresponding changes in resolution F-
+score are –0.2–0.2 points. Given that these changes
+are negligible, we conclude that PSBERT ’s
+superior performance can be attributed to the addi-
+tion of ANO rather than the additional pre-training
+steps.6944ACL 2023 Responsible NLP Checklist
+A For every submission:
+/squareA1. Did you describe the limitations of your work?
+Limitations Section
+/squareA2. Did you discuss any potential risks of your work?
+Ethics Statement Section
+/squareA3. Do the abstract and introduction summarize the paper’s main claims?
+Abstract and Section 1
+/squareA4. Have you used AI writing assistants when working on this paper?
+Left blank.
+B/squareDid you use or create scientiﬁc artifacts?
+4.1.1
+/squareB1. Did you cite the creators of artifacts you used?
+4.1.1
+/squareB2. Did you discuss the license or terms for use and / or distribution of any artifacts?
+5
+/squareB3. Did you discuss if your use of existing artifact(s) was consistent with their intended use, provided
+that it was speciﬁed? For the artifacts you create, do you specify intended use and whether that is
+compatible with the original access conditions (in particular, derivatives of data accessed for research
+purposes should not be used outside of research contexts)?
+Not clearly explained in the paper, but our paper’s use is consistent with their intended use.
+/squareB4. Did you discuss the steps taken to check whether the data that was collected / used contains any
+information that names or uniquely identiﬁes individual people or offensive content, and the steps
+taken to protect / anonymize it?
+The datasets used in the paper do not include offensive content.
+/squareB5. Did you provide documentation of the artifacts, e.g., coverage of domains, languages, and
+linguistic phenomena, demographic groups represented, etc.?
+5
+/squareB6. Did you report relevant statistics like the number of examples, details of train / test / dev splits,
+etc. for the data that you used / created? Even for commonly-used benchmark datasets, include the
+number of examples in train / validation / test splits, as these provide necessary context for a reader
+to understand experimental results. For example, small differences in accuracy on large test sets may
+be signiﬁcant, while on small test sets they may not be.
+Yes. Section 5
+C/squareDid you run computational experiments?
+5
+/squareC1. Did you report the number of parameters in the models used, the total computational budget
+(e.g., GPU hours), and computing infrastructure used?
+56945/squareC2. Did you discuss the experimental setup, including hyperparameter search and best-found
+hyperparameter values?
+5
+/squareC3. Did you report descriptive statistics about your results (e.g., error bars around results, summary
+statistics from sets of experiments), and is it transparent whether you are reporting the max, mean,
+etc. or just a single run?
+5
+/squareC4. If you used existing packages (e.g., for preprocessing, for normalization, or for evaluation), did
+you report the implementation, model, and parameter settings used (e.g., NLTK, Spacy, ROUGE,
+etc.)?
+5
+D/squareDid you use human annotators (e.g., crowdworkers) or research with human participants?
+Left blank.
+/squareD1. Did you report the full text of instructions given to participants, including e.g., screenshots,
+disclaimers of any risks to participants or annotators, etc.?
+Left blank.
+/squareD2. Did you report information about how you recruited (e.g., crowdsourcing platform, students)
+and paid participants, and discuss if such payment is adequate given the participants’ demographic
+(e.g., country of residence)?
+Left blank.
+/squareD3. Did you discuss whether and how consent was obtained from people whose data you’re
+using/curating? For example, if you collected data via crowdsourcing, did your instructions to
+crowdworkers explain how the data would be used?
+Left blank.
+/squareD4. Was the data collection protocol approved (or determined exempt) by an ethics review board?
+Left blank.
+/squareD5. Did you report the basic demographic and geographic characteristics of the annotator population
+that is the source of the data?
+Left blank.6946

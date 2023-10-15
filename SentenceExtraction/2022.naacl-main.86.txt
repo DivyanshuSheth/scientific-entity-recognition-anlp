@@ -1,1 +1,1151 @@
-1174 Proceedings of the 2022 Conference of the North American Chapter of the Association for Computational Linguistics : Human Language Technologies , pages 1174 1193 July 10 - 15 , 2022 © 2022 Association for Computational Linguistics 1175 1176 1177 1178 1179 1180 1181 1182 1183 1184 1185 1186 1187 1188 1189 1190 1191 1192 1193 
+
+Dian Yu, Mingqiu Wang, Yuan Cao,
+Izhak Shafran, Laurent El Shafey, Hagen SoltauUniversity of California, DavisGoogle Research
+dianyu@ucdavis.edu
+{mingqiuwang, yuancao, izhak, shafey, soltau}@google.com
+Abstract
+Carefully-designed schemas describing how to
+collect and annotate dialog corpora are a pre-
+requisite towards building task-oriented dialog
+systems. In practical applications, manually
+designing schemas can be error-prone, labori-
+ous, iterative, and slow, especially when the
+schema is complicated. To alleviate this expen-
+sive and time consuming process, we propose
+an unsupervised approach for slot schema in-
+duction from unlabeled dialog corpora. Lever-
+aging in-domain language models and unsu-
+pervised parsing structures, our data-driven ap-
+proach extracts candidate slots without con-
+straints, followed by coarse-to-fine clustering
+to induce slot types. We compare our method
+against several strong supervised baselines, and
+show significant performance improvement in
+slot schema induction on MultiWoz and SGD
+datasets. We also demonstrate the effective-
+ness of induced schemas on downstream ap-
+plications including dialog state tracking and
+response generation.
+1 Introduction
+Defining task-specific schemas, including intents
+and arguments, is the first step of building a task-
+oriented dialog (TOD) system. In real-world appli-
+cations such as call centers, we may have abundant
+conversation logs from real users and system assis-
+tants without annotation. To build an effective sys-
+tem, experts need to study thousands of conversa-
+tions, find relevant phrases, manually group phrases
+into concepts, and iteratively build the schema to
+cover use cases. The schema is then used to an-
+notate belief states and train models. This pro-
+cess is labor-intensive, error-prone, expensive, and
+slow (Eric et al., 2020; Zang et al., 2020; Min et al.,
+2020; Yu and Yu, 2021). As a prerequisite, it hin-
+ders quick deployment for new domains and tasks.
+We therefore are interested in developing automaticFigure 1: Overview of slot schema induction from raw
+conversations. We use a bottom-up representation level
+distance function derived from pre-trained LMs (com-
+bined with PCFG structure) to extract informative can-
+didate phrases such as “after 16:15” and “expensive”.
+The spans are subsequently clustered through multiple
+stages to form coarse to fine categories. The ground
+truth mapping is shown on the right (such as “train
+leaveat”).
+schema induction methods in this work to create
+the ontologyfrom conversations for TOD tasks.
+Most existing approaches for slot schema induc-
+tion rely on syntactic or semantic models trained
+with labeled data (Chen et al., 2013; Hude ˇcek et al.,
+2021; Min et al., 2020). Our proposed method, on
+the other hand, is completely unsupervised with-
+out requiring generic parsers and heuristics, and
+hence portable to new tasks and domains seam-
+lessly, overcoming the limitations of previous re-
+search. Analogous to human experts, our procedure
+is divided into two general steps: relevant span ex-
+traction, and slot categorization. Fig. 1 provides an
+overview of our approach. We introduce a bottom-
+up span extraction method leveraging a pre-trained
+language model (LM) and regularized by unsuper-
+vised probabilistic context-free grammar (PCFG)
+structure. We also propose a multi-step auto-tuned
+clustering method to group the extracted spans into
+fine-grained slot types with hierarchy.
+We demonstrate that our unsupervised in-
+duced slot schema is well-aligned with expert-1174designed reference schema on the public Multi-
+WoZ (Budzianowski et al., 2018) and SGD (Ras-
+togi et al., 2020) datasets. We further evaluate
+the induced schema on dialog state tracking (DST)
+and response generation to indicate usefulness and
+demonstrate performance gains over strong super-
+vised baselines. Meanwhile, our method is appli-
+cable to more realistic scenarios with complicated
+schemas.
+2 Related Work
+Schema induction from dialog logs has not been
+studied extensively in the literature and developers
+resort to a patch work of tools to automate parts
+of the process. We first introduce related work on
+schema induction for dialog, and then discuss pre-
+vious research on span extraction as part of schema
+induction for slots.
+Schema induction for dialog Motivated by the
+practical advantages of unsupervised schema induc-
+tion such as reducing annotation cost and avoiding
+human bias, Klasinas et al. (2014); Athanasopoulou
+et al. (2014) propose to induce spoken dialog gram-
+mar based on n-grams to generate fragments. Dif-
+ferent from studying semantic grammars, Chen
+et al. (2013, 2014, 2015b,a); Hude ˇcek et al. (2021)
+propose to utilize annotated FrameNet (Baker et al.,
+1998) to label semantic frames for raw utterances
+(Das et al., 2010). The frames are designed on
+generic semantic context, which contains frames
+that are related to the target domain (such as "ex-
+pensiveness") and irrelevant (such as "capability"),
+while other relevant slots such as “internet” cannot
+be extracted because they do not have correspond-
+ing defined frames. This line of work focuses on
+ranking extracted frame clusters and then manu-
+ally maps the top-ranked induced slots to reference
+slots. Instead of FrameNet, Shi et al. (2018) extract
+features such as noun phrases (NPs) using part-of-
+speech (POS) tags and frequent words and aggre-
+gate them via a hierarchical clustering method, but
+only about 70% target slots can be induced. In
+addition to the unsatisfactory induction results due
+to candidate slot extraction, most of the previous
+works are only applicable to a single domain such
+as restaurant booking with a small amount of data,
+and require manual tuning to find spans and gener-
+ate results. These methods are not easily adaptable
+to unseen tasks and services.
+The most comparable work to ours is probably
+Min et al. (2020), which is not bounded by an ex-isting set of candidate values so that potentially all
+slots can be captured. They propose to mix POS
+tags, named entities, and coreferences with a set
+of rules to find slot candidates while filtering irrel-
+evant spans using manually updated filtering lists.
+In comparison, our method does not require any
+supervised tool and can be easily adapted to new
+domains and tasks with self-supervised learning. In
+addition to flexibility, despite our simple and more
+stable clustering process compared to their varia-
+tional embedding generative approach (Jiang et al.,
+2017), our method achieves better performance on
+slot schema induction and our induced schema is
+more useful for downstream tasks.
+We survey schema induction work for other nat-
+ural language processing tasks in Appendix A.11.
+Span extraction Previous works in span extrac-
+tion consider all combination of tokens as candi-
+dates (Yu et al., 2021). Alternatively, keyphrase
+extraction research (Campos et al., 2018; Bennani-
+Smires et al., 2018) mostly depends on corpus
+statistics (such as frequency), similarity between
+phrase and document embeddings, or POS tags
+(Wan and Xiao, 2008; Liu et al., 2009), and formu-
+lates the task as a ranking problem. Although these
+methods can find meaningful phrases, they may re-
+sult in a low recall for TOD settings. For instance,
+the contextual semantics of a span (such as time)
+in an utterance may not represent the utterance-
+level semantics compared to other generic phrases.
+Other methods for span extraction include syntac-
+tic chunking, but mostly require supervised data
+(Li et al., 2021) and heuristics (such as considering
+“noun phrases” or “verb phrases”), and thus are not
+flexible and robust compared to our method.
+Finally, target spans can be found in syntactic
+structures which can be potentially induced from
+supervised parsers or unsupervised grammar induc-
+tion (Klein and Manning, 2002, 2004; Shen et al.,
+2018; Drozdov et al., 2019; Zhang et al., 2021).
+Kim et al. (2020) probe LMs and observe that re-
+cursively splitting sentences into binary trees in a
+top-down approach can correlate to constituency
+parsing. However, unlike the task of predicting
+relationship between words in a sentence where
+phrases at each level of a hierarchical structure
+are valid, detecting clear boundaries is critical to
+span extraction but challenging with various phrase
+lengths. Even though more flexible compared to se-
+mantic parsers that are limited by pre-defined roles,
+there is no straightforward way to apply these meth-1175ods to span extraction.
+3 Unsupervised Slot Schema Induction
+Our proposed method for slot schema induction
+consists of a fully unsupervised span extraction
+stage followed by coarse-to-fine clustering. The
+resulting clusters can be mapped to slot type labels.
+3.1 Overview
+Given user utterances from raw conversations, our
+goal is to induce the schema of slot types Sand
+their corresponding slot values. The span extraction
+stage extracts spans (e.g., “with wifi”) from an
+utterance x. The candidate spans from all user
+utterances are then clustered into a set of groups S
+where each group scorresponds to a slot type such
+as “internet” with values “with wifi”, “no wifi”,
+and “doesn’t matter”. The induced slot schema can
+be later used for downstream applications such as
+dialog state tracking and response generation.
+Algorithm 1: Span Extraction
+3.2 Candidate span extraction
+Challenges Since it is unclear what spans are
+meaningful phrases representative of task-specific
+slots, candidate span extraction presents two chal-
+lenges. Firstly, with either supervised or unsuper-
+vised predicted structures, there is no protocol on
+what constituent and from what level we should
+extract the spans from without relying on dataset-
+specific heuristics, especially as structured repre-
+sentations are often compositional (Herzig and Be-
+rant, 2021). The second challenge is that span
+extraction methods should be flexible and robust
+to unseen tasks and domains. To tackle these prob-
+lems, we leverage pre-trained LMs and propose a
+novel bottom-up attention-based span extraction
+method regularized by unsupervised PCFG for bet-
+ter structure representation. Because our method
+does not need any supervised data, the second prob-
+lem can be effectively addressed by in-domain self-
+training. The full algorithm is outlined in Algo-
+rithm 1.
+Bottom-up attention-based extraction with LMs
+and PCFG regularization Recent studies re-
+veal that attention distributions in pre-trained LMs
+can indicate syntactic relationships among tokens
+(Clark et al., 2019). Therefore, we hypothesize
+that similar attention distributions indicate tokens
+to form a meaningful phrase. We define the dis-
+tance between attention distributions as a sym-
+metric Jensen-Shannon divergence (Clark et al.,
+2019), and iteratively merge tokens whose distance
+is smaller than a thresholdin a bottom-up fashion.
+We start from the smallest distance to the largest,
+where the merged tokens are considered as a new
+token in the next iteration but the distribution dis-
+tance with adjacent tokens remains the same. Fig. 2
+illustrates the distances between tokens from a pre-
+trained LM for an example sentence where adjacent
+tokens such as “global” and “cuisine” are merged
+but not “serves” and “modern”. This new decoding
+method enables us to effectively group tokens into
+phrases with precise boundaries.
+Although LMs can be used to induce grammar,1176their training objectives are not optimized for sen-
+tence structure prediction, hence falling behind un-
+supervised PCFG (Kim et al., 2020) on syntactic
+modeling. Utilizing attention distribution from
+LM representations to extract spans can thus be
+fuzzy and noisy. We therefore employ unsuper-
+vised PCFG proposed by Kim et al. (2019) as a
+mechanism to regularize our bottom-up span ex-
+traction. Instead of relying solely on attention dis-
+tribution, we in addition require two tokens to share
+the same parent in the predicted PCFG tree struc-
+ture before merging. This extra requirement re-
+duces the noise from the distribution divergence in
+a sub-optimal structure representation. An exam-
+ple illustrating the necessity of span constraint is
+given in Fig. 2. Even though the distance between
+“restaurant” and “which” is small ( 0.33), we disre-
+gard this span since they do not belong to the same
+parent in the PCFG structure. After merging two
+tokens, we assign the grandparent of the two tokens
+as the new parent, and continue the iteration until
+all distances are examined.
+Self-supervised in-domain training Our
+attention-based approach enables us to extract
+phrases beyond certain n-grams, or certain types
+of phrases in a specific hierarchical layer. More
+importantly, it is appealing to adapt to new
+domains and services, where a LM can be further
+trained to encode structure representations without
+any annotated data and to group tokens into
+candidate phrases based on the training corpus.
+To encourage efficient span extraction above
+token-level representation, we further pre-train a
+SpanBERT model (Joshi et al., 2020) by predicting
+masked spans together with a span boundary
+objective (denoted as TOD-Span) on TOD data
+(Wu et al., 2020). In addition to masking random
+contiguous spans with a geometric distribution, we
+also mask spans inspired by recent findings such
+as segmented PMI (Levine et al., 2021) among
+other methods (See Appendix A.3 for details).
+This process can be thought of as incorporating
+corpus statistics such as phrase frequency into the
+model implicitly (Henderson and Vuli ´c, 2021).
+The unsupervised PCFG is trained to maximize
+the marginal likelihood of in-domain utterances
+with the inside-outside algorithm on the same TODdataset. Similar to self-supervised LMs, this pro-
+cess is flexible and robust against domain mis-
+match, a common problem with supervised parsers
+(Davidson et al., 2019). At inference time, the
+trained model predicts a Chomsky normal form
+from Viterbi decoding (Forney, 1973).
+3.3 Clustering candidate spans
+Challenges After extracting candidate spans as
+potential slot values, we apply contextualized clus-
+tering on them to form latent concepts each slot
+value belongs to. We face two major challenges.
+Firstly, for any clustering method, hyperparame-
+ters such as the number of clusters are critical to
+the clustering quality, while they are not known
+for a new domain. Secondly, because of the trivial
+differences in slot types (for example, a location
+can be a “train departure place”, or a “taxi arrival
+place”), clustering requires considering different di-
+mensions of semantics and pragmatics. To address
+these problems, we propose an auto-tuned, coarse-
+to-fine multi-step clustering method. The pseudo
+code of the clustering algorithm can be found in
+Appendix A.2.
+Auto-tuning hyperparameters To avoid hyper-
+parameter tuning, we utilize density-based HDB-
+SCAN (McInnes et al., 2017). Compared to other
+clustering methods such as K-Means, HDBSCAN
+is mainly parametrized by the minimum number
+of samples per cluster, and resulting clusters are
+known to be less sensitive to this parameter. We
+set this number automatically by maximizing the
+averaged Silhouette coefficient (Rousseeuw, 1987)
+s=b−a
+max (a, b)
+across all clusters where arepresents the distance
+between samples in a cluster, and bmeasures the
+distance between samples across clusters.
+Multi-step clustering The input to our first-step
+clustering is the contextualized span-level repre-
+sentation from the extracted spans. Specifically,
+we consider the mean representation of tokens in
+the span from the last layer as the span represen-
+tation. To prevent the surface-level token embed-
+dings from playing a dominant role, we replace
+candidate spans with masked tokens and use the
+contextual representation of the masked spans (Ya-
+mada et al., 2021). After the first step of clustering,
+we have coarse groups illustrated in Appendix A.5.1177
+Michael et al. (2020) suggest that we may only
+identify salient clusters (e.g., cardinal numbers),
+but cannot separate for example, different types
+of cardinals (e.g., number of people or number
+of stays). Thus, in the second step, we cluster
+examples within each cluster from the first step
+leveraging utterance level representation of spans
+(i.e., the [CLS] token of the utterance). Specifically,
+we identify the utterance-level representation for
+spans grouped from the first step. This enables us
+to distinguish between domains and intents as they
+reflect utterance-level semantics. For example, we
+may find a cluster of time information (e.g., “11
+AM”) in the first step, and the second step cluster-
+ing is to differentiate between train and taxi book-
+ing time. Lastly, we cluster groups developed from
+the second step into more fine-grained types using
+span-level representations similar to the first step.
+After this multi-step clustering, we can potentially
+separate for instance, departure time and arrival
+time in train booking. This process is illustrated
+in Fig. 3. Each cluster represents a slot type, with
+slot values shown as data points. This multi-step
+clustering brings an additional benefit of inducing
+the slot schema with hierarchy, where sub-groups
+in further steps belong to the same parent group.
+4 Experiments
+To examine the quality of our induced schema, we
+perform intrinsic andextrinsic evaluations. Our
+intrinsic evaluation compares the predicted schemawith the ground truth schema by measuring their
+overlap in slot types and slot values. This indi-
+cates how well our induced schema aligns with
+the expert annotation. The extrinsic evaluation es-
+timates the usefulness of the induced schema for
+downstream tasks, for which we consider dialog
+state tracking and response generation tasks. Ex-
+periments are conducted on MultiWOZ (Eric et al.,
+2020) and SGD (Rastogi et al., 2020) datasets fol-
+lowing previous research. See Appendix A.1 for
+implementation details. We also apply and eval-
+uate our method for both intent and slot schema
+induction on realistic scenarios (See Section 5).
+Baselines We compare our proposed approach
+with different setups against DSI (Min et al., 2020),
+which uses supervised tools and heuristics. We
+evaluate different span extraction methods includ-
+ing using parsers only, leveraging distance func-
+tions from LMs, and combining LMs with un-
+supervised PCFG. Specifically, NP extracts all
+noun phrases, DSI cand. uses the same candidates
+phrases as DSI, and PCFG and CoreNLP (Man-
+ning et al., 2014) extract phrases from an unsu-
+pervised and supervised structure respectively by
+taking the smallest constituents above the leaf level.
+These baselines solely rely on parsers. For our
+bottom-up attention-based LM methods (Section
+3.2), we compare spans extracted using representa-
+tions from BERT (Devlin et al., 2019), SpanBERT
+(Joshi et al., 2020), TOD-BERT (Wu et al., 2020),
+and our span-based TOD pre-training from mask-
+ing random spans (TOD-Span). Lastly, we combine
+the LMs with unsupervised PCFG structures.
+Due to space constraints, we show results on
+MultiWOZ in this section. Observations on SGD
+can be found in the Appendix.
+4.1 Slot schema induction
+To evaluate the induced schema against ground
+truth, we need to match clusters to ground truth
+labels. Previous work on dialog schema induction
+either requires manual mapping from a cluster to
+the ground truth (Hude ˇcek et al., 2021) or com-
+pares predicted slot values to its state annotation
+at each turn (Min et al., 2020). These can create
+noises and biases, hence not practical when no an-
+notation is available. Particularly, Min et al. (2020)1178compare candidate spans to corresponding refer-
+ence slot types at each turn, which is a small subset
+of the ground-truth ontology. This would overes-
+timate the performance of schema induction since
+the matching is more evident and is different from
+defining schemas in realistic settings. Instead, we
+simulate the process of an expert annotator map-
+ping clusters to slot names by considering the gen-
+eral contextual semantics of spans in a cluster.
+Setup We consider semantic representations of
+ground truth clusters as labels. Specifically, we
+calculate the contextual representation of spans
+averaged across all spans in an induced cluster
+as cluster representations, and compare that with
+ground truth slot type representations computed in
+the same way. For fair comparison among different
+methods, we use BERT to obtain span represen-
+tations. We assign the name of the most similar
+slot type representation to a predicted cluster mea-
+sured by cosine similarity. If the score is lower
+than 0.8 (Min et al., 2020), the generated cluster is
+considered as noise without mapping, which sim-
+ulates when a human cannot label the cluster. We
+report precision, recall, and F1 on the induced slot
+types. When the number of clusters is larger than
+the ground truth, multiple predicted clusters can be
+mapped to one slot type. This evaluation process
+is identical to human annotation, where the ground
+truth clusters serve as references (before assigning
+cluster labels) to predicted clusters, but may be bi-
+ased towards more clusters when more clusters are
+likely to cover more ground truth clusters (i.e., po-
+tentially higher recall). Thus we report the number
+of induced clusters for reference. Similarly, within
+each slot type, we compute the overlapping of clus-
+ter values to all ground truth slot values and report
+precision, recall, and F1 by fuzzy-matching scores
+(Min et al., 2020), averaged across all types.
+Results Table 1 shows the results of schema in-
+duction on slot types and slot values. All methods
+lead to a number of clusters within a similar range
+(except the slightly larger 522 clusters for DSI),
+indicating that the results are not biased and are
+comparable. When the candidate span input to
+our proposed multi-step clustering is the same as
+the baseline DSI using POS tagging and corefer-
+ence (DSI cand.), we achieve similar performance
+on slot type induction ( 85.19) and better results
+on slot values ( 49.71). This illustrates the effec-
+tiveness of our proposed clustering method since
+the only difference from the DSI baseline is cluster-
+ing. Compared to methods leveraging noun phrases
+(NP), or supervised parsers (CoreNLP), using an
+unsupervised PCFG trained on in-domain TOD
+data can achieve comparable or superior results.
+If we extract spans using LMs only, different
+models perform similarly on both slot types and
+slot values. However, when regularized by an unsu-
+pervised PCFG structure, we observe a large perfor-
+mance boost especially with TOD-Span. This indi-
+cates that the unsupervised PCFG can provide com-
+plementary information to LMs. In addition, results
+show that further pre-training a LM at the span level
+is more efficient. The better representation from
+span-level in-domain self-training can also be jus-
+tified by a standard dialog state tracking task with
+few-shot or full data shown in Appendix A.3. De-
+tailed comparison among different LM pre-training
+results can be seen in Appendix A.13.
+4.2 Application in DST
+Now that we have mapped induced clusters to
+ground truth names, we can immediately evaluate
+DST performance by identifying slot values and
+types as described above. This can be considered
+as a zero-shot setting.1179
+Setup Following Min et al. (2020), we calculate
+the overlapping of the predicted slots and values
+with their corresponding ground truth at both the
+turn level and the joint level. At each turn, a fuzzy
+matching score is applied on predicted values (Ras-
+togi et al., 2020) whose corresponding slot types
+are in the ground truth. On the other hand, even if
+a slot value is predicted correctly but its slot type
+does not match the ground truth, no reward is ac-
+credited. On the joint level, we calculate the score
+for accumulative predictions up to the current turn.
+Results Table 2 summarizes the results for DST.
+Similar to the trend in schema induction, constrain-
+ing an in-domain fine-tuned LM (TOD-Span) on
+an unsupervised structure representation (PCFG)
+achieves the best performance ( 39.95on turn level),
+significantly outperforming a strong baseline DSI
+(18.29). We also note that because all accumu-
+lated predictions are evaluated for partial rewards
+instead of exact matching on all slot types in stan-
+dard DST evaluation, the joint level scores are
+higher than the turn level from accumulative scores.
+See Appendix A.8 for more detailed discussions.
+4.3 Application in response generation
+The above settings map latent slot clusters to
+ground truth analogous to expert designs so that we
+can evaluate the alignment with human annotations.
+This experiment investigates whether the induced
+latent schema is still useful before mapping.
+Setup We modify the model of Lei et al. (2018);
+Zhang et al. (2020) by appending the predicted
+labels (i.e., a cluster index such as “10-15-2” in-
+dicating a specific slot type where each number
+represents a slot type from a clustering step. This
+can also be considered as a hierarchical cluster la-
+bel) and values to the context (e.g., “I need a train
+at 7:45. [10-15-2] 7:45” as input). The added belief
+state can be considered as a prior to generate re-
+sponses similar to Hosseini-Asl et al. (2020). Since
+we do not have the mapped names of the slots,
+we only report the BLEU score rather than other
+metrics used in response generation that require
+entity-level matching (e.g., inform rate). This is
+a more practical setting directly evaluating on the
+induced schema compared to previous work (Min
+et al., 2020), where dialog act is modeled with
+delexicalized input utterances (Chen et al., 2019,
+not feasible because ontology is required from a
+pre-defined schema for delexicalization).
+Results Table 3 compares the performance of
+using no belief state (None), belief state induced by
+DSI, our introduced method (TOD-Span + PCFG),
+and ground truth. Results show that our induced
+schema introduces a positive inductive bias ( 16.4)
+compared to the baseline ( 15.6) and is close to the
+ground truth schema with actual slot type names.
+We conjecture that the lower performance of DSI is
+due to the larger number of latent types ( 522) which
+creates noises in model training. Thus, our induced
+slot schema is useful for downstream applications.
+5 Analysis
+Comparison among different methods Our re-
+sults show that in general, span-based pre-training
+methods outperform token-based, and continued
+pre-training on in-domain data is important. When
+regularized by PCFG structures, we observe a large
+performance boost on TOD-BERT and TOD-Span,1180however the PCFG structure does not help BERT
+and SpanBERT when the LM is trained on gen-
+eral domain data only. We speculate that the LM
+representation trained on generic text is not com-
+patible with the predicted structure induced via
+in-domain self-supervision. This justifies our hy-
+pothesis in Section 3.2 that optimized structures
+from in-domain PCFG can regularize target span
+extraction.
+In addition, we believe that the performance
+gap between our proposed method and previous
+research using rules from supervised parsers (such
+as NPs and coreference) is larger when the data is
+less biased (for example, if NP is not dominant as
+slot values, Du et al., 2021). Moreover, our pro-
+posed method is data-driven, indicating that the
+slots are determined by the dialog corpus and are
+more robust again label bias. If there are specific
+annotation requirements, we can inject inductive
+bias to the LM to change distribution distances
+(Shi et al., 2019) or add rules to incorporate such
+conditions. See Appendix A.12 for discussions.
+Comparison among different datasets On Mul-
+tiWOZ, our method induces 30 out of 31 slot
+types in the ontology except “hospital-department”,
+which only appears once in the dialog corpus. For
+slot values, errors are mostly from low precision
+due to loose boundaries and semantic matching
+(e.g., predicting “free wifi”, and “include free wifi”,
+where the target value is “yes”). In comparison,
+DSI induces 26 slot types, with similar slots mixed
+(such as mapping “taxi-arriveby” to “taxi-leaveat”).
+It receives a relatively low slot value score since
+spans extracted using rules are not robust and com-
+patible.
+On SGD where 82 slot types are defined in the
+ontology, our method induces 50 and DSI induces
+72. The main reason for this low recall is similar
+slot types with overlapping values (such as “media-
+genre” and “movies-genre”), and single-value slots
+(such as “has-wifi” with the value “True”). More
+importantly, SGD has a smaller utterance length,
+making it more difficult to map to the correct slot
+type without considering more context. With a
+magnitude more number of clusters, DSI (11992
+clusters) has a higher chance to map predicted slots
+to target slot types which explains better perfor-
+mance than ours on schema induction. However,
+this large number of clusters make it infeasible for
+humans to use, and our induced schema is com-
+parable in downstream tasks such as DST despitehaving a much smaller number of clusters.
+On both datasets, in addition to values that can
+be extracted by spans, our method can also extract
+phrases such as “doesn’t matter” which maps to the
+“don’t care” slot value. In particular, on MultiWOZ,
+“hotel-internet” receives the lowest f1 score (0.07
+with precision of 0.04 and recall of 0.35), mainly
+because of imprecise boundaries for low precision
+(e.g. “free wifi”, “include free wifi”, and “offer
+free wifi”). It also mixes with “free parking” be-
+cause of the context (hotel). On SGD, due to our
+filtering step and many slots have only one value
+(e.g. “Homes-has-wifi” and “Homes-has-pets”),
+and the value (“True”) cannot be detected by spans,
+we received a lower schema induction score. In
+addition, there are 16 groups with lower matching
+score (< 0.8). This is particularly an issue when the
+number of instances is small (only 8 instances for
+“home-furnished” in total). If more instances are
+available, it is likely that our method can recover
+these missed slots due to low matching scores.
+However, the schema defined here is less com-
+plicated compared to more realistic settings. For
+example, spans may not be a noun phrase (such
+as “until the 30th” to distinguish from “after the
+30th” in the utterance “Do I have access to my
+premium account until the 30th or will I have to
+pay additional $15 on the 29th” to distinguish dif-
+ferent constraints), and spans may not necessarily
+be meaningful arguments to intents (such as “Can
+you help me to reset my password” even though
+“reset my password” can be considered as a phrase).
+ABCD (Chen et al., 2021) collects more realistic
+TOD conversations with more in-depth discussion
+on finishing tasks in the shopping domain. How-
+ever, they propose to leverage actions, rather than
+slot-value pairs as used before in slot discovery,
+where the actions are defined above the utterance
+level.
+We also apply our method on internal customer
+data for both intent (by applying multi-step cluster-
+ing directly on utterances) and slot schema induc-
+tion. Compared to MultiWOZ and SGD, schema
+in more realistic scenarios is more complicated and
+the slot boundaries are less clear. Nevertheless, our
+method is still effective in inducing the majority
+of the schema to find intents such as “change pass-
+word” and slot types such as “devices”. We observe
+similar findings on the Ubuntu dialog corpus (Lowe
+et al., 2015). See more discussions in Appendix
+A.9.1181
+Ablation studies Table 4 illustrates the perfor-
+mance comparisons with different numbers of clus-
+tering steps, as well as input representations. Re-
+sults demonstrate that compared to one-step (using
+masked span representation) and two-step (adding
+utterance representation), our three-step clustering
+method induces a more fine-grained schema, which
+is more effective for downstream tasks. The num-
+ber of steps can be customized to real use cases
+depending on target granularity. In addition, if we
+use the original input rather than the masked phrase
+representation, the performance drops by a large
+margin ( 85.71on slot type). This suggests that the
+surrounding context is more critical than the sur-
+face embeddings for schema induction, especially
+when the same phrase can serve different functions
+even in the same domain (such as locations).
+DST Error analysis Suggested by the relatively
+high span extraction accuracy ( 68.13F1 score)
+from Appendix A.4, we find that the majority of the
+problems in DST come from cluster mapping. This
+is caused by either excessive surrounding informa-
+tion or by the lack of context from previous turns.
+For instance, in the utterance “Can I book it for 3
+people”, the “3 people” can be mapped to either
+“restaurant-book people” or “hotel-book people”,
+since we extract the contextual information from
+the current turn only. If more context is consid-
+ered, the mapping performance including results
+on downstream tasks is expected to improve. An-
+other issue is with span boundary. Even though we
+apply fuzzy matching, the evaluation still penalizes
+correct predictions (such as “indian food”) from
+its ground truth (“indian”), since we do not have
+training signals to identify the target boundaries.
+Meanwhile, we acknowledge that since we ex-tract phrases as candidates of slot values, our DST
+cannot deal with other linguistic features such as
+coreferences and ellipses annotated in MultiWOZ
+and SGD. This partially explains the relatively low
+performance on the full zero-shot DST task. How-
+ever, these features are not important for schema
+induction since the majority of the slot values can
+be found as phrases in the raw conversation, which
+can further be categorized into slot types. Obtain-
+ing better performance on DST is out of the scope
+of this paper.
+6 Conclusion
+In this paper, we propose a fully unsupervised
+method for slot schema induction. Compared
+to previous research, our method can be easily
+adapted to unseen domains and tasks to extract
+target phrases before clustering into fine-grained
+groups without domain constraints. We conduct
+extensive experiments and show that our proposed
+approach is flexible and effective in generating ac-
+curate and useful schemas without task-specific
+rules in both academic and realistic datasets. We
+believe that our method could also be applied to
+other languages (since no supervised parser, model,
+or heuristic is required) and tasks such as question
+answering where the answering phrase is not ex-
+plicitly annotated (Min et al., 2019). In the future,
+we plan to extend our method to problems with
+more complex structures and data where slots are
+less trivial to identify.
+7 Ethical Considerations
+Our intended use case is to induce the schema of
+raw conversations between a real user and system,
+where the conversation is not structured or con-
+strained. Our experiments are done on English data,
+but our approach can be used for any language, es-
+pecially because our method does not require any
+language-specific tools such as parsers which gen-
+erally require a lot of labeled data. We hope that
+our work can reduce design and annotation cost in
+building dialog systems for new domains, and can
+inspire future research on this practical bottleneck
+in applications.
+Acknowledgements
+We thank Abhinav Rastogi from Google Research,
+and anonymous reviewers for their constructive
+suggestions. We would also thank Kenji Sagae
+from UC Davis for early discussions.1182References1183118411851186A Appendices
+A.1 Implementation details
+For language model further pre-training, we imple-
+ment our code based on Wu et al. (2020) where
+the training data and hyperparameters are kept the
+same. Their evaluation script is used to show re-
+sults on the standard supervised dialog state track-
+ing with the full-data and few-shot learning setting.
+We run all experiments on three random seeds and
+report the average score. The TOD-BERT base-
+line is the “TOD-BERT-JNT-V1” provided by Wolf
+et al. (2020). For span-based pre-training methods,
+we use the provided “spanbert-base-cased” model
+from Joshi et al. (2020) as the initial checkpoint
+and add a span boundary object. For random mask-
+ing, we use a 15% masking budget and sample a
+span length by geometric distribution with p= 0.2
+and clip the max length to 10. For other mask-
+ing methods, we follow Levine et al. (2021) by
+considering n-grams of lengths 2 to 5 which ap-
+pear more than 10 times in the corpus. We choose
+the top 10 - 20% of n-grams by each criterion so
+about half of the tokens can be identified as part
+of correlated n-grams. We also experimented with
+different number of n-grams to mask and evaluate
+on both pre-training loss and DST results, but did
+not observe significant difference. We further pre-
+train using the same data as TOD-BERT with early
+stopping by prediction loss. For the attention dis-
+tribution used to define our distance function, we
+use the eighth layer of the model suggested by Kim
+et al. (2020). We modify Jin and Schuler (2020)
+to train our unsupervised PCFG model using their
+suggested hyperparameters on the text input only
+with data cleaned by Wu et al. (2020). These ex-
+isting techniques, however, cannot be applied to
+induce schema without our proposed novel method.
+They only inspire us to propose an fully unsuper-
+vised method leveraging the potential benefits. All
+our experiments run on eight V-100 GPUs. The
+training time varies from three hours to 14 hours.
+For the baseline DSI, we run their provided pub-
+lic codebase on the same MultiWOZ 2.1 data and
+SGD dataset respectively (since each corpus has
+different schemas in the output space, we cannot
+pre-train on more task-oriented dialog data as ours),
+following their suggested hyperparameters on the
+best model DSI-GM.
+For our auto-tuned multi-step clustering, we set
+the minimum number of samples per cluster by
+dividing the total number of samples by 5, 10, 15,20, 25 and choose the best one auto-tuned by the
+Silhouette coefficient. A more rigorous grid search
+can potentially generate better performance on our
+tasks. All other parameters are kept as default in
+HDBSCAN.
+For our experiments on MultiWOZ and SGD,
+we use the development portion of the data (fol-
+lowing the standard separation in their original
+Github repositories), which represents a sample
+of whole corpus. MultiWOZ and SGD are com-
+monly used task-oriented dialog datasets collected
+in English. On MultiWOZ, we use 7374 user ut-
+terances from the development set (1000 conversa-
+tions), which covers 31 slot types. On SGD, we use
+24363 user utterances (2482 conversations), which
+covers 82 slot types. We also report the induced
+schema results on the training portion of the data
+in Appendix A.6 where there are 56668 user utter-
+ances (8420 conversations) on MultiWOZ 2.1., and
+164982 user utterances (16142 conversations) on
+SGD. We build the ground-truth ontology from the
+annotated corpus with slot types and values in the
+dialog state.
+A.2 Algorithm
+Algorithm 1 shows the algorithm for span extrac-
+tion. For simplicity, we compare the distance from
+left to right for both the settings with and without
+PCFG structure. For using language model only,
+we merge tokens into phrases if their distance is
+small. If PCFG structure is constrained, we com-
+pare the distance between tokens and check if their
+corresponding nodes belong to the same parent. In
+practice, we implement the PCFG span extraction
+from bottom to top where we merge tokens into
+nodes from the lower level and represent the tokens
+with merged nodes. At each level, we compare the
+distance between consecutive nodes. To illustrate
+this process, for example in Figure 2, we com-
+pare the distance between the node “modern” and
+“global cuisine”, and the distance between “a restau-
+rant” and “which” to check if they are siblings in
+the same level. Since “which” is not merged in a
+lower level, itself serves as the node whereas “a
+restaurant” serves as the node for “restaurant”. All
+merged phrases, with left-out unigrams, are consid-
+ered as candidate extracted spans.
+Algorithm 2 shows the algorithm for auto-tuned
+multi-step clustering. For each step, the input to
+the clustering algorithm (HDBSCAN) is the embed-
+dings of spans (or uttereances in the second step)1187Algorithm 2: Auto-tuned Multi-step Clustering
+grouped from the previous step. In other words,
+for each sub-groups clustered by the previous step,
+we further cluster the embeddings into fine-grained
+groups. Figure 3 illustrates this process. The clus-
+tering algorithms returns groups of embeddings
+and corresponding labels (0, 1, . . .) and we choose
+the minimum number of samples per cluster based
+on Silhouette score. We filter clusters where the
+frequent spans of each sub-cluster are the same, in-
+dicating that there is only one value for this cluster.
+We consider the rest clusters as the input to the next
+step, or return as our final clusters.
+A.3 Supervised DST results
+Wu and Xiong (2020) suggest that further pre-
+training on TOD data (Wu et al., 2020) helps gen-
+erating better utterance-level representation, but
+less so for other features such as slots. To encour-
+age better span-level representation, we further pre-
+trained a SpanBERT model on TOD data by mask-
+ing spans based on frequency, Pointwise Mutual
+Information (PMI), symmetric conditional proba-
+bility (SCP, Downey et al., 2007), and segmented
+PMI (Levine et al., 2021) following recent research,
+together with randomly masking contiguous ran-
+dom spans. Implementation details can be found
+in Appendix A.1. Here we evaluate different pre-
+trained methods on the standard DST benchmark.1188
+Table 5 and Table 6 shows the performance of
+supervised DST performance evaluated on joint
+accuracy and slot accuracy with the full data and
+few-shot data (1 - 10%), respectively. Note that
+this was not used to choose the best model to per-
+form schema induction and related tasks. These
+results compare different pre-training methods to
+illustrate the quality of the initial checkpoints on a
+more standard benchmark. As shown similarly in
+recent work, TOD-BERT can only show marginal
+improvement over BERT averaged over different
+random seeds. Meanwhile, SpanBERT when used
+as an initial checkpoint is not stable at downstream
+DST tasks even if multiple random seeds were
+tested. However, after further pre-training on task-
+oriented dialog dataset, TOD-Span achieve signif-
+icantly better performance in both the few-shot and
+full-data setting. When comparing different span
+masking methods, random masking ( TOD-Span )
+is quite effective. Although freq andPMI_seg
+achieves better performance (over the naive PMI),
+the improvement is not large. We conjecture that
+this might be due to that compared to general do-
+mains and tasks with more diverse prediction space
+such as question answering, the number of task-
+relevant phrases in task-oriented dialog is limited.
+A.4 Span Extraction Results
+Table 7 shows the recall for span extraction re-
+sults. We manually annotate 200 user utterances
+so that acceptable span boundaries would not be
+penalized. For instance, given the utterance “I need
+to book a hotel in the east that has 4 stars”, in-
+stead of the DST annotation “hotel-starts: 4” and
+“hotel-area: east” together with coreference and
+annotation errors that cannot be detected from the
+context, we manually annotate the candidate spans
+as [“in the east”, ”the east”, ”east”] and [”4 stars”,
+”has 4 stars”, ”4”] which relaxes the rigid require-ment of strict matching of slot values. Compared
+to fuzzy matching, this evaluation is cleaner. Be-
+cause of the annotation errors and coreference that
+a value does not appear in the current utterance,
+the ground truth score is 78.83. Similar to our
+schema induction and DST evaluation results, we
+observe that constraining on predicted structures
+can increase model performance. In particular, us-
+ing an in-domain self-supervised PCFG structure
+and achieve similar or even better performance than
+using a supervised parser. We only evaluate recall
+here because there are non-meaningful spans ex-
+tracted, and is not important to downstream tasks
+since they are potentially filtered by our clustering
+method.
+A.5 Clustering
+Figure 4 shows the clustering results after the first
+step. This shows that we can get some coarse clus-
+ters with non-meaningful groups (such as “thank
+you”). Some slot types (such as day of the week as
+“wednesday”) are not distinguished by their domain
+and intent. Further clustering can generate more
+fine-grained schema.
+In addition, from empirical analysis, we found
+that meaningless spans extracted together with
+meaningful ones from the previous stage may add
+noises in the process. To study its influence by fil-
+tering out noisy clusters, we automatically examine
+clusters and their corresponding sub-clusters from
+the first two steps based on the assumption that
+valid slot types include more than one slot value.
+We choose one here because if one cluster is domi-
+nated by examples such as “thank you” with a few
+other instances such as “thanks”, the latter can be
+considered as outliers from our clustering method.
+Afterwards there is only one value left. We can
+also choose to filter out clusters with more than one
+slot value, which may result in lower recall. Since
+the goal of schema induction is to build a com-
+plete ontology with high recall, noisy groups are
+actually acceptable. In other words, we observed
+similar performance before and after filtering out
+such noisy cluster since the cluster mapping step
+would assign a low score to such groups from clus-
+ter embedding representations (Section 4.1), which
+is similar to how human experts would ignore a
+cluster of meaningless spans.
+A.6 Schema induction on training portion
+Since our goal is to induce the schema of a corpus
+without using any labeled data, there is no major1189
+difference in whether the schema is induced on
+the training set of MultiWOZ or the development
+set. The main difference is the number of utterance
+where the training data is ten times larger than
+the development data. Here we show the results
+for reference. Table 8 demonstrates that despite
+our much smaller number of clusters, our method
+achieves significantly better performance than the
+DSI baseline on both schema induction and DST.
+A.7 SGD results
+Table 9 shows the results for schema induction and
+DST on the SGD dataset. We conjecture that the
+similar performance results with the strong DSI
+baseline is due to large difference in cluster num-
+bers. Intuitively, with a larger number of clusters,
+each group with fewer examples can be mapped
+to the ground truth embeddings correctly. On the
+other hand, if different slot types are mixed into one
+cluster, all slot values are assigned an inaccurate
+name. Another potential reason is that compared to
+MultiWOZ, SGD dataset requires more contextual
+information (SGD has less average tokens per turn
+and more turns per dialogue). Thus the mapping
+from relatively noisy clusters to ground truth cre-
+ates errors for downstream tasks, especially that
+the evaluation metric require exact match of slot
+types.
+However, the results are still comparable. Al-
+though predicting a magnitude smaller number
+of clusters to be less favoured in evaluation, our
+method still achieves similar or better performance.
+A.8 Comparison to DSI on DST
+We note that the DST results on MultiWOZ for
+DSI is lower than that reported in Min et al. (2020).
+As shown in Section 4.1, the original number was
+reported by mapping predicted slot types to target
+ontology at the turn level (before accumulating for
+the final prediction), where a small subset is used.
+This process makes mapping more evident (for ex-1190ample, instead of mapping a predicted slot type to
+the target 30 slot types, it only compares a slot type
+to one of two slot types that appear in the refer-
+ence). Hence, it overestimates the performance and
+is very different from how a human expert would
+assign labels when inducing the schema for a new
+corpus without (turn-level) annotation. Since DST
+is evaluated to make sure that the slot type matches,
+an incorrect slot type matching would result in a 0
+true positive score. The actual performance in our
+experiments is thus lower.
+In addition, we follow the exactly same settings
+including training and evaluation scripts (on DST)
+with their provided pre-processed span-level data
+and suggested hyperparameters. We use the same
+metrics and scripts to evaluate all methods. Accord-
+ingly, all the numbers reported in Table 2 are fair
+and comparable.
+Lastly, since we use fuzzy matching scores (Ras-
+togi et al., 2020; Min et al., 2020), turn-level per-
+formance is accumulated to the joint level. For
+that reason, different from joint goal accuracy com-
+monly used where all slot types and values are re-
+quired to be exactly match, partial true positives are
+counted again in future turns. For example, if the
+current turn predicts “train leave-at: 10” with the
+target dialog state “train leave-at: 10:00”, even if
+the next turn predicts nothing correctly, this partial
+score is counted in the joint level score in the next
+turn. This procedure follows the setting of Min
+et al. (2020). In fact, in their reported performance
+of DSI-GM on MultiWOZ 2.1 with precision and
+recall of 52.5, 39.3, and 49.2, 43.2 at turn and joint
+level respectively, the actual F1 scores are actually
+45.0 for the turn level and 46.0 at the joint level.
+Similar to ours, they also received higher score on
+the joint level due to accumulative partial scores
+(by calculating F1 using their reported precision
+and recall scores directly). Since we follow the
+same evaluation script and metrics, the results and
+conclusion we have in our experiments comparing
+different methods are comparable.
+A.9 Further analysis of schema induction
+among datasets (including realistic data)
+When we apply our method on internal customer
+data for slot schema induction, we follow the same
+pipeline introduced in Section 3. For intent schema
+induction, we consider both the system turn and
+utterance turn as the context to our multi-step clus-
+tering to find schema with the hierarchy. Becauseour method is data-driven and does not require
+heuristics, it can induce expected slots explained
+before (e.g. “until the 30th”). We observed empiri-
+cally satisfying performance but the results cannot
+be reported publicly because of restrictions. There-
+fore, we only report results on the public datasets to
+compare to previous research, as well as to inspire
+follow-up works for comparison.
+We also applied our approach to the Ubuntu dia-
+log corpus (Lowe et al., 2015). Compared to gen-
+eral TOD systems where a user and an knowledge-
+able agent communicate with each other, this data
+is collected from online forms to discuss technical
+issues. The utterances are less conversational, and
+include coding scripts, making it very noisy. We
+experiment on this more realistic dataset only for
+reference, since it is significantly different from
+building a TOD systems to interact with real users
+where schema is critical. We sample 8k utterances
+from the training data, and apply our method on
+both the intent level and the slot level. On the intent
+level, our method generates 70 clusters from the
+first step, and 154 clusters after three steps. Apart
+from greetings (which appear very frequently), we
+can induce intents such as suggesting one ques-
+tion is off topic (e.g. “this is a support channel;
+please leave and go to xxx channel”). There are
+also some more evident intent clusters such as sug-
+gested command line, suggested url, and questions
+for installations in a specific setup (e.g. “how to
+install firefox on 64 bit”). When the input sentence
+is long with mixed intents, our method may group
+these into one large cluster (such as providing sug-
+gestions to a specific problem, which is more simi-
+lar to dialog act). We may choose to mix slot- and
+utterance-level clustering to solve such an issue
+by treating each complete segment in an utterance
+as a long span. On the slot level induction, our
+method generates 36 clusters from the first step,
+and 287 clusters after three steps. Our method can
+induce slot types such as “ubuntu verision” and
+“software name”. However, compared to Multi-
+WOZ and SGD, the induced slots are much nosier
+with lower precision where meaningless verbs (e.g.
+“set up” are grouped). Meanwhile, there a many
+other slot types that are not meaning such as a clus-
+ter regarding part of a path (e.g., “/var/”), which
+may be due to that we use the same LM trained
+on TOD dat which does not handle code scripts.
+Further in-domain pre-training within the Ubuntu
+dialog corpus may solve this issue. To conclude,1191even though this dataset is noisy and different from
+TOD, our method is still applicable to discover use-
+ful schema on both the intent and the slot level
+without any supervision.
+A.10 Applying induced schema on testing
+data
+After inducing the schema on the training data, we
+may apply the induced schema directly to a differ-
+ent set of data (such as testing data) for downstream
+applications (such as DST). Since we already in-
+duced slot clusters and mapped them to ground
+truth, we do not need to follow the same span ex-
+traction before clustering again. Alternatively, we
+adopt the following procedure. We extract all can-
+didate phrases in the same way, but instead of clus-
+tering, we map the extracted phrases to clustered
+groups. Specifically, similar to mapping induced
+latent clusters to ground truth groups in schema
+induction, we find the most similar latent cluster
+to the candidate in the contextualized embedding
+space, and assign the cluster name to the phrase
+as its slot type. We observed that even though the
+schema is not induced on the testing data, the per-
+formance on both turn and joint level maintains
+(36.58 and 48.98).
+A.11 Related work in schema induction of
+other natural language processing tasks
+Similar to grammar induction and unsupervised
+parsing, schema induction can help to eliminate
+the time-consuming manual process and serves as
+the first step to build a large corpus (Klein and
+Manning, 2002; Klasinas et al., 2014). Related
+tasks include event type induction (Huang et al.,
+2016, 2018), semantic frame induction (Yamada
+et al., 2021), and semantic role induction (Lang
+and Lapata, 2010; Michael and Zettlemoyer, 2021).
+Relationship in these tasks such as predicate and
+head or patient and agent are relatively evident
+compared to that in conversational dialog. In ad-
+dition, most of previous research requires either
+strong statistical assumptions based on pre-defined
+parsers, or existing ontologies and annotations for
+some seen types, and formulate the problem similar
+to word sense disambiguation on predicate-object
+pairs (Shen et al., 2021). In contrast, our method
+does not require any formal syntactic or semantic
+supervision.A.12 Incorporating task-specific annotation
+requirements for schema induction
+Our method is data-driven, indicating that if two to-
+kens appear frequently (thus form a span), it might
+be a good idea to consider them as a slot together.
+Our motivation here is to induce the most prob-
+abilistic schema based on distributed representa-
+tions. Incorporating annotation requirement is not
+specific to schema induction from corpus, and is a
+broader concept of neuro-symbolic integration by
+merging symbolic rules with connectionist models
+like neural networks.
+However, if there is a specific requirement, we
+can either inject inductive bias similar to Shi et al.
+(2019); Kim et al. (2020) to change the attention
+distribution (so that the requirement-specific bias
+can result in smaller or larger divergence explicitly).
+We can also add such requirements as rules directly
+on certain spans. In this way, we can incorporate
+the requirements. In comparison, previous methods
+relying on supervised parser are not applicable.
+A.13 Detailed schema induction results
+Table 10 shows detailed results comparison on
+different proposed methods on schema induction.
+All methods result in a similar number of clusters,
+while span-based further pre-training methods con-
+strained on unsupervised PCFG structures achieve
+the best performance overall.11921193

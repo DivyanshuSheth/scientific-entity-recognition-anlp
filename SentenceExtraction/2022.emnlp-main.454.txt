@@ -1,1 +1,711 @@
-6765 Proceedings of the 2022 Conference on Empirical Methods in Natural Language Processing , pages 6765 6775 December 7 - 11 , 2022 © 2022 Association for Computational Linguistics 6766 6767 6768 6769 6770 6771 6772 6773 6774 6775 
+
+Sheng Xu, Peifeng Li andQiaoming Zhu
+School of Computer Science and Technology
+Soochow University
+sxu@stu.suda.edu.cn, {pfli, qmzhu}@suda.edu.cn
+Abstract
+Event coreference resolution (ECR) aims to
+cluster event mentions that refer to the same
+real-world events. Deep learning methods have
+achieved SOTA results on the ECR task. How-
+ever, due to the encoding length limitation, pre-
+vious methods either adopt classical pairwise
+models based on sentence-level context or split
+each document into multiple chunks and en-
+code them separately. They failed to capture the
+interactions and contextual cues among those
+long-distance event mentions. Besides, high-
+level information, such as event topics, is rarely
+considered to enhance representation learning
+for ECR. To address the above two issues, we
+first apply a Longformer-based encoder to ob-
+tain the document-level embeddings and an en-
+coder with a trigger-mask mechanism to learn
+sentence-level embeddings based on local con-
+text. In addition, we propose an event topic
+generator to infer the latent topic-level represen-
+tations. Finally, using the above event embed-
+dings, we employ a multiple tensor matching
+method to capture their interactions at the docu-
+ment, sentence, and topic levels. Experimental
+results on the KBP 2017 dataset show that our
+modeloutperforms the SOTA baselines.
+1 Introduction
+Within-document Event Coreference Resolution
+(ECR) is the task of grouping the event mentions
+(i.e., triggers) that occur in a document into clus-
+ters such that each cluster represents a unique real-
+world event. ECR is essential for information
+aggregation and can help many downstream ap-
+plications, such as abstractive summarization (Li
+et al., 2016), central event detection (Choubey et al.,
+2018), and discourse parsing (Lee et al., 2020).
+Although there studies employ clustering meth-
+ods (Chen and Ji, 2009; Phung et al., 2021), most
+work converts ECR into an event-pair classificationtask (Krause et al., 2016; Huang et al., 2019; Lu
+and Ng, 2021a), i.e., judging whether two event
+mentions are coreferent. Therefore, event encoding
+becomes an essential step in ECR. Earlier work
+focuses on extracting hand-crafted features (Chen
+et al., 2009; Cybulska and V ossen, 2015; Lu and Ng,
+2018), while recent studies encode triggers (i.e., the
+words that most clearly describe the event), con-
+textual linguistic cues (Nguyen et al., 2016; Huang
+et al., 2019; Lai et al., 2021), and identified ar-
+guments (i.e., the participants of a specific event)
+(Zeng et al., 2020) using various neural models.
+Recently, benefiting from the development of the
+Transformer-based models, event encoding (Krause
+et al., 2016; Huang et al., 2019; Lu et al., 2022;
+Lu and Ng, 2021a) has also changed from using
+CNN/RNN to BERT, SpanBERT, obtaining bet-
+ter event representations. However, at least two
+limitations exist in the above studies.
+First, due to the limitation of encoding length,
+current studies either adopt variant classical pair-
+wise models based on sentence-level context or
+split a document into chunks and process them
+separately to learn embeddings based on segment-
+level context. This way, the ECR models actually
+predict coreferences based only on the local infor-
+mation. Obviously, incorporating document-level
+contextual cues among event mentions is important
+for ECR, especially for those long-distance event
+mention pairs, considering their relations are hard
+to judge only based on local information. To ad-
+dress the above issue, Tran et al. (2021) implement
+document structures to capture cross-segment inter-
+actions; however, the graph construction relies on
+predicted entities, entity coreference chains, and
+dependency trees, which inevitably bring the noise
+to the model. In this paper, we first introduce a
+Longformer-based (Beltagy et al., 2020) encoder to
+learn representations based on full document-level
+context. Then, we apply a BERT-based encoder
+with a trigger-mask mechanism to mine detailed6765cues from sentence-level contexts as a beneficial
+complement. To our knowledge, this is the first to
+apply the full-document encoding to ECR.
+Second, most existing ECR methods only use
+representations obtained by text encoder while ig-
+noring high-level information, such as event top-
+ics. Since events are usually mentioned repeatedly
+only when elaborating new aspects or further in-
+formation (Choubey and Huang, 2018), it is chal-
+lenging to identify coreferent events based only on
+sentence-level or document-level information, espe-
+cially for those main events (Choubey et al., 2020),
+which advance the content and form long event
+chains. Previous studies (Choubey and Huang,
+2018; Lu and Ng, 2020) try incorporating event
+topic information to improve ECR; however, they
+use integer linear programming or traditional ma-
+chine learning models. It is difficult to combine
+these topic models with deep learning methods di-
+rectly. To this end, we propose a neural event topic
+model to infer the latent topic distribution for every
+event mention. In this way, our ECR model can
+utilize topic-level associations and interactions to
+predict coreference chains. Finally, we feed these
+different level representations into a scorer to judge
+coreferences for all event mention pairs by apply-
+ing multiple tensor matching methods. The exper-
+imental results on KBP 2017 dataset demonstrate
+the benefits of our proposed model. We summarize
+the contributions of our work as follows.
+•Our proposed ECR model is the first to pro-
+cess the entire document at once and apply
+the full-document event encoding using a
+Longfomer-based encoder;
+•Our proposed ECR model introduces a neural
+event topic model to infer the latent topic-level
+event representations;
+•Our proposed ECR model is simple but effec-
+tive and requires no additional information.
+2 Related Work
+Coreferent events normally have the same type of
+triggers and entity-coreferent arguments (i.e., event
+participants). Therefore, resolving event mentions
+has been considered more challenging than entity
+coreference resolution due to the more complex
+event structures (Yang et al., 2015). Most of the
+current work for ECR focuses on event mention
+representation learning (Huang et al., 2019; Zeng
+et al., 2020; Tran et al., 2021).Our work focuses on the within-document ECR,
+where input event mentions appear in the same
+documents; however, we also note previous stud-
+ies on cross-document ECR (Lee et al., 2012;
+Choubey and Huang, 2017; Kenyon-Dean et al.,
+2018; Barhom et al., 2019), which usually require
+clustering documents first and then resolving coref-
+erent events mentioned in each document cluster.
+As such, for within-document ECR, previous meth-
+ods have applied various machine learning models
+with hand-engineered features (Chen et al., 2009;
+Cybulska and V ossen, 2015; Peng et al., 2016; Lu
+and Ng, 2018), spectral graph clustering (Chen and
+Ji, 2009), joint inferencing using Integer Linear Pro-
+gramming or Markov Logic Networks (Chen and
+Ng, 2016; Lu et al., 2016), joint modeling with mul-
+tiple related tasks (Lu and Ng, 2017, 2021a,b; Kri-
+man and Ji, 2021), and typical pipeline approaches
+(Liu et al., 2014; Peng et al., 2016; Krause et al.,
+2016; Tran et al., 2021). In particular, Lai et al.
+(2021) introduce gate mechanisms to mitigate error
+propagation by controlling the information flows
+from the input symbolic features. In addition, some
+studies explore the relevance of event coreferences
+and discourse structures, e.g., topic structures and
+content types (Choubey and Huang, 2018; Choubey
+et al., 2020; Lu and Ng, 2020).
+However, due to the limitation of encoding
+length, current deep learning methods either adopt
+classical pairwise models (Krause et al., 2016;
+Huang et al., 2019; Zeng et al., 2020) or split
+each document into multiple chunks and encode
+them separately (Lu and Ng, 2021a,b; Tran et al.,
+2021). These methods learn event mention repre-
+sentations based only on the local context, making
+ECR models difficult to determine coreferences
+between long-distance event mention pairs. In par-
+ticular, to alleviate the encoding separation caused
+by splitting documents, Tran et al. (2021) construct
+graph-form document structures to capture the in-
+teractions between distant sentences. Compared
+with previous deep learning work for ECR, we
+present a novel representation learning framework
+based on both document-level and sentence-level
+context and apply a neural event topic model to
+further provide topic-level representations.
+3 Model
+Formally, given an input document D =
+{t, t, ..., t} (of Ntokens) and a set of event
+mentions E={e, e, ..., e}inD, ECR seeks6766
+to group the event mentions in Einto clusters. As
+such, all event mentions in each cluster are coref-
+erent. Figure 1 presents an overview of our ECR
+model, which consists of four main components: (i)
+Global Mention Encoder (GME) to learn document-
+level event representations, (ii) Local Mention En-
+coder (LME) to obtain sentence-level event repre-
+sentations, (iii) Event Topic Generator (ETG) to
+infer latent topic-level event representations, and
+(iv) Tensor Matching Scorer (TMS) to predict the
+probability that two event mentions are coreferent.
+3.1 Global Mention Encoder
+Using the long-sequence encoding of Longformer
+(Beltagy et al., 2020), we can process the entire
+document at once instead of splitting each docu-
+ment into multiple chunks like in the previous work.
+With the help of sliding window attention, even
+long-distance event mentions can learn full-context-
+based representations without losing the semantic
+interactions between each other and requiring in-
+putting additional global structures. Specifically,
+we first convert each token t∈Dinto semantic
+embeddings by feeding Dinto a pre-trained Long-
+former model. Since the event mentions emay
+be phrases containing multiple words, and the tok-
+enization scheme may split one word into multiple
+tokens, we apply the attention mechanism on top
+of the hidden vectors hof the j-th tokens in Din
+the last layer of Longformer model to obtain the
+representation vector gforeas follows.
+g=/summationdisplayαh (1)
+α=exp(w)/summationtextexp(w)w=wh (2)where pandqare the positions of the start and end
+token of the event mention e, respectively, and w
+is the model parameter. Since all hidden vectors
+hare learned based on full document context, we
+treatgas the document-level representation for
+each event mention e.
+3.2 Local Mention Encoder
+Due to the complex structure of events, it is also
+important to mine detailed cues from local contexts
+where the event triggers are located. Some stud-
+ies perform tensor matching on event templates
+filled with the recognized arguments (Choubey and
+Huang, 2017; Barhom et al., 2019), and others
+(Zeng et al., 2020) directly use semantic role la-
+bels as embeddings to alleviate the cascading er-
+rors. However, all of these methods rely on the
+prediction of syntactic or semantic parsing systems,
+such as semantic role labeling, bringing additional
+noises. Inspired by the studies on event extraction
+(Tong et al., 2020; Liu et al., 2020a) that utilize the
+Masked Language Model (MLM) to mine event
+knowledge from context, we propose a local men-
+tion encoder with a trigger-mask mechanism to
+learn sentence-level event representations. This can
+remedy the weaknesses of document-level event
+representations in capturing local clues.
+Specifically, for each event mention, we replace
+its event trigger with placeholders, i.e., [MASK]
+tokens, and require the model to predict the cor-
+responding event subtype. As such, the model is
+compelled to implicitly mine event clues from the
+contexts surrounding the triggers to make the pre-
+dictions. Formally, given the local context of each
+event mention (the sentence hosting the event trig-
+ger)S={t, t, ..., t} (of Mtokens) and the
+start and end token corresponding to the event trig-6767ger,tandt, the cloze-style input to the local
+encoder is as follows.
+S=t, ..., t,[MASK] , ...,[MASK] , t, ..., t
+(3)
+Then, similar to the GME, we first obtain the
+vector representation lof each masked trigger e
+using the attention mechanism and then feed it into
+a softmax layer to predict the probability of each
+possible event subtype as follows.
+s=softmax (wl+b)s(i, y) =s(y)(4)
+where w,bare parameters, the y-th element of
+s, i.e.,s(y), is a score indicating e’s likelihood
+of belonging to the event subtype y. Since the event
+triggers are entirely masked, our model has to mine
+the contextual clues for reasoning. This prevents
+the model from simply remembering trigger-to-
+subtype shortcuts but learning the underlying regu-
+larities regarding how events are described in texts.
+Considering that only the local contexts are used in
+the event encoding, we take las the sentence-level
+representation of each event mention e. During
+training, we provide a direct supervision signal to
+the Local Mention Encoder by reducing the cross-
+entropy loss Lof event subtype classification.
+3.3 Event Topic Generator
+However, in some situations, it is hard to deter-
+mine coreferent event mentions relying solely on
+sentence-level and document-level information (Lu
+and Ng, 2021c), especially for the main events of a
+document, which commonly elaborate on new as-
+pects or further information (Choubey and Huang,
+2018). Hence, even coreferent main events may
+have discrepant contexts, especially for those long-
+distance event pairs. It is difficult to judge event
+coreference by directly measuring the semantical
+similarities of the event contents and requires more
+high-level information, such as event topics.
+Similar to the LDA-style models, we believe
+there is an association between the event element
+distribution dand its topic distribution z. In par-
+ticular, for each d, we infer a latent topic distri-
+bution z∈R, where Tdenotes the number of
+topics. Here we take all the verbs and entities in the
+local context around eas event elements and then
+construct the corresponding BoW (Bag-of-Words)
+representation d∈ |V|. Although some studies
+(Choubey and Huang, 2018; Lu and Ng, 2020) have
+explored the event topics, most directly adopt thetraditional LDA models. Inspired by recent neu-
+ral topic models (NTMs) (Xu et al., 2019; Cao
+et al., 2021), we propose an event topic generator
+ETG based on the Variational AutoEncoder (V AE)
+(Kingma and Welling, 2013).
+We believe coreferent event mentions would
+have similar topic distributions. As such, different
+from most neural topic models that assume topics
+follow normal distributions, we make event topics
+follow the von Mises-Fisher (vMF) spherical dis-
+tribution. Let ξ∈Rbe the parameter vector, the
+vMF distribution is p(x) =Ce, where
+µ=ξ/∥ξ∥, κ=∥ξ∥, C= 1/Z. Since
+vMF distribution is measured by cosine similarity
+ofµandx, the generated event topic distributions
+naturally fit the intrinsic correlation of coreference.
+Similar to NTMs, we interpret ETG as a V AE: a
+neural encoder p(z|d)first compresses the event
+element distribution dinto a continuous hidden
+vector zas the latent topic, and then an FFNN de-
+coder g(z)restores ztod. The inference network
+p(z|d)is defined as follows.
+µ=ξ
+∥ξ∥ξ=f/parenleftig
+ReLU/parenleftbig
+f(d)/parenrightbig/parenrightig
+(5)
+where f(·), f(·)are single layer FFNNs. For
+each event element distribution dof the mention
+e, the inference network generates its own µ
+that parameterize a vMF distribution p(z|d) =
+Ce, and we further sample the latent
+topicz. To reduce the variance in the stochas-
+tic estimation and speed up sampling, we follow
+(Rezende et al., 2014; Su, 2021) to sample zby
+the reparametric and pre-sampling methods and
+sample ϵ∼ N(0,I)as follows.
+z=wµ+/radicalbig
+1−wν (6)
+w∼e(1−w)ν=ϵ− ⟨ϵ,µ⟩µ
+∥ϵ− ⟨ϵ,µ⟩µ∥
+(7)
+We hope our ETG can reconstruct the original
+inputdas much as possible using the topic distri-
+bution zwhile adding noise to the result generated
+by the encoder to enhance the robustness of the de-
+coder. As such, the loss function of ETG is defined
+as follows.
+L=E[−logq(d|z)]+KL(q(z)||p(z|d))
+(8)
+where q(z)is a uniform spherical distribution, i.e.
+κ= 0. It is worth mentioning that reducing the
+reconstruction loss can make the decoder have the6768generative ability. We calculate the reconstruction
+loss by calculating the MSE between the BoW
+representation dand/hatwidedreconstructed by the de-
+coder. Here we take κ̸= 0 as a hyperparame-
+ter such that KL (Kullback-Leibler) divergence
+κ/angbracketleftbig
+µ(d),E[z]/angbracketrightbig
++ log C−logCbe-
+comes a constant greater than zero. As such, the
+loss of ETG can be further simplified as follows.
+L=∥d−g(z)∥(9)
+Since ETG is an unsupervised model, we only
+need to input the BoW representations dduring
+training. Given an event element distribution d,
+our ETG can infer its latent distribution zas the
+corresponding topic-level representation.
+3.4 Tensor Matching Scorer
+After obtaining the document-level, sentence-level,
+and topic-level embeddings of each event mention
+e, we concatenate them to get the final event rep-
+resentation e= [g;l;z]∈R. Then, the most
+direct way is to feed the event pair representation
+[e;e]into a softmax layer to predict coreference.
+Inspired by the tensor networks used in discourse
+relation recognition (Xu et al., 2019; Liu et al.,
+2020b), we utilize two tensor matching methods to
+capture semantic interactions between event men-
+tions: (i) element-wise product, i.e. e◦e, which
+is widely used in recent ECR studies (Lai et al.,
+2021; Lu and Ng, 2021a; Tran et al., 2021); (ii)
+multi-perspective cosine similarity as follows.
+Cos(e,e) = [ cos(W◦e,W◦e),
+...,cos(W◦e,W◦e)](10)
+where W∈Ris the parameter and sis the
+number of perspectives. To decrease the compu-
+tational cost, we first reduce the event embedding
+dimension to vby an FFNN, and then adopt tensor
+factorization (Pei et al., 2014), using two low-rank
+matrices P∈R,Q∈Rto approximate
+W⇒P·Q, and r≪v. In this way, we can set
+more cosine matching perspectives.
+Finally, we concatenate the representations of
+the event pair e,eand their matching vectors
+e◦e,Cos(e,e)and then send them to a softmax
+layer to predict their coreference. During training,
+we reduce the cross-entropy loss of coreference
+judgment Lto optimize parameters. After that,
+we employ a greedy iterative clustering algorithm
+to create final clusters as follows: we first take all
+events individually as the initial clusters and thenmerge any two clusters as long as there is an event
+pair from the two clusters predicted to be coreferent.
+Repeat this process until no merging is possible.
+3.5 Training
+To simultaneously update the parameters in all com-
+ponents, we jointly tackle the subtype recognition,
+topic modeling, and the coreference classification,
+and define the overall loss function as follows.
+L=/summationdisplaylog(1 + L) (11)
+This way, the optimizer can automatically reg-
+ulate the balances among these three modules by
+weights, i∈ {s, t, c}without manually set-
+ting the trade-off parameters. To prevent overfitting,
+a dropout operation is performed on the output of
+the GME and the LME.
+4 Experimentation
+In this section, we first introduce the experimental
+settings and then report the experimental results.
+4.1 Experimental Settings
+Following previous work (Lu and Ng, 2021c), we
+train our model on the KBP 2015 and KBP 2016
+datasets (Mitamura et al., 2015, 2016) and evalu-
+ate the model on the KBP 2017 dataset (Mitamura
+et al., 2017). In particular, the KBP 2015 and KBP
+2016 datasets (i.e., LDC2015E29, E68, E73, E94,
+and LDC2016E64) include 817 annotated docu-
+ments, and the KBP 2017 contain 167 documents.
+Following Lu and Ng (2021c), we use the same
+735 documents for training and the remaining 82
+for parameter tuning.
+The Stanford CoreNLP toolkitis employed to
+recognize the named entities and verbs in the doc-
+uments. Since our work focuses on event coref-
+erence resolution, we simply build a Longformer-
+based sequence labeling model to identify triggers,
+using the BIO schema to label the event subtype
+of each token. Finally, we report the ECR per-
+formance using the official Reference Coreference
+Scorer, which employs four coreference metrics,
+including MUC (Vilain et al., 1995), B(Bagga
+and Baldwin, 1998), CEAF(Luo, 2005), BLANC
+(Recasens and Hovy, 2011), and the unweighted av-
+erage of their F1 scores (A VG-F). Besides, Micro-
+F1 is used to evaluate the performance of trigger6769
+detection, where a trigger is considered correctly
+detected if it has an exact match with a gold trigger
+in terms of boundary and event subtype.
+In our experiments, we use a Longformer-large
+model in GME and a BERT-base model in LME. To
+alleviate the data sparseness, we also take verbs and
+entities in the preceding and following sentences as
+elements of the current event mention and limit the
+vocabulary to the top 500 most frequent words, i.e.,
+|V|= 500 . For LME, we truncate the sentence
+centered on the trigger to make the maximum local
+context length 256. In ETG, the number of topics
+andκare set to 32 and 20, and the number of
+neurons in the single-layer FFNN f(·), f(·)are
+set to 32 and 64, respectively. In addition, the
+generator gis implemented by a two-layer network
+with a hidden layer size of 64. In TMS, the number
+of neurons vin the dimension reduction FFNN is
+64, the number of matching perspectives sis set
+to 128, and rof the tensor factorization is set to 4.
+For training, we use document-sized mini-batches,
+i.e., each batch includes only one document with all
+corresponding event mentions, and apply the Adam
+optimizer with a learning rate of 1e-5 to update all
+the parameters.
+4.2 Experimental Results
+We compare our proposed model with the SOTA
+models in the same evaluation setting, including
+a classical pairwise model Huang2019 (Huang
+et al., 2019) and two joint models: (i) Lu&Ng2020
+(Lu and Ng, 2020), which with a supervised topic
+model, (ii) Lu&Ng2021 (Lu and Ng, 2021b),
+which joint modeling six event tasks. In addi-
+tion, we build two pairwise baselines: BERT and
+RoBERTa model, using BERT/RoBERTa-large as
+text encoder. Specifically, it first sends the con-
+catenated event sentence (host the event mention)pairs into the encoder and then obtains the two
+event trigger representations v,vby an attention
+mechanism. Finally, the combined feature vector
+[v;v;v◦v]is used to judge coreference.
+Table 1 reports the performances of the five base-
+lines and our model on KBP 2017, and the results
+show our model outperforms the best Lu&Ng2021
+significantly, with the improvements of 3.2 in the
+average score A VG-F. This result indicates the ef-
+fectiveness of our proposed model in resolving
+event coreference.
+Compared with Huang2019, BERT and
+RoBERTa not only update the text encoder but also
+input the more accurate predicted triggers; hence,
+the ECR performance has a substantial increase.
+Benefiting from the event encoding changed from
+sentence-level to segment-level context, chunk-
+based methods Lu&Ng2020 and Lu&Ng2021
+outperform the three pairwise models in cases with
+similar trigger detection performance. This proves
+that incorporating more contextual information
+in event encoding is important for the ECR task.
+Lu&Ng 2021 jointly models more related event
+tasks compared to Lu&Ng2020, thereby greatly
+improving the performance of trigger detection
+and ECR. However, due to the constraints of event
+encoding, these methods only predict coreferences
+based on local context. In contrast, our model
+uses document-level event embeddings based on
+full-text context and additionally obtains local
+sentence-level and topic-level representations, thus
+gaining the best performance.
+5 Analysis and Discussion
+In this section, we first analyze the impact of
+document-level, sentence-level and topic-level in-
+formation, and then discuss the Impact of different
+tensor matching.67705.1 Impact of Document-level Information
+To further evaluate the contribution of document-
+level information in the GME, we construct some
+variants of our ECR model: (i) Pairwise(BERT)
+and Pairwise(RoBERTa): replacing GME with
+the classical pairwise encoder, which separately
+predicts event coreference for every event men-
+tion pair based only on sentence-level context; (ii)
+Chunk(BERT) and Chunk(RoBERTa): following
+(Lu and Ng, 2021b; Tran et al., 2021), each doc-
+ument is split into multiple chunks and then sep-
+arately encoded with BERT/RoBERTa, obtaining
+event mention representations based on segment-
+level context. The results are shown in Table 2.
+Table 2 indicates that, benefiting from learning
+representations in a wide range of segment-level
+contexts, the chunk-based models perform better
+than those corresponding pairwise models based
+only on sentence-level context; the Chunk(BERT)
+and Chunk(RoBERTa) models are improved by 1.2
+and 0.5, respectively. However, these models essen-
+tially judge coreferences using only local context.
+In contrast, with the introduction of document-level
+context, our model using GME can learn event rep-
+resentations based on full-text context, thus achiev-
+ing the best performance.
+To deeply compare these different event encod-
+ings and exclude the effect of the clustering step,
+we also report the event-pair classification F1-score
+in Table 3: (1) ALL: results of all (predicted) event
+mention pairs; (2) results of event mention pairs
+of different distances: (i) SAME: in the same sen-
+tence; (ii) ADJ: in adjacent sentences, i.e., sentence
+distance ≤3; (iii) DIST: sentence distance > 3.
+The results of the event-pair classification show
+that the chunk-based models still outperform those
+corresponding pairwise models. Specifically, in-
+corporating more contextual information can help
+identify event coreferences among distant event
+mention pairs, and the performance of the chunk-
+based BERT model is greatly improved by 2.5
+and 4.6 in the ADJ and DIST cases, respectively.
+This confirms our hypothesis that identifying event
+coreferences among long-distance event mentions
+requires more global information. Our ECR model
+obtains document-level event representations based
+on full-text context and hence achieves the best
+performance in all cases, completing an F1 score
+improvement from 5.5 to 10.7 for all event mention
+pairs. This verifies the superiority of the global
+event encoding adopted by our model for ECR.
+5.2 Impact of Sentence-level and Topic-level
+Information
+To analyze the impact of sentence-level and topic-
+level information, we take the variants containing
+only the GME as the Base model and then add our
+LME and ETG. In addition, we build an event topic
+model similar to the Simplified Topic Model (Xu
+et al., 2019), denoted as STM, which assumes that
+the event topics follow the normal distributions and
+additionally performs a batch normalization after
+obtaining the mean representations to avoid KL
+vanishing. The results are shown in Table 4.
+Table 4 shows slight improvements in most ECR
+metrics after adding sentence-level and topic-level
+representations. Specifically, the event-pair results
+indicate that after mining event clues from the local
+context and providing high-level topic information,
+the F1-score in the SAME case is greatly improved
+by 2.6. The reason may be that events located in
+the same sentence share similar elements and con-
+text; thus, injecting local event cues and topic-level
+information in representations can further attract
+the model’s attention to local detail cues. Though,
+these approaches interfere with identifying adja-
+cent and distant event pairs, the F1-score declines
+by 0.6 and 1.7 in ADJ and DIST cases, respectively.
+We also try applying our LME to classical pair-
+wise models, which concatenate the event repre-
+sentations obtained by BERT/RoBERTa and our
+sentence-level event representations, i.e., e=6771
+[v;l]. Then, using the combined feature vector
+[e;e;e◦e]to predict coreferences. The ECR
+results in Table 5 show that although the pairwise
+models are entirely based on local context, pro-
+viding local clues can further improve them. This
+confirms the effectiveness of our proposed trigger-
+mask mechanism in mining event cues.
+Table 4 shows that applying ETG can improve
+the MUC by 0.4 with a slight impact on other met-
+rics. Since the MUC metric only rewards success-
+ful identification of event links and the topic infor-
+mation is mainly to help identify coreferences of
+main events, we evaluate the event-pair results of
+event mentions on different length chains. Here we
+naively select event chains with lengths greater than
+ten as main chains. A singleton is considered cor-
+rectly recognized if it is predicted non-coreferent
+with all other event mentions. Table 6 reports the
+results, where Base is a variant of our model, which
+removes ETG.
+Table 6 shows that adding topic-level representa-
+tions improves the coreference judgment of event
+mentions on main chains, the ETG and STM in-
+crease the event-pair classification F1-score by 0.7
+and 0.6, respectively. However, this somewhat im-
+pairs the coreference determination of short-chain
+events and singletons. Interestingly, the results alsoshow that although the overall performance of STM
+is low, the normal distribution is still an option for
+modeling event topics.
+5.3 Impact of Different Tensor Matching
+Results in Table 1 show that document-level event
+representation with simple tensor matching can sig-
+nificantly improve ECR performance. To evaluate
+the impact of tensor matching, we let the variant
+that directly concatenates the two event represen-
+tations as Base, and compare it with models using
+the following three matching methods: (i) Prod :
+element-wise product, i.e., e◦e; (ii) Diff: abso-
+lute element-wise difference, i.e., |e−e|, adopt
+by popular sentence vector models (Conneau et al.,
+2017; Reimers and Gurevych, 2019); (iii) Cos: our
+proposed factored multi-perspective cosine similar-
+ity. The results are shown in Table 7.
+Table 7 shows that applying tensor matching can
+significantly improve ECR performance. In particu-
+lar, besides applying the widely used element-wise
+product, Base+Prod+Cos adopted by our model
+also uses Cos to calculate similarities from vari-
+ous perspectives, thereby achieving the best perfor-
+mance and significantly improving A VG-F by 5.8
+compared to the Base model.
+Table 7 also reports the event-pair classification
+results (P/R/F1). It shows that, compared with
+Base+Prod, Base+Prod+Cos can capture event in-
+teractions from more perspectives; thereby, the F1-
+score improved by 1.0, 0.6, and 0.9 in the SAME,
+ADJ, and DIST cases, respectively. Especially
+for distant events with varied contexts, which re-
+quires more semantic clues to judge coreference.
+Since coreferent events have more minor differ-
+ences∥e−e∥than non-coreferent events, adding
+Diff can reinforce the clustering tendency. This
+can be seen as adding a constraint like attraction
+and repulsion loss (Kriman and Ji, 2021), strength-
+ening the cohesion of event representations, thus
+improving recalls. It is worth mentioning that we
+also implement a contrastive learning loss to en-
+hance event representations, showing similar per-
+formance to adding Diff. However, compared with6772
+adding Cos, this method would reduce the recogni-
+tion precision, with the F1 scores decreased by 0.8,
+0.3, and 0.4 in the SAME, ADJ, and FAR cases,
+respectively. Even if the model applies both Diff
+andCos, it cannot improve further.
+6 Conclusion
+In this paper, we first apply a Longformer-based
+encoder to obtain the document-level event embed-
+dings based on full-text context and an encoder
+with a trigger-mask mechanism to learn sentence-
+level event embeddings based on local context. In
+addition, we propose an event topic generator to
+infer the latent topic-level representations. Finally,
+using the above event embeddings, we employ a
+multiple tensor matching method to capture their
+interactions at the document, sentence, and topic
+levels. Experimental results on KBP 2017 dataset
+show that our proposed model outperforms previ-
+ous SOTA methods. In future work, we will con-
+tinue to study how to mine the connections between
+event mentions from more aspects.
+Limitation
+Although our method is simple yet effective, it
+still suffers from two obvious shortcomings. First,
+since our model adopts the pipeline framework, we
+need to separately train models for trigger detec-
+tion and coreference prediction, which inevitably
+bring error propagation. We also try constructing a
+joint version of our model that employs the same
+Longformer (of Global Mention Encoder) to iden-
+tify triggers and judge coreferences. However, this
+method resulted in a significant performance drop.
+Therefore, how to design the joint modeling of trig-
+ger detection and coreference prediction for our
+ECR model is still an unsolved problem. Second,
+our full model applies both a Longformer and a
+Bert model to learn event representations. Even if
+we use document-sized mini-batches, the training
+hardware requirements (especially graphics mem-
+ory) are still high. Hence, how to refine the model
+structure is another focus of our future work.Acknowledgements
+We thank the anonymous reviewers for their valu-
+able comments and suggestions. This work was
+supported by the National Natural Science Foun-
+dation of China (Nos. 61836007, 62276177, and
+62006167) and funded by the Priority Academic
+Program Development of Jiangsu Higher Educa-
+tion Institutions (PAPD).
+References677367746775

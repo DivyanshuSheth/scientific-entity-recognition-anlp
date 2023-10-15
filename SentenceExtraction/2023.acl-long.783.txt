@@ -1,1 +1,796 @@
-14014 Proceedings of the 61st Annual Meeting of the Association for Computational Linguistics Volume 1 : Long Papers , pages 14014–14031 July 9 - 14 , 2023 © 2023 Association for Computational Linguistics 14015 14016 14017 14018 14019 14020 14021 14022 14023 14024 14025 14026 14027 14028 14029 14030 14031 
+
+Yu Fei, Yifan Hou, Zeming Chen, Antoine BosselutUC Irvine,ETH Zurich,NLP Lab, IC, EPFL, Switzerland
+yu.fei@uci.edu, yifan.hou@inf.ethz.ch,
+{zeming.chen, antoine.bosselut}@epfl.ch
+Abstract
+Various design settings for in-context learning
+(ICL), such as the choice and order of the in-
+context examples, can bias the model’s predic-
+tions. While many studies discuss these design
+choices, there have been few systematic inves-
+tigations into categorizing them and mitigating
+their impact. In this work, we define a typol-
+ogy for three types of label biases in ICL for
+text classification: vanilla-label bias ,context-
+label bias , and domain-label bias (which we
+conceptualize and detect for the first time).
+Our analysis demonstrates that prior label bias
+calibration methods fall short of addressing all
+three types of biases. Specifically, domain-
+label bias restricts LLMs to random-level per-
+formance on many tasks regardless of the
+choice of in-context examples. To mitigate
+the effect of these biases, we propose a sim-
+ple bias calibration method that estimates a
+language model’s label bias using random in-
+domain words from the task corpus. After
+controlling for this estimated bias when mak-
+ing predictions, our novel domain-context cali-
+bration significantly improves the ICL perfor-
+mance of GPT-J and GPT-3 on a wide range
+of tasks. The gain is substantial on tasks with
+large domain-label bias (up to 37% in Macro-
+F1). Furthermore, our results generalize to
+models with different scales, pretraining meth-
+ods, and manually-designed task instructions,
+showing the prevalence of label biases in ICL.
+1 Introduction
+Large language models (LLMs) can perform un-
+seen tasks by conditioning on a context prompt
+that consists of a few training example-label pairs
+(Brown et al., 2020). However, such in-context
+learning ability is highly sensitive to various design
+settings, such as the choice (Liu et al., 2021) and
+order (Lu et al., 2021) of the in-context samples.Figure 1: An illustration of domain-label bias. (a)
+On Tweet hate, seeing random in-domain (i.d.) words
+sampled from the dataset severely biases the model
+towards predicting label hate, while random English
+(Eng.) words show no such preference. (b) On a movie
+review dataset, SST-2, we do not observe such bias.
+Recently, Zhao et al. (2021) showed that the insta-
+bility of ICL largely arises from the fact that these
+design settings bias the model toward predicting
+certain answers ( e.g., LLMs often predict the la-
+bel of the last in-context example). As a result,
+the sensitivity of the results in ICL studies calls
+for a systematic discussion of biases in ICL and
+new methods to properly categorize, detect, and
+comprehensively mitigate various types of biases.
+In this work, we conduct a thorough investiga-
+tion of biases in ICL for text classification. We start
+by defining a typology of three types of label biases
+(the model’s undesirable preference toward certain
+label names): vanilla label bias ,context-label bias ,
+anddomain-label bias . What we term vanilla label
+bias captures the model’s non-contextualized pref-
+erence for the label names ( e.g., the common token
+bias mentioned by Zhao et al. (2021) caused by dif-
+ferent frequencies of label names in the pretraining
+corpus). Context-label bias summarizes the effects
+of the context prompt ( e.g., LLMs tend to prefer the
+majority and last label of the in-context examples).
+Finally, domain-label bias captures the effects of
+the task corpus on the model’s predictions.
+We show that domain-label biases significantly
+affect a model’s prediction in ICL. For example,14014
+on a hate detection task with two nearly balanced
+classes, simply seeing random words sampled from
+the dataset severely biases the model towards pre-
+dicting the label hate (Fig. 1(a)), while seeing
+random English words does not show such an ef-
+fect. More importantly, on many tasks with large
+domain-label bias, LLMs achieve no better than
+random performance, regardless of the choice of
+in-context examples (Fig. 2). Moreover, we find
+that existing bias mitigation methods, such as Con-
+textual Calibration (CC; Zhao et al., 2021) do not
+combat this effect.
+To this end, we propose Domain-context Calibra-
+tion (DC) to mitigate label biases in ICL. DC first
+estimates the effects of different label biases holis-
+tically using random words sampled from the task
+corpus. Specifically, we compute the probabilities
+assigned by the model to each label using random
+in-domain words as the task input (with optional
+real in-context learning examples prepended). Us-
+ing random words limits the semantic meaning of
+the input, allowing us to estimate the vanilla-label
+and context-label biases while using in-domain
+words accounts for the effect of the task corpus.
+Then, at inference time, we use this label bias esti-
+mate to calibrate the model’s output probabilities.
+We evaluate the impact of DC on 24 classifica-
+tion datasets, showing that DC improves the aver-
+age ICL performance of GPT-J (Wang and Komat-
+suzaki, 2021) and GPT-3 by 20% and 18%. We ob-
+serve substantial gains on tasks with large domain-
+label bias (up to 37% in Macro-F1). DC also bene-
+fits models with different scales, instruction-tuning
+(e.g., Instruct-GPT, Ouyang et al., 2022), and pro-
+vided with task instructions. Finally, we show that
+DC improves the zero-shot prompting performance
+of smaller models like RoBERTa (Liu et al., 2019),
+demonstrating that label bias can be mitigated in
+prompt-based frameworks beyond ICL.
+Overall, our work proposes a new typology of
+label biases in prompt-based methods, and a sim-
+ple method for mitigating them. When studying
+ICL on a diverse collection of datasets, the results
+on datasets with severe label bias can obfuscate
+the actual behaviors of the model. Thus, rigorous
+design for dataset selection (that accounts for con-
+founders) and fine-grained analysis of individual
+datasets are essential for effectively studying ICL.
+2 Categorizing Label Biases in ICL
+In this paper, we focus on in-context learning (ICL;
+Fig. 3) for classification tasks. Formally, we con-
+sider a dataset of examples {x, y}where xare
+text inputs and each ycan be mapped to a ver-
+balization in a label name set L. We assume each
+class has one label name. For example, in a sen-
+timent task, Lcould be composed of positive and
+negative as label names. Given a context prompt C
+consisting of a few labeled examples and an input
+textx, the model Mdetermines the label of xby
+computing: arg maxP(y|x, C). Using this
+notation, we define our typology of label biases
+based on the mathematical formulation of ICL.
+2.1 A Typology of Label Biases
+To perform a classification task, a model needs
+to learn the underlying text-label mapping, i.e.,
+P(y|x). In supervised learning, such mapping is
+learned by optimizing the model using the training
+data. In ICL, on the other hand, the model is fixed,
+and it determines the label of a text by comput-
+ing the probabilities of predicting the label names14015P(y|x, C). Notice that there are three compo-
+nents involved in the inference: the label name
+y, the text xfrom a specific task corpus, and the
+context C. Accordingly, as shown in Fig. 4, we
+can define three types of label biases that lead to a
+discrepancy between P(y|x, C)andP(y|x).
+Vanilla-label bias pertains to the uncontextual
+preference of the model towards predicting certain
+label names. One possible cause is the pre-training
+term frequencies of the label names. Zhao et al.
+(2021) reported a high correlation between the fre-
+quency of the DBPedia dataset label names and the
+rate at which GPT-3 predicts those labels.
+Context-label bias summarizes the effect of the
+context prompt. With in-context learning, the
+model “learns” from a few examples, and the learn-
+ing is particularly sensitive to seemingly arbitrary
+decisions such as the order of the in-context exam-
+ples (Lu et al., 2021) and the task template used to
+map the example to text that the model can process
+(Mishra et al., 2021; Holtzman et al., 2021).
+Domain-label bias captures the effect of the task
+corpus. Beyond the text-label association demon-
+strated in the in-context examples, the model also
+relies on its prior knowledge of the task when mak-
+ing predictions. We show that the association of
+words to the label names learned from pre-training
+is a potential pitfall and discuss domain-label bias
+in more detail in the next section.
+3 Domain Label Bias
+To illustrate how the domain of a task can induce
+label bias, consider a case where an LLM predicts
+whether a patient is sickorhealthy based on some
+medical descriptions. Because medical descrip-
+tions are associated more often with people having
+health problems in the natural corpus, frequently
+used words in such documents are likely to have a
+stronger correlation with sickthan healthy , leading
+to a systematic bias in the model’s predictions.
+Supporting this intuition, we find that for many
+datasets, conditioning on random words from the
+dataset examples biases the model toward predict-
+ing certain label names. For example, in the hate
+speech detection task depicted in Fig. 1, we com-
+pute the model’s preference (prior) on both label
+names given random words as the input. A model
+such as GPT-J has no preference for either of the
+classes ( neutral v.s.hate) given random English
+words, but given random in-domain words sampled
+from the dataset, the label priors shift dramatically,
+becoming 0.95 ( hate) v.s. 0.05 ( neutral ).
+Motivated by this experiment, we quantify the
+domain-label bias of a model for a particular task
+using the distance of the model’s priors estimated
+using random English words and in-domain words.
+To make the measure more comparable on tasks
+with different numbers of classes, we define the
+following metric:
+bias=1
+2/summationdisplay/vextendsingle/vextendsingle/vextendsingleP(y|x)−P(y|x)/vextendsingle/vextendsingle/vextendsingle,(1)
+where x andxcorrespond to Lrandom En-
+glish or random in-domain words and Lis the av-
+erage text length of the dataset.
+We find that datasetsexhibit different levels of
+domain-label bias (see Fig. 17 in App. A). More
+importantly, LLMs behave distinctively on datasets
+with small and large domain-label bias. As shown
+in Fig. 5, while GPT-J performs competitively on
+datasets with small domain-label bias, it rarely
+outperforms the random baselines on large-bias
+datasets, indicating that domain-label bias signifi-
+cantly affects ICL. Contextual calibration, which
+only considers vanilla-label bias and context-label
+bias, fails to handle domain-label bias.
+4 Domain-context Calibration
+In this section, we propose Domain-context Cal-
+ibration (DC), which mitigates the effects of the
+multiple label biases of our typology (§ 2.1). Fol-
+lowing contextual calibration (CC; Zhao et al.,
+2021), we estimate the overall label bias of a model14016
+with respect to a task by estimating the label prob-
+abilities on a content-free example text. However,
+unlike CC, which uses a single, seemingly content-
+free token ( e.g., “N/A”) to approximate the label
+bias, we use random words sampled from the un-
+labeled evaluation dataset as the content-free text.
+Then, for all examples we classify for the task,
+we re-calibrate the model’s prediction probability
+using this estimated bias.
+More formally, given a dataset, we first construct
+a bag-of-words Busing the unlabeled texts {x}.
+Assuming x’s have average length L, we sample L
+words randomly from Bto form a content-free ran-
+dom text, which captures the word distribution of
+the dataset domain. However, the random text still
+remains nearly content-free as it is not grammat-
+ically meaningful and potentially contains words
+from all classes, making it suitable for calibration.
+We repeat this process Mtimes and average the
+estimated priors:
+¯P(y|C) =1
+M/summationdisplayP(y|[random text ], C).(2)
+The model then makes predictions according to the
+following estimate:
+ˆy= arg maxP(y|x, C)
+¯P(y|C).
+where P(y|x, C)is the original probability as-
+signed to label yfor a particular example x.
+5 Experimental Setup
+We conduct comprehensive experiments to analyze
+the effectiveness of our domain-context calibration
+in mitigating label biases in ICL.
+Datasets We conduct experiments on 24 text clas-
+sification datasets that cover a wide range of tasks.
+Most of these datasets are recently used for study-
+ing ICL (Zhao et al., 2021; Min et al., 2022; Lu
+et al., 2021). To control the evaluation budget, weuse a subset of the 24 datasets for GPT-3 experi-
+ments following Min et al. (2022). More details
+can be found in Appendix C.
+Model and implementation details We use
+GPT-J (6B) and GPT-3 (175B) as models in our
+study. For all experiments, unless stated otherwise,
+we use k= 8 examples sampled randomly from
+the training set to construct the context prompt and
+evaluate 5 times using different random seeds. Fol-
+lowing Min et al. (2022), we use simple and unified
+templates for all datasets and do not use any task in-
+structions to keep human engineering at a minimal
+level. We discuss the effect of task instructions in
+§ 6.1. The templates and label names we used for
+all datasets can be found in App. E. To further con-
+trol the budget for evaluating with GPT-3, we fol-
+low Lu et al. (2021) and sample a subset of size 500
+for all datasets whose test sets have sizes exceed-
+ing this number. For domain-context calibration,
+we use the unlabeled test set for sampling random
+in-domain words and aggregate using M= 20
+random texts (Eq. 2). We discuss the sampling
+of random words in more detail in Appendix F.
+We use Open-AI’s API for GPT-3 experiments and
+Tesla V100 GPUs for GPT-J inference.
+Evaluation Details For each model, we compare
+the performance of domain-context calibration to
+the following baselines: random performance, un-
+calibrated performance, and contextual calibration
+performance. Following prior work, we use the
+Macro-F1 score as the evaluation metric.
+6 Experimental Results
+We report the average Macro-F1 scores of GPT-J
+(6B) and GPT-3 (175B) across the entire evaluation
+suite in Figure 6. Furthermore, we stratify our
+results into three equal-sized subsets according to
+their levels of domain-label bias.
+Our main finding is that domain-context cali-
+bration generally improves in-context learning,
+especially on tasks with large domain-label bias .14017
+On all datasets, DC consistently boosts the perfor-
+mance for both models with an average improve-
+ment (Macro-F1) of 20% (GPT-J) and 18% (GPT-
+3).As Fig. 6 shows, the performance gain of DC
+over baselines (original predictions and CC) largely
+increases when the degree of domain-label bias in-
+creases. On the tasks with the largest domain-label
+bias, DC is the only method that significantly out-
+performs the random baseline and achieves up to
+37% (GPT-J) and 35% (GPT-3) performance im-
+provement over other baselines, indicating that DC
+effectively mitigates domain-label bias.
+6.1 Generalizability
+Following the finding that DC improves ICL sig-
+nificantly on datasets with large domain-label bias,
+we analyze the robustness of DC under changes in
+model scale, number of in-context learning exam-
+ples, and task instructions (all of which have been
+shown to improve ICL). We use three datasets that
+exhibit a high level of domain-label bias for GPT-J.Scaling up the model We evaluate GPT-3 mod-
+els with sizes ranging from 350M to 175B. As
+Fig. 7 shows, larger models (both the original pre-
+diction and CC) do not exhibit better performance
+on tasks with large domain-label bias. However,
+DC consistently improves the performance of GPT-
+3 models of all sizes while reducing the variance
+due to different choices of in-context examples.
+Adding more in-context examples In Table 1,
+we study the effect of adding more in-context ex-
+amples by evaluating GPT-J and GPT-3 using 0,
+8, and 16 in-context examples. For both models,
+adding more examples does not seem to benefit the
+model’s original and CC performance on tasks with
+large domain-label bias. However, in all settings,
+DC gives the best results, and for GPT-3, DC fur-
+ther improves the performance when provided with
+more in-context examples.
+Task instructions and instruction-tuning
+Instruction-tuning and task instructions have been
+shown to be beneficial to ICL. As shown in Table 2,
+for GPT-3, providing task instructionsimproves
+the performance with DC much larger than the14018
+original and CC performance, showing that DC
+enables GPT-3 to make better use of the task
+instruction. For Instruct-GPT3 (text-davinci-002),
+adding task instructions largely improves the
+model’s original performance. Still, DC yields
+significant improvement, while CC actually hurts
+the model’s performance.
+6.2 Analysis
+To understand why DC outperforms CC, we con-
+duct a systematic analysis using GPT-J of three dif-
+ferences between DC and CC: 1) the effect of a pre-
+defined content-free token such as “N/A” compared
+to using random words; 2) the length of the random
+word sequence; 3) the source of random words.
+Below, we summarize our results from Fig. 8.
+Content-free token can also be biased First, we
+find that replacing the pre-defined content-free to-
+ken from CC ( i.e., “N/A”) with a single random En-
+glish word improves GPT-J’s overall performance,
+indicating that specific content-free tokens may
+themselves can be biased toward particular labels.
+For example, as shown in Fig. 10, on sentiment
+tasks, calibration GPT-J using “N/A” leads to a sys-
+tematic bias toward the positive class. Calibrating
+using random English words to estimate the label
+bias avoids this problem.
+Calibrating with random texts of the average in-
+put length is beneficial As shown in Fig. 8, when
+calibrating using random English words, increas-
+ing the number of words improves performance.
+Intuitively, using random texts of the average input
+length for calibration gives a more precise estimate
+of the effect of the context prompt. To test this,
+we select the longest and shortest 10% samples
+of all 24 datasets to construct a dataset with long
+and short inputs for a task. Then, we test the cali-
+bration performance using random English words
+of different lengths. As shown in Fig. 11, longer
+(shorter) texts prefer longer (shorter) random texts
+as calibration sequences to estimate the label bias.
+Calibrating using random in-domain words re-
+moves domain-label bias Finally, calibrating us-
+ing random in-domain words yields a large im-
+provement over calibrating using random English
+words. We plot the prediction distributions of GPT-
+J on Tweet hate after calibrating with both random
+English and in-domain words of various lengths in
+Fig. 9. We see that, when only calibrating using a
+few in-domain words, the word distribution of the
+dataset is not well-captured, and thus the domain-
+label bias is not effectively removed. When cali-14019
+brating using more in-domain words, the prediction
+becomes more balanced, while after calibrating us-
+ing more random English words, the model is still
+biased towards predicting label hate. Interestingly,
+we notice that the more DC mitigates the domain-
+label bias, the more task performance increases.
+6.3 Zero-shot Prompting
+Smaller LLMs pre-trained using masked language
+modeling can also be efficiently adapted to unseen
+tasks by reformulating the task into a cloze prob-
+lem using a natural language prompt ( i.e., zero-shot
+prompting (Schick and Schütze, 2020)). To demon-
+strate that DC can be used even with smaller mod-
+els, we evaluate the zero-shot prompting ability of
+RoBERTa-large (Liu et al., 2019) when it is cali-
+brated using DC.. We report our results in Tab. 7
+(App.G) and find that across the same 24 datasets,
+DC achieves a significant performance gain of 26%.
+Similar to ICL with GPT models, label biases affect
+RoBERTa’s zero-shot prompting priors. However,
+DC effectively mitigates these biases, leading to
+significant performance improvements.
+7 Discussion
+Label name selection as label bias mitigation
+Our results outline how LLMs can be biased to
+certain label names for different tasks. Intuitively,
+because the task is formulated as generating the
+label name given an example, the mechanism elic-
+its the model’s prior knowledge about the task. To
+better understand whether domain-label bias could
+be mitigated through more careful label name se-
+lection, we test GPT-J with three different pairs of
+label names on Tweet hate: 1) neutral v.s.hate,
+which is the most task-relevant set of label names
+but introduces severe domain-label bias; 2) favor
+v.s.against , a pair of less task-relevant antonyms
+used by Min et al. (2022); 3) Xv.s.Y, which are
+meaningless placeholders.14020
+As shown in Fig. 12, calibrating using random
+English words or in-domain words makes little dif-
+ference when choosing ( X,Y) or ( favor ,against ) as
+the label names, showing that they do not introduce
+domain-label bias. However, although GPT-J is
+able to achieve better original and CC performance
+on these label names, ( neutral ,hate) yields the best
+performance after removing domain-label bias us-
+ing DC. Thus, with proper calibration, using the
+most task-indicative words as label names is likely
+to be the best option. Surprisingly, the manually
+picked label names ( favor ,against ) under-perform
+the meaningless ones ( X,Y) after applying DC,
+hinting that human-plausible label names are not
+necessarily good label names for LLMs.
+Select datasets for ICL analysis The varying
+levels of domain-label bias in our studied datasets
+suggest a large variance in how ICL will perform on
+different datasets. Consequently, macro-averaging
+the performance on datasets with differing levels of
+label biases potentially obfuscates diverse results
+among different tasks. Our work encourages future
+studies to select datasets carefully to cover varying
+degrees of label bias among reported results, and to
+perform fine-grained analysis of individual datasets
+to when studying ICL performance.
+Alternate causes of domain label bias When
+evaluating models for real-world applications such
+as hate speech detection, we usually use hard exam-
+ples ( e.g., non-hateful, but “hateful-looking” exam-
+ples) to check the robustness of the model. How-
+ever, LLMs trained on natural corpora are likely
+to be susceptible to adversarial word-level features
+(LLMs use word associations learned from pre-
+training to perform ICL). To some degree, adver-
+sarial examples could also be a source or large
+domain-label bias on many datasets.8 Related Work
+In-context learning (ICL) is the standard paradigm
+for adapting LLMs (Chowdhery et al., 2022; Wei
+et al., 2022; Zhang et al., 2022). Many recent works
+focus on understanding its mechanism to improve
+adaptation performance. For example, Lu et al.
+(2021) showed that ICL is sensitive to the order of
+in-context examples. Razeghi et al. (2022) demon-
+strated that the ICL performance on numerical rea-
+soning tasks is strongly correlated with the pre-
+training term frequencies. Liu et al. (2021) found
+that using examples semantically close to the input
+texts is beneficial. Min et al. (2022) showed that
+for classification tasks, the input-label pairing for-
+mat plays the most crucial role in ICL. Sorensen
+et al. (2022) found that structure of the prompt also
+significantly affected ICL performance, and that
+better prompts could be selected based on mutual
+information between the prompts and the model’s
+output. Complementary to these works, we compre-
+hensively study the label bias problem in ICL. The
+existence of domain-label bias indicates that ICL
+is largely affected by the word-level associations
+LLMs learn during pre-training.
+Other recent works discuss the bias problem in
+ICL. Zhao et al. (2021) proposed contextual cal-
+ibration to mitigate three types of biases in ICL:
+the majority bias, recency bias, and common token
+bias. Holtzman et al. (2021) focused on the zero-
+shot setting and found that different surface forms
+of the answer can compete for probability mass
+given a question, leading to a bias when predicting
+with a single label name for each class. In contrast
+to these works, which consider a specific type of
+bias, we propose a typology of label biases and
+propose domain-context calibration that handles all
+biases in our typology.
+The ability of the largest models, like PaLM
+(Chowdhery et al., 2022), to perform in-context
+learning under the flipped label or semantically-
+unrelated label settings (Wei et al., 2023) is very
+relevant to this work. As the largest models tend to
+have emergent abilities, it would be interesting to
+test how vulnerable these models are to label biases
+(especially domain-label bias) and how domain-
+context calibration would help. Unfortunately, we
+currently do not have access to them (e.g., PaLM
+and Flan-PaLM (Chung et al., 2022)). Nevertheless,
+the similar behavior of PaLM and Instruct-GPT
+(as shown in Wei et al. (2023)) and the fact that
+Instruct-GPT also suffers from domain-label bias14021(Table 2) indicate that these more capable models
+may still be susceptible to label biases. Also, how
+scaling up or instruction-tuning would relieve label
+biases is an interesting direction to explore.
+9 Conclusion
+In this work, we define a typology of label biases
+that affect in-context learning (ICL). We catego-
+rize existing findings of label biases into two types:
+vanilla-label bias and context-label bias, and iden-
+tify a new type of bias, domain-label bias, that
+significantly influences ICL performance. To miti-
+gate these label biases, we propose domain-context
+calibration, which significantly improves ICL per-
+formance on a wide range of tasks, particularly on
+datasets with large domain-label bias. The vari-
+ous levels of domain-label bias in different datasets
+also suggest that when analyzing ICL, we need to
+select datasets with diverse types of label biases
+and report stratified that acknowledge this diversity
+beyond single aggregated scores.
+Limitations
+Data and Task Limitation In this work, we an-
+alyze domain-label bias and apply our domain-
+context calibration to English. We leave analysis
+and mitigation methods for multilingual tasks to fu-
+ture works. In experiments, we discuss calibration
+on classification tasks. The effect of domain-label
+bias could exist differently for open-end tasks like
+text generation. Our analysis of domain-label bias
+also emphasizes more on the word-level bias. Other
+types of biases associated with a domain, such as
+topics and genders, may also impact model predic-
+tion. We leave the diverse analysis to future works.
+Due to budget limitations, we conduct experiments
+on a subset of the 24 reported datasets for GPT-3.
+One can evaluate all 24 datasets to get a complete
+picture with enough budget.
+Model Limitation For large language models,
+we only focus on the GPT models and only select
+RoBERTa as the small-scale language model in
+experiments. Future work could consider expand-
+ing to other model types, such as PaLM for large
+models and DeBERTa for small models. Access
+to the OpenAI API for GPT-3 is also necessary for
+parts of our experiments. Future work can con-
+sider experimenting with open-source LLMs like
+the OPT-175B or BLOOM-176B model.Ethics Statement
+Our work focuses on analyzing the general label
+bias problem of the in-context learning ability of
+LLMs and improving their performance with a
+tuning-free method, which involves no large neu-
+ral model pre-training, re-training, or fine-tuning.
+As we only use LLMs for inference, developing
+and applying our approach requires only minimal
+computational resources compared to methods that
+require dataset-specific model fine-tuning or engi-
+neering. We do not anticipate significant ethical
+issues introduced by our approach, as we use only
+off-the-shelf LLMs, and the datasets involved are
+all publicly available text classification datasets.
+The discussion of biases in our work is general and
+not specific to any real word context. Still, our anal-
+ysis and typology of the label biases of ICL may
+motivate future work to analyze the bias problem of
+ICL and LLMs in areas with larger social impacts,
+such as healthcare or legal scenarios.
+References1402214023A Domain-label Bias of All Datasets
+We compute and illustrate the domain-label bias
+of all datasets we used with different LLMs in
+Fig. 17. Different datasets exhibit different lev-
+els of domain-label bias. Regarding task types, The
+detection tasks (red) show the largest domain-label
+bias, while the NLI tasks (orange) have the least.
+On sentiment and topic tasks, the domain-label
+bias is mostly small but can vary depending on
+the domain of the dataset. For example, for senti-
+ment classification datasets, movie review datasets
+like SST-2 have relatively small domain-label bias.
+While financial statements and poem sentiment,
+whose texts are from rare domains, have much
+larger biases. We discuss the model dependency of
+domain-label bias in the next section.
+B Correlation of Domain-label Bias
+Estimated with Different LLMs
+We compute the correlation of domain-label bias
+(defined by eq. (1)) computed with 5 different mod-
+els on all 24 evaluation datasets. We use GPT-3
+Ada (350M), GPT-3 Babbage (1.3B), GPT-3 curie
+(6.7B), GPT-3 DaVinci (175B), and GPT-J (6B).
+We show the correlation plot in Figure 13. Al-
+though domain-label bias is model-dependent by
+definition, the biases computed by different models
+are highly correlated.
+C Full Dataset Information
+We use 24 datasets falling into three categories:
+sentiment and topic classification, NLI, and Detec-
+tion. Most of the used datasets are from existing
+works. W(Min et al., 2022; Lu et al., 2021; Zhao
+et al., 2021)e added a few more detection datasets
+for better studying the domain-label bias as they
+tend to show the largest domain-label bias. We use
+the HuggingFace venison Lhoest et al. (2021) of all14024datasets and use the test set, if available, for evalu-
+ation. Otherwise, we use the development set. We
+summarize the full dataset information in Table 3.
+D Full Few-shot Results
+We report the full 8-shot results on individual
+datasets with the standard deviations (5 random
+seeds) in Table 6. We further show the few-shot
+performance gain (GPT-J) of DC over CC on all
+datasets in Figure 14.
+E Templates and Task Instructions
+We show the templates and label names for all
+datasets in Table 4. The task instructions used
+in Table 2 are illustrated in Table 5. We always
+use exactly one word for every label name. To
+avoid label names being tokenized into subwords,
+we always use lower-cased label names except for
+tasks answering with True or False.
+F Sampling Analysis
+In this section, we analyze two factors related to
+the random word sampling process involved in DC:
+1) the number of random texts to use for estimat-
+ing the prior ( Min eq. (2)), and 2) the size of
+the unlabeled dataset to sample random in-domain
+words from. We conduct experiments on two small-
+domain-label-bias datasets (SST-2 and AG News)
+and two large-domain-label-bias datasets (Tweet
+hate and Tweet irony).
+How many random texts should we sample?
+First, we sample different numbers of random texts
+Mfor estimating the model’s prior as in eq. (2). Asshown in Figure 15, DC is able to achieve a good es-
+timate with a relatively small number of sampling.
+We choose M= 20 as it achieves a good balance
+between computational efficiency and stability of
+prior estimation.
+How large should the unlabeled task corpus be?
+In the main experiments, we use the whole un-
+labeled test set to construct a bag-of-words and
+sample random words from it. Here, we study the
+effect of the unlabeled dataset set size on the per-
+formance of DC. As shown in Figure 15, DC is
+able to achieve a good estimate with 50 unlabeled
+texts from the dataset.14025G Zero-shot Prompting Experiment
+Templates for zero-shot prompting We adapt
+templates from Gao et al. (2020) for our zero-shot
+prompting experiments.
+Sentiment and detection tasks:
+⟨input⟩It was⟨mask⟩]
+Subj:
+⟨input⟩This is ⟨mask⟩
+Topic tasks:
+⟨mask⟩:⟨input⟩
+NLI tasks:
+⟨sentence⟩?⟨mask⟩,⟨sentence⟩
+Full Results We show the full zero-shot prompt-
+ing results with RoBERTa-large on individual
+datasets in Table 7.14026
+Dataset # Class Balanced GPT-J GPT-3
+Sentiment and topic classification
+SST-2 (Socher et al., 2013) 2 ✓ ✓ ✓
+SST-5 (Socher et al., 2013) 5 ✗ ✓ ✓
+MR (Pang and Lee, 2005) 2 ✓ ✓
+CR (Hu and Liu, 2004) 2 ✓ ✓
+financial_phrasebank (Malo et al., 2014) 3 ✗ ✓ ✓
+poem_sentiment (Sheng and Uthus, 2020) 4 ✗ ✓
+Subj (Pang and Lee, 2004) 2 ✗ ✓
+AG News (Zhang et al., 2015) 4 ✓ ✓ ✓
+DBpedia (Zhang et al., 2015) 14 ✓ ✓
+TREC (V oorhees and Tice, 2000) 6 ✗ ✓ ✓
+Natural language inference
+glue-wnli (Levesque et al., 2012) 2 ✗ ✓
+RTE (Dagan et al., 2005) 2 ✗ ✓ ✓
+CB (De Marneffe et al., 2019) 3 ✗ ✓ ✓
+sick (Marelli et al., 2014) 3 ✗ ✓
+Detection
+tweet_eval-hate (Barbieri et al., 2020) 2 ✗ ✓ ✓
+tweet_eval-irony (Barbieri et al., 2020) 2 ✗ ✓ ✓
+tweet_eval-offensive (Barbieri et al., 2020) 2 ✗ ✓ ✓
+tweet_eval-stance_atheism (Barbieri et al., 2020) 3 ✗ ✓
+tweet_eval-stance_feminist (Barbieri et al., 2020) 3 ✗ ✓
+hate_speech18 (de Gibert et al., 2018) 2 ✗ ✓ ✓
+ethos-binary (Mollas et al., 2022) 2 ✗ ✓
+ethos-religion (Mollas et al., 2022) 2 ✗ ✓
+ethos-national_origin (Mollas et al., 2022) 2 ✗ ✓
+ethos-race (Mollas et al., 2022) 2 ✗ ✓ ✓1402714028Dataset GPT-J GPT-3
+Original CC DC Original CC DC
+Sentiment and topic classification
+SST-2 91.090.894.096.096.496.3
+CR 81.486.587.0 - - -
+MR 93.191.393.1 - - -
+SST-5 28.940.840.3 32.541.142.4
+Financial phrasebank 46.446.761.658.960.669.5
+Poem sentiment 26.625.531.4 - - -
+AG News 68.476.881.579.986.085.9
+DBpedia 83.590.692.4 - - -
+TREC 55.363.970.369.076.576.9
+Subj 65.261.970.7 - - -
+Natural language inference
+RTE 43.137.850.361.865.864.5
+WNLI 33.533.938.1 - - -
+CB 24.827.842.353.749.051.1
+Sick 25.641.141.4- - -
+Detection
+Tweet hate 32.836.461.236.849.559.0
+Tweet irony 60.050.362.442.737.562.7
+Tweet offensive 59.451.068.359.360.564.8
+Tweet stance atheism 23.223.027.4 - - -
+Tweet stance feminist 40.434.641.3 - - -
+Hate speech18 51.541.657.349.947.052.0
+Ethos binary 48.460.170.2 - - -
+Ethos religion 30.728.043.8 - - -
+Ethos nation 23.118.240.7 - - -
+Ethos race 36.444.851.440.033.247.014029ACL 2023 Responsible NLP Checklist
+A For every submission:
+/squareA1. Did you describe the limitations of your work?
+At the end of the paper, after the conclusion section.
+/squareA2. Did you discuss any potential risks of your work?
+At the end of the paper, after the limitation section.
+/squareA3. Do the abstract and introduction summarize the paper’s main claims?
+We summarize our main contributions in the abstract and introduction sections.
+/squareA4. Have you used AI writing assistants when working on this paper?
+Left blank.
+B/squareDid you use or create scientiﬁc artifacts?
+Left blank.
+/squareB1. Did you cite the creators of artifacts you used?
+No response.
+/squareB2. Did you discuss the license or terms for use and / or distribution of any artifacts?
+No response.
+/squareB3. Did you discuss if your use of existing artifact(s) was consistent with their intended use, provided
+that it was speciﬁed? For the artifacts you create, do you specify intended use and whether that is
+compatible with the original access conditions (in particular, derivatives of data accessed for research
+purposes should not be used outside of research contexts)?
+No response.
+/squareB4. Did you discuss the steps taken to check whether the data that was collected / used contains any
+information that names or uniquely identiﬁes individual people or offensive content, and the steps
+taken to protect / anonymize it?
+No response.
+/squareB5. Did you provide documentation of the artifacts, e.g., coverage of domains, languages, and
+linguistic phenomena, demographic groups represented, etc.?
+No response.
+/squareB6. Did you report relevant statistics like the number of examples, details of train / test / dev splits,
+etc. for the data that you used / created? Even for commonly-used benchmark datasets, include the
+number of examples in train / validation / test splits, as these provide necessary context for a reader
+to understand experimental results. For example, small differences in accuracy on large test sets may
+be signiﬁcant, while on small test sets they may not be.
+No response.
+C/squareDid you run computational experiments?
+Section 6.
+/squareC1. Did you report the number of parameters in the models used, the total computational budget
+(e.g., GPU hours), and computing infrastructure used?
+Section 5.14030/squareC2. Did you discuss the experimental setup, including hyperparameter search and best-found
+hyperparameter values?
+Section 5.
+/squareC3. Did you report descriptive statistics about your results (e.g., error bars around results, summary
+statistics from sets of experiments), and is it transparent whether you are reporting the max, mean,
+etc. or just a single run?
+Section 6 and Appendix D.
+/squareC4. If you used existing packages (e.g., for preprocessing, for normalization, or for evaluation), did
+you report the implementation, model, and parameter settings used (e.g., NLTK, Spacy, ROUGE,
+etc.)?
+Section 5 and Appendix C.
+D/squareDid you use human annotators (e.g., crowdworkers) or research with human participants?
+Left blank.
+/squareD1. Did you report the full text of instructions given to participants, including e.g., screenshots,
+disclaimers of any risks to participants or annotators, etc.?
+No response.
+/squareD2. Did you report information about how you recruited (e.g., crowdsourcing platform, students)
+and paid participants, and discuss if such payment is adequate given the participants’ demographic
+(e.g., country of residence)?
+No response.
+/squareD3. Did you discuss whether and how consent was obtained from people whose data you’re
+using/curating? For example, if you collected data via crowdsourcing, did your instructions to
+crowdworkers explain how the data would be used?
+No response.
+/squareD4. Was the data collection protocol approved (or determined exempt) by an ethics review board?
+No response.
+/squareD5. Did you report the basic demographic and geographic characteristics of the annotator population
+that is the source of the data?
+No response.14031

@@ -1,1 +1,815 @@
-57 Proceedings of the 60th Annual Meeting of the Association for Computational Linguistics Volume 1 : Long Papers , pages 57 69 May 22 - 27 , 2022 c(cid:13)2022 Association for Computational Linguistics 58 59 60 61 62 63 64 65 66 67 68 69 
+
+Moxin Li, Fuli Feng, Hanwang Zhang, Xiangnan He,
+Fengbin Zhu, Tat-Seng ChuaNational University of Singapore,University of Science and Technology of ChinaNanyang Technological University,
+limoxin@u.nus.edu, fulifeng93@gmail.com,
+hanwangzhang@ntu.edu.sg, xiangnanhe@gmail.com,
+zhfengbin@gmail.com, dcscts@nus.edu.sg
+Abstract
+Neural discrete reasoning (NDR) has shown
+remarkable progress in combining deep mod-
+els with discrete reasoning. However, we ﬁnd
+that existing NDR solution suffers from large
+performance drop on hypothetical questions,
+e.g., “what the annualized rate of return would
+be if the revenue in 2020 was doubled ”. The
+key to hypothetical question answering (HQA)
+is counterfactual thinking, which is a natural
+ability of human reasoning but difﬁcult for
+deep models. In this work, we devise a Learn-
+ing to Imagine (L2I) module, which can be
+seamlessly incorporated into NDR models to
+perform the imagination of unseen counterfac-
+tual. In particular, we formulate counterfactual
+thinking into two steps: 1) identifying the fact
+to intervene, and 2) deriving the counterfactual
+from the fact and assumption, which are de-
+signed as neural networks. Based on TAT-QA,
+we construct a very challenging HQA dataset
+with 8,283 hypothetical questions. We apply
+the proposed L2I to TAGOP, the state-of-the-
+art solution on TAT-QA, validating the ratio-
+nality and effectiveness of our approach.
+1 Introduction
+Neural discrete reasoning (Dua et al., 2019) is an
+emerging technique for machine reading compre-
+hension (Rajpurkar et al., 2016) which aims at
+answering numerical questions from textual (Dua
+et al., 2019) or hybrid (Zhu et al., 2021) context.
+NDR combines deep neural network with discrete
+and symbolic reasoning ( e.g., addition, sorting, or
+counting) (Dua et al., 2019) and enables the com-
+prehension of complex contexts and compositional
+questions, which is critical for many practical ap-
+plications such as automatic diagnosis (Wei et al.,
+2018) and robo-advisor (Fisch et al., 2019). Exist-
+ing state-of-the-art NDR models implement the nu-merical reasoning process as neural network mod-
+ules (Ran et al., 2019; Herzig et al., 2020; Zhu et al.,
+2021), e.g.,a graph neural network for sorting (Ran
+et al., 2019; Chen et al., 2020a).
+In this work, we extend NDR to hypothetical
+question answering (HQA), where the question
+consists of an assumption beyond the context (Fig-
+ure 1). The ability of HQA will undoubtedly en-
+hance the practical use of NDR due to the uni-
+versality of hypothetical questions. However, cur-
+rent NDR models face severe generalization failure
+on hypothetical questions. An empirical evidence
+on such vulnerability is that the state-of-the-art
+model (Zhu et al., 2021) encounters a sharp perfor-
+mance drop (F1 score drops from 68.6% to 3.8%)
+on the TAT-QA dataset when changing the ques-
+tions to be hypothetical by adding a related as-
+sumption (see details in Section 2, Table 3). We
+postulate that the failure is due to unable of imag-
+ining the counterfactual context according to the
+assumption (Figure 1). To pursue such reasoning
+ability, we resort to the concept of counterfactual
+thinking (Pearl, 2019) from the theory of causal-
+ity, which is the ability to imagine and reason over
+unseen cases based on the seen facts and counter-
+factual assumptions.
+In this light, we consider modeling counterfac-
+tual thinking as neural network modules that can be
+seamlessly incorporated into existing NDR models.
+One straightforward solution is to model counter-
+factual thinking as a generation procedure with
+the fact and assumption as inputs by using a gen-
+eration model such as GPT (Brown et al., 2020).
+However, such uncontrollable model (Zou et al.,
+2021) can hardly generate high-quality context for
+two reasons: 1) the context is more complex than
+plain text, which can include a table (Figure 1);
+and 2) NDR requires a precise context with the cor-
+rect numbers (Figure 1, $132,935 for the ﬁnished
+goods in2019 ). Therefore, we resort to an alter-
+native approach: constructing the counterfactual57
+by intervening on the factual context. As shown
+in Figure 1, the assumption changes one entry in
+the table, e.g., $133,682 to$132,935 . This is coher-
+ent with the causal inference theory (Pearl, 2009)
+where the target variable is intervened according to
+the hypothetical condition to infer a counterfactual.
+We propose Learning to Imagine, where the
+counterfactual thinking is implemented with two
+intervening steps: 1) identifying the facts to inter-
+vene, and 2) deriving the result of intervention. To
+pursue accurate context, we derive the interven-
+tion with a set of discrete operators such as SWAP
+andADD for imagination. To evaluate the coun-
+terfactual thinking ability, we recruit volunteers
+with domain expertise to construct an HQA dataset
+based on TAT-QA (Zhu et al., 2021) by posting
+an assumption for each original question, named
+TAT-HQA. We apply L2I to TAGOP (Zhu et al.,
+2021), and obtain a promising solution for HQA.
+In summary, the main contributions are as follows:
+•We highlight the importance of counterfactual
+thinking in NDR and formulate counterfactual
+thinking as an intervening procedure to achieve
+precise imagination.
+•We devise the L2I module, which is designed as
+neural network operations and can be seamlessly
+incorporated into the NDR model for answering
+hypothetical questions.
+•We construct a challenging HQA dataset and
+conduct extensive experiments on the dataset,
+where the performance validates the rationality
+and effectiveness of the proposed L2I.
+2 Hypothetical Question Answering
+In the general setting of machine reading compre-
+hension, the task is to answer a question accord-
+ing to the facts in a given context. Formally, it
+is to learn a function y=f(q;c), wherey,q,
+andcare the word list representing the answer,the question, and the contextrespectively. This
+work studies a new and more challenging task that
+focuses on hypothetical question. As shown in Fig-
+ure 1, a hypothetical question includes an assump-
+tion, e.g., “if the amount in 2019 was $132,935
+thousand instead ”. The target of HQA is to learn
+y=f(q;c;a)whereadenotes the assumption.
+The existence of an assumption calls for the imagi-
+nation of a counterfactual context before inferring
+the answer, pushing the NDR model to grasp both
+semantic understanding and counterfactual think-
+ing.
+To facilitate the evaluation of HQA and diag-
+nose counterfactual thinking, we construct an HQA
+dataset based on TAT-QA (Zhu et al., 2021), which
+is a QA dataset with a mix of tabular and textual
+context extracted from ﬁnancial reports. Inspired
+by previous work on constructing counterfactual
+samples (Kaushik et al., 2019), we recruit college
+students with ﬁnance-related majors to imagine an
+intervention based on the factual question and con-
+text from TAT-QA which involves numerical think-
+ing,e.g., a change of number. Then they phrase the
+intervention into an assumption, forming a “ what
+if” type of question, and calculate the answer (see
+an example in Figure 1). To ensure the diversity
+of the phrasing, annotators are free to generate var-
+ious phrasing of the assumption, and there is no
+restriction on the position of the assumption. Usu-
+ally, the assumption appears either before of after
+the factual question. Each hypothetical question
+is related to one factual question from TAT-QA,
+but each factual question in TAT-QA is not guar-
+anteed to have one hypothetical question. We fol-
+low the quality control approaches of annotator
+training and two-round validation in TAT-QA to
+guarantee the quality of the hypothetical questions.58
+Following TAT-QA, the hypothetical questions are
+also labeled with four answer types: arithmetic ,
+span ,count , and multi-span , three types of answer
+sources: table, text and table-text, and a derivation
+on how the answer is derived from the context. In
+total, we obtain 8,283 hypothetical questions, nam-
+ing it as TAT-HQA. The statistics of TAT-HQA are
+shown in Table 1. We follow the split of training,
+testing and validation set of TAT-QA as shown in
+Table 2.
+We conduct a pilot study on the generalization
+ability of existing NDR models on hypothetical
+questions. In particular, we evaluate TAGOP (Zhu
+et al., 2021), which is the state-of-the-art model
+on TAT-QA (see detailed settings in Section 4.1)
+by training on TAT-QA and testing on TAT-HQA.
+In Table 3, the huge performance drop shows that
+even the state-of-the-art NDR model lacks counter-
+factual thinking ability.
+3 Methodology
+We aim to empower NDR models with counterfac-
+tual thinking ability. Firstly, we decide to choose
+the approach of explicitly modeling discrete oper-
+ations, since existing NDR solutions have demon-
+strated its superiority (Dua et al., 2019; Ran et al.,
+2019; Herzig et al., 2020; Zhu et al., 2021). We
+devise a Learning to Imagine module to model
+counterfactual thinking (Section 3.1), and then in-
+corporate the L2I module (Section 3.2) into exist-
+ing NRD methods, followed by a discussion about
+potential extensions (Section 3.3).
+3.1 Learning to Imagine
+Functionally speaking, the L2I module aims to con-
+struct a counterfactual context based on the factual
+context and the assumption. We formulate it as:
+c=g(c;a), where the counterfactual context cis
+the status of the context cafter the assumption ais
+executed. Resorting to the language of causality, it
+can be expressed as the do-operation that intervenes
+a variable to execute the assumption and the action
+to derive the outcome of the intervention(Pearl,
+2009). The key to achieving counterfactual think-
+ing in NDR lies in: 1) parsing the assumption to
+identify the target fact to intervene; and 2) deriving
+the assumed value to construct the counterfactual
+context. Taking the hypothetical question in Fig-
+ure 1 as an example, an ideal L2I should recognize
+the target variable ( ﬁnished goods in 2019 ), iden-
+tify the corresponding fact ( $133,682 ), and replace
+the fact with the assumed value ( $132,935 ).
+Two-step Formulation. To this end, we pro-
+pose a two-step formulation of counterfactual think-
+ing for HQA to perform the identiﬁcation and
+derivation. Formally,
+Step 1: i=r(c;a;q) (1)
+Step 2: c=d(c;c;a); c=(
+c; j=i;
+c;otherwise :
+•Step 1: Identifying the target fact. r()de-
+notes the tagging function which scans the fac-
+tual contextcto recognize the fact related to the
+assumptionaand the question q.iis the word
+position of the identiﬁed fact c.
+•Step 2: Deriving intervention result. d()de-
+notes the deriving function that parses the as-
+sumptionato infer the discrete operation and
+the premise to derive the assumed value c. As
+to the assumption in Figure 1, the derivation re-
+quires a SWAP operation and a premise $132,935 .
+This step then calls for an editing operation to
+construct the counterfactual context c.
+Module Design. Based on the two-step formu-
+lation, we then design the L2I module as neural
+network operations. We have two considerations
+for the module design: 1) the module should recog-
+nize the semantic connection between the assump-
+tion and the context, and 2) the module should
+uniformly support various discrete operations to59enable accurate derivation. To this end, we devise
+four key building blocks for the L2I module:
+•Encoder . It projects the raw content into latent
+representation. Inspired by the recent research on
+NDR, we employ a pre-trained language model
+(PLM), i.e.,RoBERTa (Liu et al., 2019), as the
+encoder to learn an overall representation of the
+context, question, and assumption;
+where LandMare the length of the tokenized
+inputs. CLS andSEP denote the beginning
+and the separation token of the input. fq;ag
+represents that the relevant position of atopcan
+vary. We do not assume qto always precede a
+due to the various location of ain the annotation.
+•Matching block . It distills the semantic connec-
+tion between the factual question, the factual con-
+text and the hypothetical assumption (Figure 1,
+“amount in 2019 ” and “ $132,935 ”). After ap-
+plying the token-level self-attention of PLM, we
+aim to further distill the sequence-level semantic
+connection between the factual part (the ques-
+tion and the context) and the hypothetical part
+(the assumption). We obtain the factual and as-
+sumption representations by masking Haccord-
+ing to the position of the question, the context
+and the assumption, which splits Hinto 2 non-
+overlapping parts. Inspired by the success of
+cross-attention (Kim et al., 2018) in associating
+different sources, e.g., image-image (Hou et al.,
+2019) and image-text (Lu et al., 2019), we adopt
+cross-attention between the factual representa-
+tion and the assumption representation, followed
+by self-attention respectively. Formally, the cal-
+culation of the k-th layer is,
+where MHA ()denotes the multi-head atten-
+tion (Vaswani et al., 2017) with a triple of query,
+key, and value as the input. The residual con-
+nection and batch normalization are applied as
+the default choice. mask ()denotes the masking
+operation, and pos(x)is a binary vector with the
+same length of Hdenoting the positions of x in
+the input of PLM.•Tagging head . It models the identiﬁcation of
+target fact as a token-wise tagging. Formally,
+where tis a binary tag for the fact c.cwill be
+a target as at least one of its tokens is tagged. We
+useh7!cto represent the mapping between
+token and fact, which is true if token jbelongs
+to fact c. For each token, we employ a 2-way
+classiﬁer MLP
+h
+to predict its probability
+of being tagged as pwhere argmax (p) = 1
+means positive (see Appendix A for more de-
+tails).
+•Deriving head . It derives the intervention result
+for the target fact. To calculate the intervention
+result, we select a set of commonly used dis-
+crete operators such as SWAP ,ADD , and MINUS
+(cf.Appendix B). Then, we model the deriva-
+tion as making a choice across the operators
+and tagging the premise for executing the op-
+erator. In particular, we adopt a tagging head to
+identify the premise and a multi-way classiﬁer
+for choosing operators, which is formulated as:
+o=softmax (MLP(h)).o2Ris a dis-
+tribution over the operators where Odenotes the
+number of operators. h corresponds to the
+CLS token inH.
+3.2 NDR with L2I
+Most recent NDR models (Ran et al., 2019; Andor
+et al., 2019; Chen et al., 2020a; Herzig et al., 2020;
+Zhu et al., 2021) consist of two main modules: 1)
+a PLM to encode the context and the question into
+latent representations, and 2) a reasoning module
+that chooses the discrete operator and identiﬁes the
+operands according to the latent representations.
+As shown in Figure 2, we can seamlessly incorpo-
+rate the proposed L2I into such NDR model as an
+intermediate module, which performs imagination
+before discrete reasoning. In particular, we simply
+let the reasoning module conduct operand look-up
+within the counterfactual context constructed by
+L2I. Besides, we let L2I reuse the PLM in the NDR
+model to reduce the model complexity and training
+time.
+Model training. Existing NDR methods typi-
+cally follow the supervised learning paradigm to
+optimize the model parameters (Dua et al., 2019).60
+Suppose we have a set of labeled questions D=
+f<y;(q;c;a)>g, the training objective can be
+abstracted as minPQA(y; f(q;c;a))where
+denotes model parameters. Note that QA()mea-
+sures the discrepancy between the ground-truth and
+the predicted answers which can have different for-
+mats. For instance, it can be a combination of the
+cross-entropy (CE) loss over the operand look-up
+and the CE loss over the choice of discrete opera-
+tion (Herzig et al., 2020; Yin et al., 2020; Zhu et al.,
+2021). When applying L2I to an existing NDR
+method, we keep its question-answering objective
+unchanged. To optimize the L2I module, we incor-
+porate supervision on the classiﬁers in the tagging
+head and deriving head. Formally,where p2f0;1gdenotes the label of the target
+fact (token jin context) or the premise (token j
+in assumption); and o2Ris the label of the
+deriving operator (see Appendix C for the details
+of label construction).
+3.3 Discussion
+Readers might have raised the following two con-
+cerns for L2I: 1) the operators deﬁned are lim-
+ited, and 2) the operators are tailored to one step
+of derivation on one target fact. Actually, it is a
+common approach for current state-of-the-art NDR
+models to apply a set of deﬁned operators (Ran
+et al., 2019; Chen et al., 2020a; Zhu et al., 2021).
+For the ﬁrst concern, by doing more ﬁne-grained
+classiﬁcation on the numerical reasoning process
+in the dataset, we can derive new operators and
+simply plug them into L2I. Note that the annota-
+tion of numerical intervention of TAT-HQA does
+not follow the deﬁned operators in Appendix C,
+but the operators are summarized from the data.Our deﬁned operators can cover over 90% of the
+training data. For the second concern, we discuss
+two potential solutions by our L2I framework, and
+we leave the implementation as future work.
+Multi-fact intervention. The assumption acan
+include intervening multiple facts, e.g., “if the Fin-
+ished goods in 2018 and 2019 were both doubled ”.
+Apparently, if the target facts are independent, we
+can easily handle such an assumption by executing
+L2I in multiple iterations. In other cases, L2I needs
+to recognize the relationship among the target facts.
+If such relationship is available, L2I should be able
+to handle such cases as the corresponding multi-
+variable operator is added to the deriving head.
+Multi-iteration derivation. In causal inference,
+a rigorous derivation of an intervention considers
+the successors of the target variable, e.g., ﬁnished
+goods in 2019 affects total inventories in 2019 . Cur-
+rently, we omit the following iterations in Step 2 of
+L2I ( cf.Eq 1). This is because not all successors
+are necessary for answering the question. For in-
+stance, answering the question in Figure 1 does not
+require the post-intervention value of total inven-
+tories in 2019 . In conventional causal inference,
+such successors will also be omitted according to
+thelocal surgery principle (Pearl, 2009). More-
+over, we believe that the following iterations can be
+achieved by the current L2I module in an iterative
+manner. Assume that NDR model equipped with
+L2I can answer the hypothetical questions requir-
+ing one-iteration derivation ( i.e.,c!c). We can
+thus derive the value of successors ( e.g.,c!c)
+by forming a simple hypothetical question: “ What
+cwould be if cisc?” and answering it with the
+NDR model.
+4 Experiments
+We conduct experiments on TAT-HQA dataset to
+answer the following questions: RQ1: How does
+L2I perform on HQA? RQ2: What factors inﬂu-61
+ence the effectiveness of L2I?
+4.1 Experiment Settings
+Following Dua et al. (2019) and Zhu et al. (2021),
+we evaluate the performance with two commonly
+used metrics: Exact Match (EM) and numerically-
+focused Fscore, where higher value (in [0, 100])
+means better performance. We tune the hyper-
+parameters on the validation set, and report the
+average test performance of ﬁve different runs.
+Compared methods. To validate the effective-
+ness of our proposed L2I module, we apply it to
+TAGOP, obtaining an NDR model for HQA, named
+TAGOP-L2I. In addition to the vanilla TAGOP, we
+compare our method against representative meth-
+ods of traditional QA, numerical QA, tabular QA,
+and hybrid QA. Besides, we want to select base-
+lines that are effective for learning counterfactual
+samples. The baselines are: BERT-RC (Devlin
+et al., 2019), a traditional QA method that se-
+lects answer spans from the context. NumNet+
+V2(Ran et al., 2019), a numerical QA method with
+numerically-aware graph neural network. TAPAS-
+WTQ (Herzig et al., 2020), a tabular QA method
+that focuses on parsing and understanding tables,
+pre-trained over tables collected from Wikipedia
+before training on TAT-HQA. HyBrider (Chen
+et al., 2020c), a hybrid QA method that consid-
+ers the connection between the table and text.
+TAGOP , a hybrid QA method that performs dis-
+crete reasoning over both the tabular and textual
+contexts. It is the state-of-the-art method on TAT-
+QA dataset. TAGOP-CLO , incorporating the Con-
+trastive Learning Objective (CLO) into the training
+objective of TAGOP, which is shown to be effec-
+tive in learning the relationship between factual
+and counterfactual samples (Liang et al., 2020).
+Parameter settings. We implement TAGOP-
+L2I based on TAGOP. We set the number of cross-
+attention layers to 3, and ﬁne tune from TAGOP
+trained on TAT-QA with a learning rate of 5e-5,
+batch size of 32, and gradient accumulation step
+of 4. All compared methods are initialized withthe model trained on TAT-QA and then ﬁne-tuned
+on TAT-HQA. For TAGOP-CLO, we conduct max
+pooling forHand adopt cosine similarity as the
+distance metric. We select the corresponding fac-
+tual question as the positive sample and a randomly
+selected factual question as the negative sample.
+The weight for the contrastive loss is 0.1.
+4.2 Performance Comparison (RQ1)
+Overall performance. Table 4 shows the perfor-
+mance of the compared methods on the TAT-HQA
+dataset. We can observe that: 1)TAGOP-L2I
+achieves the best performance among all the com-
+pared methods. In particular, it outperforms the
+best baselines by 19.8% and 19.7% on EM and F,
+respectively. Such signiﬁcant performance gain
+validates the effectiveness of the L2I module and
+reveal the rationality of modeling counterfactual
+thinking as a neural network module. 2)TAGOP-
+CLO outperforms TAGOP by 10.5% and 10.4% on
+EM and F. The only difference between these two
+methods is that TAGOP-CLO incorporates an extra
+CLO. The improvement indicates that learning the
+relationship between the factual and counterfactual
+samples with CLO provides some clue for counter-
+factual imagination, yet it is still worse than directly
+learning to imagine with neural network modules.
+3)As to the remaining methods, their performance
+has a clear gap between TAGOP, which is consis-
+tent with the result on the TAT-QA dataset (Zhu
+et al., 2021). This is because both datasets have tex-
+tual and tabular texts, where the ability of TAGOP
+to perform discrete reasoning across hybrid con-
+texts brings signiﬁcant advantages. 4)The perfor-
+mance achieved is still low w.r.t. the two metrics
+(e.g., 54.4!100), showing a large space for future
+exploration on the challenging TAT-HQA dataset.
+Detailed performance. To further investigate
+the effectiveness of the proposed L2I module, we
+perform a detailed comparison between TAGOP-
+L2I and TAGOP w.r.t. the discrete operation re-
+quired in answering the question or counterfactual
+thinking. We group the questions according to
+1) the answer type and 2) the operator to derive
+the intervention. Table 5 shows the group-wise62
+performance. As to answer type (the left half),
+we have the following observations: 1)TAGOP-
+L2I outperforms TAGOP on all groups, showing
+the superior ability of learning to imagine to all
+types of questions. 2)Particularly, on the arith-
+metic group, which is also the largest group ( cf.
+Table 1), TAGOP-L2I largely outperforms TAGOP.
+For this group, the key difference between TAGOP-
+L2I and TAGOP is whether the derivation of inter-
+vention and calculation of the answer are achieved
+by separate modules. The superior performance
+of TAGOP-L2I validates the rationality of model-
+ing counterfactual thinking as a separate module.
+It should be noted that the separation also facil-
+itates the generalization to new operations since
+the modules can be separately updated. 3)The
+performance of TAGOP on arithmetic has a large
+gap with other types, showing that arithmetic ques-
+tions are more difﬁcult to conduct imagination and
+reasoning even though arithmetic makes up the ma-
+jority of TAT-HQA data. As to TAGOP-L2I, the
+gap between arithmetic question and other types of
+question largely reduces, validating the effective-
+ness of learning intervention with discrete opera-
+tors and neural network modules.
+As to operator types (the right half), we observe
+that: 1)TAGOP-L2I achieves imagination on the
+majority of operator types with better performance
+than TAGOP, yet TAGOP can only achieve imag-
+ination on a few operator types. The better per-
+formance of TAGOP-L2I is attributed to modeling
+the deriving operations as speciﬁc operators. We
+thus believe that TAGOP-L2I can generalize well to
+more deriving operations by simply incorporating
+the operators, as long as the corresponding train-
+ing questions are not rare. This result thus reﬂects
+the advantage of the uniﬁed operator framework
+adopted by the L2I module, which is consistent
+with previous work (Andor et al., 2019). 2)Across
+the groups, TAGOP achieves relatively good per-
+formance on the SWAP group, which replaces the
+target fact with a number in the assumption. It
+corresponds to the simplest imagination since the
+assumed value ( i.e.,c) is explicitly mentioned inthe assumption. Therefore, the result shows that
+the NDR model can achieve simple counterfactual
+thinking by learning to answer hypothetical ques-
+tions. However, such indirect guidance on imag-
+ination fails on the groups requiring more com-
+plex imagination, e.g., requiring add or minus. 3)
+TAGOP-L2I achieves the worst performance on
+SWAP MIN NUM , which is merely comparable to
+TAGOP. We suspect the reason is that the operation
+ofSWAP MIN NUM is very close to SWAP , which
+may confuse the deriving head when making clas-
+siﬁcation over the operators. To address this issue,
+it is worth considering the operator relation in the
+deriving head in the future.
+4.3 In-depth Analysis (RQ2)
+Study on L2I module design. We then explore
+the inﬂuence of network architecture on the effec-
+tiveness of the L2I module from three perspectives:
+1) module depth; 2) conﬁguration of the matching
+block; and 3) the setting of PLM.
+Figure 3(a) shows the validation result of
+TAGOP-L2I as increasing the matching block from
+1 to 4 layers. We can observe that: 1)Stacking
+more layers does not always bring performance
+gain. 2)In particular, three layers of matching
+block achieve the best performance on TAGOP-
+L2I. The result indicates that three layers should
+be sufﬁcient to capture the semantic connection
+across the context, question and assumption. This
+is reasonable since the average length of both as-
+sumption and question are only around 10 words
+(cf.Table 2).
+As to the architecture of the matching block, we
+evaluate three variants from the default choice p-
+s, self-a which enables parameter sharing across
+layers ( i.e., ps ) and applies both cross-MHA on
+the factual and assumption representations and self-
+MHA for each of them ( i.e., self-a ). The three
+variants are: 1) p-s, w/o self-a , which removes
+self-MHA; 2) w/o p-s, self-a , which disables pa-
+rameter sharing; and 3) w/o p-s, w/o self-a , which
+adopts both changes. Figure 3(b) shows the per-
+formance of the four versions of TAGOP-L2I with63
+three layers of the matching block. From the ﬁgure,
+we can observe that: 1)The default choice largely
+outperforms the variants, validating the rational-
+ity of our module design. 2)Disabling parameter
+sharing hinders the counterfactual thinking, which
+indicates that keeping the same parameters through
+the process of matching factual and assumption
+representations is beneﬁcial for extracting the se-
+mantic correlation. 3)Removing self-MHA also
+leads to sharp performance drop, which justiﬁes the
+contribution of self-MHA in the L2I module. It is
+thus essential to also separately process the seman-
+tic information of the factual and the assumption
+representations in the matching block.
+We also conduct experiments on ﬁxing the pa-
+rameter of PLM during training on TAT-HQA as
+initialized by TAT-QA. The performance drops to
+EM 48.5 and F49.0. Fixing the parameter of PLM
+largely impedes the performance of TAGOP-L2I on
+TAT-HQA, showing that encoding factual and hy-
+pothetical questions requires different mechanisms.
+To further investigate the difference in answering
+factual and hypothetical questions, we test TAGOP-
+L2I on TAT-QA. The result in Figure 4 shows that
+training on TAT-HQA causes a performance drop in
+counting ,span andmulti-span groups of TAT-QA,
+and performs similar on the in arithmetic group.
+We conjecture the performance drop in the ﬁrst
+three groups is because the question-answering la-
+bel in TAT-HQA under the same candqis different
+from TAT-QA. However, for arithmetic questions,
+the question-answering label for one pair of cand
+qremains the same between TAT-HQA and TAT-
+QA, and the intervention is achieved explicitly by
+deriving operators and tagging head.
+Study on L2I training objective. We then
+investigate the inﬂuence of imagination-oriented
+training objectives on the effectiveness of L2I. In
+particular, we evaluate a variant TAGOP-L2I-T
+trained only with the question-answering objec-
+tive ( i.e.,QA()). That is, TAGOP-L2I-T learns to
+implicitly imagine the ﬁnal answer. Figure 5 shows
+the group-wise performance of TAGOP-L2I and
+TAGOP-L2I-T w.r.t. the type of operator for deriv-
+ing the intervention. We can observe the followings.
+1)On most groups, TAGOP-L2I largely outper-
+forms TAGOP-L2I-T, demonstrating the rationality
+of learning to imagine explicitly. 2)OnSWAP
+group TAGOP-L2I-T achieves comparable result
+to TAGOP-L2I. As SWAP is the simplest deriving
+operator, the result shows that the implicit guidance
+can achieve simple imagination, yet is still less ef-
+fective than the explicit manner. 3)TAGOP-L2I-T
+achieves better performance on SWAP MIN NUM
+group. As SWAP MIN NUM is a rare operator
+(cf.Table 6) and involves the most complex imag-
+ination process ( cf.Appendix B), we conjecture
+that learning complex operators is more difﬁcult
+than implicitly learning. This may shed light on
+the rules of deriving new operators that simple op-
+erators with ample training data is preferred over
+complex operators with less training data.
+5 Related Work
+Counterfactual thinking. Existing research in-
+corporates counterfactual thinking into deep mod-
+els from two main perspectives: counterfactual
+training andcounterfactual inference .64Counterfactual sample has become an emerg-
+ing data augmentation technique in computer vi-
+sion (Chen et al., 2020b) and natural language pro-
+cessing (Kaushik et al., 2019) to enhance model
+robustness. For instance, the technique is applied
+in visual QA (Chen et al., 2020b; Agrawal et al.,
+2018; Agarwal et al., 2020; Gokhale et al., 2020),
+vision-language navigation (Fu et al., 2020; Par-
+vaneh et al., 2020), table entailment (Eisenschlos
+et al., 2020), sentiment analysis (Kaushik et al.,
+2019; Yang et al., 2020), natural language infer-
+ence (Kaushik et al., 2019), named entity recogni-
+tion (Zeng et al., 2020), and dialogue system (Zhu
+et al., 2020). Along this line, a series of studies
+explore how to maximize the effect of counterfac-
+tual samples by combining with different learn-
+ing paradigms, such as adversarial training (Zhu
+et al., 2020; Fu et al., 2020; Teney et al., 2020),
+contrastive learning (Liang et al., 2020), causal
+graph (Gokhale et al., 2020), posterior regulariza-
+tion (Ramakrishnan et al., 2018), and designing
+new learning paradigms (Gokhale et al., 2020). A
+few studies along this line also generate counter-
+factual samples with neural networks (Sauer and
+Geiger, 2021; Yue et al., 2021). They are inher-
+ently different from our work due to their reliance
+on causal graph and the causal expression of the
+hypothetical condition for improving robustness.
+Moreover, they supervise the generation with other
+related tasks such as image classiﬁcation. In con-
+trast, we formulate imagination as an explicit learn-
+ing objective, i.e.,learning to imagine. Addition-
+ally, in commonsense reasoning, counterfactual
+samples are also utilized through hyperbole gen-
+eration (Tian et al., 2021), story generation (Qin
+et al., 2019) and commonsense QA(Huang et al.,
+2019), which is also a related yet different strand
+of research.
+Another line of research performs counterfac-
+tual inference over the predictions of deep model
+to incorporate counterfactual thinking (Yue et al.,
+2021; Wang et al., 2021; Niu et al., 2021; Tang
+et al., 2020). However, they perform counterfactual
+inference according to causal graph which is not
+available in NDR tasks.
+Neural discrete reasoning. Recent research on
+NDR focuses on enhancing the discrete reasoning
+ability of deep models in two main directions: rea-
+soning with more discrete operations (Dua et al.,
+2019; Ran et al., 2019; Chen et al., 2020a) and rea-
+soning over more complex context . For instance,NumNet (Ran et al., 2019) and QDGAT (Chen
+et al., 2020a) leverage graph neural network to en-
+hance comparison oriented operations. GenBERT
+(Geva et al., 2020) uses pre-trained language mod-
+els to generate the numerical answer, which breaks
+the limitation of ﬁxed operators. NMN (Gupta
+et al., 2019) and FinQA (Chen et al., 2021) model
+the discrete reasoning process as executing pro-
+grams. As to extending the context, several studies
+try to enable the NDR model to operate on context
+with semi-structured tabular data and hybrid data
+(Chen et al., 2020c; Herzig et al., 2020; Chen et al.,
+2021). Our paper studies the hybrid data, yet ex-
+tends the scope of NDR to hypothetical questions.
+Moreover, beyond the ability of discrete operations,
+the main idea is to endow NDR models with the
+ability to think counterfactually.
+6 Conclusion
+In this work, we pointed out a key issue of exist-
+ing NDR models: lacking counterfactual thinking.
+We proposed an L2I module, which can imagine
+the counterfactual according to a textual assump-
+tion. By applying the proposed module in the NDR
+model, we enable the model to answer hypothetical
+questions. We constructed a HQA dataset and con-
+ducted extensive experiments on the dataset, which
+validates the effectiveness of our method.
+This work opens up a new research direction
+about modeling counterfactual thinking through
+neural network. In the future, we will further
+extend the L2I from the following perspectives:
+1) handling of multiple interventions; 2) rigorous
+derivation of intervention with consideration of suc-
+cessors; 3) incorporation of the relations across the
+deriving operators; and 4) construction of complex
+operators by dynamically combining basic opera-
+tors. Moreover, we will explore the translation be-
+tween assumptions in natural language and causal
+expression to further connect the L2I framework
+with conventional causal theory, and facilitate auto-
+matic causal inference with neural network.
+Acknowledgement
+This work is supported by Sea-NExT Joint Lab,
+Singapore MOE AcRF T2, and Natural Science
+Foundation of China (Grant No. U21B2026).65References6667A Working Process of the Tagging Head
+Thetagging head (cf.Section 3.1) in L2I identi-
+ﬁes the target fact from the factual context, which
+is formulated as the Inside-Outside (IO) Tagging
+(Ramshaw and Marcus, 1999). A 2-way classiﬁer,
+which is a 2-layer MLP followed by softmax, com-
+putes the probability of being tagged as negative
+and positive for each token in the sequence. Then,
+the positive score for each fact is aggregated by the
+maximum probability of its tokens. For instance,
+the fact “$133,682” has four tokens “$”, “133”, “,”,
+“682” where each token obtains a latent represen-
+tation from the PLM. The 2-layer MLP takes the
+latent representation as input to predict the score
+for each token. The maximum score represents the
+score of fact “$133,682”.
+B Deriving Operators
+Thederiving head consists of two steps: 1) select-
+ing the deriving operators; and 2) identifying the
+premises for the selected operator. The deriving
+operator is deﬁned as a function f(T; P)over the
+target fact Tand premise P. The value of f(T; P)
+replaces Tin the factual context to form the coun-
+terfactual context. In particular, we deﬁne eight
+operators as follows:
+•SWAP :f(T; P) =P.
+•ADD :f(T; P) =T+P.
+•MINUS :f(T; P) =T P.
+•MULTIPLY :f(T; P) =TP.
+•DIVISION :f(T; P) =T=P .
+•PERCENT INC :f(T; P) =T(100+ P)=100,
+where Pis a percentage.
+•PERCENT DEC :f(T; P) = T(100 
+P)=100, where Pis a percentage.
+•SWAP MIN NUM : This is a multivariable oper-
+ator, which intervenes two facts: the target fact T
+and the sum including the target fact op. Apart
+from swapping TwithP, this operator also re-
+places opwithop T+P.
+As to the identiﬁcation of the premise, we simply
+use the outputs of the tagging head where every
+fact has a score. We select the fact with the highest
+score in the context as the target fact and the one
+in the assumption as the premise.C Labels for Tagging Head and Deriving
+Head
+Note that each hypothetical question in TAT-HQA
+corresponds to a question in TAT-QA. Both datasets
+provide the derivation to answer the question ( e.g.,
+133,682 - 162,935 ), which can be used to construct
+the ground-truth for training the tagging head and
+deriving head of L2I (Equation 4). In particular, we
+compare the counterfactual derivation with the orig-
+inal derivation. Under the assumption of one-step
+intervention, we postulate that the counterfactual
+derivation differs from the original derivation by
+involving in one more number or substituting one
+number, where we name the new number in the
+counterfactual derivation as the premise. By iden-
+tifying the premise, we construct the label for the
+tagging head. According to the operator around
+the premise, we construct the label of the deriving
+operator. The statistics of the deriving operator are
+shown in Table 6.
+D Accuracy of Deriving Operator
+Selection and Target Fact Picking
+We calculate the accuracy of operator selection and
+target fact picking of L2I. The average testing re-
+sult for 5 runs is 96.4% for operator selection, and
+82.9% for target fact picking, showing that L2I
+can select the correct operator and target fact quite
+precisely. The good performance on selection op-
+erators and target facts owes to the superior ability
+of PLM to understand questions and contexts. We
+also try a naive lexical match to select operators
+and target facts. For operator selection, we deﬁne
+a set of keywords( e.g., increase to, decrease by)
+for the question as a sign of the operator type. For
+target fact selection, we utilize the word overlap
+between the assumption and the context to locate
+the target fact. The accuracy for selecting operators
+is 89.4%, and for picking up target facts is 52.5%.
+The gap between L2I and lexical match demon-
+strates that the generalization ability of PLM plays
+an important part in operator selection and target
+fact picking in L2I.
+E Computation Resources
+We train TAGOP-L2I on a NVIDIA Tesla V100
+GPU with 32GB RAM.6869

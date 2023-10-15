@@ -1,1 +1,825 @@
-5723 Proceedings of the 60th Annual Meeting of the Association for Computational Linguistics Volume 1 : Long Papers , pages 5723 5738 May 22 - 27 , 2022 c(cid:13)2022 Association for Computational Linguistics 5724 5725 5726 5727 5728 5729 5730 5731 5732 5733 5734 5735 5736 5737 5738 
+
+Junyi Ao, Rui Wang, Long Zhou, Chengyi Wang, Shuo Ren,
+Yu Wu, Shujie Liu, Tom Ko, Qing Li, Yu Zhang, Zhihua Wei,
+Yao Qian, Jinyu Li, Furu WeiDepartment of Computer Science and Engineering,
+Southern University of Science and TechnologyDepartment of Computing, The Hong Kong Polytechnic UniversityDepartment of Computer Science and Technology, Tongji UniversityMicrosoftPeng Cheng Laboratory
+Abstract
+Motivated by the success of T5 (Text-To-
+Text Transfer Transformer) in pre-trained nat-
+ural language processing models, we pro-
+pose a uniﬁed-modal SpeechT5 framework
+that explores the encoder-decoder pre-training
+for self-supervised speech/text representation
+learning. The SpeechT5 framework consists
+of a shared encoder-decoder network and six
+modal-speciﬁc (speech/text) pre/post-nets. Af-
+ter preprocessing the input speech/text through
+the pre-nets, the shared encoder-decoder net-
+work models the sequence-to-sequence trans-
+formation, and then the post-nets generate the
+output in the speech/text modality based on the
+output of the decoder. Leveraging large-scale
+unlabeled speech and text data, we pre-train
+SpeechT5 to learn a uniﬁed-modal representa-
+tion, hoping to improve the modeling capabil-
+ity for both speech and text. To align the tex-
+tual and speech information into this uniﬁed
+semantic space, we propose a cross-modal vec-
+tor quantization approach that randomly mixes
+up speech/text states with latent units as the
+interface between encoder and decoder. Ex-
+tensive evaluations show the superiority of the
+proposed SpeechT5 framework on a wide va-
+riety of spoken language processing tasks, in-
+cluding automatic speech recognition, speech
+synthesis, speech translation, voice conver-
+sion, speech enhancement, and speaker iden-
+tiﬁcation. We release our code and model
+athttps://github.com/microsoft/
+SpeechT5 .
+1 Introduction
+Starting with ELMo (Peters et al., 2018) and BERT
+(Devlin et al., 2019), substantial work has shown
+that pre-trained models can signiﬁcantly improve
+in various natural language processing (NLP) tasksFigure 1: An illustration of the SpeechT5 frame-
+work, which treats spoken language processing tasks
+as a speech/text to speech/text format, including au-
+tomatic speech recognition (ASR), speech translation
+(ST), speech identiﬁcation (SID), text to speech (TTS),
+voice conversion (VC), and speech enhancement (SE).
+(Radford et al., 2019; CONNEAU and Lample,
+2019; Yang et al., 2019; Dong et al., 2019; Lewis
+et al., 2020). Following the pre-training techniques
+in NLP, self-supervised speech representation learn-
+ing has also been investigated and shown promising
+results, beneﬁting from richly learned representa-
+tions (Chung and Glass, 2018; Chuang et al., 2020;
+Song et al., 2019; Baevski et al., 2020; Wang et al.,
+2021; Hsu et al., 2021; Chung et al., 2021a), such
+as wav2vec 2.0 (Baevski et al., 2020) and HuBERT
+(Hsu et al., 2021).
+However, previous speech pre-training work suf-
+fers from two problems: (1) most of them learn the
+speech representation with only unlabeled speech
+data but ignore the importance of textual data
+to spoken language tasks (e.g., automatic speech
+recognition) which require the modality transfor-
+mation; (2) most of these models solely rely on a
+pre-trained speech encoder for various downstream
+tasks, leaving the decoder not pre-trained for the
+sequence-to-sequence generation tasks. How to de-
+sign a uniﬁed encoder-decoder model that can take
+advantage of both unlabeled speech and text data to
+improve various spoken language processing tasks
+is not well explored.
+Inspired by the T5 method (Raffel et al., 2020),5723we attempt to formulate each spoken language pro-
+cessing task as a speech/text to speech/text prob-
+lem via an encoder-decoder framework, which en-
+ables us to use the same pre-trained model with
+bimodal data across diverse tasks, as shown in
+Figure 1. To achieve this, we propose a uniﬁed-
+modal pre-training framework, SpeechT5, contain-
+ing an encoder-decoder backbone network and
+modal-speciﬁc pre/post-nets. With the pre-nets,
+the input speech/text is embedded in a shared
+space, and the encoder-decoder backbone net-
+work models the sequence-to-sequence conversion,
+from which the model-speciﬁc post-nets generate
+the speech/text output. Particularly, SpeechT5 is
+mainly pre-trained with a denoising sequence-to-
+sequence method by leveraging large-scale unla-
+beled text and speech corpus. To align the textual
+and acoustic information into a uniﬁed semantic
+space, the proposed SpeechT5 model (1) maps text
+and speech representations into a shared vector
+quantization space, and (2) randomly mixes up the
+quantized latent representations and the contextual
+states, which can better guide the quantizer to learn
+the cross-modal features.
+We ﬁne-tune SpeechT5 on a wide variety of
+downstream spoken language processing tasks, in-
+cluding automatic speech recognition (ASR), text-
+to-speech (TTS), speech translation (ST), voice
+conversion (VC), speech enhancement (SE), and
+speaker identiﬁcation (SID). Massive experiments
+show that the proposed SpeechT5 model achieves a
+signiﬁcant improvement on these spoken language
+processing tasks compared with the state-of-the-
+art baselines. Speciﬁcally, the proposed SpeechT5
+outperforms wav2vec 2.0 (Baevski et al., 2020)
+and HuBERT (Hsu et al., 2021) with the B
+model on the ASR task and also performs better
+than the state-of-the-art voice Transformer network
+(Huang et al., 2021) on the VC task. Besides,
+SpeechT5 is signiﬁcantly superior to SpeechNet
+(Chen et al., 2021b) and pre-trained models from
+SUPERB (Yang et al., 2021) and achieves the state-
+of-the-art performance (i.e., 96.49%) on the SID
+task. We further provide an empirical comparison
+of the pre-training tasks and modules, and the ab-
+lation study demonstrates the effectiveness of the
+proposed joint speech-text pre-training method.
+The contributions of this paper are summarized
+as follows.
+•To the best of our knowledge, this is the ﬁrst
+work to investigate a uniﬁed encoder-decoderframework for various spoken language pro-
+cessing tasks.
+•We propose a cross-modal vector quantiza-
+tion approach, which learns the implicit align-
+ment between acoustic and textual represen-
+tation with large-scale unlabeled speech and
+text data.
+•Extensive experiments on spoken language
+processing tasks demonstrate the effectiveness
+and superiority of the proposed SpeechT5
+model.
+2 SpeechT5
+In this section, we propose SpeechT5, a uniﬁed-
+modal framework for learning joint contextual rep-
+resentations for speech and text data via a shared
+encoder-decoder structure.
+2.1 Model Architecture
+Figure 2(a) shows the model architecture of the pro-
+posed SpeechT5 model. It consists of an encoder-
+decoder module and six modal-speciﬁc pre/post-
+nets. The pre-nets convert the input speech X2
+Dor text X2 Dto a uniﬁed space of hid-
+den representations and then feed them into the
+shared encoder-decoder to perform the sequence-to-
+sequence conversion. Finally, the post-nets gener-
+ate the output in the speech or text modality, based
+on the decoder output.
+Input/Output Representations To train a single
+model for a diverse set of spoken language process-
+ing tasks, we formulate them as “speech/text to
+speech/text” tasks, where the model is fed with
+speech/text as the input and generates the corre-
+sponding output in the speech/text format. Specif-
+ically, a text is split into a sequence of charac-
+tersX= (x;:::;x)as the input and output.
+For speech modality, the raw waveform X=
+(x;:::;x)is used as the input, and a sequence of
+the log Mel-ﬁlterbank features X= (x;:::;x)
+extracted from raw audio using librosa toolis
+adopted as the target output. A vocoder (Kong
+et al., 2020) is leveraged to generate the ﬁnal wave-
+form from the generated features.
+Encoder-Decoder Backbone The Transformer
+encoder-decoder model (Vaswani et al., 2017) is
+used as the backbone network of SpeechT5. Please5724
+refer to Vaswani et al. (2017) for more details.
+We employ the relative position embedding (Shaw
+et al., 2018) to help capture the relative position
+differences between elements in the input. Speciﬁ-
+cally, we only add the relative position embedding
+to the dot-product weights of the self-attention.
+Speech Pre/Post-Net The convolutional feature
+extractor of wav2vec 2.0 (Baevski et al., 2020)
+serves as the speech-encoder pre-net to downsam-
+ple raw waveform Xand produce a sequence of a
+speech utterance H= (h;:::;h). The speech-
+decoder pre-net is a neural network composed of
+three fully connected layers with the ReLU acti-
+vation, fed with the log Mel-ﬁlterbank X. To
+support multi-speaker TTS and VC, the speaker
+embedding extracted with the x-vector (Snyder
+et al., 2018) is concatenated with the output of
+the speech-decoder pre-net followed by a linear
+layer. The speech-decoder post-net consists of two
+modules. The ﬁrst module uses a linear layer fed
+with the decoder output to predict the log Mel-
+ﬁlterbank Y= (y;:::;y), followed by ﬁve
+1-dimensional convolutional layers to produce a
+residual to reﬁne the predicted Y. Another linear
+module is added to project the decoder output to a
+scalar for predicting the stop token.
+Text Pre/Post-Net We use shared embeddings as
+the text-encoder pre-net and text-decoder pre/post-
+nets. The pre-net transforms a token index into an
+embedding vector. The post-net transforms the hid-
+den state into the probability distribution of tokens,
+normalized by the softmax function.2.2 Pre-Training
+The proposed SpeechT5 model can be pre-trained
+with large-scale collections of unlabeled speech
+and text corpus. The proposed joint pre-training
+method can align the textual and acoustic informa-
+tion into a uniﬁed semantic space.
+Speech Pre-Training Leveraging unlabeled
+speech dataDto learn general speech repre-
+sentations for both classiﬁcation and generation
+tasks, SpeechT5 is trained with two types of
+tasks: bidirectional masked prediction and
+sequence-to-sequence generation.
+Following HuBERT (Hsu et al., 2021), the bidi-
+rectional masked prediction leverages a masked
+language model similar to BERT (Devlin et al.,
+2019) for the encoder, in which an acoustic unit
+discovery model provides the frame-level targets
+Z= (z;:::;z). Speciﬁcally, we apply span
+mask strategies to the output Hfrom speech-
+encoder pre-net, where 8% of timesteps are ran-
+domly selected as start indices, and spans of 10
+steps are masked. The Transformer encoder takes
+masked Has the input and produces hidden rep-
+resentations U= (u;:::;u). Based on these
+hidden representations, the cross-entropy loss is
+computed over masked timesteps as
+L=Xlogp(zj^H;n); (1)
+where ^Hdenotes the masked version of H,M5725denotes the set of masked timesteps, and zdenotes
+the frame-level target at timestep nfromZ.
+Furthermore, we propose to reconstruct the orig-
+inal speech via a sequence-to-sequence generation
+task, given the randomly masked input as intro-
+duced in bidirectional masked prediction. Fol-
+lowing seq2seq TTS models (Li et al., 2019), we
+enforce the corresponding predicted output Y,
+which is generated through the speech-decoder pre-
+net, Transformer decoder, and speech-decoder post-
+net, to be close to the original Xby minimizing
+theirL-distance as
+L=Xky xk; (2)
+where xdenotesn-th an 80-dimensional log Mel-
+ﬁlterbank from X. Besides, we use the binary
+cross-entropy (BCE) loss Lfor the stop token.
+Text Pre-Training With unlabeled text data D,
+SpeechT5 is trained to reconstruct the model output
+Y= (y;:::;y)to the original text X, using
+the corrupted text ^X= (^x;:::;^x)as the input
+generated with a mask-based noising function. Fol-
+lowing the text inﬁlling approach in BART(Lewis
+et al., 2020), we randomly sample 30% of text
+spans to mask, where the span length of text spans
+draws from a Poisson distribution ( = 3:5), and
+each span is replaced with a single mask token. For-
+mally, SpeechT5, including text-encoder pre-net,
+encoder-decoder model, and text-decoder pre/post
+nets, is optimized to generate the original sequence
+with the maximum likelihood estimation as
+L=Xlogp(yjy;^X); (3)
+Joint Pre-Training The above pre-training
+methods can only leverage speech or text data to
+model acoustic or language information individu-
+ally. To build a cross-modality mapping between
+speech and text, which is essential for tasks such
+as ASR and TTS, we propose a cross-modal vec-
+tor quantization method to learn representations
+capturing the modality-invariant information.
+Speciﬁcally, we utilize vector quantized embed-
+dings as a bridge to align the speech representation
+and text representation through a shared codebook,as shown in Figure 2(b). Inspired by VQ-V AE
+(Oord et al., 2017) and SemFace (Ren et al., 2021),
+we ﬁrst use the quantizer to convert these contin-
+uous speech/text representations ufrom the out-
+put of the encoder into discrete representations c
+from a ﬁxed-size codebook C, which contains K
+learnable embeddings. Then, the nearest neighbor
+search is performed between the encoder output
+and the embedding of each latent code via the L
+distance as
+c= arg minku ck; (4)
+where cis thej-th quantized vector in the code-
+book. Note that we do the same operation for the
+output of the speech and text encoders with a shared
+codebook.
+Then, we randomly replace a proportion (10%)
+of the contextual representations with quantized
+latent representations in the corresponding time
+steps and calculate the cross-attention upon the
+mixed representations, which can explicitly guide
+the quantizer to utilize the cross-modal informa-
+tion. The diversity loss is used to encourage shar-
+ing more codes by maximizing the entropy of the
+averaged Softmax distribution as
+L=1
+KXplogp; (5)
+wherepis the averaged probability of choosing
+thek-th code in the codebook.
+The ﬁnal pre-training loss with unlabeled speech
+and text data can be formulated as
+L=L+L+L+L+L:(6)
+whereis set to 0:1during pre-training.
+2.3 Fine-Tuning
+After pre-training, we ﬁne-tune the encoder-
+decoder backbone via the loss of the downstream
+task. The goal is to measure the learning abilities
+of SpeechT5, and we study the performance on a
+diverse set of downstream tasks such as ASR, TTS,
+ST, VC, SE, and SID. All of the spoken language
+processing tasks that we consider can be learned by
+concatenating the outputs of the encoder-decoder
+backbone and corresponding pre-net and post-net.
+Taking ASR as an example, the ﬁnal model consists
+of the speech-encoder pre-net, encoder-decoder,
+text-decoder pre-net, and text-decoder post-net,5726
+which are initialized by SpeechT5 and ﬁne-tuned
+via the cross-entropy loss on the corresponding
+training data. The baseline systems have the same
+architecture as SpeechT5, but the weights of the
+baseline encoder are initialized by the HuBERT
+B model (Hsu et al., 2021) if the input data
+of the downstream tasks is speech. It allows raw
+waveform as the model input and can provide a
+strong baseline.
+3 Experiments
+3.1 Pre-Training Setup
+All models are implemented in Fairseq(Ott et al.,
+2019). The encoder-decoder backbone contains
+12 Transformer encoder blocks and 6 Transformer
+decoder blocks, where the model dimension is
+768, the inner dimension (FFN) is 3,072, and the
+number of attention heads is 12. The above en-
+coder setting is the same as that in wav2vec 2.0
+B and HuBERT B. The speech-encoder
+pre-net contains 7 blocks of temporal convolu-
+tions, each of which is composed of 512 chan-
+nels with strides (5;2;2;2;2;2;2)and kernel sizes
+(10;3;3;3;3;2;2). For the speech-decoder pre-net
+and post-net, we use the same setting as the pre-net
+and post-net in Shen et al. (2018) except that the
+number of channels of the post-net is 256. For text-
+encoder/decoder pre/post-net, a shared embedding
+layer with dimension 768 is used. For the vector
+quantization, we use two codebooks with 100 en-
+tries for the shared codebook module, resulting in
+a theoretical maximum of K= 10code entries.
+For speech pre-training, we use the full 960
+hours of LibriSpeech audio (Panayotov et al., 2015).For text pre-training, we use the normalized lan-
+guage model training text of LibriSpeech as unla-
+beled data, which contains 400M sentences.We
+optimize the model with Adam (Kingma and Ba,
+2014) by warming up the learning rate for the ﬁrst
+8% of updates to a peak of 210, which is linear
+decayed for the following updates. We pre-train
+the proposed SpeechT5 model on 32 V100 GPUs
+with a batch size of around 90s samples per GPU
+for speech and 12k tokens per GPU for text and set
+the update frequency to 2 for 500k steps.
+3.2 Evaluation on ASR
+We ﬁne-tune the ASR model with the LibriSpeech
+100/960 hours data and train the language model
+(LM) with the LibriSpeech LM text data, which is
+used for shallow fusion (Gulcehre et al., 2015) dur-
+ing the ASR inference. Besides the cross-entropy
+loss for the decoder, we add an extra linear layer
+to calculate the connectionist temporal classiﬁca-
+tion (CTC) loss on the top of the encoder (Watan-
+abe et al., 2017), so that we can apply the joint
+CTC/attention decoding (Hori et al., 2017) to boost
+the performance. We measure the performance of
+ASR by the word error rate (WER). The implemen-
+tation details can be found in Appendix B.1.
+The results of ASR on the 100 hours set of Lib-
+riSpeech are reported in Table 1. We compare with
+several state-of-the-art self-supervised approaches,
+including DiscreteBERT (Baevski et al., 2019),
+wav2vec 2.0 (Baevski et al., 2020), and HuBERT
+(Hsu et al., 2021). Without LM fusion, the base-
+line outperforms wav2vec 2.0 B and HuBERT
+B with the help of the joint CTC/attention de-
+coding, which shows the importance of the decoder.5727
+The proposed SpeechT5 model achieves signiﬁcant
+improvements on all settings compared to wav2vec
+2.0B, HuBERT B and our strong base-
+lines, demonstrating the superiority of the proposed
+pre-training method. Furthermore, when decoding
+with LM fusion, SpeechT5 obtains the lower WERs
+than wav2vec 2.0 B on all sets and achieves
+the state-of-the-art performance. Due to space con-
+straints, the results of 960h ﬁne-tuning experiments
+are reported in Appendix C.
+3.3 Evaluation on TTS
+We ﬁne-tune the pre-trained model on the 460-
+hours LibriTTS clean sets (Zen et al., 2019) with
+theLloss,Lloss, and attention loss (Tachibana
+et al., 2018). We utilize the HiFi-GAN (Kong et al.,
+2020) vocoder to convert the log Mel-ﬁlterbank
+to the raw waveform. We evaluate the Natural-
+ness with the open-source NISQA-TTS (Mittag
+and Möller, 2020), the mean option score (MOS),
+and the comparison mean option score (CMOS) by
+native speakers on the randomly selected 200 sen-
+tences with various lengths (no overlapping with
+training data) generated by different models, in
+which case we keep the text content consistent.
+More details can be found in Appendix B.2.
+Table 3 shows the experimental results of TTS.
+The proposed SpeechT5 trained without Lis
+considered because the bidirectional masked pre-
+diction loss is proposed to help the encoder learn to
+encode the speech signal, and this variant achieves
+superior Naturalness, as shown in Table 13 (in Ap-
+pendix D). The proposed SpeechT5 model behavesbetter than baseline and achieves a performance
+of 2.91 Naturalness and 3.65 MOS. Furthermore,
+our proposed SpeechT5 obtains a gain of +0.29 in
+CMOS with respect to the baseline model, which
+suggests the proposed pre-training method signiﬁ-
+cantly improves the speech generation quality.
+3.4 Evaluation on ST
+We evaluate the ST task on the MUST-C dataset
+(Di Gangi et al., 2019), including English-German
+(EN-DE) and English-French (EN-FR) translation
+tasks. We use the default training setting of speech
+translation in Fairseq ST (Wang et al., 2020), and
+we also average the last 10 checkpoints and use a
+beam size of 5 for decoding. Translation results
+are evaluated with case-sensitive BLEU (Papineni
+et al., 2002). Details about the dataset and ﬁne-tune
+setting are introduced in Appendix B.3.
+We list the BLEU scores of ST in Table 4. The re-
+sult of SpeechT5 without initializing the decoder is
+also reported since we do not pre-train the decoder
+with German or French data, and it outperforms
+the strong baseline whose encoder is initialized by
+HuBERT encoder. The proposed SpeechT5 further
+beats the SpeechT5 without initializing the decoder,
+and achieves a signiﬁcant improvement of 1.75 and
+1.54 BLEU scores than baseline in EN-DE and
+EN-FR tasks, respectively, which demonstrates the
+effectiveness and superiority of our method. Be-
+sides, our SpeechT5 model outperforms existing
+models such as Fairseq ST (Wang et al., 2020),5728ESPnet ST (Inaguma et al., 2020), and Adapter
+Tuning (Le et al., 2021) that employs adapter mod-
+ules to be further specialized in each language pair
+from different pre-trained models.
+3.5 Evaluation on VC
+VC aims to convert a speaker-dependent source
+speech waveform into a different one while pre-
+serving linguistic information of the source speech
+waveform. We follow the many-to-many setting
+and utilize speech recordings of four speakers in the
+CMU Arctic (Kominek and Black, 2004), including
+clb, bdl, slt, and rms. For the waveform synthesis,
+we use the Parallel WaveGAN (Yamamoto et al.,
+2020), a non-autoregressive variant of the WaveNet
+vocoder. We employ the average of MCD (Mel-
+Cepstral Distortion) and WER as the metrics for
+the VC task. More details about the dataset and
+ﬁne-tune setting are given in Appendix B.4.
+We show the results of VC in Table 2, where
+we list the conversion from speaker bdl to slt and
+clb to slt as used in the voice Transformer network
+(VTN) (Huang et al., 2021). The experimental
+results demonstrate that the proposed SpeechT5
+model achieves a signiﬁcant gain than the strong
+baseline model. The proposed SpeechT5 model
+also outperforms the state-of-the-art VTN variants
+in terms of MCD, including VTN ﬁne-tuned from
+ASR or TTS (Huang et al., 2021) and many-to-
+many VTN (Kameoka et al., 2021).
+3.6 Evaluation on SE
+SE is the task of removing background noise from
+a degraded speech signal and improving the intelli-
+gibility and the perceived quality of the signal. We
+use the WSJ0 Hipster Ambient Mixtures (WHAM!)
+dataset (Wichern et al., 2019) and conduct the 16
+kHz max enhance-single task that recovers the sig-
+nal from a mixture of only the ﬁrst WSJ0 speaker
+and noise. We utilize HiFi-GAN to transform the
+log Mel-ﬁlterbank to the raw waveform. Since the
+input and output lengths are probably different in
+the encoder-decoder model, we can not evaluate it
+by PESQ (Rix et al., 2001) and ESTOI (Jensen and
+Taal, 2016), so we evaluate the negative impact on
+the ASR performance by WER. The implementa-
+tion details of SE are in Appendix B.5.
+As shown in Table 5, our strong baseline model
+recovers contents from the noisy speech, achiev-
+ing 10.9% WER from 76.1% WER. Moreover, the
+proposed SpeechT5 model gets a relative 9% WER
+reduction compared to the strong baseline model.
+The results suggest that although the noisy speech
+with WHAM! is challenging as summarized in Ta-
+ble 12 (in Appendix B.5), the proposed encoder-
+decoder framework can effectively suppress the
+noise and recover the content.
+3.7 Evaluation on SID
+We convert SID, a multi-class classiﬁcation task of
+classifying each utterance for its speaker identity,
+to a speech to text task by sequence to sequence
+model. Compared to the ASR task, the text embed-
+ding table is replaced by a speaker embedding table,
+and the decoder predicts speaker identiﬁes at the
+ﬁrst step. We adopt the V oxCeleb1 dataset (Nagrani
+et al., 2017), which contains over 100,000 speech
+records uttered by 1,251 celebrities extracted from
+videos uploaded to YouTube. The top-1 speaker
+classiﬁcation accuracy (ACC) is used as the eval-
+uation metric of SID. Refer to Appendix B.6 for
+more details about the dataset and ﬁne-tuning.
+As shown in Table 6, our baseline is superior
+to existing Transformer-based methods such as
+SpeechNet (Chen et al., 2021b) and pre-trained
+models from SUPERB (Yang et al., 2021). More-
+over, it outperforms ResNet-based architectures
+such as Thin ResNet-34 (Chung et al., 2020), in-
+dicating the superiority of the encoder-decoder ar-5729chitecture for the SID task. The SpeechT5 further
+improves the performance compared to baseline
+and achieves the state-of-the-art performance (i.e.,
+96.49% accuracy), which demonstrates the effec-
+tiveness of the proposed pre-training technique.
+3.8 Ablation Study
+To better understand why the proposed SpeechT5
+model is effective, we investigate the inﬂuence of
+the pre-training methods by removing each of them
+independently.
+As shown in Table 7, we can draw the following
+conclusions: (1) The pre-training methods, includ-
+ing speech pre-training, text pre-training, and joint
+pre-training method, are important to SpeechT5
+since without each of them, the performance of
+all tasks will degrade signiﬁcantly; (2) Speech pre-
+training is more critical than text pre-training on
+these tasks that need to encode speech, and the ASR
+model ﬁne-tuned from SpeechT5 without speech
+pre-training even can not converge; (3) Without the
+joint pre-training method, the performance of the
+ASR model decreases, which demonstrates that the
+learned alignment from joint pre-training brings
+beneﬁts for cross-modality tasks; (4) The masked
+language model learning Lof speech data is
+mainly responsible for extracting acoustic features
+and learning better speech representation, which is
+beneﬁcial to ASR and SID tasks.
+4 Related Work
+Large-scale pre-training models such as BERT (De-
+vlin et al., 2019), T5 (Raffel et al., 2020), wav2vec
+2.0 (Baevski et al., 2020), and HuBERT (Hsu
+et al., 2021) have drawn much attention in the NLP
+and speech communities, due to its strong capabil-ity of generalization and efﬁcient usage of large-
+scale data (Devlin et al., 2019; Liu et al., 2019;
+Yang et al., 2019; Lewis et al., 2020; Chen et al.,
+2021c; Baevski et al., 2020; Lakhotia et al., 2021;
+Kharitonov et al., 2021; Chen et al., 2021a). How-
+ever, the research mentioned above effects gear
+towards single-modal learning, hence they can only
+be used in either text or speech modeling. Although
+some speech-language pre-training work (Chung
+et al., 2021b; Kim et al., 2021; Qian et al., 2021)
+attempts to improve spoken language understand-
+ing tasks, these methods only focus on an encoder
+with task-speciﬁc layers for different tasks and do
+not pre-train a decoder for generation tasks such
+as speech synthesis or text generation. Besides, a
+series of research work begins to investigate joint
+text and speech training (Han et al., 2021; Ye et al.,
+2021; Tang et al., 2021a; Zheng et al., 2021; Tang
+et al., 2021b), but they are mainly designed for
+speech to text tasks.
+The proposed SpeechT5 method is most related
+to T5 (Raffel et al., 2020). The core idea of the
+T5 model, a uniﬁed framework for a variety of
+text-based language problems, is to treat every text
+processing problem as a “text-to-text” problem.
+SpeechT5 is also related to Speech Chain (Tjandra
+et al., 2020), which leverages the ASR model and
+TTS model to build a closed-loop machine speech
+chain to train models on the concatenation of both
+labeled and unlabeled data, and SpeechNet (Chen
+et al., 2021b), which designs a universal modular-
+ized model to perform multiple speech processing
+tasks with multi-task learning. The differences
+from the above models are that (1) SpeechT5 is
+a shared cross-modal encoder-decoder framework,
+whose input and output are speech or text through
+multiple pre/post-nets; (2) SpeechT5 attempts to
+pre-train and improve the universal model with
+large-scale unlabeled text and speech data.
+Another related work is SUPERB (Yang et al.,
+2021), a benchmark to examine the capability of
+pre-trained models such as HuBERT (Hsu et al.,
+2021). SUPERB focuses on investigating a simple
+framework to learn SUPERB tasks with a frozen
+and shared pre-trained encoder and lightweight pre-
+diction modules ﬁne-tuned for each task. In con-
+trast, the goal of SpeechT5 is to learn all spoken
+language processing tasks by ﬁne-tuning a uniﬁed-
+modal encoder-decoder model, which is pre-trained
+on unlabeled speech and text corpus.57305 Conclusion
+In this paper, we have proposed SpeechT5 as a pre-
+trained encoder-decoder model for various spoken
+language processing tasks. We convert all spo-
+ken language processing tasks into a speech/text to
+speech/text format and propose a novel joint pre-
+training method to utilize cross-modal information
+by leveraging the unlabeled speech and text data.
+The proposed uniﬁed encoder-decoder model can
+support generation tasks such as speech transla-
+tion and voice conversion. Massive experiments
+show that SpeechT5 signiﬁcantly outperforms all
+baselines in several spoken language processing
+tasks. In the future, we are going to pre-train the
+SpeechT5 with a larger model and more unlabeled
+data. We are also interested in extending the pro-
+posed SpeechT5 framework to address multilingual
+spoken language processing tasks for future work.
+Acknowledgments
+We thank Yanqing Liu and Sheng Zhao for their
+help in TTS human evaluation. We also want to
+thank the anonymous reviewers for insightful com-
+ments and suggestions.
+References5731573257335734A Comparisons of Text Mask Strategies
+We compare the performance when using the
+BART (Lewis et al., 2020) or T5 (Raffel et al.,
+2020) strategies for text masking on the ASR
+task, as reported in Table 10. The BART strategy
+achieves comparable or better performance than
+the T5 strategy under different inference settings.
+B Implementation Details
+B.1 ASR
+Dataset We use the LibriSpeech corpus and ﬁne-
+tune on two labeled data settings: 960 hours of tran-
+scribed Librispeech and the train-clean-100 subset
+comprising 100 hours (100 hours labeled). We train
+the language model by the LibriSpeech language
+model (LM) text data, which is used for shallow
+fusion (Gulcehre et al., 2015) during the ASR in-
+ference.
+Fine-Tuning Details We ﬁne-tune the model
+with the CTC loss and the cross-entropy loss, where
+the loss weights are 0:5for both of them. We train
+on 8 V100 GPUs with a batch size of up to 256k au-
+dio samples per GPU. The learning rate is warmed
+up for the ﬁrst 10% steps, hold as a constant for the
+following 40% steps, and is decayed linearly for
+the rest steps. Table 8 summarizes the hyperparam-
+eters for ASR experiments of 100 hours and 960
+hours sets.
+Language Model and Decoding We train a
+character-level LM for the ASR inference. The
+model has the same architecture as the Transformer
+LM in Synnaeve et al. (2020), which is used for
+decoding of wav2vec 2.0 (Baevski et al., 2020) and
+HuBERT (Hsu et al., 2021). The LM contains 20
+blocks of Transformer decoder with the model di-
+mension of 1280, inner dimension of 6144, and 16
+attention heads. To investigate the difference of
+the performance between our LM and the LM in
+Synnaeve et al. (2020), we evaluate the word-level
+perplexities of these LMs on the LibriSpeech dev-
+clean/other sets as shown in Table 9. The Trans-
+former LM used for SpeechT5 gets 56.5 perplexity
+on the dev-clean set and 59.3 perplexity on the dev-
+other set, which are higher than the perplexities of
+word Transformer LM in Synnaeve et al. (2020). It
+suggests that we may achieve better performance
+on the ASR task if the perplexities of our LM are
+similar to the LM in Synnaeve et al. (2020).
+During decoding, the beam size is set to 30 for
+all experiments. We select the model with the high-
+est accuracy on dev-other set for inference and
+apply the joint CTC/attention decoding (Hori et al.,
+2017) to further improve the performance. The
+model generates the output transcription by the
+beam search algorithm, which aims to maximize
+logP+ (1 ) logP+logP (7)
+whereandare weights for the log probabilities,
+P,P, andPare the probabilities of the
+decoder, CTC, and LM, respectively. We set 
+to 0.5 andto 1.0 for ﬁne-tuning experiments of
+100 hours set, and set to 0.9 andto 0.7 for
+ﬁne-tuning experiments of 960 hours set.
+B.2 TTS
+Dataset and Evaluation Metrics We use the
+460-hours LibriTTS clean sets (Zen et al., 2019), a
+multispeaker corpus of read English speech from
+the audiobooks of the LibriV ox project, as TTS
+training dataset. We trim the waveform as ESPnet
+recipe (Watanabe et al., 2018). The WER is evalu-
+ated by using the open-source ASR model wav2vec
+2.0 CTC. The naturalness of synthetic speech is
+estimated by using the open-source TTS natural-
+ness prediction model NISQA-TTS(Mittag and
+Möller, 2020).
+Fine-Tuning Details Besides the Lloss and
+BCE loss, we add an additional attention loss5735
+(Tachibana et al., 2018) to speed up model con-
+vergence. We train on 8 V100 GPUs in a speaker-
+independent manner by using the training data of
+the LibriTTS. The model is updated for 120k steps
+with a learning rate of 0.0004, while each GPU
+processes up to 45,000 tokens for a batch. The
+learning rate is warmed up for the ﬁrst 10k steps
+and decayed in an inverse square root manner for
+the rest steps.
+B.3 ST
+Dataset and Evaluation Metrics We evaluate
+the ST task on the MUST-C dataset (Di Gangi
+et al., 2019), including English-German (EN-DE)
+and English-French (EN-FR) translation tasks. The
+EN-DE/EN-FR language pair consists of 408/492
+hours of speech data aligned with 234K/280K trans-
+lated sentences. We report the results on EN-DE
+and EN-FR tst-COMMON set (2641 and 2632 ut-
+terances). Translation results are computed with
+case-sensitive BLEU (Papineni et al., 2002).
+Fine-Tuning Details ST translates speech sig-
+nals in a language to text in another language. We
+use raw audio as speech inputs in our experiments.
+The training setting is the same as that in S2T
+model in Fairseq. We set training steps to 80K
+and warm-up steps to 10K. Baseline and SpeechT5
+models are trained with 8 GPUs via Adam opti-
+mizer. We use 8K unigram vocabulary for both
+EN-DE and EN-FR. Following Fairseq ST (Wang
+et al., 2020), we average the last 10 checkpoints
+and use a beam size of 5 for decoding.
+B.4 VC
+Dataset and Evaluation Metrics We consider
+the many-to-many setting for the CMU Arctic
+(Kominek and Black, 2004), which contains speech
+recordings of four speakers, such as clb (female),bdl (male), slt (female), and rms (male), who read
+the same 1,132 phonetically balanced English ut-
+terances. Thus, there are twelve different combi-
+nations of source and target speakers. For each
+speaker, the ﬁrst 932, the last 100, and the rest 100
+sentences of the 1,132 sentences are used for train-
+ing, test, and validation as (Huang et al., 2021),
+respectively. The average of MCD is estimated
+by using the DTW (dynamic time warping) path
+between the output and ground-truth Mel-cepstra.
+A smaller MCD indicates better performance. The
+WER is evaluated by using the public ASR model
+HuBERT L, where the WER of the test set
+with this ASR model is comparable to that of VTN
+(Huang et al., 2021).
+Fine-Tuning Details Besides the Lloss and
+BCE loss, we add an additional attention loss
+(Tachibana et al., 2018) to speed up the model con-
+vergence. The model is trained on 8 V100 GPUs
+by the Adam optimizer with a batch size of 20000
+tokens per GPU. We assign the learning rate based
+on the inverse square root with the maximum learn-
+ing rate of 10within 60k steps and apply 6k
+warm-up steps.
+B.5 SE
+Dataset and Evaluation Metrics We aim to re-
+cover the content of signals contaminated by vari-
+ous noises and reduce the negative impact on the
+performance of ASR systems. The 16 kHz enhance-
+single task of the WHAM! dataset (Wichern et al.,
+2019) is used as the SE dataset. It contains 20,000
+training utterances, 5,000 validation utterances, and
+3,000 test utterances, where the input waveform is
+a mixture of only the ﬁrst WSJ0speaker and noise.5736
+We trim the noisy segment without contents. The
+WER is evaluated by using the open-source ASR
+modelbecause lengths of inputs and outputs are
+probably different in the encoder-decoder model.
+Since lengths of noisy speech utterances are the
+same as lengths of clean utterances, we measure
+the test set via speech quality (PESQ) (Rix et al.,
+2001), extended short-time objective intelligibil-
+ity (ESTOI) (Jensen and Taal, 2016), and WER to
+quantify the difﬁculty of noisy speech, as shown
+in Table 12. NSNet2 is the baseline model on the
+2020 Deep Noise Suppression (DNS) challenge
+(Reddy et al., 2021) and obtains WER of 45.8%,
+probably due to the mismatch between the noise
+intensity of the WHAM! and DNS corpus.
+Fine-Tuning Details We employ the loss func-
+tion as used in the ﬁne-tuning of the VC task. The
+model is trained on 8 V100 GPUs by the Adam op-
+timizer with a batch size of 16000 tokens per GPU.
+We assign the learning rate based on the inverse
+square root with the maximum learning rate 10
+within 100k steps and apply 10k warm-up steps.
+B.6 SID
+Dataset and Evaluation Metrics We use the of-
+ﬁcial split of the V oxCeleb1 dataset (Nagrani et al.,
+2017) for the SID task, where the test set contains
+8,251 utterances from these 1,251 celebrities. The
+capability of identifying speakers is assessed byclassifying an utterance into the ground-truth cat-
+egory. Speciﬁcally, the whole utterance is taken
+as an input to the model to determine the speaker
+identity.
+Fine-Tuning Details We use the cross-entropy
+loss and ﬁne-tune all models on 8 V100 GPUs
+by the Adam optimizer with a batch size of 64
+segments per GPU and the inputs of 3 seconds.
+The learning rate is set based on one cycle of a
+triangular cyclical schedule between 10and5
+10in 60k steps. We initialize the weights of
+the text embeddings layer because there are no
+overlapping text tokens between the vocabularies
+during the pre-training and the SID ﬁne-tuning.
+C Results for 960 Hours Set of
+LibriSpeech
+We also ﬁne-tune the model on the 960 hours set of
+LibriSpeech, as reported in Table 11. Experiments
+show that the proposed SpeechT5 model achieves
+signiﬁcant improvement even without LM fusion,
+and it performs comparable or even better than
+wav2vec 2.0 with LM fusion.
+D Results of the SpeechT5 without L
+on the TTS task
+We use the automatic evaluation tool NISQA-
+TTS to verify the performance of TTS results here,
+because it is convenient and cheap compared with
+MOS and CMOS, which need to be evaluated by
+humans. As shown in Table 13, the variant of5737SpeechT5 trained without the loss Lachieves
+an improvement in terms of naturalness when com-
+pared with the SpeechT5. It suggests that the pre-
+training without the speech-speciﬁc loss brings a
+signiﬁcant gain. Thus, we select the SpeechT5
+without the lossLfor MOS and CMOS evalu-
+ations.5738

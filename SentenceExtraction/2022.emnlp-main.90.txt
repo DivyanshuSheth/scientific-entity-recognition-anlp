@@ -1,1 +1,830 @@
-1384 Proceedings of the 2022 Conference on Empirical Methods in Natural Language Processing , pages 1384 1403 December 7 - 11 , 2022 © 2022 Association for Computational Linguistics 1385 1386 1387 1388 1389 1390 1391 1392 1393 1394 1395 1396 1397 1398 1399 1400 1401 1402 1403 
+
+Aman Madaan, Shuyan Zhou, Uri Alon,
+Yiming Yang,Graham NeubigLanguage Technologies Institute, Carnegie Mellon University, USAInspired Cognition, USA
+{amadaan,shuyanzh,ualon,yiming,gneubig} @cs.cmu.edu
+Abstract
+We address the general task of structured com-
+monsense reasoning: given a natural language
+input, the goal is to generate a graph such as
+an event or a reasoning-graph. To employ large
+language models (LMs) for this task, existing
+approaches “serialize” the output graph as a
+flat list of nodes and edges. Although feasi-
+ble, these serialized graphs strongly deviate
+from the natural language corpora that LMs
+were pre-trained on, hindering LMs from gen-
+erating them correctly. In this paper, we show
+that when we instead frame structured common-
+sense reasoning tasks as code generation tasks,
+pre-trained LMs of code arebetter structured
+commonsense reasoners than LMs of natural
+language, even when the downstream task does
+not involve source code at all. We demonstrate
+our approach across three diverse structured
+commonsense reasoning tasks. In all these
+natural language tasks, we show that using
+our approach, a code generation LM ( C )
+outperforms natural-LMs that are fine-tuned
+on the target task ( e.g.,5) and other strong
+LMs such as GPT-3 in the few-shot setting.
+Our code and data are available at https:
+//github.com/madaan/CoCoGen .
+1 Introduction
+The growing capabilities of large pre-trained lan-
+guage models (LLMs) for generating text have en-
+abled their successful application in a variety of
+tasks, including summarization, translation, and
+question-answering (Wang et al., 2019; Raffel et al.,
+2019; Brown et al., 2020; Chowdhery et al., 2022).
+Nevertheless, while employing LLMs for natu-
+ral language (NL) tasks is straightforward, a ma-
+jor remaining challenge is how to leverage LLMs
+forstructured commonsense reasoning , including
+tasks such as generating event graphs (Tandon et al.,
+2019), reasoning graphs (Madaan et al., 2021a),
+scripts (Sakaguchi et al., 2021), and argument ex-
+planation graphs (Saha et al., 2021). Unlike tradi-tional commonsense reasoning tasks such as read-
+ing comprehension or question answering, struc-
+tured commonsense aims to generate structured
+output given a natural language input. This family
+of tasks relies on the natural language knowledge
+learned by the LLM, but it also requires complex
+structured prediction and generation.
+To leverage LLMs, existing structured common-
+sense generation models modify the output format
+of a problem. Specifically, the structure to be gen-
+erated ( e.g., a graph or a table) is converted, or
+“serialized”, into text. Such conversions include
+“flattening” the graph into a list of node pairs (Fig-
+ure 1d), or into a specification language such as (Figure 1c; Gansner et al., 2006).
+While converting the structured output into text
+has shown promising results (Rajagopal et al.,
+2021; Madaan and Yang, 2021), LLMs struggle
+to generate these “unnatural” outputs: LMs are
+primarily pre-trained on free-form text, and these
+serialized structured outputs strongly diverge from
+the majority of the pre-training data. Further, for
+natural language, semantically relevant words are
+typically found within a small span, whereas neigh-
+boring nodes in a graph might be pushed farther
+apart when representing a graph as a flat string.
+Thus, a language model which was trained on
+natural language text is likely to fail to capture
+the topology of the graph. Consequently, using
+LLMs for graph generation typically requires a
+large amount of task-specific training data, and
+their generated outputs show structural errors and
+semantic inconsistencies, which need to be fur-
+ther fixed either manually or by using a secondary
+downstream model (Madaan et al., 2021b).
+Despite these struggles, the recent success of
+large-language models of code (Code-LLMs; Chen
+et al., 2021b; Xu et al., 2022) for tasks such as
+code generation from natural language (Austin
+et al., 2021; Nijkamp et al., 2022), code comple-
+tion (Fried et al., 2022), and code translation (Wang1384Take the pies out to cool Open cabinet drawer
+Take out several plates
+Begin putting
+pies on plateFill pies onto
+plates evenly
+Serve the potpies on a plate
+et al., 2021), show that Code-LLMs are able to per-
+form complex reasoning on structured data such
+as programs. Thus, instead of forcing LLMs of
+natural language (NL-LLMs) to be fine-tuned on
+structured commonsense data, an easier way to
+close the discrepancy between the pre-training data
+(free-form text) and the task-specific data (com-
+monsense reasoning graphs ) is to adapt LLMs that
+were pre-trained on code to structured common-
+sense reasoning in natural language .
+Thus, our main insight is that large language
+models of code are good structured commonsense
+reasoners . Further, we show that Code-LLMs can
+be even better structured reasoners than NL-LLMs,
+when converting the desired output graph into a for-
+mat similar to that observed in the code pre-training
+data. We call our method CCG: modelsofCode for Commonsense Generation, and it is
+demonstrated in Figure 1.
+Our contributions are as follows:
+1.We highlight the insight that Code-LLMs
+are better structured commonsense reasoners
+than NL-LLMs, when representing the desired
+graph prediction as code.
+2.We propose CCG: a method for
+leveraging LLMs of code for structured
+commonsense generation.
+3.We perform an extensive evaluation across
+three structured commonsense generation
+tasks and demonstrate that CCGvastly
+outperforms NL-LLMs, either fine-tuned or
+few-shot tested, while controlling for the num-
+ber of downstream task examples.
+4.We perform a thorough ablation study, which1385shows the role of data formatting, model size,
+and the number of few-shot examples.
+2 CCG: Representing
+Commonsense structures with code
+We focus on tasks of structured commonsense gen-
+eration. Each training example for such tasks is
+in the form (T,G), where Tis a text input, and G
+is the structure to be generated (typically a graph).
+The key idea of CCGis transforming an out-
+put graph Ginto a semantically equivalent program
+Gwritten in a general-purpose programming lan-
+guage. In this work, we chose Python due to its
+popularity in the training data of modern Code-
+LLMs (Xu et al., 2022), but our approach is ag-
+nostic to the programming language. The code-
+transformed graphs are similar in their format to
+the pre-training data of Code-LLMs, and thus serve
+as easier to generalize training or few-shot exam-
+ples than the original raw graph. CCGuses
+Code-LLMs to generate GgivenT, which we
+eventually convert back into the graph G.
+We use the task of script generation ( ,
+Figure 1) as a running example to motivate our
+method: script generation aims to create a script ( G)
+to achieve a given high-level goal ( T).
+2.1 Converting (T,G)into Python code
+We convert a (T,G)pair into a Python class or
+function. The general procedure involves adding
+the input text Tin the beginning of the code as
+a class attribute or descriptive comment, and en-
+coding the structure Gusing standard constructs
+for representing structure in code ( e.g., hashmaps,
+object attributes) or function calls. The goal here is
+to compose Python code that represents a (T,G)
+pair, but retains the syntax and code conventions of
+typical Python code.
+For example, for the script generation task, we
+convert the (T,G)pair into a Tree class (Fig-
+ure 1b). The goal Tis added as class attribute
+(goal ), and the script Gis added by listing
+the nodes and edges separately. We first in-
+stantiate the list of nodes as objects of class
+Node . Then, the edges are added as an attribute
+children for each node (Figure 1b). For ex-
+ample, we instantiate the node “ Take out sev-
+eral plates ” astake_out_several_plates
+= Node() , and add it as a child of the node
+take_pies_out_to_cool .
+While there are multiple ways of representinga training example as a Python class, we found
+empirically that this relatively simple format is the
+most effective, especially with larger models. We
+analyze the choice of format and its connection
+with the model size in Section 4.
+2.2 Few-shot prompting for generating G
+We focus on large-language models of the scale
+ofC (Chen et al., 2021a). Due to their pro-
+hibitively expensive cost to fine-tune, these large
+models are typically used in a few-shot prompting
+mode. Few-shot prompting uses kinput-output ex-
+amples{(x, y)}to create an in-context prompt:
+p=x⊕y⋅x⊕y⋅. . .⋅x⊕y, where⊕
+is a symbol that separates an input from its output,
+and⋅separates different examples.
+A new (test) input xis appended to the prompt
+p(that is: p⋅x), and p⋅x⊕is fed to the model
+for completion. As found by Brown et al. (2020),
+large language models show impressive few-shot
+capabilities in generating a completion ˆygiven the
+input p⋅x⊕. The main question is how to
+construct the prompt?
+In all experiments in this work, the prompt p
+consists of kPython classes, each representing a
+(T,G)pair. For example, for script generation,
+each Python class represents a goal Tand a script
+Gfrom the training set. Given a new goal Tfor
+inference, a partial Python class (i.e., only specify-
+ing the goal) is created and appended to the prompt.
+Figure 2 shows such a partial class. Here, the code
+generation model is expected to complete the class
+by generating the definition for Node objects and
+their dependencies for the goal make hot green tea .
+class Tree :
+goal = "make hot green tea."
+def__init__ (self ):
+# generate
+In our experiments, we used C (Chen et al.,
+2021a) and found that it nearly always generates
+syntactically valid Python. Thus, the generated
+code can be easily converted back into a graph
+and evaluated using the dataset’s standard, original,1386metrics. Appendix F lists sample prompts for each
+of the tasks we experimented with.
+3 Evaluation
+We experiment with three diverse structured com-
+monsense generation tasks: (i) script genera-
+tion ( , Section 3.2), (ii) entity state
+tracking ( , Section 3.3), and (iii) explana-
+tion graph generation ( , Section 3.4)
+Dataset details are included in Appendix D. Despite
+sharing the general goal of structured common-
+sense generation, the three tasks are quite diverse
+in terms of the generated output and the kind of
+required reasoning.
+3.1 Experimental setup
+Model As our main Code-LLM for CCG,
+we experiment with the latest version of C
+code-davinci-002 from OpenAIin few-shot
+prompting mode.
+Baselines We experimented with the following
+types of baselines:
+1.Text few-shot: Our hypothesis is that code-
+generation models can be repurposed to gen-
+erate structured output better. Thus, natural
+baselines for our approach are NL-LLMs –
+language models trained on natural language
+corpus. We experiment with the latest ver-
+sions of (text-curie-001 ) and (text-davinci-002 ), the two
+GPT-3 based models by OpenAI (Brown
+et al., 2020). For both these models, the
+prompt consists of (T,G)examples, where
+Gis simply flattened into a string (as in Fig-
+ure 1c). is estimated to be much
+larger in size than , as our experiments
+also reveal (Appendix A). , popu-
+larly known as GPT-3, is the strongest text-
+generation model available through OpenAI
+APIs.
+2.Fine-tuning: we fine-tune a5-large model
+for , and use the results from
+Sakaguchi et al. (2021) on5-xxl for- tasks. In contrast to the few-shot setup
+where the model only has access to a few ex-
+amples, fine-tuned models observe the entire
+training data of the downstream task.Choice of prompt We created the prompt pby
+randomly sampling kexamples from the training
+set. As all models have a bounded input size ( e.g.,
+4096 tokens for Ccode-davinci-002
+and 4000 for GPT-3 text-davinci-002 ), the
+exact value of kis task dependent: more examples
+can fit in a prompt in tasks where (T,G)is short.
+In our experiments, kvaries between 5and30, and
+the GPT-3 baseline is always fairly given the same
+prompts as C . To control for the variance
+caused by the specific examples selected into p,
+we repeat each experiment with at least 3 different
+prompts, and report the average. We report the
+mean and standard deviations in Appendix I.
+CCG:We use CCGto refer to se-
+tups where a C is used with a Python prompt.
+In Section 4, we also experiment with dynamically
+creating a prompt for each input example, using
+a NL-LLMs with code prompts, and using Code-
+LLMs with textual prompts.
+3.2 Script generation:
+Given a high-level goal ( e.g., bake a cake ), the
+goal of script generation is to generate a graph
+where each node is an action, and edges cap-
+ture dependency between the actions (Figure 1a).
+We use the (Sakaguchi et al., 2021)
+dataset, where the scripts are directed acyclic
+graphs, which were collected from a diverse range
+of sources including ROCStories (Mostafazadeh
+et al., 2016), Descript (Wanzare et al., 2016), and
+Virtual home (Puig et al., 2018).
+LetG(V,E)be a script for a high-level goal
+Twith node and edge sets VandE, respectively.
+Following Sakaguchi et al. (2021), we experiment
+with two sub-tasks: (i) script generation: gen-
+erating the entire script G(V,E)given a goal T,
+and (ii) edge prediction: predicting the edge set E
+given the nodes Vand the goal T.
+Figure 1 shows an input-output example from , and our conversion of the graph into
+Python code: we convert each node v∈Vinto an
+instance of a Node class; we create the edges by
+addingchildren attribute for each of the nodes.
+Additional examples are present in Figure 6
+To represent a sample for edge prediction, we
+list the nodes in a random order (specified after the
+comment # nodes in Figure 1b). The model then
+completes the class by generating the code below
+the comment # edges .1387 - Avg(d) Avg( ∣V∣) Avg( ∣E∣)
+G(reference graph) - - 1.00 0.00 1.84 7.41 6.805 (fine-tuned) 23.80 35.50 -0.31 0.51 1.89 1.79 7.46 6.70 (15) 11.40 27.00 -0.41 0.15 3.92 1.47 8.09 6.16 (15) 23.11 36.51 -0.27 0.64 1.44 1.74 7.58 6.59
+CCG(15) 25.24 38.28 -0.26 0.53 2.10 1.79 7.44 6.70
+Script Generation metrics We denote the script
+that was generated by the model as ˆG, and evaluate
+ˆGvs.Gfor both semantic and structural similar-
+ity. To evaluate semantic similarity, we use , -, and the learned metric to de-
+termine the content overlap. Following Sakaguchi
+et al. (2021), we use the following metrics for struc-
+tural evaluation of generated scripts:
+•Graph edit distance (): the number of
+required edits (node/edge removal/additions)
+to transform ˆGtoG(Abu-Aisheh et al., 2015);
+•Graph isomorphism (; Cordella et al.,
+2001): determines whether ˆGandGare iso-
+morphic based on their structure, disregarding
+the textual content of nodes;
+•Graph size: average number of nodes and
+edges, (∣G(V)∣,∣G(E)∣,∣ˆG(V)∣,∣ˆG(V))
+and the average degree ( d(G(V))), where
+the high-level goal is for ˆGto have as close
+measures to Gas possible.
+Edge Prediction metrics For the edge prediction
+task, the set of nodes is given, and the goal is to pre-
+dict the edges between them. Following Sakaguchi
+et al. (2021), we measure precision, recall, and F
+comparing the true and predicted edges. Specifi-
+cally, p=,r=, andF=.Results Table 1 shows the results for script gener-
+ation. The main results are that CCG(based
+onC ), with just 15 prompt examples, outper-
+forms the fine-tuned model5which has been fine-
+tuned on all3500 samples. Further, CCG
+outperforms the few-shot NL-LM across
+all semantic metrics and structural metrics. CC-
+Goutperforms across all semantic met-
+rics, while performs slightly better in two
+structural metrics.
+Table 2 shows the results for edge predic-
+tion: CCGsignificantly outperforms the NL-
+LLMs and . When comparing with5, which was fine-tuned, CCGwith only 15
+examples outperforms the fine-tuned5which was
+fine-tuned on 100 examples. The impressive per-
+formance in the edge-generation task allows us to
+highlight the better ability of CCGin captur-
+ing structure, while factoring out all models’ ability
+to generate the NL content.
+3.3 Entity state tracking:
+The text inputs Tof entity state tracking are a
+sequence of actions in natural language about a par-
+ticular topic ( e.g., photosynthesis) and a collection
+of entities ( e.g., water). The goal is to predict the
+state of each entity after the executions of an action.
+We use the dataset (Dalvi et al., 2018) as
+the test-bed for this task.
+We construct the Python code Gas follows, and
+an example is shown in Figure 3. First, we de-
+fine themain function and list all nactions as
+comments inside the main function. Second, we
+create kvariables named as state_k where kis
+the number of participants of the topic. The seman-
+tics of each variable is described in the comments
+as well. Finally, to represent the state change af-
+ter each step, we define nfunctions where each
+function corresponds to an action. We additionally
+define aninit function to represent the initial-1388Action Entity
+water light CO2
+Initial states soil sun -
+Roots absorb
+water from soil roots sun ?
+The water flows
+to the leaf leaf sun ?
+Model prec rec F 95.1 22.3 36.1 75.5 47.1 58.0
+CCG 80.0 53.6 63.0
+ization of entity states. Inside each function, the
+value of each variable tells the state of the corre-
+sponding entity after the execution of that action.
+Given a new test example where only the actions
+and the entities are give, we construct the input
+string until the init function, and we append it to
+the few-shot prompts for predictions.
+Metrics We follow Dalvi et al. (2018) and mea-
+sure precision, recall and Fscore of the predicted
+entity states. We randomly sampled three examples
+from the training set as the few-shot prompt.
+Results As shown in Table 3, CCG
+achieves a significantly better Fscore than . Across the five prompts, CCG
+achieves 5.0 higher Fthan on aver-
+age. In addition, CCGyields stronger perfor-
+mance than , achieving Fof 63.0, which is
+74% higher than (36.1).
+In ,CCGwill be ranked 6onthe leaderboard.However, all the methods above
+CCGrequire fine-tuning on the entire train-
+ing corpus. In contrast, CCGuses only 3
+examples in the prompt and has a gap of less than
+10Fpoints vs. the current state-of-the-art (Ma
+et al., 2022). In the few-shot settings, CCG
+is state-of-the-art in .
+3.4 Argument graph generation:
+Given a belief ( e.g., factory farming should not be
+banned ) and an argument ( e.g., factory farming
+feeds millions ), the goal of this task is to generate
+a graph that uses the argument to either support
+orcounter the belief (Saha et al., 2021). The text
+input to the task is thus a tuple of ( belief ,argument ,
+“supports”/“counters” ), and the structured output is
+an explanation graph (Figure 4).
+We use the dataset for this
+task (Saha et al., 2021). Since we focus on generat-
+ing the argument graph, we take the stance as given
+and use the stance that was predicted by a stance
+prediction model released by Saha et al..
+To convert an to Python, the
+belief, argument, and stance are instantiated as
+string variables. Next, we define the graph struc-
+ture by specifying the edges. Unlike ,
+the edges in are typed. Thus,
+each edge is added as an add_edge(source,
+edge_type, destination) function call.
+We also list the starting nodes in a list instantiated1389Factory
+FarmingMillions
+Food Necessary
+Bannedcauses
+has context desires
+has context
+not desires
+StCA (↑) SeCA (↑) G-BS (↑) (↓) EA (↑)
+fine-tuned5 (150) 12.56 6.03 9.54 91.06 7.775 (1500) 38.19 21.86 29.37 73.09 23.415 (2500) 43.22 29.65 33.71 69.14 26.38
+few-shot (30) 5.03 1.26 3.95 96.74 2.60 (30) 23.62 10.80 18.46 83.83 11.84
+CCG(30) 45.20 23.74 34.68 68.76 23.58
+with abegin variable (Figure 4). Given a test
+example, we construct the input until the line of #
+Edges and let a model complete the remaining.
+Metrics We use the metrics defined by Saha et al.
+(2021) (see Section 6 of Saha et al. (2021) for
+a detailed description of the mechanisms used to
+calculate these metrics):
+•Structural accuracy (StCA): fraction of graphs
+that are connected DAGs with two concepts
+each from belief and the argument.
+•Semantic correctness (SeCA): a learned metric
+that evaluates if the correct stance is inferred
+from a (belief, graph) pair.
+•G-BERTScore (G-BS): measures BERTscore-
+(Zhang et al., 2020) based overlap between gen-
+erated and reference edges .
+•GED (): avg. edits required to transform
+the generated graph to the reference graph.
+•Edge importance accuracy (EA): measures the
+importance of each edge in predicting the target
+stance. A high EA implies that each edge in
+the generated output contains unique semantic
+information, and removing any edge will hurt.Results Table 4 shows that CCGwith only
+30 examples outperforms the5model that was
+fine-tuned using 1500 examples, across all metrics.
+Further, CCGoutperforms the NL-LLMs and with a text-prompt across all
+metrics by about 50%-100%.
+4 Analysis
+In this section, we analyze the effect of three im-
+portant components of CCG: (i) the con-
+tributions of Code-LLMs and structured prompt
+G; (ii) the selection of examples in the in-context
+prompt; and (iii) the design of the Python class.
+Structured Prompts vs. Code-LLMs Which
+component is more important, using a Code-LLMs
+or the structured formatting of the input as code?
+To answer this, we experimented with a text prompt
+with a Code-LLM C , and a code prompt with
+an NL-LLM, . Table 5 shows that both
+contributions are indeed important: performance
+improves for the NL-LLM both when we
+use a code prompt, andwhen we use a Code-LLM.
+However when using both a Code-LLM and a code
+prompt – the improvement is greater than the sum1390
+of each of these solely.
+Dynamic prompt selection The prompts for all
+experiments in Section 3 were created by random
+sampling of examples from the training set. Specif-
+ically, a set of k(T,G)pairs are sampled and con-
+catenated into a prompt p, which we used for infer-
+ence over all examples xin the test set. As an
+alternative to creating prompts, there is now a grow-
+ing interest in customizing the in-context examples
+each example x. Popular techniques typically
+train a retriever, which is used to fetch the closest
+examples (Liu et al., 2021; Rubin et al., 2021; Poe-
+sia et al., 2021). We also experimented with such
+dynamic creation of the prompt, that depends on
+the particular test example. Specifically, following
+Poesia et al. (2021), we performed knowledge sim-
+ilarity tuning (): we trained a retriever model
+to retrieve the kclosest examples for a given input.
+The results indicate that the efficacy of dynamic
+prompts depends on both the training data and task.
+In the edge-prediction sub-task of ,
+edges between events in similar scripts are help-
+ful, and Table 6 shows that the model was able to
+effectively leverage this information. In the script
+generation sub-task of , Table 8 shows
+that provides gains as well (Appendix B).
+In , we observed that the train-
+ing data had multiple examples which were nearly
+identical, and thus dynamically created prompts
+often included such duplicate examples, effectively
+reducing diversity and prompt size (Table 9).Python Formatting We performed an extensive
+study of the effect of the Python format on the
+downstream task performance in Appendix G. We
+find that: (i) there are no clear task-agnostic Python
+class designs that work uniformly well; and that
+(ii) larger models are less sensitive to prompt
+(Python class) design. In general, our approach
+benefits the most from code formats that as similar
+as possible to the conventions of typical code.
+Human evaluation We conduct human evalua-
+tion of the graphs generated by CCGand to supplement automated metrics. The re-
+sults (Appendix C) indicate that human evaluation
+is closely correlated with the automated metrics:
+for , graphs generated by CC-
+Gare found to be more relevant and correct. For generation, both andCC-
+Ghave complementary strengths, but CC-
+Gis generally better in terms of relevance.
+5 Related work
+Structured commonsense reasoning using LLMs
+Existing methods for structured commonsense
+generation typically flatten the output graphs as
+strings (Madaan and Yang, 2021; Madaan et al.,
+2021a; Sakaguchi et al., 2021). Consequently,
+these methods struggle with generation of well-
+formed outputs (Sakaguchi et al., 2021; Madaan
+et al., 2021b). In contrast, we address the problem
+of structured generation by (1) translating the task
+into Python code, and (2) generating code using
+large-code generation models.
+Code representation for procedural knowledge
+reasoning Programs inherently encode rich struc-
+tures, and they can efficiently represent task proce-
+dures. Existing works leverage the control-flows,
+nested functions and API calls of a programming
+language such as Python to control the situated
+agents in the embodied environment (Sun et al.,13912019; Zhou et al., 2022; Singh et al., 2022). In
+this work, we go beyond these procedural tasks
+and show the effectiveness of using Code-LLMs
+on broader structured commonsense tasks.
+Adapting Code-LLMs for reasoning As code-
+generation models (Code-LLMs) are getting in-
+creasingly popular, there is a growing interest in
+adapting them for a wide range reasoning tasks.
+Wu et al. (2022) use C and PaLM (Chowdh-
+ery et al., 2022) for converting mathematical state-
+ments written in natural language into a formal
+structure that can be used for theorem provers, with
+moderate success. The task is challenging, as it
+involves understanding the concepts used in the
+theorem ( e.g., set of real numbers) and the complex
+relationship between them. Our work is similar in
+spirit to Wu et al. (2022), and seeks to leverage
+the dual abilities of Code-LLMs for text and sym-
+bolic reasoning. However, differently from their
+work, we close the gap between the pre-training
+data and our tasks by translating our output into
+Python code. As our experiments show, this step is
+crucial in outperforming text-only and fine-tuned
+models. To the best of our knowledge, our work is
+the first to transform a natural-language reasoning
+problem into code to successfully leverage code
+generation methods.
+Symbolic reasoning using LLMs The use of
+programming languages like LISP (Tanimoto,
+1987) and Prolog (Colmerauer and Roussel, 1996)
+to process natural language has a long history in
+AI. However, the recent progress in large language
+models has obviated the need for specialized meth-
+ods for symbolic processing. Cobbe et al. (2021)
+and Chowdhery et al. (2022) address middle-school
+level algebra problem solving using large-language
+models in a few-shot setup. These problems require
+a model to understand the order in which a set of
+operations should be performed over symbols (typ-
+ically small integers). In contrast, structured com-
+monsense reasoning requires broader information
+than supplied in the prompt, while utilizing the
+models’ structural generation capabilities for gen-
+erating output effectively. Thus, the tasks in our
+work push a model to use both its reasoning and
+symbolic manipulation capabilities.
+6 Conclusion
+We present the first work to employ large language
+models of code for structured commonsense gen-eration. By converting the output commonsense
+structures to Python code, CCGprovides
+a simple and effective method for leveraging the
+code-generation abilities of Code-LLMs for struc-
+tured generation. These results open a promising
+direction for structural commonsense reasoning.
+We believe that the principles and the methods pre-
+sented in this paper are applicable to additional
+NLP tasks that require “language understanding”
+andstructured prediction.
+Acknowledgments
+We thank Kaixin Ma, Keisuke Sakaguchi and Niket
+Tandon for thoughtful discussion and helping with datasets and the anonymous review-
+ers for valuable feedback. This material is partly
+based on research sponsored in part by the Air
+Force Research Laboratory under agreement num-
+ber FA8750-19-2-0200. The U.S. Government is
+authorized to reproduce and distribute reprints for
+Governmental purposes notwithstanding any copy-
+right notation thereon. The views and conclusions
+contained herein are those of the authors and should
+not be interpreted as necessarily representing the
+official policies or endorsements, either expressed
+or implied, of the Air Force Research Laboratory
+or the U.S. Government. This project was also
+partially supported by a gift from AWS AI.
+Limitations
+Some experiments in this work are performed with
+language models that are not open-sourced, namely , , and C . Existing documen-
+tation (Brown et al., 2020; Chen et al., 2021b) does
+not fully describe the details of these models, such
+as the pretraining corpus, model size, and model
+biases. Therefore, we can only provide educational
+guesses on these details (analysis in Appendix A).
+In addition, even though C is free to use for
+research as of June 2022, we are unsure whether the
+research community will continue to have free ac-
+cess in the future. Nonetheless, we release our code
+and model outputs to ensure the reproducibility of
+our work. Furthermore, in cases where the models
+we experiment with reveal any issue, the publicly
+available code will allow future investigations.
+Another limitation of our work is that we exclu-
+sively experiment with datasets in English. Explor-
+ing the efficacy of structured generation methods
+in cross-lingual settings is an interesting and im-
+portant future work.1392References139313941395A Few-shot models size estimates
+As OpenAI has not released any details of the size
+of their few-shot models, we estimate the relative
+strengths and weaknesses on code and text gen-
+eration by calculating the average loss per token.
+To calculate the avg. loss of each of these mod-
+els on code, we use the implementation provided
+by Xu et al. (2022).The perplexity on text cor-
+pus was evaluated on 30 random wikipedia pages
+from Wikiplotsfollowing a similar procedure The
+structure and text generation capabilities of the
+models are apparent from the results in Table 7; outperforms C on text generation
+but is worse on code-generation and vice-versa. underperforms both andC
+significantly. Importantly, these results show that
+C and are of comparable capacities,
+making their comparison fair.
+Model
+C 0.46 2.71 0.63 2.25 1.17 3.32
+B Dynamic prompt Creation
+As an alternative to creating prompts, there is now
+a growing interest in customizing the in-context
+examples each example T. Popular techniques
+typically train a retriever, which is used to fetch
+the examples in the training set that are closest to
+T(Liu et al., 2021; Rubin et al., 2021; Poesia
+et al., 2021).
+Specifically Poesia et al. (2021) train a retriever
+with a target-similarity tuning (TST) objective over
+a corpus of Dof(x, y)examples. TST learns an
+embedding function fsuch that for a pair of exam-
+ples(x, y)and(x, y), ify∼y⟹f(x)∼
+f(x). For a new x,f(x)is used to retrieve the
+closest examples from D.
+We follow Poesia et al. (2021), and train a
+knowledge-similarity tuner (). We use mpnet-basewith SentenceTransformers (Reimers and
+Gurevych, 2019) to fine-tune a retrieval function f
+by minimizing the following loss:
+L=(cos(f(T), f(T))−sim(G,G))
+(1)
+where fis parameterized using a transformer.
+Results on usingwith (Table 8)
+and (Table 9). Whileis highly
+effective for edge-prediction 6, the results are
+mixed for and . For , yields marginal gains. However,
+for , a number of training examples
+have overlapping theme (Table 10), and thus cre-
+ating a prompt dynamically reduces the effective
+information in the prompt.
+C Human Evaluation
+Out of the four tasks used in this work,
+edge prediction and have only one possi-
+ble correct value. Thus, following prior work, we
+report the automated, standard metrics for these
+tasks. For , we use model-based
+metrics proposed by Saha et al. (2021), which were
+found to have a high correlation with human judg-
+ments. For graph generation, we con-
+ducted an exhaustive automated evaluation that sep-
+arately scores the correctness of the nodes and the
+correctness of the edges.
+However, automated metrics are limited in their
+ability to evaluate model-generated output. Thus,
+to further investigate the quality of outputs, we
+conduct a human evaluation to compare the out-
+puts generated by CCGand . We
+sampled 20 examples, and three of the authors per-
+formed the evaluation. Annotators were shown two
+graphs (generated by CCGand )
+and were asked to select one they thought was bet-
+ter regarding relevance and correctness. The se-
+lection for each criterion was made independently:
+the same graph could The annotations were done
+separately: the same graph could have more rele-
+vant nodes (higher relevance) but may not be cor-
+rect. The identity of the model that generated each
+graph ( CCGor ) was shuffled and
+unknown to the evaluators.
+The results in Table 11 indicate that human eval-
+uation is closely correlated with the automated
+metrics: for , annotators found the1396
+StCA (↑) SeCA (↑) G-BS (↑) (↓) EA (↑)
+CCG+ 002 45.2 23.74 34.68 68.76 23.58
+CCG+ 002 + 37.47 18.46 29.41 73.76 19.15
+Dataset CCG No preference
+Relevance 28.3% 16.7% 46.7% (script generation) 26.7% 18.3% 55%
+Correctness 38.3% 18.3% 31.7% (script generation) 26.7% 23.3% 50%1397graphs generated by CCGto be more rele-
+vant and correct. We find that often fails
+to recover semantic relations between nodes in the
+argument graphs. For example, consider a belief
+(B)urbanization harms natural habitats for the an-
+imals in the world . We want to generate a graph
+that can counter this belief with the argument (A)
+urbanization causes increase in jobs.
+For the same prompt, CCGgenerated (ur-
+banization; causes; increase in jobs); (increase
+in jobs; has context; good); (good; not capa-
+ble of; harms) whereas generated (jobs;
+not harms; natural habitats) →(natural habitats;
+not part of; animals). Note that suc-
+cessfully recovered relevant events (“natural habi-
+tat” “animals”) but arranged them in incorrect rela-
+tions. For , the human evaluation shows
+thatCCGand have complementary
+strengths, while CCGgenerally produces
+more relevant and correct outputs.
+D Dataset statistics
+Dataset statistics are shown in Table 12. The test
+split for is not available, so we
+evaluate on the validation split. For ,
+we obtained the test splits from the authors.
+Corpus #Train #Val #Test 3252 1085 2077 387 43 54 2368 398 -
+E Sample outputs
+Sample outputs from CCGfor all the
+tasks are located at https://github.com/
+madaan/CoCoGen/tree/main/outputs .
+Representative examples from each task are
+presented in Figure 5. Surprisingly, CC-
+G(C with a Python prompt) generates
+syntactically valid Python graphs that are similar
+to the task graphs/tables in nearly 100% of the
+cases.
+F Prompts
+The prompts for each tasks are present at this anony-
+mous URL:1. script-generation: https:
+//github.com/madaan/CoCoGen/
+tree/main/data/proscript_
+script_generation/prompt.txt
+2. edge-prediction: https:
+//github.com/madaan/CoCoGen/
+tree/main/data/proscript_edge_
+prediction/prompt.txt
+3. :https://github.com/
+madaan/CoCoGen/tree/main/data/
+explagraphs/prompt.txt
+4. :https://github.com/
+madaan/CoCoGen/tree/main/data/
+explagraphs/prompt.txt
+These prompts are also present in the attached
+supplementary material, and can be found in the
+data folder under respective task sub-directories.
+GDesigning Python class for a structured
+task
+Figure 7 shows three different designs for Ex-
+plagraphs. For , the various formats
+include representing proscript as a Networkx
+class (8), DOT-like class 9, and as a Tree (10).
+H Impact of Model size
+The C model released by OpenAI is avail-
+able in two versions:code-davinci-001
+andcode-davinci-002 . While the exact
+sizes of the models are unknown because
+of their proprietary nature, OpenAI API
+states that code-davinci-002 is the Most
+capable Codex model Tables 16 and ??com-
+pares CCG +code-davinci-001
+with CCG +code-davinci-002 .
+Note that both code-davinci-001 and
+code-davinci-002 can fit 4000 tokens,
+so the number of in-context examples was
+identical for the two settings. The results
+show that for identical prompts, CCG
++code-davinci-002 vastly outperforms
+CCG+code-davinci-001 , showing
+the importance of having a better underlying code
+generation model.1398
+Model Format StCA ( ↑) SeCA (↑) G-BS (↑) (↓) EA (↑)
+C -002 Literal 45.2 23.74 34.68 68.76 23.58
+C -002 Tree 39.24 15.95 30.49 73.85 18.24
+C -002 Relation 42.82 23.68 33.38 70.23 21.16
+Model Format F
+C -001 Literal 15.9
+C -001 Tree 29.7
+C -002 Literal (Figure 9) 52.0
+C -002 Tree (Figure 10) 56.5Model size vs. sensitivity to the prompt In
+Table 14 shows the performance of C -001
+(smaller) and C -002 (larger, also see Ap-
+pendix A) on identical prompts. Our experiments
+show that as model size increases, the sensitivity
+of the model on the prompt reduces. This indicates
+that for very large models, prompt design might get
+progressively easier.
+I Variation in prompts
+We run each experiment with 3 different random
+seeds, where the random seeds decides the order
+of examples in the prompt. We find minimal vari-
+ance between runs using different fixed prompts be-
+tween 3 runs. Further, as shown in the Tables 18,19,
+20, and 21, all improvements of CCGover are statistically significant (p-value <
+0.001).1399Take the pies out to cool Open cabinet drawer
+Take out several plates
+Begin putting
+pies on plateFill pies onto
+plates evenly
+Serve the potpies on a plate - 23.1±2.7 36.5±2.7 -0.27±0.06
+CCG 25.3±0.1 38.3±0.1 -0.25±0.01
+F1 48.9±2.8
+CCG 56.2±2.1F1 56.9±2.4
+CCG 62.8±2.41400140114021403

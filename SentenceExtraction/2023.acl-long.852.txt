@@ -1,1 +1,842 @@
-15286 Proceedings of the 61st Annual Meeting of the Association for Computational Linguistics Volume 1 : Long Papers , pages 15286–15304 July 9 - 14 , 2023 © 2023 Association for Computational Linguistics 15287 15288 15289 15290 15291 15292 15293 15294 15295 15296 15297 15298 15299 15300 15301 15302 15303 15304 
+
+Kaiyu Huang, Peng Li, Jin Ma, Ting Yao, Yang LiuInstitute for AI Industry Research (AIR), Tsinghua University, Beijing, ChinaDept. of Comp. Sci. & Tech., Institute for AI, Tsinghua University, Beijing, ChinaBeijing National Research Center for Information Science and TechnologyShanghai Artificial Intelligence Laboratory, Shanghai, ChinaTencentSch. of Comp. Sci. & Tech., University of Science and Technology of China
+{huangkaiyu,lipeng}@air.tsinghua.edu.cn; tessieyao@tencent.com
+majin01@mail.ustc.edu.cn; liuyang2011@tsinghua.edu.cn
+Abstract
+In the real-world scenario, a longstanding
+goal of multilingual neural machine transla-
+tion (MNMT) is that a single model can in-
+crementally adapt to new language pairs with-
+out accessing previous training data. In this
+scenario, previous studies concentrate on over-
+coming catastrophic forgetting while lacking
+encouragement to learn new knowledge from
+incremental language pairs, especially when
+the incremental language is not related to the
+set of original languages. To better acquire
+new knowledge, we propose a knowledge trans-
+fer method that can efficiently adapt original
+MNMT models to diverse incremental lan-
+guage pairs. The method flexibly introduces the
+knowledge from an external model into original
+models, which encourages the models to learn
+new language pairs, completing the procedure
+of knowledge transfer. Moreover, all original
+parameters are frozen to ensure that transla-
+tion qualities on original language pairs are not
+degraded. Experimental results show that our
+method can learn new knowledge from diverse
+language pairs incrementally meanwhile main-
+taining performance on original language pairs,
+outperforming various strong baselines in in-
+cremental learning for MNMT.
+1 Introduction
+Multilingual neural machine translation (MNMT)
+aims at handling multiple translation directions
+in a single model and achieves great success in
+recent years (Wenzek et al., 2021; Goyal et al.,
+2022; Cheng et al., 2022). However, the powerful
+MNMT models need to be retrained from scratch
+Table 1: The BLEU scores of incremental learning meth-
+ods on new translation directions. The original model
+is mBART25 which does not support the languages of
+Ukrainian ( uk) and Bengali ( bn).
+using a mixture of original and incremental training
+data when new language pairs arrive (Tang et al.,
+2020). Considering that the original training data
+of MNMT models is often large-scale (Fan et al.,
+2021; Costa-jussà et al., 2022), and thus the method
+that utilizes original data to train incrementally is
+time-consuming and cumbersome (Ebrahimi and
+Kann, 2021). Therefore, a practical scenario is
+that these models can continually support new lan-
+guage pairs while preserving the previously learned
+knowledge without accessing previous training
+data, which belongs to incremental learning, and
+has drawn much attention recently (Dabre et al.,
+2020; Gu et al., 2022; Zhao et al., 2022).
+In this scenario, existing studies attempt to over-
+come the issue of catastrophic forgetting (French,
+1993) on original language pairs, such as replay-
+based methods (Garcia et al., 2021; Liu et al., 2021)
+and regularization-based methods (Huang et al.,
+2022; Zhao et al., 2022). However, the methods
+primarily focus on balancing performance between
+old and new translation directions and use only in-
+cremental data to acquire new knowledge, restrict-
+ing the development of new language pairs (Es-
+colano et al., 2021; Ke and Liu, 2022). As shown in
+Table 1, prior incremental learning methods cannot15286achieve comparable performance on new transla-
+tion directions, compared with training a bilingual
+translation model from scratch. Therefore, is it
+possible to leverage external knowledge without
+increasing the amount of incremental training data
+to facilitate the learning procedure of new language
+adaptation?
+Fortunately, the development of Transformer-
+based language models unveils that Feed-Forward
+Networks (FFN) might be a core component that
+stores the knowledge (Geva et al., 2021; Dai et al.,
+2022; Geva et al., 2022; Vázquez et al., 2022).
+In these efforts, external knowledge is injected
+into FFN layers to enhance the performance of
+pre-trained language models. More importantly, it
+opens the door to leveraging the knowledge from
+neural models in adapting MNMT models to incre-
+mental language pairs.
+In this work, considering the knowledge in neu-
+ral networks, we propose a knowledge transfer
+(KT) method that can efficiently adapt MNMT
+models to diverse incremental language pairs. First,
+we convert incremental training data into continu-
+ous representation by additional parameters, form-
+ing pluggable modules. Then the pluggable mod-
+ules can be flexibly introduced in the embedding
+layer and FFN layers of original MNMT models, re-
+spectively. The two stages are regarded as a process
+of knowledge transfer and equip original models
+with knowledge of unseen languages before adap-
+tation, alleviating the representation gap between
+original models and introduced parameters. And
+the knowledge transfer method can further provide
+better optimization than training from scratch for
+the introduced parameters. Moreover, except for
+the pluggable modules, all the parameters of the
+original model are frozen. Therefore, our architec-
+ture can also retain previously learned knowledge
+from the original translation model to completely
+maintain the translation qualities on original lan-
+guage pairs. To sum up, our contributions are as
+follows:
+•We propose a knowledge transfer method with
+pluggable modules to acquire more knowl-
+edge of new languages, which achieves com-
+petitive translation qualities on incremental
+language pairs.
+•Our architecture can efficiently adapt to di-
+verse language pairs in incremental learning
+and naturally retain the performance on origi-nal language pairs when the original training
+data is not available.
+•Experiments show that our method can learn
+knowledge from the other large-scale transla-
+tion models for adapting original models with
+different sizes to new language pairs.
+2 Related Work
+Replay-Based Methods. The first branch of
+works utilizes previous training data or create
+pseudo data that is essentially a replay on old
+tasks (de Masson D’Autume et al., 2019; Liu et al.,
+2021; Kanwatchara et al., 2021). Specifically, pre-
+vious data sometimes cannot be accessed due to
+data protection and security (Feyisetan et al., 2020;
+Qu et al., 2021). In this scenario, Sun et al. (2019)
+replay pseudo samples of previous tasks, which
+can avoid forgetting previously learned knowledge.
+However, the pseudo data with noise significantly
+hurts the performance for both old and new tasks,
+and the data generation procedure requires addi-
+tional time costs, restricting the efficiency of incre-
+mental learning (Peng et al., 2020; Garcia et al.,
+2021). In contrast to these methods, our approach
+does not require extra data and is more flexible in
+the real-world scenario.
+Regularization-Based Methods. The second
+branch of works introduces additional penalty
+terms to the learning objective on the parame-
+ters, alleviating the issue of catastrophic forget-
+ting (Kirkpatrick et al., 2017; Thompson et al.,
+2019; Castellucci et al., 2021; Gu et al., 2022).
+In particular, Shao and Feng (2022) propose a com-
+plementary online knowledge distillation method
+that utilizes previous models (teachers) to supple-
+ment current model (student) training. In contrast
+to these methods, our architecture can naturally
+avoid forgetting previously learned knowledge and
+retain the performance of old tasks. It allows our
+method to focus solely on learning new knowledge
+better instead of preserving old knowledge.
+Parameter-Isolation Based Methods. The third
+branch of works introduces extra parameters to
+support new tasks and freeze all original parame-
+ters to completely retain the performance on pre-
+vious tasks (Bapna and Firat, 2019; Madotto et al.,
+2021; Zhu et al., 2021). However, the methods
+only utilize incremental training data to optimize
+the additional parameters which are randomly ini-
+tialized (Escolano et al., 2021; He et al., 2021),15287
+hindering old models from learning knowledge of
+incremental languages (Dabre et al., 2020; Ke and
+Liu, 2022). Chalkidis et al. (2021) combine pseudo
+data with the prompt-tuning method to alleviate
+this issue for multilingual tasks. Our method at-
+tempts to exploit the potentiality of incremental
+training data to acquire new knowledge via knowl-
+edge transfer while not leveraging extra data, com-
+pared with existing methods.
+3 Method
+In this work, we aim to completely maintain the
+performance of previous translation tasks without
+original training data. As shown in Figure 1, we
+introduce additional components for new language
+pairs and adopt a strategy that does not disturb the
+parameters of the original model. We hope to mini-
+mize the impact on the original model during the
+incremental learning process. As a result, we exclu-
+sively concentrate on how to handle the situation
+of learning new language pairs. Furthermore, the
+additional components are transferred from param-
+eters in another pre-trained translation model, in
+a similar way to a pluggable module, rather than
+randomly initialized, as shown in Figure 2. It can
+also reduce the cost of learning new language pairs
+during the training stage, enhancing the practicabil-
+ity and efficiency of incremental learning methods
+in the real-world scenario.
+3.1 Task Definition
+An ideal requirement is that original MNMT mod-
+els can be continually updated to support new lan-
+guage pairs while retaining translation qualities on
+original language pairs without accessing previous
+training data, as shown in Figure 1.Formally, an MNMT model is trained on ini-
+tially selecting a set of available parallel data
+D={D, ...,D, ...,D}which covers Nlan-
+guages, and Drepresents the original parallel train-
+ing corpus on the i-th language pair. The training
+objective of the initial MNMT model is to maxi-
+mize the log-likelihood L:
+L(θ) =/summationdisplay/summationdisplaylogp(y|x;θ) (1)
+where θrepresents the trainable parameters of
+MNMT models. The source sentence is denoted
+asx, while the target sentence is denoted as y. In
+order to specify the source and target languages,
+two language tokens are added at the beginning of
+each source and target sentence, respectively.
+Incremental learning is updating the original
+MNMT model on an updated set of parallel data
+D={D, ...,D, ...,D}which covers M
+languages, and N > M . A dilemma, though, is
+that the original training data Dis often unavail-
+able due to data security. Thus, we can only utilize
+the new data D={D, ...,D, ...,D}to in-
+crementally train the original MNMT model, and
+Drepresents the incremental parallel training cor-
+pus on the j-th language pair. The optimization
+objective in incremental learning is given by:
+L(θ) =/summationdisplay/summationdisplaylogp(y|x;θ)(2)
+As a result, the number of language pairs that the
+MNMT model support increases from NtoM.
+3.2 Knowledge Transfer via Pluggable
+Modules
+Based on the original MNMT model, we open up
+additional spaces for adapting to new language
+pairs, as shown in Figure 2. However, the addi-
+tional spaces with initialized parameters are weak
+in their abilities to capture the shared linguistic
+features among different languages. Because the
+linguistic distribution of the original model is fit-
+ted previously, which leads to a representation gap
+between the original model and introduced spaces.
+Thus, we not only leverage new training data but
+also exploit the potentiality of these data by intro-
+ducing two types of pluggable modules to bridge
+the representation gap.
+Vocabulary Adaptation. On the one hand, if
+the new language has a distinct script with the15288
+set of original languages, a certain proportion
+of the out-of-vocabulary (OOV) tokens with un-
+clear semantics will occur due to different char-
+acter sets between the original and incremental
+languages, which hinders performance on new lan-
+guage pairs (Zhang et al., 2022). However, the
+external model is not troubled by this situation and
+covers sufficient tokens for the incremental lan-
+guage pairs. Therefore, we expand an extra space
+in the embedding layer and concatenate the embed-
+dings of non-overlap tokens between the original
+model and the external model, bridging the repre-
+sentation gap through vocabulary adaptation.
+Feed-Forward Adaptation. On the other hand,
+FFN layers can be seen as key-value mem-
+ories, which has previously been investigated
+by (Sukhbaatar et al., 2019). Each FFN layer con-
+sists of two linear networks with a non-linearity
+activation function and is given by:
+FFN( H) =f(H·K)·V (3)
+where K, V∈R are parameter matrices,
+dis the dimension of the FFN, His the input
+hidden state of FFN layers and the dimension is
+d ,frepresents the non-linearity activation
+function, e.g., GELU and ReLU.
+The first linear network is regarded as the keysand activates a set of intermediate neurons. The
+second linear network integrates the corresponding
+value matrices by weighted sum, using the activated
+neurons as weights. The FFN layers store knowl-
+edge in the key-value memories manner. Thus,
+we leverage the continuous representation in the
+FFN layers of the external model that stores useful
+language knowledge and transfer the knowledge
+into the FFN layers of the original model, form-
+ing a type of pluggable module. We combine the
+output of the original FFN layers and the injected
+pluggable modules to share linguistic knowledge,
+alleviating the representation gap through Feed-
+Forward layers adaptation. The fusion FFN output
+His given by:
+H= FFN (H) + FFN (H)(4)
+3.3 Training and Inference
+During the training stage, previously learned
+knowledge can be naturally preserved with a frozen
+training strategy, which can avoid the issue of catas-
+trophic forgetting. The training procedure of our
+method is divided into two stages, as shown in
+Figure 2.
+Stage 1: External Model Training. To convert
+incremental training data into continuous represen-
+tation by additional parameters. We first leverage15289the incremental training data to train an external
+Transformer-based neural network.
+L(ˆθ) =/summationdisplay/summationdisplaylogp(y|x;ˆθ)(5)
+where ˆθrepresents the trainable parameters of the
+external neural models. We only retain the param-
+eters in the embedding layer ( ˆθ) and FFN layers
+(ˆθ) of the external model as the pluggable modules
+for the next training stage.
+Stage 2: Pluggable Module Tuning. Directly
+transferring the additional parameters limits the
+MNMT model capacity, especially for the language
+pairs with sufficient data. Therefore, we further
+train the pluggable modules in the second stage:
+L(ˆθ,ˆθ) =/summationdisplay/summationdisplaylogp(y|x;ˆθ,ˆθ)
+(6)
+where ˆθandˆθrepresent the trainable parameters
+of pluggable modules in the embedding layer and
+FFN layers, respectively.
+Inference. For the inference stage, the original
+translation directions follow the original model
+without any pluggable modules while the incremen-
+tal translation directions require the concatenation
+of the original model and pluggable modules.
+4 Experiments
+4.1 Datasets
+To ensure the reliability of the experiments, the
+original MNMT model is implemented on a mul-
+tilingual machine translation dataset(WMT-7)
+that covers seven languages (Farhad et al., 2021).
+And we provide four incremental languages con-
+sidered for incremental adaptation. An extensive
+description and comprehensive information regard-
+ing the datasets for all languages can be found in
+Appendix A. All training data are sourced from
+the WMT (Workshop on Machine Translation) and
+FLoRes datasets, ensuring reliable quality.
+Language Choice. As contrasted to previous
+studies for incrementally adapting translation mod-
+els to new languages, we further provide a com-
+prehensive language setting. Previous works often
+investigate the situation of the related languageswhich are similar language families and scripts to
+the original languages. In our setting, the incre-
+mental languages have distinct scripts and belong
+to several language families, which leads to a se-
+rious language representation gap. Please refer to
+Appendix A.2 for more details of language consid-
+eration in our setting.
+4.2 Implementation Details
+Baselines. We implement a vanilla Transformer
+for original languages as the initial model which
+is trained on multiple parallel data jointly (John-
+son et al., 2017). And we compare the proposed
+method with different architectures for adapting the
+original model to new language pairs. All methods
+utilize the preprocessing script of a shared BPE
+model with 32k tokens based on the Sentencepiece
+library. The baselines can be listed as follows:
+From-scratch (Johnson et al., 2017): A vanilla
+Transformer is trained from scratch on the incre-
+mental languages with the multilingual training
+strategy. Note that the models do not support the
+original translation directions.
+Adapter (Bapna and Firat, 2019): We follow
+previous adapter architectures and introduce ex-
+tra parameters in each FFN layer of the original
+MNMT model. All original parameters are frozen
+and only the adapters are trainable.
+Extension (Lakew et al., 2018): On the basis
+of the adapter architecture, we extend the original
+vocabulary ( V) for new languages adaptation. Ini-
+tially, a supplementary vocabulary ( V) is created
+using the standard Byte-Pair Encoding (BPE) pro-
+cedure from the incremental training data. Subse-
+quently, VandVare combined to form a unified
+vocabulary V, which is defined as V=V∪ V.
+The embeddings of the original models are ex-
+panded to match the size of the complete vocabu-
+lary (V), and the additional embeddings are initial-
+ized using a Gaussian distribution.
+Serial/Parallel (Zhu et al., 2021): We follow
+Zhu et al. (2021) to introduce adapters in the serial
+or parallel connection manner. Our pluggable mod-
+ules in the FFN layers can also be converted into a
+serial manner.
+Training Setup. We implement all models based
+on the open-source toolkit fairseq(Ott et al., 2019).
+For a fair comparison, we employ the same config-
+uration of Transformer-Big (Vaswani et al., 2017)15290
+in our experiments. All original parameters are
+frozen during the incremental learning procedure.
+More model training details are provided in Ap-
+pendix B.1.
+Evaluation. We report the detokenized case-
+sensitive BLEU of models by the SacreBLEU eval-
+uation script (Post, 2018). We show the training
+time of each method in terms of kiloseconds and
+use the beam search decoding algorithm with a
+beam size of 5 and a length penalty of 1.0.
+4.3 Main Results
+Adding A Single Language
+As shown in Table 2, we investigate the translation
+qualities when a new language pair arrive. The
+results demonstrate that our proposed method (KT)
+outperforms several baselines in terms of average
+BLEU scores for all incremental translation direc-
+tions. Specifically, KT achieves an average BLEU
+score of 27.14 for xx →en and 21.32 for en →xx
+translations. In particular, based on KT, the plug-
+gable modules that are injected in a parallel man-
+ner further improve the performance over the serial
+manner on all incremental language pairs.
+The Adapter methods are more vulnerable to
+adapting original models to some incremental lan-
+guage pairs, e.g., 0.12 BLEU scores on en→bnand
+16.94 BLEU scores on bn→en. Because the meth-
+ods with an unaltered vocabulary result in the sen-
+tence being broken up into semantically meaning-
+less OOV tokens. Although the Extension methods
+can alleviate the issue of OOV tokens and fragmen-
+tary semantics by rebuilding embedding layers, the15291
+extended parameters are still hard to optimize. The
+knowledge transfer method can further guide addi-
+tional parameters to achieve greater improvements
+on these language pairs.
+Considering the different introduced manners of
+pluggable modules, based on the baselines, parallel
+modules tend to be weaker than serials. It demon-
+strates that parallel architecture is more difficult
+to learn new knowledge from limited training data.
+And the results show that the knowledge transfer
+method mitigates this issue and explores the poten-
+tial of parallel architectures, achieving obvious im-
+provement on all eight translation directions, even
+outperforming the model training from scratch.
+Adding Multiple Languages Simultaneously
+As shown in Table 3, we examine the translation
+qualities in incremental learning when eight new
+language pairs arrive simultaneously. The results
+show that our proposed method can also achieve
+better performance compared with the baselines.
+Notably, in the low resource scenario ( roanduk),
+our method of adding multiple languages obtains
+better performance compared with adding a single
+language.
+Besides, adding multiple languages simultane-
+ously in incremental training makes more training
+samples available and it facilitates the optimiza-
+tion of challenging pluggable modules in a parallel
+manner. In this setting, the parallel pluggable mod-
+ules of all methods demonstrate better performance
+than the serial. Moreover, the situation of incre-
+mental language pairs that are difficult to learn is
+still alive with the Adapter. It even shows more
+severe degeneration on the other incremental lan-
+guages (17.24 BLEU on en→deof adding a sin-gle language while 6.56 BLEU of adding multiple
+languages simultaneously). However, our method
+does not significantly been disturbed by different
+conditions in incremental learning, which exhibits
+good stability, as shown in Table 2 and Table 3.
+Degeneration in Incremental Learning.
+As shown in Table 4, to demonstrate the reliabil-
+ity and effectiveness, we investigate the degener-
+ation on the original translation directions, com-
+pared with various outstanding continual learn-
+ing methods. The results demonstrate that our
+method achieves competitive performance on the
+incremental translation directions and even outper-
+forms the fine-tuning strategy (up to +0.57/+0.40
+forro→enanden→rorespectively). Please refer
+to Appendix 4.6 and B.2 for more details of the
+original models and all baselines.
+Besides, the results also show that prior replay-
+based and regularization-based methods still suf-
+fer from pronounced degeneration on the original
+translation directions without the original data. Al-
+though no degradation has occurred using Prompt
+and Prefix, they are vulnerable to learning new
+knowledge from updated training samples incre-
+mentally. More importantly, considering the reli-
+ability of the comparison, we have only selected
+the translation directions between Romanian and
+English. Because previous methods cannot obtain
+comparable results when the incremental languages
+are not related to the set of original languages.
+4.4 Results on Pre-trained Models
+As shown in Table 5, we leverage pre-trained M2M-
+100 models (Fan et al., 2021) as the external model
+and investigate the effectiveness of different knowl-15292
+edge transfer methods. Knowledge distillation
+(KD) (Hinton et al., 2015) is a widely used tech-
+nique to transfer knowledge between models. The
+results show that only utilizing KD cannot achieve
+comparable performance for incremental language
+adaptation. However, KD can be arbitrarily inte-
+grated into our method (KT) and further facilitate
+the procedure of knowledge transfer. The combi-
+nation of KD and KT achieves better translation
+qualities than only using one alone based on all
+model settings.
+Besides, both KD and KT are better at learning
+knowledge from the large pre-trained models. It
+proves that the large pre-trained model contains
+more useful knowledge. And we find that the size
+between models also determines the performance
+on incremental translation directions. The small
+M2M-100 model (0.4B) is beneficial for the same
+size original model (0.4B) but is insufficient to
+support the large original model (1.2B). In contrast,
+the large M2M-100 model (1.2B) plays a positive
+role in both small and large original models by
+knowledge transfer. However, the small original
+model (0.4B) limits learning sufficient knowledge
+from the large M2M-100 model according to the
+comparison between No.6 and No.12, as shown in
+Table 5.
+4.5 Ablation Studies
+Effects on Transfer Areas
+As shown in Table 6, we further investigate the
+effectiveness of our method in different transferareas. The results demonstrate that our method can
+help each pluggable module to be better optimized
+separately and achieves better performance when
+both two pluggable modules are injected through
+knowledge transfer for all incremental languages.
+Specifically, the method improves translation qual-
+ities related to Romanian and Ukrainian when it af-
+fects the pluggable module in the embedding layer.
+On the contrary, it is more effective to transfer the
+knowledge for the pluggable modules in the FFN
+layers on translation directions related to German
+and Bengali, according to the comparison between
+2 and 3. A possible reason is that the resource of
+different language pairs influences the efficiency of
+knowledge transfer.
+Effects on Pluggable Modules
+Previous parameter-isolation based methods pro-
+pose various components to introduce additional pa-
+rameters in the hidden layers (He et al., 2021). As
+shown in Table 7, inspired by them, we modify the
+usage of the pluggable modules in the hidden layers
+and our method is stable on the four translation di-
+rections. In particular, we also inject the pluggable
+modules in the Self-Attention layer. However, the
+special modification of pluggable modules does not
+demonstrate effective performance in incremental
+learning for MNMT.
+4.6 Results on Original Language Pairs
+To demonstrate the validity and reliability of our
+method, we build two powerful MNMT models as
+the original models. As shown in Table 8, the origi-
+nal models achieve state-of-the-art performance on
+all original translation directions, compared with
+the other powerful MNMT models.
+4.7 More Comparisons
+Due to space limitation, we provide a more detailed
+analysis of our method in Appendix C, including
+the training cost of the incremental learning, the15293
+visualization of sentence representations on all lan-
+guage pairs, and the case study on new language
+pairs, demonstrating the effectiveness of the knowl-
+edge transfer method in incremental learning for
+new language adaptation.
+5 Conclusion
+In this work, we propose a knowledge transfer
+method in incremental learning for MNMT, which
+leverages the knowledge from neural models. It can
+encourage original models to learn new knowledge
+from updated training data while naturally mitigat-
+ing the issue of degradation on previous translation
+directions. Moreover, it is more efficient to uti-
+lize the knowledge transfer scheme than introduc-
+ing randomly initialized parameters in incremental
+learning. Experimental results demonstrate that the
+proposed method outperforms several strong base-
+lines in the comprehensive language consideration.
+Limitations
+In this work, we attempt to extend an existing
+MNMT model to support new language pairs with
+an acceptable expense. In addition to the advan-
+tages, our method has the following limitations:
+(1) Additional introduced parameters. We utilize
+the parameter-isolation based method to support
+new language pairs. The total parameters of the
+MNMT model have been increased by pluggable
+modules to achieve better performance than prior
+studies. In the future, we will compress the number
+of parameters to the same size of original models
+meanwhile preserve the performance on all transla-
+tion directions.
+(2) The gap between our scenario and the real-
+world scenario. Our proposed method is a white-
+box service in incremental learning. Thus, we traina powerful MNMT model as the original model in-
+stead of directly utilizing existing models from the
+Internet. And we only consider eight incremental
+language pairs due to the limitation of computation
+resources. We try our best to simulate the real-
+world scenario and we will apply our proposed
+method for large-scale pre-trained MNMT models
+(e.g., NLLB 54.5B and M2M 12B) to validate the
+effectiveness in industrial scenarios.
+Acknowledgements
+This work is supported by the National Key R&D
+Program of China (2022ZD0160502) and the Na-
+tional Natural Science Foundation of China (No.
+61925601, 62276152, 62236011). We sincerely
+thank the reviewers for their insightful comments
+and suggestions to improve the quality of the paper.
+References15294152951529615297A Dataset Details
+We utilize six language pairs to train the original
+MNMT model that covers 12 translation directions
+and 7 languages (WMT-7). All the original training
+data comes from the recent WMT general trans-
+lation track. And we conduct eight incremental
+language pairs in incremental learning from the
+WMT news translation track and FLoRes. All data
+follow the license that can be freely used for re-
+search purposes (Farhad et al., 2021). The license
+of FLoRes dataset is CC-BY-SA 4.0. In addition,
+we follow Fan et al. (2021) to clean the training
+sample. We introduce the characteristics of differ-
+ent languages to analyze the linguistic diversity, as
+shown in Table 9. All language pairs are English-
+centric and the statistics of training data are shown
+in Table 10.
+A.1 Data Statistics
+As the general setting, all language pairs are di-
+vided into three categories in terms of the amount
+of parallel data, including high resource (>10M),
+medium resource (1M~10M), and low resource
+(100k~1M). Specifically, the original language
+pairs are, High resource: Japanese and Polish;
+Medium resource: Icelandic and Pashto; Low re-
+source: Hausa and Tamil. And the incremental
+language pairs are, Medium resource: German and
+Bengali; Low resource: Ukrainian and Romanian.
+Note that incremental training data is often a non-
+high resource in the real-world scenario.
+A.2 Language Consideration
+In this work, we explore a more complex and
+comprehensive scenario for MNMT in incremental
+learning, taking into account the diversity of incre-
+mental languages. These incremental languages
+differ from the original languages in terms of their
+scripts and belong to different language families,
+which leads to a serious vocabulary and linguistic
+gap. Inspired by Zhang et al. (2022), if the incre-
+mental language has a distinct script with the set
+of original languages, a certain proportion of OOV
+tokens with unclear semantics will occur between
+the original and incremental languages and hinder
+the performance on new language pairs. Moreover,
+it is important to note that a language family refers
+to a group of languages that share a common an-
+cestry, known as the proto-language. This concept
+highlights the historical connections among lan-
+guages and their evolution over time. Additionally,
+differences in grammar and word order can be ob-
+served across distinct language families. These
+linguistic variations further contribute to the exist-
+ing gap between incremental languages, making
+their translation more challenging.
+In our setting, the 4 incremental languages in-
+clude: Bengali, which is not related to any of
+the original 7 languages, and has a distinct script;
+Ukrainian, which is related to the original language
+Polish with the language family Slavic, but has a
+distinct script with Cyrillic; Romanian, is Romance
+language that is not related to all the original lan-
+guages, but has a share script with Latin characters;
+German, which is similar to the original languages
+in the language families and scripts. The statistics
+and details of datasets for original and incremental
+languages are shown in Table 9.
+B Model Details
+B.1 Training Setup
+We implement Transformer translation models in
+all our experiments. In particular, the small orig-
+inal model (0.4B) consists of 6 stacked encoder
+layers, 6 stacked decoder layers, and 16 multi-
+attention heads, followed by the configuration of
+Transformer-Big (Vaswani et al., 2017). The dimen-
+sions of d anddare 1024 and 4096 respec-
+tively. The large original model (1.2B) consists of
+24 stacked encoder layers, 24 stacked decoder lay-
+ers, and 16 multi-attention heads, followed by the
+configuration of M2M-100 (Fan et al., 2021). The15298
+dimensions of d anddare 1024 and 8192
+respectively. We use Adam (Kingma and Ba, 2014)
+and a half-precision training scheme to optimize
+the parameters of all MNMT models. In addition,
+we reset the optimizer and learning scheduler in in-
+cremental learning and use the temperature-based
+sampling scheme (Arivazhagan et al., 2019) with
+a temperature of T= 5 to balance the training
+data between diverse language pairs. We adopt the
+early stop (patience is 10) strategy in incremental
+learning and the batch size is 4096 ×4 in all train-
+ing procedures. To eliminate the randomness of the
+result, we report the mean BLEU scores of the mod-
+els that are trained in five seeds. All incremental
+models are trained on 2 NVIDIA A100 GPUs.
+B.2 Continual Learning Baselines
+We compare our method with various representa-
+tive baselines in continual learning. The baselines
+are as follows:
+•Replay (Sun et al., 2019): creating pseudo
+data for the original language pairs and train-
+ing new language pairs jointly with the pseudo
+data and incremental training data.
+•EWC (Kirkpatrick et al., 2017): computing
+the importance of the parameters with Fisher
+matrix and employing an additional penalty
+into the loss function to preserve original
+knowledge.
+•Self-KD (Castellucci et al., 2021): utilizing
+the original models as the teacher model to
+distill old knowledge.
+•LFR (Gu et al., 2022): constraining the pa-
+rameters of original models with low forget-
+ting risk regions. We choose the LRF-CM for
+adapting new language pairs.
+•Prompt (Chalkidis et al., 2021): prepending
+prompts to the input embedding in the first
+layer.
+•Prefix (Li and Liang, 2021): prepending pre-
+fixes to the keys and values of the attention at
+every layer.
+C More Comparisons
+C.1 Training Cost
+To further illustrate the efficiency of our method,
+we investigate the training time compared with the
+stronger baselines, as shown in Figure 3. The re-
+sults show that the knowledge transfer method can
+reduce the training time of incremental learning,
+which is more efficient and practical than the other
+methods.
+C.2 Visualization of Multilingual
+Representations
+As shown in Figure 4, we visualize the sentence
+representations on xx-to-English translation direc-
+tions to investigate the representation gap between
+languages. Due to comparability in one represen-
+tation space, we need multi-source sentences that
+represent the same meaning in different languages.15299
+We use “FLoRes” and reduce the 1024-dim repre-
+sentations to 2-dim with t-SNE (Van der Maaten
+and Hinton, 2008) for visualization.
+As Figure 4 shows, the sentence representations
+using our method are drawn closer than the stan-
+dard Adapter method (one of the baselines). It
+demonstrates that our method can well adapt to
+the new language. Moreover, previous studies
+have shown that if sentences with similar semantics
+are closer together in the representation space, it
+can usually improve the translation performance
+of zero-shot translation. Experimental results intwo translation directions show that our method
+can achieve better performance for zero-shot trans-
+lation, which is consistent with our visualization.
+C.3 Case Study
+We present several translation examples to provide
+a comprehensive understanding of the knowledge
+transfer method, as shown in Table 12. The exam-
+ples demonstrate that our method can effectively
+adapt original models to new languages especially
+when the incremental language is not related to
+the set of original languages. In particular, due to15300the vocabulary gap, the Adapter method is vulnera-
+ble to learning incremental languages that have a
+distinct script with Latin. Although the Extension
+alleviates this issue by expanding the embedding
+layer, the additional parameters are not fully op-
+timized to suffer from the off-target problem for
+MNMT.
+D Potential Risks of Our Method
+Since our proposed method can increase the unlim-
+ited number of translation directions, it is possible
+for some malicious users to use the MNMT model
+to provide translation services for politically sensi-
+tive languages. For instance, a malicious user may
+utilize our model to generate hateful or offensive
+sentences in some politically sensitive languages.1530115302ACL 2023 Responsible NLP Checklist
+A For every submission:
+/squareA1. Did you describe the limitations of your work?
+We provide the limitations of our work in the section ’Limitation’.
+/squareA2. Did you discuss any potential risks of your work?
+We provide the potential risks of our work in Appendix D.
+/squareA3. Do the abstract and introduction summarize the paper’s main claims?
+The paper’s main claims are summarized in the section ’Abstract’ and the section 1.
+/squareA4. Have you used AI writing assistants when working on this paper?
+Left blank.
+B/squareDid you use or create scientiﬁc artifacts?
+We provide the dataset and open toolkit in the section 4.1, 4.2, and Appendix A.
+/squareB1. Did you cite the creators of artifacts you used?
+We cite the dataset and open toolkit in the section 4.1, 4.2, and Appendix A.
+/squareB2. Did you discuss the license or terms for use and / or distribution of any artifacts?
+We discuss the license of dataset in Appendix A.
+/squareB3. Did you discuss if your use of existing artifact(s) was consistent with their intended use, provided
+that it was speciﬁed? For the artifacts you create, do you specify intended use and whether that is
+compatible with the original access conditions (in particular, derivatives of data accessed for research
+purposes should not be used outside of research contexts)?
+We discuss the existing artifact was consistent with their intended use n the section 4.2 and Appendix
+A.
+/squareB4. Did you discuss the steps taken to check whether the data that was collected / used contains any
+information that names or uniquely identiﬁes individual people or offensive content, and the steps
+taken to protect / anonymize it?
+We check the details of dataset in Appendix A.
+/squareB5. Did you provide documentation of the artifacts, e.g., coverage of domains, languages, and
+linguistic phenomena, demographic groups represented, etc.?
+We provide the details of domains and languages in Appendix A.
+/squareB6. Did you report relevant statistics like the number of examples, details of train / test / dev splits,
+etc. for the data that you used / created? Even for commonly-used benchmark datasets, include the
+number of examples in train / validation / test splits, as these provide necessary context for a reader
+to understand experimental results. For example, small differences in accuracy on large test sets may
+be signiﬁcant, while on small test sets they may not be.
+We carefully provide the statistics of all data in Appendix A.
+C/squareDid you run computational experiments?
+We provide the computational experiments in Appendix B and C.
+/squareC1. Did you report the number of parameters in the models used, the total computational budget
+(e.g., GPU hours), and computing infrastructure used?
+We provide all implementation details and training setup in section 4, Appendix B.1 and Appendix
+B.2. The section 4.4 also contains the number of parameters in the models used. We report the
+training cost in Appendix C.1.15303/squareC2. Did you discuss the experimental setup, including hyperparameter search and best-found
+hyperparameter values?
+We provide the experimental setup with hyper-parameters and conﬁguration in Appendix B.1
+/squareC3. Did you report descriptive statistics about your results (e.g., error bars around results, summary
+statistics from sets of experiments), and is it transparent whether you are reporting the max, mean,
+etc. or just a single run?
+We report the statistics about our results in Appendix B.1.
+/squareC4. If you used existing packages (e.g., for preprocessing, for normalization, or for evaluation), did
+you report the implementation, model, and parameter settings used (e.g., NLTK, Spacy, ROUGE,
+etc.)?
+We used existing packages of scripts and toolkit and we report these details in section 4.2.
+D/squareDid you use human annotators (e.g., crowdworkers) or research with human participants?
+Left blank.
+/squareD1. Did you report the full text of instructions given to participants, including e.g., screenshots,
+disclaimers of any risks to participants or annotators, etc.?
+No response.
+/squareD2. Did you report information about how you recruited (e.g., crowdsourcing platform, students)
+and paid participants, and discuss if such payment is adequate given the participants’ demographic
+(e.g., country of residence)?
+No response.
+/squareD3. Did you discuss whether and how consent was obtained from people whose data you’re
+using/curating? For example, if you collected data via crowdsourcing, did your instructions to
+crowdworkers explain how the data would be used?
+No response.
+/squareD4. Was the data collection protocol approved (or determined exempt) by an ethics review board?
+No response.
+/squareD5. Did you report the basic demographic and geographic characteristics of the annotator population
+that is the source of the data?
+No response.15304

@@ -1,1 +1,804 @@
-9465 Proceedings of the 2022 Conference on Empirical Methods in Natural Language Processing , pages 9465 9480 December 7 - 11 , 2022 © 2022 Association for Computational Linguistics 9466 9467 9468 9469 9470 9471 9472 9473 9474 9475 9476 9477 9478 9479 9480 
+
+Bhavana Dalvi Mishra, Oyvind Tafjord, Peter Clark
+Allen Institute for AI, Seattle, WA
+{bhavanad,oyvindt,peterc}@allenai.org
+Abstract
+Our goal is a teachable reasoning system for
+question-answering (QA), where a user can in-
+teract with faithful answer explanations, and
+correct its errors so that the system improves
+over time. Our approach is to augment a QA
+model with a dynamic memory of user feed-
+back, containing user-supplied corrections to
+erroneous model beliefs that users identify dur-
+ing interaction. Retrievals from memory are
+used as additional context for QA, to help avoid
+previous mistakes in similar new situations -
+a novel application of memory-based contin-
+uous learning. With simulated feedback, we
+find that our system (called TeachMe) contin-
+ually improves with time, and without model
+retraining, requiring feedback on only 25% of
+training examples to reach within 1% of the
+upper-bound (feedback on all examples). Sim-
+ilarly, in experiments with real users, we ob-
+serve a similar trend, with performance improv-
+ing by over 15% on a hidden test set after teach-
+ing. This suggests new opportunities for using
+frozen language models in an interactive setting
+where users can inspect, debug, and correct the
+model’s beliefs, leading to improved system’s
+performance over time.
+1 Introduction
+Our goal is a teachable question-answering (QA)
+system - one that a user can interact with to see
+faithful explanations for its answers, debug errors,
+and correct them so that the system gradually im-
+proves over time (sometimes referred to as explana-
+tory interactive machine learning (XIL) (Teso and
+Kersting, 2019)). While the benefits of such a sys-
+tem are evident (Lakkaraju et al., 2022), the chal-
+lenges are evident also: despite recent progress in
+explainability (Wiegreffe and Marasovi ´c, 2021), it
+is often hard to understand how a model arrived at
+an answer, and even harder to correct it if it madeFigure 1: TeachMe augments the basic question-
+answering model with a memory of user feedback. (A)
+Given a new question, facts retrieved from memory are
+used as additional context for the model, influencing its
+answers and proofs. (B) If the user disagrees with an
+answer, they localize the error in the explanation and
+offer corrective feedback, which is added to memory.
+(C) These new facts can then be retrieved if the query is
+re-asked, helping the system avoid repeating mistakes.
+Note that these also help improve answers on new, sim-
+ilar questions that are asked later, helping the system
+improve over time.
+a mistake. In contrast, people are typically able to
+provide a chain of reasoning for their decisions, and
+may change their mind if a flaw in their knowledge
+or reasoning is exposed. Our goal is to similarly
+have machines provide reasoned answers to ques-
+tions, showing how the answer follows from its in-
+ternal knowledge (and possibly externally available
+information), and where it is capable of changing
+its answer if errors in that knowledge are identified.
+Our approach has three components. First,
+the system produces answers supported by an
+entailment-based chain of reasoning, showing how
+the answer follows from the system’s own internal
+beliefs. Second, if an answer is wrong, a user9465can inspect the reasoning to diagnose and correct
+the failure. For example in Figure 1, the system
+incorrectly concludes that “a magnet can pick up
+a penny” from its over-general (false) belief that
+“metals are magnetic”. The user can thus correct the
+mistake by asserting that “not all metals are mag-
+netic”, in particular copper. Finally, to store and
+apply the user’s feedback, we augment the model
+with a dynamic memory. Given a new question (or
+re-asking an old question), TeachMe retrieves user-
+supplied facts from this memory. These are then
+used as context while generating an entailment-
+supported answer to the question, e.g., step (C)
+in Figure 1. This helps override prior, erroneous
+model beliefs, thus biasing TeachMe to avoid sim-
+ilar mistakes in future – a novel application of
+memory-based continual learning to belief main-
+tenance, in which the model itself remains fixed
+(frozen) and retraining is not required.
+We evaluate TeachMe using both simulated and
+real user feedback. With simulated feedback, us-
+ing two existing datasets OBQA (Mihaylov et al.,
+2018) and QuaRTz (Tafjord et al., 2019), we find
+that TeachMe is able to continuously improve with
+time, without retraining, requiring only a quarter of
+the feedback annotations available in the original
+dataset to reach within 1% of the upper-bound (us-
+ing all gold annotations). Similarly with real users,
+we find that after they interact with TeachMe on a
+small set of questions, the system’s performance on
+a hidden test set similarly improves (by over 15%)
+without retraining. Our contributions are thus:
+1.A novel, memory-augmented architecture en-
+abling user corrections to help override erro-
+neous model beliefs, thus allowing the over-
+all system to gradually improve with time,
+without model retraining (the runtime model
+remains frozen). While memory-based archi-
+tectures have been used previously, ours is the
+first to show that user-provided and model-
+internal beliefs can be integrated together for
+systematic reasoning.
+2.A demonstration of the viability of the ap-
+proach with both simulated and real users,
+showing system improvement on hidden test
+questions after users “taught” the system on a
+set of training questions.
+2 Related Work
+Guiding Frozen Language Models and Memory:
+Our use of context to modify a (run-time) frozenmodel’s behavior is similar to retrieval-based QA
+(Ni et al., 2019; Clark et al., 2020), where retrieved
+context can improve QA performance. In our case,
+however, retrieval is from a dynamic memory of
+user-supplied facts, rather than a static corpus, the
+memory serving to expand and override model be-
+liefs. It also can be seen as a form of prompt en-
+gineering (Brown et al., 2020; Rubin et al., 2021),
+except using relevant facts rather than few-shot
+QA examples, and with novelty on the interactive
+collection and management of those facts.
+TeachMe’s memory-based feedback is inspired
+by the feedback mechanism of BeliefBank (Kass-
+ner et al., 2021), in which retrieved memories were
+similarly used as context to guide future QA. In Be-
+liefBank, however, memories were previous system
+answers, without any mechanism for explaining its
+reasonong nor being corrected by a user. In con-
+trast, TeachMe’s memories are provided by a user,
+identified through interaction with system explana-
+tions.
+TeachMe’s memory is also related to work by
+Tandon et al., where user feedback memories were
+used but in different ways, namely to repair er-
+roneous model outputs via post-processing (Tan-
+don et al., 2022a), or to clarify user intent in
+GPT3 prompts (Tandon et al., 2022b). In contrast,
+TeachMe’s feedback contains corrections and elab-
+orations to the model’s internal beliefs themselves.
+More generally, while the idea of memory for
+improved performance is not new, our way of using
+memory is novel: to the best of our knowledge,
+TeachMe is the first system that allows a user to
+find, extend, and correct its reasoning errors, and
+the memory allows the resulting system to improve
+over time (continual learning).
+Feedback and Interaction: Interaction has been
+successfully used to learn in interactive recom-
+mender systems, e.g., (Kang et al., 2019; Li et al.,
+2021), conversational systems, e.g., BlenderBot
+(Shuster et al., 2022), knowledge graphs (Hixon
+et al., 2015), and procedural tasks (Li et al., 2020).
+Interaction has also been used for data augmen-
+tation, by having users identify model biases and
+provide additional corrective training examples to
+reduce those biases (Kaushik et al., 2020; Lu et al.,
+2022). In contrast, our work focuses on learning
+corrective feedback in the context of reasoning .
+Early AI attempts at having users debug rule-based
+representations had limited success, e.g., Teiresias
+(Davis, 1977), Convince (Kim and Pearl, 1987).9466Our work can be viewed as a modern formulation
+of this goal, using linguistic expressions of the
+knowledge stored latently in a model.
+Continual Learning: Finally, our system per-
+forms a kind of continual learning (Parisi et al.,
+2019; Carlson et al., 2010), aiming to correct spe-
+cific errors that appear. Recent work has explored
+“model editing” - editing model parameters to fix
+incorrect answers or add new knowledge (Mitchell
+et al., 2021; De Cao et al., 2021; Hase et al., 2021).
+However, to date these approaches have only been
+demonstrated in a limited context (e.g., correcting
+a single error), and even then can lead to uncontrol-
+lable out-of-scope changes (Mitchell et al., 2021).
+In contrast, our goal is not just to correct a spe-
+cific error, but to have that correction generalize to
+new problems, and without damaging the model’s
+basic problem-solving acumen. Thus, our work
+leaves the model fixed, and seeks improvement in
+the broader system in which the model is embed-
+ded, exploring an alternative and potentially more
+interpretable architecture towards this goal.
+3 Approach
+We adopt a question-centric approach to teaching
+and interaction, in which the user (teacher) asks the
+system (student) a question that they know the an-
+swer to, to probe the system’s knowledge. The sys-
+tem then answers it along with a faithful entailment-
+based explanation. If the system’s answer is wrong,
+the user can interact with the explanation to iden-
+tify the erroneous system beliefs that lead to the
+incorrect answer, and correct them. Corrections are
+stored in a dynamic memory used to influence, and
+ideally improve, future system behavior.
+We instantiate this approach in a system called
+TeachMe, which has three key components:
+1. Answering Questions: Given a user’s ques-
+tion, TeachMe searches for an entailment-
+based line of reasoning for different candidate
+answers, and selects the best.
+2. Interaction: The user can inspect, locate, and
+correct errors in the system beliefs that led to
+incorrect answers.
+3. Dynamic Memory: TeachMe maintains a dy-
+namic memory of user-corrected beliefs, used
+to help answer future questions.
+We now describe each in turn.
+3.1 Answering Questions
+The key requirement of this component is to show
+how an answer systematically follows from the
+model’s own beliefs - in other words, provide an
+explanation that is both truthful (reflects the sys-
+tem’s own beliefs) and faithful (the answer choice
+follows from those beliefs). Beyond this, TeachMe
+is agnostic as to how this is done - we describe our
+approach below, but others could be used.
+3.1.1 Candidate Hypothesis Generation
+Given a question from the user, TeachMe first gen-
+erates candidate answers and converts these into
+declarative hypotheses (e.g., “Is the sky (A) blue
+(B) yellow” →{H= “The sky is blue.”, H=
+“The sky is yellow.”).AnN-way multiple choice
+question yields Nhypotheses. A true/false ques-
+tion yields 2 hypotheses. For open-ended questions,
+TeachMe first collects Ncandidate answers gen-
+erated by an external QA system (we use Macaw
+(Tafjord and Clark, 2021)) using nucleus sampling,
+then forms Nhypotheses from them.
+3.1.2 Entailment Proof Generation
+TeachMe then tries to generate a “proof”for each
+hypothesis H, where here a proof means a set
+of premises (sentences) such that the hypothesis
+clearly follows from (is entailed by) the premises.
+There are several ways such a proof might9467
+be generated. In our case we use Entailer
+(Tafjord et al., 2022), a T5-11B model trained
+on EntailmentBank – a large, existing dataset
+of such textual entailment proofs (Dalvi et al.,
+2021). The input to the model is a hypothesis H,
+plus optionally the question Q, answer A, and a
+context of relevant sentences C, and the output
+isP, a set of premises (sentences) that entail H.
+To ensure the proof is truthful , the system asks
+itself “Is ptrue?” for each premise p, reflecting
+our definition of belief (footnote 1), and if not, the
+proof is rejected. Finally, the proofs are scored,
+and the final answer is the hypothesis with the
+highest-scoring proof (hence the answer is faithful
+to the proof). An example result ( Hbecause P) is:
+Full details are given in (Tafjord et al., 2022).
+Note that such proofs could be generated in other
+ways also, for example using chain-of-thought
+style, zero-shot prompting to a large model such as
+GPT3 (Wei et al., 2022) (continuation in gray):followed by verification steps to ensure that each
+premise and the entailment itself were believed
+by the model, i.e., reflected the model’s “beliefs”
+about the world, and to score them. Again, these
+could be performed using zero- or few-shot
+prompting.
+3.2 Interaction
+Given the system’s answer plus entailment proof,
+users can interact with the system to inspect, de-
+bug, and correct system mistakes via a simple user
+interface. Specifically, if an answer is entailed by
+the system’s beliefs, and the answer is wrong, then
+either one of those beliefs must be wrong or the
+entailment itself must be invalid. To repair this, the
+user can correct an erroneous model belief that they
+identify (or block the entailment itself, by adding it
+to a list of blocked entailments). Corrected model
+beliefs are stored in the dynamic memory. For fu-
+ture questions, retrievals from memory are used as
+question context to bias the model away from the
+prior erroneous beliefs. In this way, user-corrected
+beliefs may also help on new, unseen questions.
+Figure 3 shows the overall flow of interaction
+in TeachMe. The user first poses a question, then
+the system attempts to answer it with a supporting
+chain of reasoning. If found, the user can critique it
+and (if wrong), correct the system’s misunderstand-
+ings and/or lack of knowledge using the actions9468shown. If not found, the system tries to elicit user
+guidance by showing the user the facts it consid-
+ered during search for an answer, to which the user
+can respond. After making a change, the system
+re-attempts the question, and shows its updated an-
+swer and reasoning. When the user is satisfied, the
+premises and answer are then noted in memory, for
+consistency if those premises are queried about in
+future.
+A brief example is below, transcribed into textual
+format (the original interactions are implemented
+graphically using hyperlinks and text boxes, illus-
+trated in Appendices B and C). The user first asks a
+question, and the system answers incorrectly. The
+user volunteers A penny is made of copper, and the
+system retries, but now reveals its erroneous belief
+that magnets can attract copper. The user points
+out this is false, and finally the system succeeds:
+As a result of this interaction, the user-asserted
+facts (*) have been added to memory:
+Now given a new question, retrievals from memory
+are added to the context when answering. Here, the
+retrievals include “A magnet cannot attract copper”,
+helping the model answer correctly:
+Given its simple nature, we do not make any claims
+for this interface in this paper. Rather, it is just one
+means by which the memory of corrected model
+beliefs can be constructed. Further transcribed ex-
+amples (from real users) are in Appendix D.3.3 Dynamic Memory
+The third component of TeachMe is a dynamic
+memory, containing a list of assertions (English
+sentences), collected through interaction. The
+memory serves as a set of additions and overrides
+to the model’s latent beliefs, and to our knowl-
+edge is the first to show that user-provided and
+model-internal beliefs can be integrated together
+for systematic reasoning.
+Given a question, TeachMe retrieves up to r(=
+5) sentences from memory using the question as
+the search query, using a standard BM25 search
+algorithm. The retrievals are then used as follows:
+As Context: During generation of an answer +
+proof (Section 3.1), retrieved facts are provided as
+context to the model. This encourages (but does
+not force) TeachMe to use these facts in a generated
+proof and avoid conflicting facts. In this way, these
+user-supplied facts help TeachMe avoid mistakes
+that it previously made.
+Forced Generation: Given rretrieved sentences,
+we also force TeachMe to explore proofs that use
+them, to ensure user-supplied sentences are fully
+considered by the model. This is done using forced
+generation during decoding time, so that each proof
+starts with a different sentence as its first premise.
+Given rsentences, we generate rforced proofs in
+this way, plus a r+ 1proof without forced gen-
+eration. This forcing can also be seen as a way
+of encouraging diversity in the generations. Note
+that many of these proofs may later be rejected if
+verification fails. The highest-scoring proof is then
+selected. The full algorithm is in Algorithm 1.
+4 Experiments and Results
+Our goal is that TeachMe’s memory-augmented
+architecture will allow users to teach the system
+in ageneral way, adding to and correcting model
+beliefs so that its performance improves on new,
+unseen questions. To evaluate this, we use both
+both simulated and real users. In both cases, users
+first provide feedback on a set of training ques-
+tions, populating the memory. Then, with no fur-
+ther interaction, we measure whether TeachMe’s
+performance has improved on a set of hidden test
+questions. In all cases, TeachMe’s model is frozen -
+any improvements are purely via memory updates.9469Algorithm 1 TeachMe’s Overall Control Algo-
+rithm
+4.1 Datasets
+We evaluate with two existing multiple-choice
+datasets, OBQA (Mihaylov et al., 2018) and
+QuaRTz (Tafjord et al., 2019). These datasets con-
+tain questions that (typically) require multihop rea-
+soning, along with a (crowdworker created) gold
+1-step entailment proof for every correct answer op-
+tion. In addition, among the premises in those gold
+proofs, one has been tagged as the “core” (most im-
+portant) fact of the proof (e.g., “Metals conduct
+electricity”), with several questions sharing the
+core fact. These core facts can help us simulate
+the user feedback.
+For meaningful feedback experiments, there
+should be at least topical overlap between train
+(teaching) and test (evaluation) partitions. In
+OBQA, this topical overlap occurs naturally be-
+cause the train/test partitions were created ran-
+domly, meaning that questions based on the same
+core fact are distributed between train and test.
+QuaRTz, however, was originally partitioned to
+remove topical (core fact) overlap between train
+and test. As a result, we use just the training par-
+tition of QuaRTz, and repartition it randomly into
+Train’/Dev’/Test’, leading to a natural topical over-
+lap between the new partitions.
+The sizes of the partitions we use are OBQA
+train/test = 4957/500 examples, and QuaRTz
+Train’/Test’ = 1348/557 examples.4.2 Experiments with a Simulated User
+We first measure TeachMe’s ability to learn through
+interaction with a simulated user (teacher). In this
+scenario, we consider the teacher working through
+the training questions, and behaving as follows:
+1. If TeachMe answers the question correctly
+then no action is taken. This makes the simplifying
+assumption that the generated chain of reasoning
+is also correct.
+2. If TeachMe answers the question incorrectly
+then the user will provide feedback to help correct
+the system. In the simulated scenario, we take
+the core fact in the gold entailment proof as that
+user feedback: As the system was wrong, we here
+assume that either the model did not know this
+core fact, or failed to attend to it when trying to
+generate a chain of reasoning for the correct answer.
+The (simulated) user thus aims to correct this by
+providing that fact. This new fact is then added
+to the system’s memory, where it may be recalled
+and used for future questions to avoid a similar
+mistake in future. Although only an approximation,
+it allows us to assess whether this failure-driven
+feedback also helps on future, unseen questions.
+Once simulated teaching is completed, we then
+test the system on a hidden test set (no further
+interaction), measuring QA accuracy.
+4.2.1 Configurations
+We compare the following configurations, all us-
+ing the frozen model, i.e., evaluating the impact of
+feedback that a deployed system would receive:
+1. Direct QA (non-teachable): We measure the
+model’s basic ability to directly answer the test
+questions, without using a reasoning chain, using
+theH→Sangle. One can loosely think of this
+as the “fast thinking” answer.
+2. TeachMe (before teaching): Here we mea-
+sure TeachMe’s ability to answer the test questions
+by generating, scoring, and comparing entailment
+proofs for each answer option, when the memory
+is in its initial state (empty). One can loosely think
+of this as the “slow thinking” answer.
+3. TeachMe (after teaching): This is at the end
+of simulated teaching scenario, after the simulated
+user provided feedback (the appropriate core fact)
+for all training questions that TeachMe answered
+incorrectly, thus populating the memory.
+4. TeachMe ( ≈upper bound: feedback for all
+answers): As an upper bound, we imagine the9470
+user providing feedback on alltraining questions,
+regardless of whether TeachMe answered them cor-
+rectly. To simulate this, TeachMe’s memory is set
+to all the core facts used in all training questions.
+In this upper-bound scenario, the simulated user is
+doing approximately the same work as it took to
+create the training dataset proofs in the first place.
+4.2.2 Results
+The results are shown in Figure 4. Our main find-
+ings are as follows:
+TeachMe’s Basic Accuracy is Close to that of
+Direct Answering: Comparing TeachMe (before
+teaching) with direct QA, we see TeachMe’s proof-
+based answer accuracy is close, but not quite as
+good as, the accuracy for direct QA (72.6% vs.
+75.2% OBQA,73.6% vs. 74.1% QuaRTz). It is
+encouraging that the scores are loosely comparable,
+as it suggests users are critiquing proofs of reason-
+able quality. A primary cause of failure is errors by
+the two verifiers, in particular the entailment ver-
+ifierPH→Ssometimes mis-recognizes a bad
+entailment as valid.
+Feedback helps on new questions. Most sig-
+nificantly, feedback on the training questions has
+helped improve performance on the test questions
+without requiring model retraining (OBQA:
+72.6% to 77.0%; QuaRTz: 73.6% to 75.9%), in-
+dicating the viability of the paradigm we are ex-
+ploring. The with-memory scores also exceed the
+direct QA scores on both datasets.
+Feedback reaches within 1% of the upper bound
+while only requiring feedback on ≈30% of the
+training questions (namely those that the model
+answered incorrectly). This suggests that targeted
+feedback is sufficient to obtain near-optimal per-
+formance, avoiding the high cost of exhaustively
+annotating the proofs for all the training questions,
+as was done in the original datasets.
+4.2.3 Retrieval Strategies
+Facts in memory are indexed by the words in those
+facts. We also evaluated alternative indexing strate-
+gies, e.g., indexing a fact by the question(s) that
+used it in the answer proof, or a combination of
+question plus fact, but these did not work as well.
+Details and results are in Appendix A.
+4.2.4 Improvement with Time
+How does TeachMe’s performance improve with
+time? To track this, we re-used the OBQA dataset
+and measured TeachMe’s performance on the test
+set as it sees a larger fraction of training data, stor-
+ing the feedback for wrong answers it has seen so
+far in its memory. The results were averaged over
+3 random orderings of OBQA training data, and
+are shown in Figure 5. As can be seen, the per-
+formance gradually improves as more feedback is
+collected on failing training questions. Note that
+a larger memory does not guarantee better perfor-
+mance, e.g. when training data increases from 20%
+to 30% in Figure 5, because TeachMe may retrieve
+distracting facts from memory, resulting in spuri-
+ous proofs supporting wrong answers.
+4.2.5 Analysis
+4.2.6 Success Analysis
+When TeachMe changed its (test set) answer from
+a wrong answer option (no feedback) to the correct
+answer option (with feedback), was that change
+for a good reason? Our interest here is whether
+TeachMe did indeed recall and use relevant do-
+main knowledge appropriately. To explore this,
+we analyzed a random sample of 50 of the 74/5009471
+test cases where such positive flips occurred. Of
+these, we found approximately 3/4 resulted from
+good reasoning, while approximately 1/4 were not.
+Comparing the generated and gold test set proofs,
+we found four groupings, illustrated in Figure 6 and
+described below (Table E1 in Appendix E provides
+examples of all four): 28% (14/50) : the gold core
+fact was included in the best scoring proof. 28%
+(14/50) : a relevant core fact (though not exactly
+the gold core fact) was used. 20% (10/50) : a
+remotely related fact was retrieved and used by
+the model as the first premise in the proof due to
+forced generation (Section 3.3). 24% (12/50) : a
+spurious fact was retrieved due to word overlap
+with the question, then the model produced an in-
+coherent proof connecting it to the correct answer
+hypothesis, and scored this proof highest. Although
+this error was advantageous in these cases, there
+are analogous failure cases where a spurious fact
+changes a previously correct answer to incorrect.
+4.2.7 Failure Analysis
+In cases where retrieved feedback did not help on
+new questions, there are four failure modes: knowl-
+edge (the relevant knowledge was simply not in
+memory); retrieval (the knowledge was there but
+not retrieved); reasoning (the knowledge was there,
+retrieved, but TeachMe chose to ignore it); and
+scoring (the knowledge was retrieved and used,
+but the proof for a different answer option scored
+higher). To measure the relative frequency of these,
+we examine 50 randomly sampled failure cases, de-
+scribed below and illustrated in Figure 7 (Table E2
+in Appendix E provides examples), and found:
+24% (12/50) missing knowledge: The gold sci-
+ence fact for the test question was not present in the
+corpus. Instead, the model tried to make use of the
+facts retrieved from the corpus to construct proofs
+but ended up selecting a wrong answer option.
+54% (27/50) bad retrieval: The gold science fact
+for the test question was present in the corpus but
+the IR module failed to retrieve it among the top-k.
+12% (6/50) bad reasoning: The proof generated
+for the gold answer option was not good, even when
+the retrieval was good. In 5/6 cases, the model
+created a bad proof, even though it had correctly
+started with the correct fact. In the remaining case,
+the gold core fact was retrieved but then ignored.
+10% (5/50) bad scoring: While a good proof for
+the right answer was generated, it was not scored
+highest either due to some of its (true) premises
+or entailment being disbelieved by the model, or a
+false premise or bad entailment for a wrong answer
+being scored highly. Again, further training of the
+verifiers would help alleviate this problem.
+4.3 Experiments with Real Users
+We also ran a small-scale experiment with real
+users, to test whether users could in practice im-
+prove the system’s performance. For this, we took
+31 questions from OBQA, based on five core facts,
+that TeachMe struggled with (getting 20/31 of the
+questions wrong). We then split them into a train-
+ing set containing 1 failing question for each core
+fact (total 5 questions), and the remaining 26 ques-
+tions as a test set. Our interests were (a) whether
+users could successfully interact with the system to
+identify and correct TeachMe’s erroneous beliefs
+about the 5 training questions, so it could answer
+them correctly, and then (b) whether the result of
+this teaching carried over to improved performance
+on the test set. Transcribed examples of some of
+the dialogs are in Appendix D.
+4.3.1 Results
+The results were averaged over eight users (from
+within our organization), and are shown in Figure 8
+showing TeachMe’s scores before and after user
+interaction. On average, users made 2.7 teaching
+actions per question to correct the system (13.5 per
+user session for correcting the five questions), with
+distribution (%) as follows (see Appendix C for9472
+details of these categories): fact is missing (24%),
+fact is false (12%), fact is true (6%), bad reasoning
+(5%), fact is irrelevant (5%), use old fact (10%),
+use new fact (37%). The average completion time
+for the task was 19 mins (ranging from 13 to 31
+mins). As shown in Figure 8 (first two bars), users
+were able to correct/expand TeachMe’s knowledge
+to remove almost all its errors on the training set
+(raising TeachMe’s training score to 97%). More
+importantly, the taught system’s score on the hid-
+den test set increased by 17% (38% to 55%), in-
+dicating the knowledge provided by the users
+generalized to the test set .
+4.3.2 Analysis
+Of the 208 test answers (26 questions x 8 users), 41
+answers changed from incorrect to correct, and 7
+changed from correct to incorrect. Of the 41 that
+changed to correct (based on an analysis of a sub-
+set):≈70% a relevant fact was recalled and used in
+a good proof, ≈10% the recalled facts altered the
+model behavior so it generated a good proof with
+a (generated) relevant fact, while ≈20% had bad
+proofs but (fortuitously) scored highest.
+For example, for the question:
+Some birds find locations with (A) landmarks
+(B) road signs (C) eggs (D) magnetic patterns
+the model originally selected a wrong answer
+(eggs), and could not generate a proof for the cor-
+rect answer. With memory, its retrieval included
+the user-supplied fact "Animals can use magnetic
+patterns to navigate." , providing crucial knowledge
+that the model apparently did not know, and allow-
+ing a proof for the right answer to be found.
+Similarly for the 7 cases that changed from cor-
+rect to incorrect: about half the time (4/7) the sys-
+tem did recall a relevant fact, but either ignored it
+(2/7) or generated a bad proof (2/7). In the remain-ing 3/7 cases, there was no relevant fact retrieved,
+but the retrievals served to confuse the generator.
+For example, for the question:
+Gills are used to breath water by what? (A)
+salmon (B) fishing boats (C) penguins...
+the system originally selected the right answer
+(salmon), with an (incorrect) proof for penguins
+close behind. With memory, it retrieved the user-
+supplied fact "Animals can use magnetic patterns
+to navigate." , irrelevant to the question, but enough
+when added to the context to slightly change the
+verification scores, resulting in the (bad) proof for
+penguin being scored highest.
+5 Discussion and Conclusion
+Our goal is a teachable reasoning system, where
+users can interact to see its beliefs and reasoning,
+and correct it when it is wrong. We have shown that
+by embedding an entailment-based QA model in a
+larger system with a dynamic, persistent memory,
+users can correct and override model beliefs, re-
+sulting in an overall system that can improve over
+time without retraining. To our knowledge, this
+is the first system to show that user-provided and
+model-internal beliefs can be integrated together
+for systematic reasoning. This is significant as it
+is a step towards systems that can not only interact
+with users, but continually learn from them.
+Although we have created and evaluated an in-
+tegrated system, numerous issues still remain. For
+reasoning, methods to avoid uninteresting (near-
+tautologous) proofs are needed. For interaction,
+we have treated “teaching” primarily as question-
+centric debugging, but clearly there are other styles
+to explore. Finally while the memory usefully bi-
+ases TeachMe for new tasks, the effects of placing
+new knowledge in an input context are not fully
+predictable, despite careful training. These are all
+areas for future exploration.
+Despite these, the research agenda is an excit-
+ing one, pointing towards future systems that can
+learn directly from users in a conversational way,
+rather than solely training on large datasets. It also
+suggests a way of overcoming the opaqueness of
+neural systems, by viewing models as components
+in a larger system with a persistent memory and
+that can systematically reason. We look forward to
+future developments in these directions.9473Limitations
+We have shown how a dynamic memory, paired
+with a QA system that can provide faithful explana-
+tions, can allow users to correct erroneous system
+beliefs, and thus improve its performance without
+model retraining. While exciting, there are several
+limitations with the current approach and opportu-
+nities for future work.
+First, we have so far only worked with rela-
+tively small memories (up to ≈2000 facts, for the
+simulated users, Section 4.2). A deployed sys-
+tem could potentially acquire orders of magnitude
+more user-supplied facts, raising challenges for re-
+trieval and memory management. Eventually, one
+might want to retrain the model to incorporate these
+new/corrected beliefs into the model itself.
+Second, as memory grows, it is possible that
+conflicting facts may arise in it, either from a user
+being inconsistent, or assuming different contexts
+for a fact, or from different users. Mechanisms
+for belief management would be advantageous to
+spot and repair such problems, e.g., (Kassner et al.,
+2021).
+Third, the approach relies on the system generat-
+ing meaningful chains of reasoning for its answers
+(in particular, for its incorrect answers) to engage
+the user. However, in some cases those chains
+are poor (Section 4.2.7), and could be improved
+through enhanced proof generation techniques.
+In addition, two broader themes merit more ex-
+ploration. First, we have treated “teaching” as
+question-centric debugging, but clearly there are
+broader styles to explore, e.g., the user volunteer-
+ing general knowledge up-front, probing what the
+system already knows, and following a curriculum.
+Second, we have assumed a single-user environ-
+ment dealing with factual questions, but a deployed
+system may encounter users with different beliefs
+about the world, and/or different opinions. This
+problem is not new and mechanisms exist to han-
+dle this (e.g., for Wikipedia), but would need to be
+integrated into this environment too for large-scale
+deployment.
+Finally, our approach relies on human feedback
+on new questions that TeachMe fails to answer or
+fails to justify indicating significant human efforts.
+We are exploring three mechanisms for reducing
+such human efforts: (a) TeachMe can spot some
+errors itself by using external text sources to verify
+them (b) TeachMe can carefully order the teaching
+questions. That way, if the user can debug somecritical system misconceptions early, then many
+future questions will be answered correctly (hence
+not requiring user input). (c) Ask multiple users,
+e.g., factoring the teaching task into a curriculum
+of smaller topics ( “magnetism”, “gravity”, “adap-
+tation” etc.) for different users to work on.
+Acknowledgements
+This research was made possible, in part, by fund-
+ing from Open Philanthropy. We also thank Google
+for providing the TPUs for conducting experiments.
+Finally thanks to the end-users and annotators and
+who participated in experiments and data collection,
+and to Ashish Sabharwal for valuable feedback on
+an earlier draft.
+References94749475Appendix A. Different Memory Indexing
+Strategies
+As described in Section 4.2.3, TeachMe retrieves up
+to r (=5) sentences from memory using the question
+as the search query, using a standard BM25 search
+algorithm. We evaluate the following alternative
+ways of indexing this memory (in all 4 ways, the
+“document” is always the fact collected through
+interaction but the indexing terms are different):
+1) F: Index by the terms in the fact
+2) Q: Index by the terms in the question for which
+the fact was provided as feedback
+3) Q + F: Index by concatenation of the question
+and associated fact (For both options 2, 3, if a
+fact is useful for multiple questions, it will appear
+multiple times in the memory.)
+4) Relevant Qs + F: Index by concatenation of the
+fact and all the questions it is relevant to (Each fact
+appears only once in the memory.)
+Table A1 compares the retrieval performance
+of these four indexing strategies on OBQA Dev
+questions, using the simulated user setup, where we
+measure how well the gold fact associated with a
+Dev question is retrieved, using an index built from
+the Train questions (that also use these gold facts).
+In all cases the search query is the question. We
+find the simple strategy of indexing by the fact itself
+performs the best (used in rest of the experiments
+in this paper).9476Appendix B. TeachMe’s Interactive Interface9477Appendix C: Example of Graphical
+Interaction
+Below shows snippets of the graphical interface
+with TeachMe, walking through a path of interac-
+tion in the dialog tree shown in Figure 3. First,
+the user (playing the role of teacher) has asked
+TeachMe the question “Can a magnet attract a
+penny?” in the upper box. (The correct answer
+is “no”, as pennies are made of the non-magnetic
+metal copper). The system has responded with an
+(incorrect) answer and proof (blue):The error in this case is the system’s belief that “A
+penny is made of magnetic metal.” (pennies are in
+fact made of non-magnetic copper). To indicate the
+error, the user clicks on the “No” button in response
+to “Do you agree?”, and then here chooses to cor-
+rect the error by entering the missing, required
+knowledge that “A penny is made of copper.”:On reasking the question, TeachMe uses this user-
+supplied fact as the first part of the proof (via forced
+generation), but still gets the answer wrong due to a
+different misunderstanding, namely that “A magnet
+can attract copper.”Here the user chooses to correct this mistake by
+clicking on [but it’s not true!] next to “A mag-
+net can attract copper”, causing the opposite fact
+(“A magnet cannot attract copper”) to be added to
+memory. Finally the system gets the answer right:Confirming the answer causes TeachMe to note
+both the facts, conclusion, and proof in memory, so
+that it will produce the same answer if the question
+is reasked. In addition, the stored facts can be
+retrieved to help answer future questions, a key
+role for the memory.9478Appendix D: Additional Examples of
+Interactions
+We here provide some additional examples of
+real user dialogs with the system, transcribed into
+textual format (the original interactions are via
+the graphical interface). These examples are all
+from the user trials in Section 4.3, using questions
+from the OBQA dataset, and are all cases where
+TeachMe initially answered incorrectly. The di-
+alogs illustrate how the user (blue) used different
+actions (annotated in bold square brackets, referenc-
+ing actions in Figure C1, Appendix C) to diagnose
+and correct the system’s misunderstandings.9479Appendix E: Success and Failure Analysis: Examples9480

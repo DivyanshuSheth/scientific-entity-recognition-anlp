@@ -1,1 +1,886 @@
-1670 Proceedings of the 60th Annual Meeting of the Association for Computational Linguistics Volume 1 : Long Papers , pages 1670 1686 May 22 - 27 , 2022 c(cid:13)2022 Association for Computational Linguistics 1671 1672 1673 1674 1675 1676 1677 1678 1679 1680 1681 1682 1683 1684 1685 1686 
+
+Bhargavi Paranjape, Matthew Lamm, and Ian TenneyPaul G. Allen School of Computer Science & Engineering, University of WashingtonGoogle Research
+bparan@cs.washington.edu
+{mrlamm,iftenney}@google.com
+Abstract
+Deep NLP models have been shown to be brit-
+tle to input perturbations. Recent work has
+shown that data augmentation using counter-
+factuals — i.e. minimally perturbed inputs —
+can help ameliorate this weakness. We focus
+on the task of creating counterfactuals for ques-
+tion answering, which presents unique chal-
+lenges related to world knowledge, semantic
+diversity, and answerability. To address these
+challenges, we develop a Retrieve- Generate-
+Filter (RGF) technique to create counterfac-
+tual evaluation and training data with minimal
+human supervision. Using an open-domain
+QA framework and question generation model
+trained on original task data, we create coun-
+terfactuals that are ﬂuent, semantically diverse,
+and automatically labeled. Data augmenta-
+tion with RGF counterfactuals improves per-
+formance on out-of-domain and challenging
+evaluation sets over and above existing meth-
+ods, in both the reading comprehension and
+open-domain QA settings. Moreover, we ﬁnd
+that RGF data leads to signiﬁcant improve-
+ments to robustness to local perturbations.
+1 Introduction
+Models for natural language understanding (NLU)
+may outperform humans on standard benchmarks,
+yet still often perform poorly under a multitude of
+distributional shifts (Jia and Liang (2017); Naik
+et al. (2018); McCoy et al. (2019), inter alia ) due
+to over-reliance on spurious correlations or dataset
+artifacts. This behavior can be probed using coun-
+terfactual data (Kaushik et al., 2020; Gardner et al.,
+2020) designed to simulate interventions on spe-
+ciﬁc attributes: for example, perturbing the movie
+review “A real stinker, one out of ten!" to“A real
+classic, ten out of ten!" allows us to discern theFigure 1: Retrieve-Generate-Filter to generate coun-
+terfactual queries for Natural Question (Kwiatkowski
+et al., 2019) using an open-domain retrieval system,
+question generation and post-hoc ﬁltering.
+effect of adjective polarity on the model’s predic-
+tion. Many recent works (Kaushik et al., 2020,
+2021; Wu et al., 2021a; Geva et al., 2021, inter
+alia) have shown that training augmented with this
+counterfactual data (CDA) improves out-of-domain
+generalization and robustness against spurious cor-
+relations. Consequently, several techniques have
+been proposed for the automatic generation of coun-
+terfactual data for several downstream tasks (Wu
+et al., 2021a; Ross et al., 2021b,a; Bitton et al.,
+2021; Geva et al., 2021; Asai and Hajishirzi, 2020;
+Mille et al., 2021).
+In this paper, we focus on counterfactual data for
+question answering, in both the reading compre-
+hension and open-domain settings (e.g. Rajpurkar
+et al., 2016; Kwiatkowski et al., 2019). Model in-
+puts consist of a question and optionally a context
+passage, and the target ais a short answer span.
+Counterfactuals are often considered in the context
+of a speciﬁc causal model (Miller, 2019; Halpern
+and Pearl, 2005), but in this work we follow Wu
+et al. (2021a) and Kaushik et al. (2020) and seek a
+method to generate counterfactuals that may be use-1670ful in many different settings. In QA, the set of pos-
+sible causal features is large and difﬁcult to specify
+a priori ; relevant factors are often instance-speciﬁc
+and exploring them may require world knowledge.
+For example, going from “Who is the captain of
+the Richmond Football Club” to a perturbed ques-
+tion“Who captained Richmond’s women’s team?”
+as in Figure 1 requires knowledge about the club’s
+alternate teams, and the perturbation “Who was
+the captain of RFC in 1998?” requires knowledge
+about the time-sensitive nature of the original ques-
+tion. In the absence of such knowledge, otherwise
+reasonable edits — such as “Who captained the
+club in 2050?” — can result in false premises or
+unanswerable questions.
+We develop a simple yet effective technique to
+address these challenges: Retrieve, Generate, and
+Filter (RGF; Figure 1). We use the near-misses
+of a retrieve-and-read QA model to propose alter-
+nate contexts and answers which are closely related
+to — but semantically distinct from — the origi-
+nal question. We then use a sequence-to-sequence
+question generation model (Alberti et al., 2019) to
+generate corresponding questions to these passages
+and answers. This results in fully-labeled examples,
+which can be used directly to augment training data
+or ﬁltered post-hoc for analysis.
+While our method requires no supervised inputs
+besides the original task training data, it is able
+to generate highly diverse counterfactuals cover-
+ing a range of semantic phenomena (§4), including
+many transformation types which existing meth-
+ods generate through heuristics (Dua et al., 2021),
+meaning representations (Ross et al., 2021b; Geva
+et al., 2021) or human generation (Bartolo et al.,
+2020; Gardner et al., 2020). Compared to alterna-
+tive sources of synthetic data (§5.1), training aug-
+mented with RGF data improves performance on
+a variety of settings (§5.2, §5.3), including out-of-
+domain (Fisch et al., 2019) and contrast evaluation
+sets (Bartolo et al., 2020; Gardner et al., 2020),
+while maintaining in-domain accuracy. Addition-
+ally, we introduce a measure of pairwise consis-
+tency , and show that RGF signiﬁcantly improves
+robustness to a range of local perturbations (§6).
+2 Related Work
+2.1 Counterfactual Generation
+There has been considerable interest in developing
+challenge sets for NLU that evaluate models on a
+wide variety of counterfactual scenarios. Gardneret al. (2020); Khashabi et al. (2020); Kaushik et al.
+(2020); Ribeiro et al. (2020) use humans to create
+these perturbations, optionally in an adversarial
+setting against a particular model (Bartolo et al.,
+2020). However, these methods can be expensive
+and difﬁcult to scale.
+This has led to an increased interest in creating
+automatic counterfactual data for evaluating out-
+of-distribution generalization (Bowman and Dahl,
+2021) and for counterfactual data augmentation
+(Geva et al., 2021; Longpre et al., 2021). Some
+work focuses on using heuristics like swapping su-
+perlatives and nouns (Dua et al., 2021), changing
+gendered words (Webster et al., 2020), or target-
+ing speciﬁc data splits (Finegan-Dollak and Verma,
+2020). More recent work has focused on using
+meaning representation frameworks and structured
+control codes (Wu et al., 2021a), including gram-
+mar formalisms (Li et al., 2020), semantic role
+labeling (Ross et al., 2021b), structured image rep-
+resentations like scene graphs (Bitton et al., 2021),
+and query decompositions in multi-hop reasoning
+datasets (Geva et al., 2021). Ye et al. (2021) and
+Longpre et al. (2021) perturb contexts instead of
+questions by swapping out all mentions of a named
+entity. The change in label can be derived heuristi-
+cally or requires a round of human re-labeling of
+the data. These may also be difﬁcult to apply to
+tasks like Natural Questions (Kwiatkowski et al.,
+2019), where pre-deﬁned schemas can have difﬁ-
+culty covering the range of semantic perturbations
+that may be of interest.
+2.2 Data Augmentation
+Non-counterfactual data augmentation methods for
+QA, where the synthetic examples are notpaired
+with the original data, have shown only weak im-
+provements to robustness and out-of-domain gener-
+alization (Bartolo et al., 2021; Lewis et al., 2021).
+Counterfactual data augmentation is hypothesized
+to perform better, as exposing the model to mini-
+mal pairs should reduce spurious correlations and
+make the model more likely to learn the correct,
+causal features (Kaushik et al., 2020). However,
+Joshi and He (2021) ﬁnd that methods that limit
+the structural and semantic space of perturbations
+can potentially hurt generalization to other types
+of transformations. This problem is exacerbated in
+the question answering scenario where there can be
+multiple semantic dimensions to edit. Our method
+attempts to address this by targeting a broad range1671of semantic phenomena, thus reducing the chance
+for the augmented model to overﬁt.
+3 RGF: Counterfactuals for
+Information-seeking Queries
+We deﬁne a counterfactual example as an alter-
+native input xwhich differs in some meaningful,
+controlled way from the original x, which in turn
+allows us to reason – or teach the model – about
+changes in the label (the outcome). For question-
+answering, we take as input triples (q;c;a )consist-
+ing of the question, context passage, and short an-
+swer, and produce counterfactual triples (q;c;a)
+wherea6=a. This setting poses some unique
+challenges, such as the need for background knowl-
+edge to identify relevant semantic variables to alter,
+ensuring sufﬁcient semantic diversity in question
+edits, and avoiding questions with false premises
+or no viable answers. Ensuring (or characteriz-
+ing) minimality can also be a challenge, as small
+changes to surface form can lead to signiﬁcant se-
+mantic changes, and vice-versa. We introduce a
+general paradigm for data generation — Retrieve,
+Generate and Filter — to tackle these challenges.
+3.1 Overview of RGF
+An outline of the RGF method is given in Figure 1.
+Given an input example x= (q;c;a )consisting
+of a question, a context paragraph, and the cor-
+responding answer, RGF generates a set of new
+examplesN(x) =f(q;c;a);(q;c;a);:::g
+from the local neighborhood around x. We ﬁrst
+use an open-domain retrieve-and-read model to re-
+trieve alternate contexts cand answers awhere
+a6=a. As near-misses for a task model, these
+candidates (c;a)are closely related to the origi-
+nal target (c;a)but often differ along interesting,
+latent semantic dimensions (Figure 2) in their rela-
+tion to the original question, context, and answer.
+We then use a sequence-to-sequence model to gen-
+erate new questions qfrom the context and answer
+candidates (c;a). This yields triples (q;c;a)
+which are fully labeled, avoiding the problem of
+unanswerable or false-premise questions.
+Compared to methods that rely on a curated set
+of minimal edits (e.g. Wu et al., 2021b; Ross et al.,
+2021b), our method admits the use of alternative
+contextsc6=c, and we do not explicitly constrainour triples to be minimal perturbations during the
+generation step. Instead, we use post-hoc ﬁltering
+to reduce noise, select minimal candidates, or se-
+lect for speciﬁc semantic phenomena based on the
+relation between qandq. This allows us to explore
+a signiﬁcantly more diverse set of counterfactual
+questionsq(§C.1), capturing relations that may
+not be represented in the original context c.
+We describe each component of RGF below;
+additional implementation details are provided in
+Appendix A.
+3.2 Retrieval
+We use REALM retrieve-and-read model of (Guu
+et al., 2020). REALM consists of a BERT-
+based bi-encoder for dense retrieval, a dense
+index of Wikipedia passages, and a BERT-
+based answer-span extraction model for reading
+comprehension, all ﬁne-tuned on Natural Ques-
+tions (NQ; Kwiatkowski et al., 2019). Given
+a question q, REALM outputs a ranked list
+of contexts and answers within those contexts:
+f(c;a);(c;a);:::(c;a)g. These alternate
+contexts and answers provide relevant yet diverse
+background information to construct counterfac-
+tual questions. For instance, in Figure 1, the ques-
+tion“Who is the captain of the Richmond Football
+Club" with answer “Trent Cotchin" also returns
+other contexts with alternate answers like “Jeff
+Hogg" (q=“Who captained the team in 1994" ),
+and“Steve Morris" (q=“Who captained the re-
+serve team in the VFL league" ). Retrieved con-
+texts can also capture information about closely re-
+lated or ambiguous entities. For instance, the ques-
+tion“who wrote the treasure of the sierra madre"
+retrieves passages about the original book Sierra
+Madre , its movie adaptation, and a battle fought
+in the Sierra de las Cruces mountains. This back-
+ground knowledge allows us to perform contextual-
+ized counterfactual generation, without needing to
+specify a priori the type of perturbation or semantic
+dimension. To focus on label-transforming coun-
+terfactuals, we retain all (c;a)whereadoes not
+match any of the gold answers afrom the original
+NQ example.
+3.3 Question Generation
+This component generates questions qthat cor-
+respond to the answer-context pairs (c;a). We
+use a T5 (Raffel et al., 2020) model ﬁne-tuned1672on(q;c;a )triples from Natural Questions, using
+context passages as input with the answer marked
+with special tokens. We use the trained model to
+generate questions (q;q;:::q)for each of the
+the retrieved set of alternate contexts and answers,
+((c;a);(c;a);:::(c;a)). For each (c;a),
+we use beam decoding to generate 15 different
+questionsq. We measure the ﬂuency and correct-
+ness of generated questions in §4.
+3.4 Filtering for Data Augmentation
+Noise Filtering The question generation model
+can be noisy, resulting in a question that cannot be
+answered given cor for which ais an incorrect an-
+swer. Round-trip consistency (Alberti et al., 2019;
+Fang et al., 2020) uses an existing QA model to
+answer the generated questions, ensuring that the
+predicted answer is consistent with the target an-
+swer provided to the question generator. We use an
+ensemble of six T5-based reading-comprehension
+((q;c)!a) models, trained on NQ using different
+random seeds (Appendix A), and keep any gen-
+erated (q;c;a)triples where at least 5 of the 6
+models agree on the answer. This discards about
+5% of the generated data, although some noise still
+remains; see §4 for further discussion.
+Filtering for Minimality Unlike prior work on
+generating counterfactual perturbations, we do not
+explicitly control for the type of semantic shift or
+perturbation in the generated questions. Instead,
+we use post-hoc ﬁltering over generated questions
+qto encourage minimality of perturbation. We
+deﬁne a ﬁltering function f(q;q)that categorizes
+the semantic shift or perturbation in qwith respect
+toq. One simple version of fis the word-level
+edit (Levenshtein) distance between qandq. Af-
+ter noise ﬁltering, for each original (q;c;a )triple
+we select the generated (q;c;a)with the smallest
+non-zero word-edit distance between qandqsuch
+thata6=a. We use this simple heuristic to create
+large-scale counterfactual training data for aug-
+mentation experiments (§5). Over-generating po-
+tential counterfactuals based on latent dimensions
+identiﬁed in retrieval and using a simple ﬁltering
+heuristic avoids biasing the model toward a narrow
+set of perturbation types (Joshi and He, 2021).
+3.5 Semantic Filtering for Evaluation
+To better understand the types of counterfactuals
+generated by RGF, we can apply additional ﬁlters
+based on question meaning representations to cat-
+egorize counterfactual (q;q)pairs for evaluation.
+Meaning representations provide a way to decom-
+pose a question into semantic units and categorize
+(q;q)based on which of these units are perturbed.
+In this work, we employ the QED formalism for
+explanations in question answering (Lamm et al.,
+2021). QED decompositions segment the question
+into a predicate template and a set of reference
+phrases. For example, the question “Who is cap-
+tain of richmond football club" decomposes into
+one question reference “richmond football club"
+and the predicate “Who is captain of X" . A few
+example questions and their QED decompositions
+are illustrated in Table 1.
+We use these question decompositions to identify
+the relation between a counterfactual pair (q;q).
+Concretely, we ﬁne-tune a T5-based model on the
+QED dataset to perform explanation generation
+following the recipe of Lamm et al. (2021), and
+use this to identify predicates and references for
+the question from each (q;c;a )triple. We use ex-
+act match between strings to identify reference
+changes. As predicates can often differ slightly
+in phrasing ( who captained vs.who is captain ), we
+take a predicate match to be a preﬁx matching with
+more than 10 characters. For instance, “Who is the
+captain of Richmond’s ﬁrst ever women’s team?" ,
+“Who is the captain of the Richmond Football Club"
+have same predicates. We ﬁlter generated ques-
+tions into three perturbation categories — reference
+change, predicate change, or both.
+4 Intrinsic Evaluation
+Following desiderata from Wu et al. (2021a) and
+Ross et al. (2021b), we evaluate our RGF data1673
+along three measures: ﬂuency ,correctness , and
+directionality .
+Fluency Fluency measures whether the gener-
+ated text is grammatically correct and semantically
+meaningful. Fluency is very high from RGF, as the
+generation step leverages a high-quality pretrained
+langauge model (T5). We manually annotate a sub-
+set of 100 generated questions, and ﬁnd that 96%
+of these are ﬂuent.Correctness Correctness measures if the gener-
+ated question qand context, alternate answer pairs
+(c;a)are aligned, i.e. the question is answerable
+given context candais that answer. We quantify
+correctness in the generated dataset by manually
+annotating a samples of 100 (q;c;a)triples (see
+Appendix B). The proportion of noise varies from
+30% before noise ﬁltering and 25% after noise ﬁl-
+tering using an ensemble of models (§3.4).
+Directionality/Semantic Diversity In Table 2,
+we show examples of semantic changes that occur
+in our data, including reference changes (50% of
+changes), predicate changes (30%), negations (1%),
+question expansions, disambiguations, and contrac-
+tions (13%). These cover many of the transforma-
+tions found in prior work (Gardner et al., 2020;
+Ross et al., 2021b; Min et al., 2020b), but RGF is
+able to achieve these without the use of heuristic
+transformations or structured meaning representa-
+tions. As shown in Figure 2, the types of relations
+are semantically rich and cover attributes relevant
+to each particular instance that would be difﬁcult
+to capture with a globally-speciﬁed schema. Addi-
+tional examples are shown in Figure 6.1674
+5 Data Augmentation
+Unlike many counterfactual generation methods,
+RGF natively creates fully-labeled (q;c;a)exam-
+ples which can be used directly for counterfactual
+data augmentation (CDA). We augment the origi-
+nal NQ training set with additional examples from
+RGF, shufﬂing all examples in training. We explore
+two experimental settings, reading comprehension
+(§5.2) and open-domain QA (§5.3), and compare
+RGF-augmented models to those trained only on
+NQ, as well as to alternative baselines for synthetic
+data generation. As described in Section 3.4, we
+use edit-distance based ﬁltering to choose onegen-
+erated (q;c;a)triple to augment for every origi-
+nal example, (q;c;a ).Additional training details
+for all models and baselines are included in Ap-
+pendix A.
+5.1 Baselines
+In the abstract, our model for generating counterfac-
+tuals speciﬁes a way of selecting contexts cfrom
+original questions, and answers awithin those
+contexts, and a way of a generating questions q
+from them. RGF uses a retrieval model to identify
+relevant contexts; here we experiment with two
+baselines that use alternate ways to select c. We
+also compare to the ensemble of six reading com-
+prehension models described in 3.4, with answers
+selected by majority vote.
+Random Passage (Rand. Agen-Qgen) Here,c
+is a randomly chosen paragraph from the Wikipedia
+index, with no explicit relation with the original
+question. This setting simulates generation from
+the original data distribution of Natural Questions.
+To ensure that the random sampling of Wikipedia
+paragraphs has a similar distribution, we employ
+the learned passage selection model from Lewiset al. (2021),. This baseline corresponds to the
+model of Bartolo et al. (2021), which was applied
+to the SQuAD dataset (Rajpurkar et al., 2016); our
+version is trained on NQ and omits AdversarialQA.
+Gold Context (Gold Agen-Qgen) Here,cis the
+passageccontaining the original short answer a
+from the NQ training set. This baseline speciﬁcally
+ablates the retrieval component of RGF, testing
+whether the use of alternate passages leads to more
+diversity in the resulting counterfactual questions.
+Answer Generation for Baselines For both the
+above baselines for context selection, we select
+spans in the new passage that are likely to be an-
+swers for a potential counterfactual question. We
+use a T5 (Raffel et al., 2020) model ﬁne-tuned for
+question-independent answer selection c!aon
+NQ, and select the top 15 candidates from beam
+search. To avoid simply repeating the original ques-
+tion, we only retain answer candidates awhich do
+not match the original NQ answers afor that exam-
+ple. These alternate generated answer candidates
+and associated passages are then used for ques-
+tion generation and ﬁltering as in RGF (§3.3). For
+the Gold Agen-Qgen case, we select based on the
+longest edit distance between (q;q), which gave
+signiﬁcantly better performance than random selec-
+tion or the shortest edit distance used for RGF.
+5.2 Reading Comprehension (RC)
+In the reading comprehension (RC) setting, the in-
+put consists of the question and context and the task
+is to identify an answer span in the context. Thus,
+we augment training with full triples (q;c;a)con-
+sisting of the retrieved passage c, generated and
+ﬁltered question q, and alternate answer a.
+Experimental Setting We ﬁnetune a T5 (Raf-
+fel et al., 2020) model for reading comprehension,1675with input consisting of the question prepended to
+the context. We evaluate domain generalisation of
+our RC models on three evaluation sets from the
+MRQA 2019 Challenge (Fisch et al., 2019). We
+also measure performance on evaluation sets con-
+sisting of counterfactual or perturbed versions of
+RC datasets on Wikipedia, including SQuAD (Ra-
+jpurkar et al., 2016), AQA (adversarially-generated
+SQuAD questions; Bartolo et al., 2020), and human
+authored counterfactual examples (contrast sets;
+Gardner et al., 2020) from the QUOREF dataset
+(Dasigi et al., 2019). We also evaluate on the set
+of disambiguated queries in AmbigQA (Min et al.,
+2020b), which by construction are minimal edits to
+queries from the original NQ.
+Results We report exact-match scores in Table 3;
+F1 scores follow a similar trend. We observe
+only limited improvements on the in-domain NQ
+development set, but we see signiﬁcant improve-
+ments from CDA with RGF data in out-of-domain
+and challenge-set evaluations compared both to
+the original NQ model and the Gold and Random
+baselines. RGF improves by 1-2 EM points on
+most challenge sets, and up to 7 EM points on
+the BioASQ set compared to training on NQ only,
+while baselines often underperform the NQ-only
+model on these sets. Note that all three augmen-
+tation methods have similar proportion of noise
+(Appendix B), so CDA’s beneﬁts may be attributed
+to improving model’s ability to learn more robust
+features for the task of reading comprehension. Us-
+ing an ensemble of RC models improves slightly
+on some tasks, but does not improve on OOD per-
+formance as much as RGF. RGF’s superior perfor-
+mance compared to the Gold Agen-Qgen baseline
+is especially interesting, since the latter also gen-
+erates topically related questions. We observe that
+RGF counterfactuals are more closely related to the
+original question compared to this baseline (Fig-
+ure 5 in Appendix C), since qis derived from a
+near-miss candidate (c;a)to answer the original
+q(S3.1).
+5.3 Open-Domain Question Answering (OD)
+In the open-domain (OD) setting, only the question
+is provided as input. The pair (q;a), consisting
+of generated and ﬁltered question qand alternate
+answera, is used for augmentation. Compared to
+the RC setting where passages change as well, here
+the edit distance ﬁltering of §3.4 ensures the aug-
+mentation data represents minimal perturbations.Experimental Setting We use the method and
+implementation from Guu et al. (2020) to ﬁnetune
+REALM on (q;a)pairs from NQ. End-to-end train-
+ing of REALM updates both the reader model and
+the query-document encoders of the retriever mod-
+ule. We evaluate domain generalization on pop-
+ular open-domain benchmarks: TriviaQA (Joshi
+et al., 2017), SQuAD (Rajpurkar et al., 2016), Cu-
+rated TREC dataset (Min et al., 2021), and dis-
+ambiguated queries from AmbigQA (Min et al.,
+2020b).
+Results In the open-domain setting (Table 4), we
+observe an improvement of 2 EM points over the
+original model even in-domain on Natural Ques-
+tions, while also improving signiﬁcantly when com-
+pared to other data augmentation techniques. RGF
+improves over the next best baseline — Random
+Agen-Qgen — by up to 6 EM points (on TriviaQA).
+We hypothesize that data augmentation has more
+beneﬁt in this setting, as the open-domain task is
+more difﬁcult than reading comprehension, and
+counterfactual queries may help the model learn
+better query and document representations to im-
+prove retrieval.
+6 Analysis
+To better understand how CDA improves the model,
+we introduce a measure of local consistency (§6.1)
+to measure model robustness, and perform a strat-
+iﬁed analysis (§6.2) to show the beneﬁts of the
+semantic diversity available from RGF.
+6.1 Local Robustness
+Compared to synthetic data methods such as PAQ
+(Lewis et al., 2021), RGF generates counterfactual
+examples that are paired with the original inputs
+and concentrated in local neighborhoods around
+them (Figure 2). As such, we hypothesize that
+augmentation with this data should speciﬁcally im-
+prove local consistency, i.e. how the model behaves
+under small perturbations of the input.
+Experimental Setting We explicitly measure
+how well a model’s local behavior respects per-
+turbations to input. Speciﬁcally, if a model f:
+(q;c)!acorrectly answers q, how often does
+it also correctly answer q? We deﬁne pairwise
+consistency as accuracy over the counterfactuals
+(q;a;c), conditioned on correct predictions for
+the original examples:
+C(D) =E[f(q;c) =ajf(q;c) =a]1676Exact Match (OD) Train Size
+Original 90K 37.65 26.75 22.43 14.25 31.93
+Gold Agen-Qgen 90K + 90K 37.86 27.02 23.65 15.01 32.94
+Rand. Agen-Qgen 90K + 90K 37.45 29.87 24.13 14.55 26.89
+RGF (REALM-Qgen) 90K + 90K 39.11 32.32 26.98 16.94 33.61
+Consistency (RC) Train Size
+Original NQ 90K 63.22 51.72 44.86 64.65 52.93
+Ensemble 90K 63.87 48.33 46.02 65.21 55.21
+Gold Agen-Qgen 90K + 90K 50.25 42.86 40.66 55.63 43.08
+Rand. Agen-Qgen 90K + 90K 56.07 48.08 44.79 60.06 48.34
+RGF (REALM-Qgen) 90K + 90K 64.46 55.93 48.94 76.17 66.12
+RGF Ref. 90K + 52K 58.8 56.9 40.54 77.61 59.56
+RGF Pred. 90K + 52K 63.64 49.15 43.13 73.29 63.09
+To measure consistency, we construct val-
+idation sets consisting of paired examples
+(q;c;a );(q;c;a): one original, and one counter-
+factual. We use QED to categorize our data, as
+described in §3.5. Speciﬁcally, we create two types
+of pairs: (a) a change in reference where question
+predicate remains ﬁxed, and (b) a change in predi-
+cate, where the original reference(s) are preserved.
+We create a clean evaluation set by ﬁrst selecting
+RGF examples for predicate or reference change,
+then manually ﬁltering the data to discard incorrect
+triples (§4) until we have 1000 evaluation pairs of
+each type (see Appendix B).
+We also construct paired versions of AQA, Am-
+bigQA, and the QUOREF contrast set. For Am-
+bigQA, we pair two disambiguated questions and
+for QUOREF, we pair original and human-authored
+counterfactuals. AQA consists of human-authored
+adversarial questions qwhich are not explicitly
+paired with original questions; we create pairs by
+randomly selecting an original question qand a
+generated question qfrom the same passage.Results Training with RGF data improves con-
+sistency by 12-14 points on the QED-ﬁltered slices
+of RGF data, and 5-7 points on AQA, AmbigQA
+and QUOREF contrast (Table 5). The Gold Agen-
+Qgen baseline (which contains topically related
+queries about the same passage) also improves con-
+sistency over the original model compared to the
+Random Agen-Qgen baseline or to the ensemble
+model, though not by as much as RGF. Consistency
+improvements on AQA, AmbigQA and QUOREF
+are especially noteworthy, since they suggest an im-
+provement in robustness to local perturbations that
+is independent of other confounding distributional
+similarities between training and evaluation data.
+6.2 Effect of Perturbation Type
+QED-based decomposition of queries allows for the
+creation of label-changing counterfactuals along
+orthogonal dimensions — a change of reference or
+predicate. We investigate whether training towards
+one type of change induces generalization bias, a
+detrimental effect which has been observed in tasks
+such as NLI (Joshi and He, 2021).
+Experimental Setting We shard training exam-
+ples into two categories based on whether qandq1677have the same reference (predicate change) or same
+predicate (reference change), as deﬁned in §3.5.
+We over-generate by starting with 20 (q;c;a)for
+each original training example to ensure that we
+ﬁnd at least one qthat matches the criterion. We
+also evaluate on paired evaluation sets from §6.1.
+Results Results are shown for QED-ﬁltered train-
+ing in Table 5. Counterfactual perturbation of a
+speciﬁc kind (a predicate or a reference change)
+during augmentation does not hurt performance on
+another perturbation type compared to the base-
+line NQ model, which differs from the observa-
+tions of Joshi and He (2021) on NLI. Further-
+more, similar to the observations of Min et al.
+(2020a), augmenting with one type of perturba-
+tion has orthogonal beneﬁts that improve model
+generalization on another perturbation type: aug-
+menting with RGF ( Pred.) leads to signiﬁcant
+improvement on RGF ( Ref.), and vice-versa.
+Compared to reference-change examples, augment-
+ing with predicate-change examples leads to greater
+improvements in local consistency, except for on
+RGF ( Ref.) and on AmbigQA – which contains
+many reference-change pairs. Predicate-change ex-
+amples may also be more informative to the model,
+as reference changes can be modeled more easily
+by lexical matching within common context pat-
+terns.
+6.3 Effect of Training data size
+Joshi and He (2021) show CDA to be most effective
+in the low-resource regime. To better understand
+the role that dataset size plays in CDA in the read-
+ing comprehension setting, we evaluate RGF in a
+cross-domain setting where only a small amount of
+training data is available.
+Experimental Setting Since our approach de-
+pends on using an open-domain QA model and
+a question generation model trained on all Natural
+Questions data, we instead experiment with a low-
+resource transfer setting on the BioASQ domain,
+which consists of questions on the biomedical do-
+main. We use the domain-targeted retrieval model
+from Ma et al. (2021), where synthetic question-
+passage relevance pairs generated over the PubMed
+corpus are used to train domain-speciﬁc retrieval
+without any gold supervised data. We ﬁne-tune our
+question-generation model on (limited) in-domain
+data, generate RGF data for augmentation, and then
+use this along with (limited) in-domain data to fur-
+ther ﬁne-tune an RC model, using the NQ-trainedweights for initialization. Further training details
+are provided in Appendix A.
+Training Data Train Size BioASQ (Dev)
+F1 EM
+Original 1000 42.93 23.67
+Orig. + RGF 500 + 500 41.72 23.01
+Original 2000 45.88 25.80
+Orig. + RGF 1000 + 1000 44.64 26.80
+Results We observe signiﬁcant improvements
+over the baseline model in the low resource setting
+for in-domain data (< 2000 examples), as shown in
+Table 6. Compared with the limited gains we see
+on the relatively high-resource NQ reading compre-
+hension task, we ﬁnd that on BioASQ, CDA with
+1000 examples improves performance by 2% F1
+and 3% exact match, performing nearly as well as
+a model trained on 2000 gold examples. These re-
+sults suggest that using counterfactual data in lieu
+of collecting additional training data is especially
+useful in the low-resource setting.
+7 Conclusion
+Retrieve-Generate-Filter (RGF) creates counterfac-
+tual examples for QA which are semantically di-
+verse, using knowledge from the passage context
+and a retrieval model to capture semantic changes
+that would be difﬁcult to specify a priori with a
+global schema. The resulting examples are fully-
+labeled, and can be used directly for training or
+ﬁltered using meaning representations for analy-
+sis. We show that training with this data leads to
+improvements on open-domain QA, as well as on
+challenge sets, and leads to signiﬁcant improve-
+ments in local robustness. While we focus on ques-
+tion answering, for which retrieval components are
+readily available, we note that the RGF paradigm
+is quite general and could potentially be applied to
+other tasks with a suitable retrieval system.
+References1678167916801681A Model Training and Implementation
+Details
+Below, we describe the details of different models
+trained in the RGF pipeline. Unless speciﬁed oth-
+erwise, we use the T5X libraryand pre-trained
+checkpoints from Raffel et al. (2020).
+Question Generation We use a T5-3B model
+ﬁne-tuned on Natural Questions (NQ) dataset. We
+only train on the portion of the dataset that consists
+of gold short answers and an accompanying long
+answer evidence paragraph from Wikipedia. The
+input consists of the title of the Wikipedia article
+the passage is taken from, a separator (‘»’) and
+the passage. The short answer is enclosed in the
+passage using character sequences ‘« answer =’
+and ‘»’ on left and right respectively. The output
+is the original NQ question. The input and output
+sequence lengths are restricted to be 640and256
+respectively. We train the model for 20ksteps with
+a learning rate of 210, dropout 0:1, and batch
+size of 128. We decode with a beam size of 15, and
+take the top candidate as our generated question q.
+Answer Generation We use a T5-3B model
+trained on the same subset of Natural Questions
+(NQ) as question generation with same set of hyper-
+parameters and model size described above. The
+input consists of the title of the Wikipedia article
+the passage is taken from, a separator (‘»’) and
+the passage, while the output sequence is the short
+answer from NQ.
+Reading Comprehension Model We model the
+task of span selection-based reading comprehen-
+sion, i.e. identifying an answer span given question
+and passage, as a sequence-to-sequence problem.
+Input consists of the question, separator (‘»’), and
+title of Wikipedia article, separator (‘»’) and pas-
+sage. The answer format is simply one of the gold
+answer strings. The reading comprehension model
+is a T5-large model trained with batch size of 512
+and learning rate 210for20Ksteps.
+Open-domain Question Answering model
+The open domain QA model is based on the
+implementation from Lee et al. (2019), and
+initialized with the REALM checkpoint from Guuet al. (2020). Both the retriever and reader are
+initialized from the BERT-base-uncased model.
+The query and document representations are 128
+dimensional vectors. When ﬁnetuning, we use a
+learning rate of 10and a batch size of 1 on a
+single Nvidia V100 GPU. We perform 2 epochs of
+ﬁne-tuning for Natural Questions.
+Noise Filtering We train 6 reading comprehen-
+sion models based on the conﬁgurations above
+with different seed values for randomizing train-
+ing dataset shufﬂing and optimizer initialization.
+We retain examples where more than 5 out of 6
+models have the same answer for a question.
+QED Training We use a T5-large model ﬁne-
+tuned on the Natural Questions subset with QED
+annotations (Lamm et al., 2021).We refer the
+reader to the QED paper for details on the lineariza-
+tion of explanations and inputs in the T5 model.
+Our model is ﬁne-tuned with batch size of 512and
+learning rate 210for 20k steps.
+Experimental Variability Unless otherwise
+stated, results are reported from single runs.
+However, we used the six RC models discussed in
+Section 3.4 to estimate cross-run variation. Using
+the procedure and code of Sellam et al. (2021), we
+ﬁnd variation of about 0.5 points (F1). As such, we
+do not ﬁnd differences smaller than this signiﬁcant,
+and in our results focus only on larger effects.
+Computational Budget and Environmental Im-
+pact We ﬁne-tune all T5 models on Cloud TPU
+v3 hardware; each takes approximately 4 hours
+on 16 TPUs in pod conﬁguration. Total compute
+time is approximately 96 TPU-hours and 192 GPU-
+hours, which we estimate as 43 kg CO2e using the
+method of Luccioni et al. (2019).
+B Evaluation of Fluency and Noise
+The authors sampled 300 examples of generated
+questions. To annotate for ﬂuency, authors use
+the following rubric: Is the generated question
+grammatically well-formed barring non-standard
+spelling and capitalization of named entities. This
+noise annotation was done for RGF, as well as Gold
+Agen-Qgen and Random Agen-Qgen.1682Creation of paired data for counterfactual eval-
+uation Once again, authors annotate for cor-
+rectness of counterfactual RGF instances that are
+paired by reference or predicate, as described in
+§3.5. Filtering is done until 1000 examples are
+available under each category.
+Data Unﬁltered Filtered
+RGF 29.8% 25.3%
+Gold Agen-Qgen 27.9% 20.7%
+Random Agen-Qgen 30.7% 28.3%
+C Additional Experiments
+C.1 Intrinsic Evaluation
+In Figure 3, we compare distributions of the
+edit distance between the original and generated
+questions for questions generated by our approach,
+those generated with the gold evidence passage
+(Gold Agen-Qgen baseline), and those generated
+from a random Wikipedia passage (§5) (Random
+Agen-Qgen baseline). We ﬁnd that RGF counter-
+factuals undergo minimal perturbations from the
+original question compared to questions that are
+generated from random Wikipedia paragraph. This
+pattern also holds when compared to questions gen-
+erated from gold NQ passages. We hypothesize thatthe set of alternate answers retrieved in our pipeline
+approach are semantically similar to the gold an-
+swer — same entity type, for instance. Random
+answer spans chosen from the gold NQ passage
+can result in signiﬁcant semantic shifts in gener-
+ated questions.
+In Figure 4, we measure the relation between re-
+trieval rank and edit-distance for RGF. For retrieval
+ranki, we plot average edit distance between the
+original question and counterfactual question that
+was generated using the ith passage and answer.
+We observe a monotonic relation between retrieval
+rank and edit distance (which we use for ﬁltering
+our training data). We also measure changes in
+the distribution of question type and predicate type
+between original NQ data and the generated RGF
+data.
+Figure 5 indicates that counterfactual data ex-
+acerbates question-type bias. However, this bias1683Consistency (OD) Train Size AQA AmbigQA RGF Ref. RGF Pred.
+Original NQ 90K 16.58 13.33 25.12 11.23
+Random Agen-Qgen 90K + 90K 15.80 20.00 27.94 17.16
+RGF (REALM-Qgen) 90K + 90K 17.66 28.57 31.77 19.81
+exists in RGF as well as baselines.
+C.2 Consistency for Open-Domain QA
+In Table 8, we show results on evaluating consis-
+tency on paired datasets in the open-domain results,
+similar to the results shown in §6.1 in the Reading
+Comprehension setting.
+C.3 Augmentation with more data
+In Table 9, we show results on augmenting with
+more than one RGF counterfactual triple (q;a;c)
+for every original example (q;a;c )in NQ. These
+experiments were run on an older version of T5X,
+so RGF (1X) values are reported differently from
+Table 3. We observe that adding more RGF data
+(3X or more) for augmentation can hurt perfor-
+mance. This may be because of increase in the pro-
+portion of noisy to clean examples during training
+and exacerbation of biases in the question genera-
+tion model (explored in 5), resulting in diminishing
+returns. These challenges also occur in the base-
+lines, and may be inhererent to augmentation with
+generated data.
+C.4 Effect of perturbation type
+Experimental Setting For edit distance-based
+experiments, we shard training examples into three
+categories by binning word-level edit distance be-
+tweenqandqinto three ranges: 1–4,5–10, and
+>10. We similarly categorize RGF data gener-
+ated for the NQ development set into the same
+categories. Evaluation sets for edit-distance experi-
+ments based were not manually noise ﬁltered. We
+again report consistency on the reading comprehen-
+sion model.
+Results Similar to the observations for dataset
+sharding along QED annotations, when data is
+sharded by edit distance, we observe that using
+the full RGF data nearly matches the best perfor-
+mance from training on that shard, suggesting that
+CDA with the highly diverse RGF data can lead to
+improved consistency on a broad range of pertur-
+bation types.1684D Semantic Diversity
+Figure 6 includes more examples from Natural Questions, showing the counterfactual questions generated
+for different input questions by RGF.1685E Error analysis of generated examples
+Table 11 shows examples where the RGF model produced incorrect (q;a;c)triples, selected from the
+manually-annotated subset described in Section 4.
+Nonsensical Question
+Context: The security management process relates to other ITIL - processes . However , in this
+particular section the most obvious relations are the relations to the service level management ,
+incident management and change management processes . Security management is a continuous
+process that can be compared to W . Edwards Deming ’ s Quality Circle ( Plan , Do , Check ,
+Act ) . The inputs are requirements from clients . The requirements are translated into security
+services and security metrics.
+Answer: W . Edwards Deming
+Generated Question: the security management process is similar to the itil ?
+Incomplete Question
+Context: Using Cartesian coordinates , inertial motion is described mathematically as : where
+" x " is the position coordinate and " " is proper time . ( In Newtonian mechanics , " t"
+, the coordinate time ) . In both Newtonian mechanics and special relativity , space and then
+spacetime are assumed to be ﬂat , and we can construct a global Cartesian coordinate system .
+Ingeneral relativity , these restrictions on the shape of spacetime and on the coordinate system
+to be used are lost . Therefore , a different deﬁnition of inertial motion is required .
+Answer: general relativity
+Generated Question: which theory states that all motion is a function of ?
+Correct Type, but Wrong Entity
+Context: Ruth McDevitt Ruth McDevitt ( September 13 , 1895 – May 27 , 1976 ) was an
+American stage , ﬁlm , radio and television actress . She was born Ruth Thane Shoecraft in
+Coldwater , Michigan . After attending the American Academy of Dramatic Arts , she married
+Patrick McDevitt and decided to devote her time to her marriage . After her husband ’ s death
+in 1934 , she returned to acting . She performed on Broadway , in particular understudying and
+succeeding Josephine Hull in " Arsenic and Old Lace " and " The Solid Gold Cadillac " . She
+also worked as a radio actor . McDevitt was a familiar face on television during the 1950s ,
+1960s , and 1970s . She played " Mom Peepers " in the 1950s sitcom " Mister Peepers " . She
+was a regular with Ann Sheridan , Douglas Fowley , and Gary Vinson in CBS ’ s " Pistols ’ n ’
+Petticoats " , a 1966 - 67 satire of the Old West .
+Answer: Ann Sheridan
+Generated Question: who played the mother on mr peepers ?1686

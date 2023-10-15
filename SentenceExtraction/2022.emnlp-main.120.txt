@@ -1,1 +1,688 @@
-1827 Proceedings of the 2022 Conference on Empirical Methods in Natural Language Processing , pages 1827 1841 December 7 - 11 , 2022 © 2022 Association for Computational Linguistics 1828 1829 1830 1831 1832 1833 1834 1835 1836 1837 1838 1839 1840 1841 
+
+Shuguang Chen
+University of Houston
+schen52@uh.eduLeonardo Neves
+Snap Inc.
+lneves@snap.comThamar Solorio
+University of Houston
+tsolorio@uh.edu
+Abstract
+In this work, we take the named entity recog-
+nition task in the English language as a case
+study and explore style transfer as a data aug-
+mentation method to increase the size and di-
+versity of training data in low-resource sce-
+narios. We propose a new method to effec-
+tively transform the text from a high-resource
+domain to a low-resource domain by chang-
+ing its style-related attributes to generate syn-
+thetic data for training. Moreover, we de-
+sign a constrained decoding algorithm along
+with a set of key ingredients for data selec-
+tion to guarantee the generation of valid and
+coherent data. Experiments and analysis on
+five different domain pairs under different data
+regimes demonstrate that our approach can
+significantly improve results compared to cur-
+rent state-of-the-art data augmentation meth-
+ods. Our approach is a practical solution to
+data scarcity, and we expect it to be applicable
+to other NLP tasks.
+1 Introduction
+Large-scale pre-trained language models (PLMs)
+such as BERT (Devlin et al., 2019) and T5 (Raffel
+et al., 2020) have shown impressive performances
+on a wide variety of NLP tasks. Following the
+paradigm of self-supervised pre-training and fine-
+tuning, these models have achieved state-of-the-
+art performance in many NLP benchmarks such
+as question answering (Yang et al., 2019; Yamada
+et al., 2020), machine translation (Provilkov et al.,
+2020; Lewis et al., 2020), and text summariza-
+tion (Zaheer et al., 2020; Aghajanyan et al., 2021).
+However, due to the discrepancy of training objec-
+tives between language modeling and downstream
+tasks, the performance of such models may be
+limited by data scarcity in low-resource domains
+(Jiang et al., 2020; Gururangan et al., 2020).Data augmentation is effective in addressing
+data scarcity. Previous work (Wei and Zou, 2019;
+Morris et al., 2020) has mainly focused on us-
+ing in-domain data to synthesize new datasets for
+training. When applied to low-resource domains,
+however, these approaches may not lead to sig-
+nificant improvement gains as the data in low-
+resource domains is not comparable to that in
+high-resource domains in terms of size and diver-
+sity. Recently, many studies (Xia et al., 2019; De-
+houck and Gómez-Rodríguez, 2020) have revealed
+the potential of leveraging data from high-resource
+domains to improve low-resource tasks. Despite
+their impressive results, directly using abundant
+data from high-resource domains can be problem-
+atic due to the difference in data distribution (e.g.,
+language shift) and feature misalignment (e.g.,
+class mismatch) between domains (Wang et al.,
+2018; Zhang et al., 2021).
+In this work, we explore the potential of em-
+ploying style transfer as a way of data augmen-
+tation in cross-domain settings. Style transfer on
+natural language aims to change the style-related
+attributes of text while preserving its semantics,
+which makes it a reasonable alternative for the
+purpose of data augmentation. Here, we take the
+named entity recognition (NER) task as a case
+study to investigate its effectiveness. The general
+pipeline is shown in Figure 1. Compared to the
+text classification task, the NER task is more dif-
+ficult as it requires to jointly modify the tokens
+and their corresponding labels. One of the critical
+challenges here is the lack of parallel style transfer
+data annotated with NER labels. Our workaround
+to the lack of data is to figure out how to lever-
+age a non-NER parallel style transfer dataset and
+a nonparallel NER dataset. Both datasets contain
+pairs of sentences in source and target styles, re-
+spectively. This scenario is much more realistic
+since resources for style transfer tend to be task-
+agnostic. At the same time, it is easier to come1827
+by nonparallel task-specific datasets with different
+styles. Moreover, a solution that can successfully
+exploit data in this manner will be relevant in gen-
+eral data augmentation scenarios beyond NER.
+We formulate style transfer as a paraphrase gen-
+eration problem following previous work (Krishna
+et al., 2020; Qi et al., 2021) and propose a novel
+neural architecture that uses PLMs as the genera-
+tor and discriminator. The generator aims to trans-
+form text guided by task prefixes while the dis-
+criminator aims to differentiate text between dif-
+ferent styles. We jointly train the generator and
+discriminator on both parallel and nonparallel data
+to learn transformations in a semi-supervised man-
+ner. We apply paraphrase generation directly on
+the parallel data to bridge the gap between source
+and target styles. For nonparallel data, we use
+a cycle-consistent reconstruction to re-paraphrase
+back the paraphrased sentences to its original
+style. Additionally, to guarantee the generation of
+valid and coherent data, we present a constrained
+decoding algorithm based on prefix trees along
+with a set of key ingredients for data selection to
+reduce the noise in synthetic data. We system-
+atically evaluate our proposed methods on 5 dif-
+ferent domain pairs under different data regimes.
+Experiments and analysis show that our proposed
+method can effectively generate synthetic data by
+imitating the style of a target low-resource domain
+and significantly outperform previous state-of-the-
+art methods.
+In summary, our contributions are as follows:
+1. We propose a novel approach for data aug-
+mentation that leverages style transfer to im-prove the low-resource NER task and show
+that our approach can consistently outper-
+form previous state-of-the-art methods in dif-
+ferent data regimes.
+2. We present a constrained decoding algorithm
+along with a set of key ingredients to guaran-
+tee the generation of valid and coherent data.
+3. Our proposed solution is practical and can
+be expected to be applicable to other low-
+resource NLP tasks as it does not require any
+task-specific attributes.
+2 Related Work
+Style Transfer Style transfer aims to adjust the
+stylistic characteristics of a sentence while pre-
+serving its original meaning. It has been widely
+studied in both supervised (Jhamtani et al., 2017;
+Niu et al., 2018; Rao and Tetreault, 2018; Wang
+et al., 2019, 2020) and unsupervised manners
+(Yang et al., 2018; Li et al., 2018; Prabhumoye
+et al., 2018; John et al., 2019; Dai et al., 2019;
+He et al., 2020; Krishna et al., 2020; Liu et al.,
+2021b). Although style transfer is frequently uti-
+lized in many NLP tasks such as dialogue systems
+(Niu and Bansal, 2018; Zhu et al., 2021), sen-
+timent transfer (Shen et al., 2017; Malmi et al.,
+2020), and text debiasing (Ma et al., 2020; He
+et al., 2021), its application on data augmentation
+still remains understudied by the NLP community.
+To facilitate research in this direction, we study
+style transfer as data augmentation and propose a
+novel approach to explore transferring the style-
+related attributes of text to add more variations in
+the training data.1828Data Augmentation Data augmentation has
+been recently receiving increasing and widespread
+attention in the field of NER. The mainstream
+methods can be group into two categories: rule-
+based approaches (Bodapati et al., 2019; Dai
+and Adel, 2020; Lin et al., 2021; Simoncini and
+Spanakis, 2021), and model-based approaches
+(Ding et al., 2020; Nie et al., 2020; Zeng et al.,
+2020; Chen et al., 2020; Wenjing et al., 2021;
+Liu et al., 2021a; Wang and Henao, 2021; Zhao
+et al., 2021). Although previous methods have
+shown promising results, they may not perform
+well in low-resource domains as the size and di-
+versity of the training data are limited. Recent
+work have studied data augmentation by leverag-
+ing the data from high-resource domains. Chen
+et al. (2021) investigated data transformation with
+implicit textual patterns while Zhang et al. (2021)
+explored replacing entities between domains with
+cross-domain anchor pairs. Motivated by their im-
+pressive results, we further study how to bridge the
+gap of data difference between domains and ex-
+plore a better to leverage the data in high-resource
+domains for data augmentation.
+3 Problem Formulation and
+Preliminaries
+Considering a nonparallel NER dataset Dcon-
+sisting of source data Dfrom a high-resource
+domain and target data Dfrom a low-resource
+domain, training a model directly on Dand
+evaluating on Dis expected to give low pre-
+diction performance due to the stylistic differ-
+ences (e.g., lexicons and syntax) between do-
+mains. In this work, we transform the data from
+a source domain to a target domain by chang-
+ing text style and use the resulting transformed
+data to improve NER performance on D. To
+this end, we assume access to a dataset Pthat
+contains pairs of parallel source and target sen-
+tences, respectively, to provide supervision sig-
+nals for style transfer and a pre-trained generative
+model Gbased on an encoder-decoder (Vaswani
+et al., 2017) architecture. Given an input sequence
+x={x, x, ..., x}of length N, the genera-
+torGis pre-trained to maximize the conditional
+probability in an autoregressive manner:
+p(ˆy|x) =/productdisplayp(ˆy|ˆy, x)
+where ˆy={ˆy,ˆy, ...,ˆy}is the generatedsentence of length Mthat has the same meaning
+asxbut a different style.
+Data Preparation Applying pre-trained gener-
+ative models requires converting NER tokens and
+labels into a linearized format. In this work, we
+assume that the NER dataset follows the stan-
+dard BIO labeling schema (Tjong Kim Sang and
+Veenstra, 1999). Previous work (Ding et al.,
+2020; Chen et al., 2021) has explored pre-pending
+each label to its corresponding token so that
+the model can capture the dependency and re-
+lationship between tokens and labels. How-
+ever, we argue that this approach requires pro-
+hibitively large amounts of training data to ad-
+equately model the labeling schema. Recent
+work has also found that this format introduces
+too many hallucinated tokens and thus makes the
+learning problem significantly harder as the model
+needs to track token indices implicitly (Maynez
+et al., 2020; Raman et al., 2022). In the sce-
+nario where the number of annotated data is lim-
+ited, the model may be confused with the label-
+ing schema and tend to generate noisy samples.
+To mitigate this issue, we propose to linearize the
+data by only adding <START_ENTITY_TYPE>
+and<END_ENTITY_TYPE> special tokens to
+the beginning and the end of each entity span.
+For instance, the sample “ A rainy day in
+[New] [York] " will be converted
+to “A rainy day in <START_LOC> New
+York <END_LOC> ". Furthermore, we also
+prepend task prefixes to the beginning of the sen-
+tences to guide the direction of style transfer,
+where a prefix is a sequence of words for task de-
+scription specifying the source and target styles of
+transfer (e.g., “transfer source to target: ").
+4 Method
+In this work, we explore style transfer as a data
+augmentation method to improve the performance
+of NER systems on low-resource domains. We
+propose an adversarial learning framework to gen-
+erate a paraphrase of the source data in a high-
+resource domain whose style conforms to the tar-
+get data in a low-resource domain. The pro-
+posed framework comprises two main compo-
+nents: (1) paraphrase generation , which aims to
+rephrase the sentence to a different style with su-
+pervision, and (2) cycle-consistent reconstruction ,
+which aims to transfer the sentence to a different
+style and then back to its original style with no1829
+supervision. The overall architecture is shown in
+Figure 2. Besides, we design a constrained decod-
+ing algorithm to guarantee the generation of valid
+samples and present a set of key ingredients to se-
+lect high-quality generated sentences.
+4.1 Adversarial Learning with PLMs
+Paraphrase Generation (PG) Recent work
+(Krishna et al., 2020; Qi et al., 2021) has demon-
+strated the effectiveness of reformulating style
+transfer as a controlled paraphrase generation
+problem. Here, we follow the same idea to per-
+form the style transfer task in a supervised man-
+ner by using a gold standard annotated corpus P.
+Specifically, as shown in Figure 2, given a sen-
+tence x={x, x, ..., x}of length Nconcate-
+nated with a task prefix that specifies the source
+and target styles of transfer, the generator Gen-
+codes it into a sequence of latent representations
+ˆz and then decodes these representations into
+its paraphrase ˆy={ˆy,ˆy, ...,ˆy}of length M
+which has the same meaning as xbut a different
+style. The generator Gis trained with explicit
+supervision to maximize the log likelihood objec-
+tive:
+L=−1
+M/summationdisplayy·log(ˆy)
+Cycle-consistent Reconstruction (CR) Con-
+sidering a nonparallel NER dataset consisting of
+data from DandDin the source and targetstyles, respectively, we aim to change the style of
+text as a way to augment data. Previous mech-
+anism enables the generator Gto learn differ-
+ent mapping functions, i.e., G(x)→ˆyand
+G(x)→ˆy. Intuitively, the learned map-
+ping functions should be reverses of each other.
+The sentence transferred by one mapping function
+should be able to be transferred back to its original
+representation using the other mapping function.
+Such cycle-consistency can not only encourage
+content preservation between the input and output,
+but also reduce the search space of mapping func-
+tions (Shen et al., 2017; Prabhumoye et al., 2018).
+To this end, as shown in Figure 2, we first use the
+generator Gto generate the paraphrase ˜y of
+the input sentence x concatenated with a pre-
+fix. As the gradients cannot be back-propagated
+through discrete tokens, we use Gumbel Softmax
+(Jang et al., 2017) for ˜y as a continuous ap-
+proximation to recursively sample the tokens from
+the probability distribution:
+p(ˆy|ˆy, x) =exp((log(π) +g)/τ)
+/summationtextexp((log(π) +g)/τ)
+where πare class probabilities for tokens and |V|
+denotes the size of vocabulary. gare i.i.d. sam-
+ples drawn from Gumbel (0,1)distribution and τ
+is the temperature hyperparameter (Hinton et al.,
+2015). τ→0approximates a one-hot representa-
+tion while τ→ ∞ approximates a uniform distri-1830bution. Then we concatenate the paraphrase ˜y
+with a different prefix as the input to the generator
+Gand let it transfer the paraphrase back to the
+original sentence ˆy. The training objective for
+cycle-consistent reconstruction is formulated as:
+L=E[−logp(˜y|x)]+
+E[−logp(˜y|x)]
+Additionally, the generator Gis adversarially
+trained with a style discriminator D, which takes
+as the input the latent representations of either the
+input sentence or its paraphrase, and discriminates
+the input between the source and target styles:
+L=E[−logD(G(x))]+
+E[−log(1−D(G(x)))]
+Overall Training Objective The overall train-
+ing objective can be formalized as:
+L(θ, θ) =λL+λL+λL
+where λ,λ, andλreflect the relative impor-
+tance of L,L, andL, respectively.
+The training process begins with the paraphrase
+generation as the first stage: the generator Gis
+trained with the paraphrase generation objective
+while the discriminator Dis trained with the ad-
+versarial learning objective. In the second stage,
+both paraphrase generation and cycle-consistent
+reconstruction are involved: the cycle-consistent
+reconstruction objective is further incorporated to
+train the generator G.
+4.2 Data Transformation
+Constrained Decoding When given the input
+sequence xand the already generated tokens
+{y, y, ..., y}, a straightforward approach to
+generate the next word yis to greedily select the
+word with the highest probability at the timestep i.
+However, this greedy decoding approach may re-
+sult in the sub-optimal decision and cannot guar-
+antee to generate valid NER samples (e.g, mis-
+match of entity types and incomplete sentences).
+To address these issues, we propose to apply
+a constrained decoding algorithm based on pre-
+fix trees (Cao et al., 2021; Lu et al., 2021) to
+control data transformation. Figure 3 presents
+our proposed algorithm. Specifically, the decod-
+ing starts with a <BOS> token and ends with a
+<EOS> token. At each decoding step, we apply
+top-k (Fan et al., 2018) and top-p (Holtzman et al.,
+2020) algorithms to navigate the search space.
+The prefix tree maintains two candidate vocabu-
+laries for text spans (i.e, <Text> node) and en-
+tity spans (i.e, <B_ENT> and<I_ENT> nodes),
+respectively. Based on the previous generated to-
+ken, the constrained decoding dynamically prunes
+the vocabulary to lead the model to generate valid
+tokens. For example, if the previously generated
+token is <Text> , the model can only generate ei-
+ther<EOS> or<B_ENT> as the next token. Oth-
+erwise, it makes the sample invalid and noisy. We
+also adapt a slightly larger temperature (i.e., τin
+Gumbel Softmax) to smooth the probability distri-
+bution towards the tokens that most likely conform
+to the target style.
+Data Selection Even with a valid structure, the
+generated sentences may still remain unreliable as
+it may have a low quality due to degenerate rep-
+etition and incoherent gibberish (Holtzman et al.,
+2020; Welleck et al., 2020). To mitigate this issue,
+we further perform data selection with the follow-
+ing metrics:
+•Consistency : a confidence score from a pre-
+trained style classifier as the extent a gener-
+ated sentence is in the target style.
+•Adequacy : a confidence score from a pre-
+trained NLU model on how much semantics
+is preserved in the generated sentence.
+•Fluency : a confidence score from a pre-
+trained NLU model indicating the fluency of1831the generated sentence.
+•Diversity : the edit distance between original
+sentences and the generated sentences at the
+character level.
+For each sentence, we over-generate k=10 can-
+didates. We calculate the above metrics (see Ap-
+pendix C for more details) and assign a weighted
+score of these metrics to each candidate. Then we
+use the score to rank all candidates and select the
+best one for training NER systems.
+5 Experiments
+In this section, we present the experimental setup
+and results. We extensively evaluate our proposed
+method on five different domain pairs and com-
+pare our proposed method with state-of-the-art
+systems on data augmentation for NER in cross-
+domain scenarios.
+5.1 Experimental Setup
+Datasets We focus exclusively on formality
+style transfer which aims to transfer formal sen-
+tences to informal sentences. We use the paral-
+lel style transfer data from the GYAFC(Rao
+and Tetreault, 2018) as P. This corpus contains
+pairs of formal and informal sentences collected
+from Yahoo Answers. For the nonparallel NER
+dataD, we use a subset of OntoNotes 5.0cor-
+pus as source data Dand Temporal Twitter Cor-
+pus(Rijhwani and Preotiuc-Pietro, 2020) as tar-
+get data D. Here, we only consider the English
+datasets. The source data involves five different
+domains in the formal style: broadcast conversa-
+tion ( BC), broadcast news ( BN), magazine ( MZ),
+newswire ( NW), and web data ( WB) while the tar-
+get data involves only social media ( SM) domain in
+the informal style. The source and target data are
+nonparallel and we consider a total of 18 different
+entity types (e.g, PERSON andLOCATION ). The
+data statistics and a list of entity types are shown
+in Appendix A. The details of data preprocessing
+and filtering are described in Appendix B.
+Base Models For style transfer, we use a pre-
+trained T5model (Raffel et al., 2020) to initial-
+ize both the generator Gand discriminator D.For NER, we use a sequence labeling framework
+consisting of a pre-trained BERTmodel (De-
+vlin et al., 2019) as the text encoder and a lin-
+ear layer as the classifier to assign labels for each
+token. We use Huggingface Transformers library
+(Wolf et al., 2020) to implement all models. The
+details of hyper-parameters and fine-tuning are de-
+scribed in Appendix D.
+Data Regimes To better understand the effec-
+tiveness of our proposed method, we undertake ex-
+periments in three different data regimes by vary-
+ing the amount of training data in the target do-
+main, namely- , - , and -scenarios. For all scenarios, we assume
+full access to PandDbut different access to
+D. In the- scenario, we adopt a N-
+wayK∼2K-shot setting following Ding et al.
+(2021). We randomly select samples from D
+and ensure that each entity class contains K∼2K
+examples. The Kis set to 10 in our experiments
+and thus we will have 10 ∼20 samples from the
+target data. In the - scenario, we
+simulate low-resource settings by randomly se-
+lecting 1024 samples from D. For the -scenario, we assume a full access to D, i.e.,
+use all of samples from the target data.
+Compared Methods We investigate the fol-
+lowing methods on data augmentation for NER
+in cross-domain scenarios for comparison: (1)
+Adaptive Data Augmentation (ADA) (Zhang
+et al., 2021) which proposes to augment sentences
+by replacing the entity in the source data with the
+entity in the target data that belongs to same en-
+tity class, and (2) Cross-domain Data Augmen-
+tation (CDA) (Chen et al., 2021) which studies to
+augment sentences by transforming data represen-
+tations through an aligned feature space between
+the source and target data. We apply each method
+on source data to obtain the same amount of gen-
+erated pseudo data. Each sample in the pseudo
+data corresponds to a sample in the source data.
+To make a fair comparison, we use the same base
+model (i.e., BERT+Linear) but different train-
+ing data generated from each method. The valida-
+tion and test data are from the target domain. We
+do five runs for all experiments and report the av-
+erage micro F1 score as the evaluation metric.
+5.2 Main Results
+Using Same Amount of Pseudo Data Here,
+we randomly select 1K, 2K, 3K, and 4K sam-1832
+ples generated by each method as the training
+data to fine-tune the model. The baseline is es-
+tablished by fine-tuning the model on the same
+amount of data from the source domain. The
+validation and test data are from the target do-
+main. Table 1 presents the performance compar-
+ison of different data augmentation methods with
+the same amount of pseudo data. Overall, our pro-
+posed method significantly outperforms the pre-
+vious best method. On average, the F1 score in-
+creases by 4.7%, 10.1%, and 9.3% in- , - , and -settings, respec-
+tively. Regarding the effect of data augmentation
+in cross-domain settings, we find that simply re-
+placing the entities may decrease the model per-
+formance, especially when we only have limited
+amounts of target data. Although this method can
+comparatively address the word discrepancy by
+sharing entities across domains, it potentially in-
+creases the overlap between the training and test
+data, and thus reduces the model’s generalization
+ability. Additionally, learning text differences be-tween domains from only nonparallel samples suf-
+fers from the problem of data scarcity and can re-
+sult in the generation of invalid and/or low-quality
+data. In contrast, our proposed method is more
+stable and consistently outperforms the baseline in
+different settings. We attribute this improvement
+to the fact that the proposed method can signifi-
+cantly increase the diversity from the perspective
+of words and entities while barely bringing seman-
+tic changes to the original text.
+Using Large Amount of Pseudo Data Theo-
+retically, we could generate an infinite amount of
+pseudo data for training. Thus, we undertake ex-
+periments using more pseudo data combined with
+target data for training. Here, we make compari-
+son with three different method to support the ef-
+fectiveness of our proposed method: (1) S + T :
+fine-tune on source and target data together, (2) T
+only: fine-tune on only target data, and (3) S→T:
+fine-tune on source data first and then target data.
+For our proposed method P + T , we gradually in-
+crease the number of generated samples combined1833
+with target data as for training. We present the re-
+sults in Figure 2. Notably, combining source data
+directly with target data could hurt the model per-
+formance. One possible explanation for such poor
+performance is that the distribution (e.g., lexicons
+and syntax) of source and target data can be very
+different, which may encourage the model to learn
+irrelevant patterns and thus lead to under-fitting.
+We also notice a similar phenomenon while only
+using a few amounts of samples combined with
+target samples. We argue that, in such cases, the
+model can have an inductive bias towards mem-
+orization instead of generalization, and thus per-
+form poorly on test data. Additionally, fine-tuning
+on the source data first and then target data S→T
+can achieve better results than simply fine-tuning
+on source and target data together S + T or only
+target data T only . Nevertheless, with more and
+more generated samples for training, our proposed
+method can significantly boost the model perfor-
+mance comparing against other methods in four
+domain pairs ( BC,BN,MZ, andNW) while remains
+very competitive in WB.
+5.3 Analysis
+Ablation Study In Table 3, we present ablation
+studies in the - setting. For each do-
+main pair, we generate the training data by ran-
+domly transferring 1K samples from the source
+domain while the validation and test data are from
+the target domain SM. We consider a series of ab-
+lation studies: (1) no cycle-consistent reconstruc-
+tion, which indicates that we train the model with
+only the style transfer datasets, (2) no style dis-
+criminator, (3) no constrained decoding (i.e., no
+guarantee on the generation of valid sentences, and
+(4) no data selection. From Table 3, we can see
+that cycle-consistent reconstruction is critical for
+our proposed method to transfer the knowledge
+between domains. Without this component, the F1
+score decreases by 39.15% on average. Addition-
+ally, constrained decoding also plays an important
+role in avoiding label mistakes, which can signif-
+icantly hurt model performance. Moreover, the
+style discriminator is effective to enable the model
+to find generalized patterns while data selection
+can further boost the model performance. Over-
+all, the ablation results demonstrate that each strat-
+egy in our proposed method is crucial in achieving
+promising results.
+Case Study Table 6 shows some hand-picked
+examples of formal source sentences and their
+corresponding informal target sentences generated
+from our proposed method. We observe that
+the generated sentences are embedded with some
+target domain characteristics (e.g., misspellings,
+grammar errors, language variations, and emojis)
+which significantly enhances entity context yet re-
+mains semantically related and coherent. This in-
+dicates that our proposed method can learn and
+transfer the text styles. Besides, we find that some
+entities in the original sentences can be replaced
+with not only those of the same entity type but1834also those of a different entity type. We also no-
+ticed that the proposed method tends to generate
+short sentences, imitating the target data to make
+the context ambiguous. However, we also note
+that the model may ignore the entity spans in the
+original sentences, which has a negative impact
+on the diversity of entities if the data is very lim-
+ited. Besides, our model cannot deal well with the
+mismatch of labeling schema (i.e., the same en-
+tity span is labeled into different entity types in
+the source and target data) and has a limited abil-
+ity to recognize rare entities. In the future, we plan
+to continue exploring approaches to address these
+issues.
+6 Conclusion
+In this paper, we propose an effective approach
+to employ style transfer as a data augmentation
+method. Specifically, we present an adversarial
+learning framework to bridge the gap between dif-
+ferent text styles and transfer the entity knowl-
+edge from high-resource domains to low-resource
+domains. Additionally, to guarantee the genera-
+tion of valid and coherent data, we design a con-
+strained decoding algorithm along with a set of
+key ingredients for data generation and selection.
+We undertake experiments on five different do-
+main pairs. The experimental results show that our
+proposed method can effectively transfer the data
+across domains to increase the size and diversity
+of training data for low-resource NER tasks. For
+the future work, we plan to explore style trans-
+fer as data augmentation in cross-lingual settings
+(i.e., transfer entity knowledge across languages
+instead of just domains). Additionally, since our
+approach is based on pre-trained language mod-
+els, it would be interesting to explore leveraging
+pre-trained knowledge for data augmentation.
+Limitations
+Based on our studies, we find the following main
+limitations: (1) mismatch of annotation schema :
+we observe that the annotation schema between
+some NER datasets conflict with each other. The
+same entity span can be labeled into different en-
+tity types. For example, “America" is an instance
+ofGPE in the OntoNotes 5.0 dataset but LOCA-
+TION in the WNUT17 dataset. This phenomenon
+introduces noise and make it difficult for mod-
+els to understand entity types and learn transfor-
+mations. (2) mismatch of labeling schema : thelabeling schema in different NER datasets can
+be very different. For instance, OntoNotes 5.0
+dataset contains 18 coarse-grained entity types
+while FEW-NERD contains 9 coarse-grained and
+66 fine-grained entity types. Using such datasets
+as source and target data may not lead to a signif-
+icant improvement gains. We hope our findings
+can inform potential avenues of improvement on
+data augmentation for NER and inspire the further
+work in this research direction.
+Acknowledgements
+This work was partially supported by the National
+Science Foundation (NSF) under grant #1910192.
+We would like to thank the anonymous review-
+ers for their valuable suggestions and the members
+from the RiTUAL lab at the University of Houston
+for their valuable feedback.
+References1835183618371838
+A Data Statistics
+Table 4 presents the data statistics of GYAFC
+corpus (Rao and Tetreault, 2018), OntoNotes 5.0
+corpus and Temporal Twitter corpus (Rijhwani
+and Preotiuc-Pietro, 2020). We consider totally
+18 different entity types following the annota-
+tion schema of OntoNotes 5.0 corpus, includ-
+ingWORK_OF_ART ,ORG ,FAC,LAW ,PER-
+CENT ,PRODUCT ,MONEY ,DATE ,PERSON ,
+GPE ,QUANTITY ,CARDINAL ,NORP ,TIME ,
+EVENT ,ORDINAL ,LOC ,LANGUAGE .
+B Data Preprocessing and Filtering
+Due to the limitation of computational resources,
+we set a max length of 64 to filter out long lin-
+earized sentences in both style transfer dataset
+Pand NER dataset Dfor training the proposed
+framework to generate pseudo data. We also uses
+a pre-trained BERTmodel (Devlin et al., 2019)
+to assign pseudo NER tags for sentences in the
+style transfer dataset Pas weak supervision. The
+pre-trained BERTmodel is only trained with
+the source data and has no access to the target
+data. The predicted NER tags are selected only
+if it comes with a confidence score (i.e., predicted
+probability) higher than 0.9 in both parallel source
+and target sentence. This results in approximately183910% of sentences in the style transfer dataset P
+having pseudo NER tags. For the NER dataset D,
+we simply adapt original tags without further pro-
+viding pseudo labels.
+C Score Calculation in Data Selection
+We simply fine-tune a T5model (Raffel et al.,
+2020) for style classification as the style classifier
+to obtain the consistency score. The adequacy and
+fluency scores are obtained from the softmax con-
+fidence a pretrained NLU model.
+D Hyper-parameters and Fine-tuning
+Table 5 lists the hyper-parameters for both style
+transfer and NER tasks. All hyper-parameters
+are kept the same across different experiments for
+fine-tuning and/or generating. For the hardware,
+we use 8 NVIDIA V100 GPUs with a memory
+of 24GB. By adjusting the training batch size, our
+experiments should be compatible with any GPU
+that has a memory higher than 10GB.
+E Examples of Generated Data
+Table 6 shows some examples of formal source
+sentences and their corresponding informal target
+sentences generated from our proposed method for
+case study.18401841

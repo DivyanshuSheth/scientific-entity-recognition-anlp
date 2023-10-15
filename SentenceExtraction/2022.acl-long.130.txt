@@ -1,1 +1,756 @@
-1852 Proceedings of the 60th Annual Meeting of the Association for Computational Linguistics Volume 1 : Long Papers , pages 1852 1865 May 22 - 27 , 2022 c(cid:13)2022 Association for Computational Linguistics 1853 1854 1855 1856 1857 1858 1859 1860 1861 1862 1863 1864 1865 
+
+Yanyang Li, Fuli Luo, Runxin Xu, Songfang Huang, Fei Huang, Liwei WangDepartment of Computer Science and Engineering, The Chinese University of Hong KongAlibaba GroupKey Laboratory of Computational Linguistics, Peking University, MOE, China
+{yyli21,lwwang}@cse.cuhk.edu.hk, runxinxu@gmail.com
+{lfl259702,songfang.hsf,f.huang}@alibaba-inc.com
+Abstract
+Structured pruning has been extensively stud-
+ied on monolingual pre-trained language mod-
+els and is yet to be fully evaluated on their mul-
+tilingual counterparts. This work investigates
+three aspects of structured pruning on multi-
+lingual pre-trained language models: settings,
+algorithms, and efﬁciency. Experiments on
+nine downstream tasks show several counter-
+intuitive phenomena: for settings, individu-
+ally pruning for each language does not in-
+duce a better result; for algorithms, the sim-
+plest method performs the best; for efﬁciency,
+a fast model does not imply that it is also small.
+To facilitate the comparison on all sparsity lev-
+els, we present Dynamic Sparsiﬁcation , a sim-
+ple approach that allows training the model
+once and adapting to different model sizes at
+inference. We hope this work ﬁlls the gap in
+the study of structured pruning on multilingual
+pre-trained models and sheds light on future re-
+search.
+1 Introduction
+Large-scale pre-trained monolingual language mod-
+els like BERT (Devlin et al., 2019) and RoBERTa
+(Liu et al., 2019) have shown promising results in
+various NLP tasks while suffering from their large
+model size and high latency. Structured pruning has
+proven to be an effective approach to compressing
+and accelerating these large monolingual language
+models (Michel et al., 2019; Wang et al., 2020c;
+Prasanna et al., 2020; Liang et al., 2021), making
+them practical for real-world applications.
+Similarly, multilingual pre-trained models (Con-
+neau and Lample, 2019; Conneau et al., 2020; Xue
+et al., 2021; Luo et al., 2021) are also powerful and
+even have more parameters. However, little atten-
+tion has been paid to evaluating the effectiveness
+of structured pruning on these multilingual mod-
+els. Applying pruning to multilingual pre-trainedmodels is non-trivial, as it typically involves many
+languages and needs to carefully design the roles of
+modules within the network. For example, most at-
+tention heads have little impact on the performance
+of monolingual pre-trained models (Michel et al.,
+2019; V oita et al., 2019), while it is the opposite for
+multilingual pre-trained models (See Section 5.3
+and also Budhraja et al. (2021)).
+This work intends to examine how structured
+pruning reacts to multilingual pre-trained mod-
+els. We take the most representative multilingual
+pre-trained model family, XLM-R (Conneau et al.,
+2020; Goyal et al., 2021) for our case study and
+evaluate the pruning performance on nine cross-
+lingual understanding tasks in XTREME (Hu et al.,
+2020). We investigate three aspects of structured
+pruning: settings, algorithms, and efﬁciency.
+Settings Traditional pruning produces a single
+small model, which is shared across languages
+(shared setting). Recent work on multilingual
+translation (Li et al., 2020; Lin et al., 2021; Xie
+et al., 2021; Gong et al., 2021) suggests that tai-
+loring pruning to one language could achieve bet-
+ter results ( non-shared setting). However, our
+comprehensive experiments show that neither of
+the two settings can consistently outperform the
+other one (See Section 5.2).
+Algorithms There exists a broad spectrum of prun-
+ing algorithms (Hoeﬂer et al., 2021), and it is im-
+possible to test all of them considering the cost of
+pre-training. We focus on two pruning algorithms
+that have been studied the most in monolingual pre-
+trained models: the regularization-based pruning
+(Louizos et al., 2018; Wang et al., 2020c) (and our
+improved version) and the gradient-based pruning
+(Michel et al., 2019; Prasanna et al., 2020; Liang
+et al., 2021) (See Section 4). We experimentally
+ﬁnd that the simplest gradient-based pruning is
+more effective for XLM-R (See Section 5.2).
+Efﬁciency One meaningful way to measure prun-
+ing algorithms is to study how the performance and1852speed of the pruned model vary with the sparsity
+(Hoeﬂer et al., 2021). However, most pruning al-
+gorithms, including those we study in this work,
+require training the model for each speciﬁc sparsity.
+This limitation makes comparisons against a range
+of sparsity levels infeasible due to the prohibitive
+training cost. To solve this issue, we propose the
+Dynamic Sparsiﬁcation (DS for short), a simple
+method that parameterizes subnetworks at any spar-
+sity level and shares their weights afterward (See
+Section 6.1). DS only trains the model once but can
+obtain models at any sparsity level during inference.
+Experiments on XNLI (Conneau et al., 2018) show
+that DS does not degrade the performance much
+while dramatically reducing the training cost. Inter-
+estingly, we observe that the model size and infer-
+ence speed are not strongly correlated in XLM-R.
+This observation suggests that one could not obtain
+a fast model by simply making the model small by
+using vanilla pruning algorithms (See Section 6.2).
+2 Related Work
+Settings Recent multilingual translation research
+suggests that adapting subnetworks for each lan-
+guage or language pair rather than for all of them
+gives better results. Among them, Li et al. (2020)
+train a shared multilingual model, then select layers
+for each language pair. Lin et al. (2021) also prune
+a shared multilingual model for each language pair,
+though on the level of entries in weight matrices.
+Instead, Gong et al. (2021) prune attention heads
+and feedforward networks for each language. Xie
+et al. (2021) ﬁrst identify general and language-
+speciﬁc neurons in a shared multilingual network,
+then tune those neurons using the data of their cor-
+responding language only. These ﬁndings inspire
+us to extend from multilingual translation to see
+hownon-shared pruning settings work on mul-
+tilingual pre-training.
+Algorithms There are many structured pruning
+techniques proposed for monolingual pre-trained
+language models recently. Michel et al. (2019) pro-
+pose a simple gradient-based importance score to
+prune attention heads. Prasanna et al. (2020); Liang
+et al. (2021) extend to prune other components
+like the feedforward network of the Transformer
+(Vaswani et al., 2017). Wang et al. (2020c) decom-
+pose the pre-trained model weights and apply L
+regularization (Louizos et al., 2018) to regulate the
+ranks of decomposed weights. Sajjad et al. (2020)
+study layer pruning and show that directly dropping
+the top layers performs the best in ﬁne-tuning. Peer
+et al. (2021) further show that by carefully choos-
+ing layers to drop, structured pruning can achieve
+a performance close to those trained by knowledge
+distillation (Hinton et al., 2015).
+Efﬁciency The pruning algorithms mentioned
+above need to train one network for each spar-
+sity level used at inference. Hou et al. (2020) pro-
+pose a dynamic structured pruning method based
+on Michel et al. (2019), which allows training the
+model once and making the inference with any size
+of the model. Compared with our Dynamic Spar-
+siﬁcation, Hou et al. (2020)’s method cannot be
+applied to the non-shared setting as it needs to
+rearrange the network, i.e., producing a new model,
+for each language. Cascading methods (Schwartz
+et al., 2020; Xin et al., 2020) can even adapt the
+network size for each instance. Since cascading
+methods cannot perform batch inference and are
+only available for sentence classiﬁcation tasks, we
+do not consider them in this work.
+3 Background
+In this section, we brieﬂy review the structure of
+XLM-R (Conneau et al., 2020), a Transformer en-
+coder (Vaswani et al., 2017) pre-trained by masked
+language modeling task (Devlin et al., 2019). We
+also revisit how conventional structured pruning
+algorithms are applied to Transformers by intro-
+ducing additional gating variables and setting ap-
+propriate values to them (See Figure 1 and also
+Prasanna et al. (2020); Liang et al. (2021)). The
+XLM-R model consists of Nlayers. Each layer is
+made of the multihead attention and feedforward1853networks, followed by the residual connection and
+layer normalization.
+Attention Following Michel et al. (2019)’s for-
+mula, the multihead attention is written as:
+MHA(X) =XGhead (1)
+whereHis the number of heads, headis the out-
+put ofi-th head and Gis thei-th entry of the
+gating variables G2R.Gindicates whether
+the headiwill be pruned. Gis set to 1 to retain
+that head and 0 if to drop it. Different pruning algo-
+rithms will have their own ways to determine the
+values ofG.
+Feedforward Network The feedforward net-
+work contains two linear projections with GeLU
+activation (Hendrycks and Gimpel, 2016) in be-
+tween:
+FFN(X) = (GeLU( XW+b)G)W+b
+(2)
+whereW2R,b2R,W2Rand
+b2Rare weights of the feedforward network
+anddis the hidden size.denotes the Hadamard
+product and G2Ris a gating vector with a
+value in the range of [0, 1]. Gfunctions similar to
+Gin multihead attention, except that Gcontrols
+the activation of hidden units.
+Embedding To prune the large embedding ma-
+trixE(occupying 69% of all parameters), we de-
+compose it via low-rank approximation as in Lan
+et al. (2020):
+E=^Ediag(G)P (3)
+where ^E2RandP2Rare the decom-
+posed matrices of E.vis the vocabulary size.
+G2R, governing the rank of E, is a gating
+vector similar to GandG.diag(G)converts
+Gto a diagonal matrix. The right part of Figure 1
+is an illustration of the components (such as hidden
+units, attention heads, and embeddings) that will
+be pruned.
+4 Extending Pruning Algorithms to
+Pruning Settings
+This section will ﬁrst introduce pruning algorithms
+that we study and then describe how to adapt them
+to two pruning settings. The ﬁrst is the sharedsetting that shares the pruned network across lan-
+guages (default setting that all pruning algorithms
+could run on), and the second is the non-shared
+setting that prunes one subnetwork for each lan-
+guage (Xie et al., 2021; Gong et al., 2021).
+4.1 Gradient-based Pruning
+Gradient-based pruning (Michel et al., 2019) com-
+putes the importance score of each component, e.g.,
+heads in Eq. 1. Then it sets the gating variable of
+a component, e.g., Gin Eq. 1, to 1 if its impor-
+tance score is larger than a threshold and 0 other-
+wise. Taking an attention head ias an example, its
+importance score is deﬁned as:
+I=Ehead@L(X)
+@head(4)
+whereXis the data distribution and we choose the
+validation set as Xin practice,L is the masked
+language modeling loss (Devlin et al., 2019). The
+values of gating variables are set and frozen after
+pre-training. An additional phase of pre-training is
+further employed to update network parameters to
+recover performance loss brought by pruning.
+Extending gradient-based pruning to the
+non-shared setting is straightforward: to prune
+for one language, we use data of that language
+to compute a unique set of gating variables G=
+fG;G;Ggfor it.
+4.2 Regularization-based Pruning
+TheLnorm has been widely used in many ar-
+eas, including signal processing (Zhang, 2010; Xu
+et al., 2011) to induce sparsity. In neural networks,
+regularization-based pruning, also referred to as
+Lregularization (Louizos et al., 2018), deﬁnes
+a differentiable Lnorm on the gating variables
+G=fG;G;Gg. It controls the network spar-
+sity by learning the values of Gduring pre-training.
+Taking a gating variable g2Gas an example, it is
+modeled as:
+uU(0;1) (5)
+s= sigmoid((log u=(1 u) +)=)(6)
+^s=s(r l) +l (7)
+g= min(1;max(0;^s)) (8)
+whereUis the uniform distribution, l <0and
+r>1are two ﬁxed constants, is the temperature
+andis a learnable parameter of g. During training,
+uis sampled for each gseparately. At inference,1854Eq. 6 becomes s= sigmoid(). Compared with
+gradient-based pruning, the importance score in L
+regularization is the learnt and the threshold is
+ﬁxed to sigmoid
+ 
+.
+TheLregularization term of gis:
+jjgjj= sigmoid (  log( l=r)) (9)
+and the overall Lregularization term is:
+L=jjGjj=Xjjgjj (10)
+Lwill be multiplied by a hyper-parameter 
+and added to the pre-training loss L .
+4.2.1 Improved LRegularization
+Two issues of the previous native Lregulariza-
+tion emerge in practice: 1) The hyper-parameter
+does not relate to the model sparsity. It requires
+several expensive try-outs training runs to ﬁnd an
+appropriate setup that can reach desired sparsity
+(Wang et al., 2020c). 2) If we extend Lregulariza-
+tion to non-shared setting as done in gradient-
+based pruning, it easily converges to an optimum
+where every language shares the network (Gong
+et al., 2021). This falls back to the shared setting.
+Thus, we propose two corresponding solutions as
+below:
+1) Sparsity Constraint To address the ﬁrst issue,
+we add a sparsity constraint to Eq. 10:
+L=XjjGjj t (11)
+wherelis the number of languages and Gdenotes
+the set of gating variables for language i. This
+loss term will keep the subnetwork size of each
+language close to the targeted size t.
+2) Diverse Subnetwork To address the second
+issue, we introduce a diversity loss term to encour-
+age the model to ﬁnd a distinct subnetwork for each
+language. It is achieved by diagonalizing the gram
+matrix of gating variables G= [G;;G]:
+L=jjPGG(1 I)jj (12)where 1is a matrix of ones and Iis the identity
+matrix.P2Ris used to introduce linguistic
+prior and is a matrix of ones by default.
+Eq. 12 will penalize each language pair equally.
+Intuitively, the subnetworks of two languages that
+are close, e.g., English and Spanish, should not be
+penalized. Thus we add linguistic prior P= 0
+when thei-th andj-th languages belong to the same
+language family (See Appendix C) and 1 otherwise.
+To the end, the loss Lwe used in pre-training is:
+L=L +L+L (13)
+Note that the parameter of the gating variable 
+is randomly initialized. We ﬁnd that tuning only
+in the ﬁrst few epochs is crucial to obtain better
+performance. If no further notice, we will use this
+improvedLregularization for experiments with
+non-shared setting and the native Lregular-
+ization for shared setting.
+5 Empirical Study of Algorithms and
+Settings for Multilingual Pruning
+5.1 Experimental Setup
+Pre-training Our pruned models are trained on
+the CC-100 corpus (Wenzek et al., 2020). We
+choose 100 languages with a total size of 2.2TB
+for training, which is consistent with those used
+in XLM-R (Conneau et al., 2020). The develop-
+ment set we used to induce the importance score
+for pruning is 3K randomly selected samples from
+the CC-100 corpus per language.
+Our model is a 12-layer Transformer with a 768
+embedding size and a 3072 hidden size. It is pruned
+and continually trained based on the publicly avail-
+able XLM-R model for 150K steps with a batch
+size of 2048 and a learning rate of 0.0002. Other
+hyper-parameters remain the same as in the orig-
+inal paper (Conneau et al., 2020). We train our
+model on 32 Nvidia Tesla V100 32GB GPUs with
+mixed-precision training. It takes roughly 7-10
+days to pre-train one model. For inference, we
+use 1 Nvidia Tesla V100 32GB GPU and Intel(R)
+Xeon(R) Platinum 8269CY CPU @ 2.50GHz to es-
+timate the GPU and CPU throughput (with a batch
+size of 128 for GPU and 1 for CPU).
+Fine-tuning We evaluate the pruned models on
+9 downstream tasks from XTREME (Hu et al.,
+2020). These tasks can be classiﬁed into four
+different categories: (1) sentence-pair classiﬁca-
+tion: XNLI (Conneau et al., 2018), PAWS-X (Yang1855
+et al., 2019); (2) structured prediction: POS (Nivre
+et al., 2018), Wikiann NER (Pan et al., 2017);
+(3) question answering: XQuAD (Artetxe et al.,
+2020), MLQA (Lewis et al., 2020), TyDiQA (Clark
+et al., 2020); (4) sentence retrieval: BUCC2018
+(Zweigenbaum et al., 2017), Tatoeba (Artetxe and
+Schwenk, 2019). The hyper-parameter setup of
+ﬁne-tuning could be found in Appendix A.
+Following previous work (Hu et al., 2020), we
+study the pruned models in two ﬁne-tuning set-
+tings: Cross-lingual Transfer (a.k.a., zero-shot)
+andTranslate-Train-All (a.k.a., multi-task). Note
+that for the two sequence labelling tasks POS and
+NER, translation cannot give us the correct train-
+ing labels. We thus use human-annotated data for
+translate-train-all training on them.
+5.2 Results
+Table 1 shows the ﬁne-tuning results of using differ-
+ent methods to prune XLM-R to 50% sparsity (also
+the value oftin Eq. 11). We follow the convention
+of Prasanna et al. (2020) to compute the sparsity of
+the encoder, which excludes the embeddings in the
+calculation. For DistilBERT , we remove half
+of the original layers of XLM-R as done in Sanh
+et al. (2019). Note that in Table 1 (the rows of
+“L(shared)”), regularization-based pruning with
+shared setting has a lower sparsity (20%).
+Gradient-based pruning performs better than
+regularization-based pruning. Table 1 shows
+that vanilla Linshared setting has more pa-
+rameters (20% sparsity) but performs worse than
+gradient-based pruning with fewer parameters
+(50% sparsity). Despite that our proposed im-
+provedLworks better ( non-shared setting),
+it still underperforms the gradient-based pruning
+counterpart. This is because regularization-based
+pruning keeps modifying the subnetwork structure
+when weights are updating, which might introduce
+too much noise during training. Gradient-based
+pruning, on the other hand, keeps the pruned net-
+work unchanged and adapts weights only. Despite
+that some works (Hoeﬂer et al., 2021) suggest that
+regularization-based pruning should be preferred,
+it might not be the same conclusion for XLM-R.
+Neither of the pruning settings performs con-
+sistently better. Previous work on multilingual1856
+translation has suggested that non-shared set-
+ting provides consistent gains, as this way allows
+the pruned model to adapt for each language (Li
+et al., 2020; Lin et al., 2021; Xie et al., 2021; Gong
+et al., 2021). However, this is not the case for XLM-
+R. As shown in Table 1, regularization-based prun-
+ing (L) works the best with the non-shared
+settings, but for gradient-based pruning it is the
+shared setting. We analyze that this is because
+XLM-R covers more low-resource languages (100
+languages in XLM-R vs. 24 in most multilingual
+translation research), which makes sharing the sub-
+network for a universal representation more prefer-
+able (Aharoni et al., 2019).
+Simple distillation performs less effective than
+pruning. For most tasks, distillation is not as ef-
+fective as pruning.This might be that distillation
+prunes a whole layer, while more ﬁne-grained com-
+ponents are pruned in structured pruning. But com-
+bining distillation with pruning could provide some
+gain, as shown in Table 2.
+Our improved Lregularization-based prun-
+ing can further boost the performance. In Sec-
+tion 4.2.1, we propose an improved Lregulariza-
+tion to solve the drawbacks of standard L. Table 2
+shows the results. Through the sparsity constraint,
+we can control the model sparsity to be the de-
+sired valuet= 50% instead of 20% (the closest
+we could have using vanilla L). And along with
+diverse subnetwork, the improved Lcan even con-
+sistently improve the ﬁne-tuning results. Appendix
+E visualizes how subnetworks differ between two
+languages after applying the diversity loss term.
+Moreover, integrating with distillation (the last row
+of Table 2) can further improve the results.
+5.3 Analysis
+Why does regularization-based pruning per-
+form poorly? Since regularization-based prun-
+ing learns the subnetwork from scratch, we believe
+its poor performance results from the low-resource
+languages. We choose XNLI with the translate-
+train-all setting for empirical veriﬁcation. On the
+one hand, the translate-train-all setting ensures that
+each language has the same dataset for ﬁne-tuning
+(except for NER and POS). This way eliminates the
+difference in ﬁne-tuning. On the other hand, among
+all tasks except NER and POS, XNLI covers more
+languages.
+Figure 2 supports our hypothesis. It shows the
+accuracy loss and corpus size of each language in
+regularization-based and gradient-based pruning.
+We observe that for regularization-based pruning
+accuracy loss strongly correlates with pre-training
+dataset size (a value of 0.83 for Pearson’s ), while
+it is not for gradient-based pruning.
+Where does pruning methods behave differ-
+ently? In Figure 3, we compare in which aspect
+different pruning algorithms behave differently.
+Figure 3 shows the sparsity of each component
+(attention heads and hidden units) at each layer.
+Interestingly, we see that gradient-based pruning
+preserves all attention heads and only a tiny number
+of hidden units, while regularization-based prun-
+ing prunes heads and hidden units more evenly.
+Though previous works (Michel et al., 2019; V oita
+et al., 2019) have suggested that most attention
+heads have little impact on the ﬁnal performance
+of monolingual models, our results show that this
+is not the case for XLM-R. Besides, both pruning
+methods tend to drop more in the middle layers.1857
+6 Toward Efﬁcient Pruning
+6.1 Dynamic Sparsiﬁcation
+In practice, we may need models with different
+sparsities to ﬁt various resource constraints or com-
+pare a set of methods. Nevertheless, existing prun-
+ing techniques must train the model independently
+for each sparsity level, which is prohibitive for
+large models. Here we propose Dynamic Sparsi-
+ﬁcation (DSfor short), a method that trains the
+model once but allows inference with any level of
+sparsity.
+Section 4 shows that both gradient-based and
+regularization-based pruning follow the same pro-
+cedure: we ﬁrst determine a threshold, then get the
+importance score for each component, and set the
+gating variable to 1 if its score is larger than that
+threshold and 0 otherwise. By adjusting the thresh-
+old, one can obtain networks with any sparsity.
+Based on this, we model a gating variable gas:
+g=f(+t) (14)
+whereis a trainable importance score as in
+regularization-based pruning, tis the targeted net-
+work size (which is one minus the sparsity), tis
+the threshold with a learnable ,fis a function
+with output ranging between 0 and 1. We choose f
+to be Eqs. 6 - 8 because it enables us to optimize 
+andviaLregularization. If andare set prop-
+erly, Eq. 14 will automatically determine whether
+its corresponding component should be activated
+under the targeted network size t.
+Then is how to ﬁnd andusing pruning algo-
+rithms. We know that pruning algorithms could
+rank different components by their importance
+scores. Based on this ranking, we identify the
+boundary network size that a speciﬁc component
+will be activated (denoted as ^t) and will not. These
+two conditions form a system of linear equations
+in two unknowns and:(
+f 
++^t
+= 1
+f 
++ ^t 
+
+= 0(15)
+whereis the network size that one component
+contributes to, ^tis the boundary network size where
+the corresponding gating variable gshould be 1 if
+t > ^tand 0 ift < ^t .^tequals the ranking
+divided by the total number of components. Eq. 15
+has a closed-form solution for and:
+(
+= 
+1 ^t=
+f(1) + ( ^t=)f(0)
+= 
+f(1) f(0)
+=(16)
+Before training, we use gradient-based pruning
+to initialize andvia Eq. 16. If only gradient-
+based pruning is adopted, andare then clamped
+and only the retained network parameters will be
+updated, otherwise they can be jointly optimized
+via regularization-based pruning. During training,
+we sample different ts to train different sized sub-
+networks. At inference, tis set to the targeted
+network size to prune the model. If one wants to
+extend DS to non-shared setting, he can prune
+for each language once and compute a unique set
+ofandfor each language.1858
+6.2 Main Results
+Table 3 ( + DS rows) shows the 50% sparsity re-
+sults after applying DS to the two pruning algo-
+rithms under their best performing pruning settings
+(according to Table 1). Surprisingly, we observe
+that gradient-based pruning with shared setting
+suffers from a signiﬁcant loss, while regularization-
+based pruning with non-shared setting has al-
+most no loss. This is because DS shares the weights
+between subnetworks of different sparsities hurts
+the model capacity, and non-shared setting en-
+larges the subnetwork capacity by untying weights
+of different languages. Due to the expensive cost
+of training models without DS, we only test the im-
+pact of DS on 50% sparsity, but we compare it with
+other systems with a smaller size (See Appendix
+F). The leftmost part of Figure 4 shows more on
+how the two pruning methods trade accuracy for
+efﬁciency under various sparsities.
+The second sub-ﬁgure from the left of Figure 4
+shows a non-linear relationship between the num-
+ber of parameters and sparsity, as embeddings are
+not included in sparsity calculation (Prasanna et al.,
+2020). Since embeddings are more important than
+most parts of the model and are very large (69% of
+the overall parameters), the number of parameters
+remains high even when the encoder is quite sparse
+(Sparsity50%). Pruning algorithms only start
+to prune these large embeddings when the encoder
+is very sparse (Sparsity >50%) and results in a
+great drop in the number of parameters, as shown
+in Figure 5.
+The two rightmost panels of Figure 4 describe
+how the CPU and GPU throughput vary as the
+sparsity changes. We observe a strong correlation
+between the CPU throughput and sparsity when the
+sparsity50%. However, there is no such trend
+observed when the sparsity <50%. This might be
+due to the time consumption of irregular memory
+access out-weights the speed-up brought by the
+small tensor computation.
+Interestingly, we see that sparse models show
+no acceleration on GPU even when the sparsity
+is high (e.g., 90%). Although pruning algorithms
+here optimize the model size instead of inference
+efﬁciency, it is expected that the resulting sparse
+models still have speedup as shown in CPU and in
+other work (Wang et al., 2020c). In Figure 6, we
+ﬁnd that the highest sparsity of all layers is close
+to but not exactly 100%. This implies that prun-
+ing tends to produce a deep and narrow model.
+Previous studies (Sanh et al., 2019; Wang et al.,
+2020a; Li et al., 2021) show that GPU throughput
+is more sensitive to the model height instead of
+its width. This explains why we did not observe
+any acceleration even for a model with 1=10of the
+original size.
+Though not shown in Table 1 and Figure 4, it
+is still possible to obtain actual speedup in GPU
+for sparse models. Previous observations on
+GPU throughput only hold for inference with
+the same batch size . In practice, the sparse mod-
+els have a smaller memory footprint and we can
+use a larger batch size for higher parallelism. For
+pruned models in Table 1, a nearly 2 speedup is
+observed when we double the inference batch size.
+In summary, Figure 4 suggests that the correla-
+tion between the model size and throughput is
+very week for XLM-R : for model size, reducing
+the embedding size is important, but it has almost
+no impact on throughput (an O(1)complexity table
+lookup); for throughput, compressing parts other
+than embeddings is more effective as shown in Fig-
+ure 4, but they have much fewer parameters than
+the embeddings (193M parameters for embeddings
+vs. 86M for the others). This advocates special1859care needed to be taken if one wants to compress
+and accelerate XLM-R simultaneously.
+6.3 Analysis
+Here we study what DS will prune under various
+sparsities. Figure 5 shows which component (em-
+beddings, attention heads and hidden units) will
+be preferred during pruning. In general, gradient-
+based pruning behaves similar to regularization-
+based pruning: they ﬁrst prune hidden units, and
+only prune attention heads and embeddings when
+the sparsity is high. The main difference be-
+tween them is that gradient-based pruning starts
+to prune embeddings earlier (at 70% sparsity) than
+regularization-based pruning. This explains why
+we observe a signiﬁcant drop in performance for
+gradient-based pruning with 70% sparsity (See the
+left of Figure 4): the model already lost much in-
+formation at the beginning and there is no way to
+recover.
+Figure 6 shows how regularization-based prun-
+ing prunes each layer with DS. Though we do not
+plot the curves of gradient-based pruning, its phe-
+nomenon is similar to regularization-basd pruning.
+We ﬁnd that regularization-based pruning behaves
+differently at low and high sparsity. It ﬁrst prunes
+bottom layers when the sparsity is low, then gradu-
+ally shift to higher layers as the sparsity increases.
+In the end, it retains more parameters in the bot-
+tom layers instead of the top layers. This provides
+insight for future model design: a pyramid struc-
+ture is better when the model size is very small .
+7 Conclusion
+In this work, we study three aspects of structured
+pruning on multilingual pre-trained models: set-
+tings, algorithms and efﬁciency. Experiments show
+interesting phenomena: The best pruning setting
+depends on the choice of algorithms; The simplest
+pruning algorithm performs the best; A fast model
+does not mean it should be small. We hope this
+work will give insight to future research.
+References186018611862A Hyper-parameters
+Pre-training We setto 8 andto 1 forL
+regularization in 50% sparsity. If Dynamic Spar-
+siﬁcation is applied, we set to 128 and others
+remain the same. The number of pre-training steps
+that tunesonly is 150K.
+Fine-tuning We perform a grid search to ﬁnd the
+best hyper-parameter setting for each task (except
+for BUCC and Tatoeba, they do not need training).
+We list the names of hyper-parameters as well as
+their search ranges below:
+• Learning rate: [1e-6, 2e-6, , 5e-5].
+•Epoch: [5, 10] for cross-lingual transfer and 3
+for translate-train-all.
+We use a batch size of 32 for all experiments.
+B Weighting LRegularization
+In practice, gating variables gfrom different com-
+ponents should contribute differently to the overall
+Lregularization term jjGjjin Eq. 10, as they
+govern different weight matrices. For example, dis-
+abling the head iwill removeW;W;WandW,
+but disabling a hidden unit only eliminate a column
+ofWand a row of W. So we weigh the regular-
+ization terms from attention heads by 644,2for
+those from hidden units and 1for those from the
+embedding matrix.
+C Language Family
+Table 4 is the language family information we used
+in Section 4. There are 15 different language fami-
+lies and one special Missing family in Table 4.
+D Implementation of Dynamic
+Sparsiﬁcation
+Dynamic Sparsiﬁcation described in Section 6 has
+two issues:
+•It assumes all components in the network con-
+tribute equally to the network size. But ac-
+cording to the discussion in Appendix B, dif-
+ferent components relate to different numbers
+of weight matrices and each weight matrix has
+a different size.
+•The solution of andprovided by Eq. 16
+requires high precision in order to precisely
+activate just a single hidden unit by givingan appropriate sparsity. This fact brings difﬁ-
+culties in mixed-precision training as it easily
+causes the overﬂow issue.
+Here we describe an improved version of Dy-
+namic Sparsiﬁcation for practical implementation.
+The key difference between this improved version
+and the original one is the way it computes (the
+network size that a component should contribute to)
+and^t(the network size where a component should
+be activated).
+For, we have:
+1.We associate a weight wto each component,
+as done in Appendix B.
+2.Then=w= Pw
+, where Wis the
+set of allw.
+For^t, we have:
+1.We deﬁne a set of sparsities fs;s;;sg
+(in sorted order) to be used at inference where
+nis the number of all possible sparsities and
+s= 0 ands= 1, e.g., {0%, 10%, ,
+100%}.
+2.A set of sparsity ranges can then be natu-
+rally derived from these sparsities, i.e., fs
+s;;ss;;ssg. For
+example, given the set of sparsities {0%,
+10%,, 100%}, the set of ranges will be
+{0%10%, 10%20%,, 90%100%}.
+3.For each sparsity range ss, we ﬁnd out
+all components that should be activated in that
+range, i.e., their original ^tmust satisfy s<
+^ts(considering their actual contributions
+to the total network size under the weighting
+scheme in Appendix B), and we denote these
+set of components as C.
+4.For all components c2C, we assign their
+^t=s.
+The way we compute resolves the ﬁrst issue by
+weighting the contribution to network size for each
+component. And the way how ^tdeﬁned resolves
+the second issue by constraining the precision of
+sparsity and thus the precision of and. Given ^t
+and, we can use Eq. 16 to induce a solution that
+is numerical stable.1863
+E Language Subnetwork Diversity
+Section 4 states that introducing a diversity loss
+term in Eq. 12 helps to diversify the subnetworks
+of each language. To measure the distance between
+these subnetworks, we ﬁrst choose the gating vari-
+ablesGto represent a subnetwork. We then cal-
+culate the Hamming distance between Gs for each
+language pair. Figure 7 visualizes the results from
+the model pruned by our improved Lregulariza-
+tion. We can see that subnetworks of different
+languages are indeed different. Some languages
+are similar like guandbn, but some are different
+likebsandom. We also see that even for the mostdistant language pairs, they are still signiﬁcantly
+overlapped (a Hamming distance around 0.3). This
+indicates that sharing weights between languages
+is important.
+F Comparison with Other Systems
+Due to the expensive cost of pre-training models
+with different sparsities, we only compare the re-
+sults with and without Dynamic Sparsiﬁcation at
+50% sparsity, as shown in Table 3. Here in Table 5,
+we compare our models trained by Dynamic Sparsi-1864
+ﬁcation with mMiniLMv1(Wang et al., 2020b), a
+system trained by advanced knowledge distillation
+techniques. This mMiniLMv1 system has almost
+the same number of parameters as our 70% spar-
+sity models, and is also evaluated on XNLI. Thus
+the comparison in Tables 5 and 1 helps to justify
+that Dynamic Sparsiﬁcation does not degrade the
+performance much on different sparsity levels, es-
+pecially forLregularization with non-shared
+pruning setting.1865

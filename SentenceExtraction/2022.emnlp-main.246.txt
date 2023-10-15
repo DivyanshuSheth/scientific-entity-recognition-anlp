@@ -1,1 +1,698 @@
-3740 Proceedings of the 2022 Conference on Empirical Methods in Natural Language Processing , pages 3740 3751 December 7 - 11 , 2022 © 2022 Association for Computational Linguistics 3741 3742 3743 3744 3745 3746 3747 3748 3749 3750 3751 
+
+Zihan WangPeiyi WangTianyu LiuBinghuai Lin
+Yunbo CaoZhifang SuiHoufeng WangMOE Key Laboratory of Computational Linguistics, Peking University, ChinaTencent Cloud Xiaowei
+{wangzh9969, wangpeiyi9979}@gmail.com; {szf, wanghf}@pku.edu.cn
+{rogertyliu, binghuailin, yunbocao}@tencent.com;
+Abstract
+Hierarchical text classification (HTC) is a chal-
+lenging subtask of multi-label classification
+due to its complex label hierarchy. Recently,
+the pretrained language models (PLM) have
+been widely adopted in HTC through a fine-
+tuning paradigm. However, in this paradigm,
+there exists a huge gap between the classifi-
+cation tasks with sophisticated label hierarchy
+and the masked language model (MLM) pre-
+training tasks of PLMs and thus the potential
+of PLMs cannot be fully tapped. To bridge
+the gap, in this paper, we propose H, a
+Hierarchy-aware Prompt Tuning method to
+handle HTC from a multi-label MLM perspec-
+tive. Specifically, we construct a dynamic vir-
+tual template and label words that take the
+form of soft prompts to fuse the label hierar-
+chy knowledge and introduce a zero-bounded
+multi-label cross-entropy loss to harmonize the
+objectives of HTC and MLM. Extensive ex-
+periments show Hachieves state-of-the-art
+performances on 3popular HTC datasets and
+is adept at handling the imbalance and low
+resource situations. Our code is available at
+https://github.com/wzh9969/HPT .
+1 Introduction
+Hierarchical text classification (HTC) aims to cate-
+gorize a text into a set of labels with a structured
+class hierarchy (commonly modeled as a tree) (Silla
+and Freitas, 2011). HTC is a multi-label text clas-
+sification problem, where the classification result
+corresponds to one or more paths of the hierarchy
+(Zhou et al., 2020). The major challenge of HTC
+is to model the large-scale, imbalanced, and struc-
+tured label hierarchy (Mao et al., 2019).
+As shown in Figure 1(a), existing state-of-the-
+art HTC models (Zhou et al., 2020; Deng et al.,
+2021; Chen et al., 2021; Zhao et al., 2021) sepa-
+rately extract text and label hierarchy features byFigure 1: Comparison of previous methods and our
+H. (a) Previous models formulate HTC as a multiple
+binary classification problem and utilize the PLM in a
+fine-tuning paradigm. (b) Hfollows a prompt tuning
+paradigm that transforms HTC into a hierarchy-aware
+multi-label MLM problem.
+utilizing text and graph encoders, and then fuse
+the two sources of features into a final represen-
+tation for text classification. Specifically, Chen
+et al. (2021) takes advantage of powerful pretrained
+language models (PLMs) in HTC through a fine-
+tuning paradigm, where they use PLMs as the text
+encoder. In this paradigm, the PLMs are trained to
+infer with complex label hierarchy.
+Despite the success of the fine-tuning paradigm,
+some recent studies suggest that it may suffer
+from distinct training strategies in the pretraining
+and fine-tuning stages, which restrains the fine-
+tuned models to take full advantage of knowledge
+in PLMs (Chen et al., 2022). Therefore, a new
+paradigm known as prompt tuning is proposed to
+bridge the gap between the downstream tasks and
+the pretraining tasks of PLMs, which can tap the
+full potential of PLMs. By warping the text (e.g.,
+“x”) into the model input (e.g., “ xis[MASK] ” )
+and taming the PLMs to complete the masked cloze
+test, prompt tuning has achieved promising perfor-
+mances on the flat text classification where labels
+have no hierarchy (Shin et al., 2020).
+How about the performances of the prompt tun-
+ing in HTC? In the pilot study, we test flat prompt3740tuning methods on HTC and surprisingly find that
+they are even comparable with the state-of-the-
+art models in HTC. This result suggests that the
+expressive power of PLMs has been undermined
+in the prior HTC methods due to the pretraining-
+finetuning gap. Although the flat prompt tuning
+methods have somewhat narrowed the gap, there
+still remain two challenges while combining PLMs
+with HTC.
+1.hierarchy and flat gap . Labels of HTC lie
+on a sophisticated hierarchy while MLM pre-
+training and flat prompt tuning do not take
+label hierarchy into consideration.
+2.multi-label and multi-class gap . HTC is a
+multi-label classification problem where the
+output labels are interconnected with a hierar-
+chy while MLM pretraining is formulated as
+a multi-class classification.
+To bridge these two gaps, as shown in Figure
+1(b), we propose a hierarchy-aware prompt tuning
+(H) method that solves HTC from a multi-label
+MLM perspective. In detail, to bridge the hierar-
+chy and flat gap, we incorporate the label hierarchy
+knowledge into soft prompt with continuous rep-
+resentation. Specifically, we incorporate the depth
+and width information in the label hierarchy into
+different virtual template words, which is helpful
+to alleviate the label imbalance problem as verified
+by our experiments. To bridge the multi-label and
+multi-class gap, we transform HTC into a multi-
+label MLM problem by a zero-bounded multi-label
+cross-entropy loss which continually seeks to in-
+crease the score of the correct label and decrease
+the score of the incorrect labels.
+We summarize our contributions as follows:
+•We propose a hierarchy-aware prompt tuning
+(H) method for hierarchical text classifica-
+tion. To the best of our knowledge, this is
+the first investigation on flat and hierarchical
+prompt tuning in HTC.
+•We summarize two challenging gaps between
+HTC and masked language modeling (MLM).
+To bridge these gaps, we transform HTC into
+a hierarchy-aware multi-label MLM problem.
+•Extensive experiments demonstrate that our
+proposed model achieves new state-of-the-art
+results on three popular datasets, and is adept
+at handling label imbalance and low resource
+situations.2 Related Work
+2.1 Hierarchical Text Classification
+Hierarchical text classification (HTC) is a challeng-
+ing task due to its large-scale, imbalanced, and
+structured label hierarchy (Mao et al., 2019). Exist-
+ing work for HTC could be categorized into local
+and global approaches based on their ways of uti-
+lizing the label hierarchy (Zhou et al., 2020): local
+approaches build classifiers for each node or level
+while global ones build only one classifier for the
+entire graph. Although early works on HTC mainly
+focus on local approaches (Wehrmann et al., 2018;
+Shimura et al., 2018; Banerjee et al., 2019), global
+approaches soon become mainstream. The early
+global approaches neglect the hierarchical structure
+of labels and view the problem as a flat multi-label
+classification (Johnson and Zhang, 2015). Later
+on, some work try to coalesce the label structure
+by meta-learning (Wu et al., 2019), reinforcement
+learning (Mao et al., 2019), and attention module
+(Zhang et al., 2021). Although such methods can
+capture the hierarchical information, Zhou et al.
+(2020) demonstrate that encoding the holistic la-
+bel structure directly by a structure encoder can
+further improve performance. Following this re-
+search, a bunch of models try to study how the
+hierarchy should interact with the text. Both Chen
+et al. (2020) and Chen et al. (2021) embed word
+and label hierarchy jointly in a same space. Deng
+et al. (2021) constrains label representation with in-
+formation maximization. Zhao et al. (2021) designs
+a self-adaption fusion strategy to extract features
+from text and labels. Wang et al. (2022) adopts
+contrastive learning to directly inject hierarchical
+knowledge into the text encoder.
+2.2 Prompt tuning
+Prompt tuning (Schick and Schütze, 2021) aims
+to transform the downstream NLP task into the
+pretraining task of the pretrained language mod-
+els (PLM), which can bridge their gap and better
+utilize PLM. The most popular pretraining task of
+PLM is MLM (Devlin et al., 2019), which masks
+some words in the input text and requires PLM
+to recover these masked words. The prompt tun-
+ing methods can be broadly divided into 2cate-
+gories: (1) Hard prompt (Gao et al., 2021; Schick
+and Schütze, 2021). The hard prompt methods se-
+lect a template and label words from the vocabulary
+of PLM, which require carefully manual designing.
+(2)Soft prompt (Hambardzumyan et al., 2021; Qin3741and Eisner, 2021). Soft prompt methods first create
+some continuous vectors as a template and label
+embeddings and then find the best prompt using
+the training examples, which eliminates the need
+for manually-designed prompts.
+3 Preliminaries
+3.1 Problem Definition
+For each hierarchical text classification (HTC)
+dataset, we have a predefined label hierarchy H=
+(Y, E), where Yis the label set (also the node set
+ofH) andEis the edge set. In HTC, given an input
+textx, the models aim to categorise it into a label
+setY⊆ Y . Specifically, we focus on a setting
+where every node except the root has one and only
+one father so that the hierarchy can be simplified
+as a tree-like structure. In this case, labels can be
+organized into layers where labels in the same layer
+have the same depth in the tree. The predicted label
+setYcorresponds to one or more paths in H.
+3.2 Vanilla Fine Tuning for HTC
+Given an input text x, the vanilla Fine Tuning
+method first converts it to “ [CLS] x[SEP] ” as
+the model input, and then utilizes the PLM to en-
+code it. After that, it utilizes h , the hidden
+state of “ [CLS] ”, to predict the labels of the input
+text. Previous methods (Chen et al., 2021; Wang
+et al., 2022) based on the PLM all follow this fine-
+tuning paradigm.
+3.3 Prompt Tuning for HTC
+To bridge the gap between the pretraining task and
+the downstream tasks, prompt tuning has been pro-
+posed. We adopt 2typical flat text classification
+prompt methods to HTC.
+Hard Prompt For a text “ x”, hard prompt first
+applies a template and fills the input into it. For
+HTC, we choose “ [CLS] x[SEP] The text is
+about [MASK] [SEP] ” as template. The PLM is
+then asked to predict the “ [MASK] ” slot, which
+outputs a score for every word in the vocabulary. A
+verbalizer is then selected for each label to repre-
+sent its meaning: the score of filling that verbalizer
+into the “ [MASK] ” slot is the prediction score of
+the corresponding label. We select the headword
+(the root word on the dependency tree) of the label
+name as a verbalizer to represent the corresponding
+label.Soft Prompt For a text “ x”, soft prompt append
+a fixed number of learnable virtual template words
+to the text (i.e., “ [CLS] x[SEP] [V1] [V2]
+...[V8] [MASK] [SEP] ” in case of 8) as tem-
+plate. During training, the PLM learns to predict
+the “[MASK] ” slot as well as tunes virtual tem-
+plate words. For HTC, we create a learnable label
+embedding as a verbalizer for each hierarchical
+label.
+Since HTC is a multi-label classification prob-
+lem, following previous works, both the vanilla
+fine-tuning and 2typical prompt tuning methods
+finally conduct multiple binary classifications. The
+output of PLM is normalized by sigmoid instead of
+the original softmax to predict each label and the
+loss function is changed to binary cross-entropy.
+Although we can modify these 2typical prompt
+tuning methods for HTC, the essence of this chal-
+lenge has not been considered. As mentioned, the
+existing prompt methods experience two major
+gaps when migrating to HTC:
+1.Hierarchy and flat gap. Both soft prompt
+and hard prompt do not take labels into ac-
+count until prediction, and PLM views all can-
+didate words as equal. Previous works suggest
+that incorporating label dependency instead of
+modeling them as flat classification is essen-
+tial for alleviating the label imbalance (Gopal
+and Yang, 2013).
+2.Multi-label and multi-class gap. Previous
+works on HTC view the problem as multiple
+binary classifications but MLM is designed
+for multi-class classification. Prompting aims
+to bridge the gap between pretraining and fine-
+tuning but the gap still exists if we use the sig-
+moid normalization and binary cross-entropy
+loss functions for HTC during fine-tuning.
+4 Methodology
+In this section, we introduce a hierarchy-aware
+prompt tuning method to solve HTC from a multi-
+label MLM perspective.
+4.1 Hierarchy-aware Prompt
+To bridge the hierarchy and flat gap , we create
+the prompt with the label hierarchy constraint and
+injection.
+4.1.1 Hierarchy Constraint
+To incorporate the label hierarchy, we propose a
+layer-wise prompt. Since the label hierarchy is a3742
+tree, we construct templates based on the depth of
+the hierarchy. Given a predefined label hierarchy
+H= (Y, E)with a depth of Land input text x,
+the template is “ [CLS] x[SEP] [V1] [PRED]
+[V2] [PRED] ...[VL] [PRED] [SEP] ”. In-
+stead of a fixed number of template words as soft
+prompts, we have a dynamic template that has tem-
+plate words (from [V1] to[VL] ) the same num-
+ber as hierarchy layers. We use a special [PRED]
+token for label prediction, indicating a multi-label
+prediction.
+We use BERT (Devlin et al., 2019) as text en-
+coder, which first embeds input tokens to embed-
+ding space:
+T= [x, . . . ,x,t,e, . . . ,t,e](1)
+where X= [x, . . . ,x]is word embeddings and
+eis the embedding of [PRED] , which is initial-
+ized by the [MASK] token of BERT. {t}are
+layer-wise template embeddings. Similar to soft
+prompt, template embeddings are randomly initial-
+ized and are learned through training. Here we
+omit special tokens of BERT ( [CLS] and[SEP] )
+for clarity.
+BERT then encodes Tto achieve the hidden
+states:
+H= [h, . . . ,h,h,h, . . . ,h,h](2)
+where his the hidden state of the i-the, which
+corresponds to the i-th layer of the label hierarchy.For verbalizer, we create a learnable virtual label
+word vfor each label yand initialize its embed-
+dingvwith the averaging embedding of its cor-
+responding tokens. Instead of predicting all labels
+in one slot, as shown in the green part of Figure 2,
+we divide labels into different groups according to
+their layers and constrain [PRED] to only predict
+labels on one layer. To this end, each template word
+[Vi] is followed by a [PRED] token for predic-
+tions on the i-th layer. By splitting predictions into
+different slots, the model may learn better about the
+dependency between labels across different layers
+and somewhat solve the label imbalance.
+Formally, for h, we define a verbalizer Verb
+as follows:
+Verb(y) =/braceleftigg
+v, y∈ N
+∅,Others(3)
+where Nis the label set of the m-th layer and
+∅denotes that there is no label word for labels at
+other layers.
+4.1.2 Hierarchy Injection
+The hierarchy constraint only introduces the depth
+of labels but lacks their connectivity. To make full
+use of the label hierarchy in an MLM manner, we
+further inject the per-layer label hierarchy knowl-
+edge into template embedding.3743As shown in the blue part of Figure 2, a K-layer
+stacked Graph Attention Network (GAT) (Kipf and
+Welling, 2017) is adopted to model the label hier-
+archy. Given a node uat the k-th GAT layer, the
+information interaction and aggregation operation
+is defined as follows:
+g = ReLU(/summationdisplay1
+cWg)(4)
+where N(u)denotes the neighbors for node u,c
+is a normalization constant and W∈R
+is the trainable parameter.
+To achieve per layer knowledge for our layer-
+wise prompt, we create Lvirtual nodes t, . . . , t
+(colored in yellow) and connect twith all label
+nodes at the i-th layer in H. In this way, these
+virtual nodes can aggregate information from a cer-
+tain hierarchical level through artificial connections.
+For the first GAT layer, we adopt the virtual label
+wordvfor node y∈ Y as its node feature and
+assign template embedding tto virtual node tas
+its node feature.
+GAT is then applied to the new graph and it out-
+puts representations gfor virtual node t, which
+has gathered knowledge from the i-th layer. We uti-
+lize a residual connection to achieve the i-th graph
+template embedding:
+t=t+g(5)
+where the new template embedding with hierarchy
+knowledge, t, is injected into BERT replacing t
+in Equation 1.
+4.2 Zero-bounded Multi-label Cross-entropy
+Loss
+Since hierarchical text classification is a multi-label
+classification problem, previous methods (Zhou
+et al., 2020; Chen et al., 2021; Zhao et al., 2021)
+mainly regard HTC as a multiple binary classifica-
+tion problem and utilize the binary cross-entropy
+(BCE) as their loss function:
+L =−/summationdisplay(ylog(s)+(1−y)log(1 −s))
+(6)
+where sis the predicted sigmoid score of the
+label yfor the input. As illustrate in Equation 6,
+BCE ignores the correlation between labels. In
+contrast, the masked language modeling is a multi-
+class classification task, which is optimized withthe cross-entropy (CE) loss:
+L=−loge
+/summationtexte
+= log(1 +/summationdisplaye)(7)
+where yis the gold label for the input. As shown
+in Equation 7, CE forces the score of the gold label
+to be greater than all other labels, which directly
+models the label correlation.
+To harmonize their objectives and bridge this
+multi-label and multi-class gap , in this paper, in-
+stead of calculating the score of each label sepa-
+rately, we expect the scores of all target labels are
+greater than all non-target labels. We use a multi-
+label cross-entropy (MLCE) loss (Sun et al., 2020;
+Su, 2020):
+L = log(1 +/summationdisplay/summationdisplaye)(8)
+where NandNare the target and non-target
+label sets of the input text.
+However, Equation 8 is actually impracticable
+since we cannot know a priori the number of target
+labels during inference even if the positive (target)
+labels and negative (other) labels are separated. To
+fix this glitch, following Su (2020), we introduce
+an anchor label with a constant score 0in MLCE
+and hope that the scores of the target labels and
+the non-target labels are all greater and less than 0
+respectively. Thus, we form a zero-bounded multi-
+label cross-entropy (ZMLCE) loss:
+L = log(1 +/summationdisplay/summationdisplaye
++/summationdisplaye+/summationdisplaye)
+= log(1 +/summationdisplaye) + log(1 +/summationdisplaye)
+(9)
+To be consistent with the hierarchy constraint,
+we adopt ZMLCE at each label hierarchy layer for
+the layer-wise prediction. Formally, for the m-th
+layer with scores predicted by h, we add layer
+constraints as follows:
+L =log(1 +/summationdisplaye)
++ log(1 +/summationdisplaye)(10)3744where s=vh+bandbis a learnable
+bias term. NandNare the target and non-
+target label sets at the m-th layer for the input text
+respectively.
+We keep the original MLM loss as BERT pre-
+training and the final loss Lis the sum of
+ZMLCE losses at different layers and the MLM
+loss:
+L=/summationdisplayL +L (11)
+We randomly mask 15% words of the text to com-
+pute the MLM loss L . During inference, we
+select labels with scores greater than 0as our pre-
+diction. A comparison between our method and
+existing prompt methods is in Appendix B.
+5 Experiments
+5.1 Experiment Setup
+Datasets and Evaluation Metrics We experi-
+ment on Web-of-Science (WOS) (Kowsari et al.,
+2017), NYTimes (NYT) (Sandhaus, 2008), and
+RCV1-V2 (Lewis et al., 2004) datasets for analysis.
+The statistic details are illustrated in Table 4. We
+follow the data processing of previous work (Zhou
+et al., 2020; Chen et al., 2021) and measure the
+experimental results with Macro-F1 and Micro-F1.
+Baselines For systematic comparisons, we in-
+troduce a variety of hierarchical text classifica-
+tion baselines and compare Hwith two typical
+prompt learning methods. 1) TextRCNN (Lai et al.,
+2015). A simple network of bidirectional GRU fol-
+lowed by CNN. It is a traditional text classification
+model adopted by HiAGM, HTCInfoMax, and Hi-
+Match as their text encoder. 2) BERT (Devlin
+et al., 2019). A widely used pretrained language
+model that can serve as a text encoder. Among
+previous work, only HiMatch introduces BERT as
+text encoder so we implement other baselines with
+BERT replaced. 3) HiAGM (Zhou et al., 2020).
+HiAGM exploits the prior probability of label de-
+pendencies through Graph Convolution Network
+and applies soft attention over the text feature and
+label feature for the mixed feature. 4) HTCInfo-
+Max (Deng et al., 2021). HTCInfoMax improves
+HiAGM by maximizing text-label mutual infor-
+mation and matching the label feature to a prior
+distribution. 5) HiMatch (Chen et al., 2021). Hi-
+Match views the problem as a semantic matching
+problem and matches the relationship between thetext semantics and the label semantics. 6) HGCLR
+(Wang et al., 2022). HGCLR regulates BERT rep-
+resentation by contrastive learning and introduces
+a new graph encoder.
+Implement Details We implement our model us-
+ing PyTorch in an end-to-end fashion. Follow-
+ing previous work (Chen et al., 2021), we use
+bert-base-uncased as our base architecture.
+We use a single layer of GAT for hierarchy injec-
+tion. The batch size is set to 16. The optimizer is
+Adam with a learning rate of 3e. We train the
+model with the train set and evaluate on the devel-
+opment set after every epoch and stop training if
+the Macro-F1 does not increase for 6epochs. All of
+the hyperparameters have not been tuned. For base-
+line models, we follow the hyperparameter tuning
+procedure in their original paper. We use a length
+of8template words for soft prompt in accordance
+with H.
+5.2 Main Results
+Table 1 illustrates our main results. As is shown,
+“HardPrompt” and “SoftPrompt” outperform the
+vanilla fine-tuning BERT on all 3datasets and
+achieve a comparable result with the state-of-the-
+art method on RCV1-V2. This result shows the
+superiority of the prompt tuning paradigm since it
+adapts HTC to BERT to some extent.
+By bridging the gaps between HTC and MLM,
+ourHachieves new state-of-the-art results on
+all3datasets. Compared to HiMatch (Chen et al.,
+2021), our model introduces no extra parameter
+so these improvements demonstrate that Hcan
+better utilize the pretrained language model. Al-
+though HGCLR (Wang et al., 2022) introduces a
+new graph encoder, our model achieves consistent
+improvements on all datasets with a simple GAT.
+In addition, the depths of the label hierarchy for
+WOS, RCV1-V2, and NYT are 2,4, and 8respec-
+tively, which can reflect the respective difficulty
+of the label hierarchy. Houtperforms both the
+baseline BERT and HGCLR by increasing margins
+on WOS, RCV1-V2, and NYT respectively, show-
+ing that hierarchy-aware prompt can better handle
+more difficult label hierarchy.
+5.3 Ablation Study
+To illustrate the effect of our proposed mechanisms,
+we conduct ablation studies by removing one com-
+ponent of our model at a time. We test on the NYT
+dataset in this and the following sections because3745
+it has the most complicated label hierarchy and it
+can better demonstrate how our method reacts to
+the hierarchy.
+After removing the hierarchy constraint, the tem-
+plate has only one [PRED] token and the model
+needs to recover all label words according to its
+hidden state. As shown in Table 2, the Micro-F1
+and Macro-F1 drop slightly, which shows the ef-
+fectiveness of our layer-wise prompt. By removing
+the hierarchy injection (i.e., remove Equation 5),
+the model cannot access the connectivity of the
+label hierarchy and drops 1.36on Macro-F1. From
+this decline, we can see that the hierarchy injec-
+tion is essential for the performance of labels with
+few instances. By incorporating an extra structural
+encoder, the model can learn label features from
+training instances from other classes based on the
+hierarchical dependencies between them. As a re-
+sult, the hierarchy injection significantly boosts the
+performance of scarce classes. At last, both the per-
+formances of using BCE loss instead of ZMLCE
+loss ( r.p.BCE loss) and removing MLM loss ( r.m.MLM loss) drop, which shows it is important to
+bridge the gap of optimizing objectives between
+HTC and MLM.
+To further illustrate the effectiveness of the hi-
+erarchy injection, we test our model with random
+connection. As a reminder, during hierarchy in-
+jection, we connect virtual nodes with according
+labels with the same depth. Random connection
+adds random connections based on that connec-
+tion. For each label, it connects the label to another
+virtual node randomly.
+As in the last row of Table 2, the variant with ran-
+dom connection drops over 1% on Macro-F1 score.
+This result illustrates that connections that violate
+the label hierarchy have adverse effects. The de-
+structiveness of a contradicting input like random
+connection even outweighs removing the hierar-
+chy completely ( r.m.hierarchy injection), reflect-
+ing that the proposed Hindeed gains instructive
+information from the label hierarchy. More dis-
+cussions on the connection of virtual nodes are
+elaborate in Appendix C. Ablation results on other
+datasets are in Appendix D.
+5.4 Interpreting on Representation Space
+In this section, we hope to intuitively show how
+the label hierarchy is incorporated and what the
+prompt has learned. The virtual label words are
+learned in the same space as word embedding, so
+they can be interpreted by their similarities with
+meaningful words. Therefore, we illustrate the top
+8nearest words of 2labels in the NYT dataset,
+National Hockey League (NHL) and News and
+Features (NF). As shown in table 3, despite some3746
+meaningless words, the model indeed learns some
+interpretable features. For NHL, the label words
+ofHconsist of the semantic of football , which
+is the brother node of Hockey (the father node of
+NHL) in the label hierarchy. For NF, the label
+words of Hconsist of the semantic of theatre ,
+which is the father node of NF. After removing the
+hierarchy knowledge (r.m. hierarchy), these seman-
+tics disappear from label words of NHL and NF.
+These results intuitively show that Hincorpo-
+rates the hierarchy knowledge into the pretrained
+language model and bridges the gap between HTC
+and MLM.
+5.5 Results on Imbalanced Hierarchy
+One of the key challenges of hierarchical text clas-
+sification is the imbalanced label hierarchy. In this
+section, we analyze how our model resolves the
+issue of imbalance on the development set of NYT.
+For HTC, the imbalance can be viewed from two
+perspectives. For one, the number of labels at dif-
+ferent depths of the hierarchy is imbalanced. As
+shown in Figure 3a, medium layers (depth 3 and
+4) have more labels than deep or shallow layers,
+where all models have poor performances. Com-
+pared with other baselines, Hmainly boosts the
+performance of medium levels. For another, the
+instance of each label is various. Take the NYT
+dataset as an example, the ratio of the maximum
+and minimum amount of training samples of a label
+is over 100. In Figure 3b, we cluster labels into
+5bunches depending on their amounts of training
+samples. Our model largely improves the perfor-
+mance of labels with few training instances, show-
+ing that our method can alleviate the long-tail effect
+to some extent.
+5.6 Results on Low Resource Setting
+To further evaluate the potential of our method,
+we conduct experiments in low-resource settings.
+Since the problem is multi-label, the commonly
+used N-way K-shot setting is hard to define so we
+simply sample 10% of training data. As previous
+HTC works do not consider the low resource set-
+ting (LRS), we reproduce baseline models in LRS.
+Besides less training data, other settings follow the
+main experiment.
+The comparison of LRS experimental results
+is shown in Figure 4. Among baseline meth-
+ods, prompt-based models outperform non-prompt-
+based models on 3datasets, which shows the ad-
+vantages of prompt methods in LRS. Our model
+outperforms all baseline models and has better
+stability (lower standard deviation) on all 3LRS
+datasets. Comparing with the full resource set-
+ting (FRS) (i.e., main results), the performance gap
+between Hand other baselines increases on the
+LRS. For example, on RCV1-V2, Houtperforms
+“BERT+HTCinfoMAX” 2.13and6.09Macro-F1
+scores in FRS and LRS, respectively, which shows
+the potential of our method.37476 Conclusion
+In this paper, we propose a hierarchy-aware prompt
+tuning ( H) method to bridge the gaps between
+HTC and MLM. To bridge the hierarchy and flat
+gap,Hincorporates the label hierarchy knowl-
+edge into a virtual template and label words. To
+bridge the multi-label and multi-class gap ,Hin-
+troduces a zero-bounded multi-label cross-entropy
+loss to harmonize the objectives of HTC and MLM.
+Htransforms HTC into a hierarchy-aware multi-
+label MLM task, which can better tap the potential
+of the pretrained language model in HTC. Exten-
+sive experiments show that our method achieves
+state-of-the-art performances on 3popular HTC
+datasets, and is adept at handling the imbalance
+and low resource situations.
+Limitations
+Prompting methods need pretrained language mod-
+els as the backbone. Our work is based on the
+masked language model (MLM) task but it is not a
+universal component of PLM. As a result, our ap-
+proach is only applicable to PLMs which incorpo-
+rate MLM. Despite such limited choices, compared
+to other HTC works which adopt PLM as a replace-
+able text encoder, our approach takes more advan-
+tage of PLMs by considering how they are trained.
+Another limitation is the constraint of maximum
+sequence length. Although the length limitation
+of PLM is extensively existed, our approach needs
+extra tokens for template, and that further shortens
+the length of input text. Even so, the experiment re-
+sults indicate that our method performs better than
+the raw PLM so this sacrifice is worthy. Notice
+that the length of our template is proportional to
+the depth of the label hierarchy, so Hmay fail to
+datasets with extreme hierarchy depth.
+Acknowledgements
+We thank all the anonymous reviewers for their
+constructive feedback. The work is supported by
+National Natural Science Foundation of China un-
+der Grant No.62036001, PKU-Baidu Fund (No.
+2020BD021) and NSFC project U19A2065.
+References37483749
+A Data Statistics
+B Example of Different Prompt Methods
+We provide some detailed examples here to ex-
+plain the difference between our Hwith existing
+prompt methods.
+Templates of hard prompt, soft prompt, and H
+are illustrated in Table 5. xis the original text and
+[CLS] and[SEP] are special tokens of BERT.
+[V1] to[VN] in soft prompt are Nvirtual tem-
+plate words which are learnable embeddings, and
+the number Nis predefined. Our method has L
+virtual template words. They are output embed-
+dings of graph encoder as in Equation 5 and Lis
+the number of hierarchy layers. Our method uses
+a special token [PRED] for multi-label prediction
+(Section 4.2), whereas hard and soft prompt use the
+same [MASK] token as BERT, which is proposed
+for single-label predictions.
+C Discussion on Different Connections of
+Hierarchy Injection
+During hierarchy injection, we connect virtual
+nodes with according labels with the same depth,
+but this connection is not unique. Besides random
+connection, we further test our model with a vari-
+ant. Depth increasing connects a virtual node with
+labels on the same and shallower layers, i.e., vir-
+tual node tconnects with all label nodes on 1st to
+i-th layers. Figure 5 is an illustration of theses two
+connections.
+As in the third row of Table 6, the variant with
+depth increasing behaves similarly to the original
+one. This observation illustrates that the impact of
+the connection of virtual nodes is not significant as
+long as it contains logical hierarchical information.
+Compared to random connection which violates the
+label hierarchy and has adverse effects, this result
+reflects that the proposed His aware of the label
+hierarchy on the secondary side.
+D Ablation results on WebOfScience and
+RCV1-V2
+The hierarchy of the WOS dataset only has two lay-
+ers so the structural information of WOS is weak.
+So, in Table 7, removing or disturbing such infor-
+mation has little influence.
+After replacing ZMLCE loss with BCE loss,
+Macro-F1 decreases dramatically on all datasets.3750
+Although BCE loss indeed can solve the multi-label
+problem, ZMLCE loss is a better choice theoreti-
+cally and experimentally.3751

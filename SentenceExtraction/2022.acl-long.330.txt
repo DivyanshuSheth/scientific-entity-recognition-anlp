@@ -1,1 +1,571 @@
-4811 Proceedings of the 60th Annual Meeting of the Association for Computational Linguistics Volume 1 : Long Papers , pages 4811 4820 May 22 - 27 , 2022 c(cid:13)2022 Association for Computational Linguistics 4812 4813 4814 4815 4816 4817 4818 4819 4820 
+
+Jing Zhao, Yifan Wang, Junwei Bao, Youzheng Wu, Xiaodong He
+JD AI Research, Beijing, China
+{zhaojing857,wangyifan15,baojunwei,
+wuyouzheng1,xiaodong.he}@jd.com
+Abstract
+Transformer-based pre-trained models, such as
+BERT, have shown extraordinary success in
+achieving state-of-the-art results in many natu-
+ral language processing applications. However,
+deploying these models can be prohibitively
+costly, as the standard self-attention mechanism
+of the Transformer suffers from quadratic com-
+putational cost in the input sequence length.
+To confront this, we propose FCA, a fine- and
+coarse-granularity hybrid self-attention that re-
+duces the computation cost through progres-
+sively shortening the computational sequence
+length in self-attention. Specifically, FCA con-
+ducts an attention-based scoring strategy to de-
+termine the informativeness of tokens at each
+layer. Then, the informative tokens serve as
+the fine-granularity computing units in self-
+attention and the uninformative tokens are re-
+placed with one or several clusters as the coarse-
+granularity computing units in self-attention.
+Experiments on GLUE and RACE datasets
+show that BERT with FCA achieves 2x reduc-
+tion in FLOPs over original BERT with <1%
+loss in accuracy. We show that FCA offers
+significantly better trade-off between accuracy
+and FLOPs compared to prior methods.
+1 Introduction
+Transformer-based large pre-trained language mod-
+els with BERT (Devlin et al., 2018) as a typical
+model routinely achieve state-of-the-art results on a
+number of natural language processing tasks (Yang
+et al., 2019; Liu et al., 2019; Clark et al., 2020),
+such as sentence classification (Wang et al., 2018),
+question answering (Rajpurkar et al., 2016, 2018),
+and information extraction (Li et al., 2020b).
+Despite notable gains in accuracy, the high com-
+putational cost of these large models slows down
+their inference speed, which severely impairs theirpracticality, especially in the case of limited indus-
+try time and resources, such as Mobile Phone and
+AIoT. In addition, the excessive energy consump-
+tion and environmental impact caused by the com-
+putation of these models also raise the widespread
+concern (Strubell et al., 2019; Schwartz et al.,
+2020).
+To improve the efficiency of BERT, the main-
+stream techniques are knowledge distillation (Hin-
+ton et al., 2015) and pruning. Knowledge distil-
+lation aims to transfer the “knowledge" from a
+large teacher model to a lightweight student model.
+The student model is then used during inference,
+such as DistilBERT (Sanh et al., 2019). Pruning
+technique includes: (1) structured methods that
+prune structured blocks of weights or even com-
+plete architectural components in BERT, for ex-
+ample encoder layers (Zhang and He, 2020), (2)
+unstructured methods that dynamically drop redun-
+dant units, for example, attention head (V oita et al.,
+2019) and attention tokens (Goyal et al., 2020).
+However, both types of methods encounter chal-
+lenges. For the former, a great distillation effect
+often requires an additional large teacher model and
+very complicated training steps (Jiao et al., 2019;
+Hou et al., 2020). For the latter, pruning methods
+discard some computing units, which inevitably
+causes information loss.
+In contrast to the prior approaches, we propose a
+self-motivated and information-retained technique,
+namely FCA, a fine- and coarse-granularity hy-
+brid self-attention that reduces the cost of BERT
+through progressively shortening the computational
+sequence length in self-attention. Specifically,
+FCA first evolves an attention-based scoring strat-
+egy to assign each token with the informativeness.
+Through analyzing the informativeness distribution
+at each layer, we conclude that maintaining full-
+length token-level representations is progressive
+redundant along with layers, especially for the clas-
+sification tasks that only require single-vector repre-4811sentations of sequences. Consequently, the tokens
+are divided into informative tokens and uninfor-
+mative tokens according to their informativeness.
+Then, they are updated through different computa-
+tion paths. The informative tokens carry most of
+the learned features and remain unchanged as the
+fine-grained computing units in self-attention. The
+uninformative tokens may not be as important as
+informative ones but we will not completely dis-
+card them to avoid information loss. Instead, We
+replace them with more efficient computing units
+to save memory consumption. Experiments on the
+standard GLUE benchmark show that FCA accel-
+erates BERT inference speed and maintains high
+accuracy as well.
+Our contributions are summarized as follows:
+•We analyze the progressive redundancies in
+maintaining full-length token-level represen-
+tations for the classification tasks.
+•We propose a fine- and coarse-granularity hy-
+brid self-attention, which is able to reduce the
+cost of BERT and maintain high accuracy.
+•Experiments on the standard GLUE bench-
+mark show that the FCA-based BERT
+achieves 2x reduction in FLOPs over the stan-
+dard BERT with < 1% loss in accuracy.
+2 Related work
+There has been much prior literature on improving
+the efficiency of Transformers. The most common
+technologies include:
+Knowledge distillation refers to training a smaller
+student model using outputs from various interme-
+diate representations of larger pre-trained teacher
+models. In the BERT model, there are multiple rep-
+resentations that the student can learn from, such
+as the logits in the final layer, the outputs of the
+encoder units, and the attention maps. The distil-
+lation on output logits is most commonly used to
+train smaller BERT models (Sanh et al., 2019; Sun
+et al., 2019; Jiao et al., 2019; Sun et al., 2020). The
+output tensors of encoder units contain meaningful
+semantic and contextual relationships between in-
+put tokens. Some work creates a smaller model by
+learning from the outputs of teacher’s encoder (Jiao
+et al., 2019; Sun et al., 2020; Li et al., 2020a).
+Attention map refers to the softmax distribution
+output of the self-attention layers and indicates the
+contextual dependence between the input tokens. Acommon practice of distillation on attention maps
+is to directly minimize the difference between the
+self-attention outputs of the teacher and the stu-
+dent (Jiao et al., 2019; Sun et al., 2020; Mao et al.,
+2020). This line of work is orthogonal to our ap-
+proach and our proposed FCA can be applied to
+the distillate models to further accelerate their in-
+ference speed.
+Pruning refers to identifying and removing less
+important weights or computation units. Pruning
+methods for BERT broadly fall into two categories.
+Unstructured pruning methods prune individual
+weights by comparing their absolute values or gra-
+dients with a pre-defined threshold (Mao et al.,
+2020; Gordon et al., 2020; Chen et al., 2020). The
+weights lower than the threshold are set to zero. Un-
+like unstructured pruning, structured pruning aims
+to prune structured blocks of weights or even com-
+plete architectural components in the BERT model.
+V oita et al. (2019) pruned attention heads using a
+method based on stochastic gates and a differen-
+tiable relaxation of the L0 penalty. Fan et al. (2019)
+randomly dropped Transformer layers to sample
+small sub-networks from the larger model during
+training which are selected as the inference models.
+Goyal et al. (2020) progressively reduced sequence
+length by pruning word-vectors based on the at-
+tention values. This work is partly similar to the
+fine-grained computing units in our proposed FCA.
+However they ignored the coarse-grained units that
+may cause information loss.
+In addition, there are some engineering tech-
+niques to speed up the inference speed, such as
+Mixed Precision (Micikevicius et al., 2017) and
+Quantization (Zafrir et al., 2019; Fan et al., 2020).
+Using half-precision or mixed-precision representa-
+tions of floating points is popular in deep learning
+to accelerate training and inference speed. Quanti-
+zation refers to reducing the number of unique val-
+ues required to represent the model weights, which
+in turn allows to represent them using fewer bits.
+3 Preliminary
+BERT (Devlin et al., 2018) is a Transformer-
+based language representation model, which can
+be fine-tuned for many downstream NLP tasks,
+including sequence-level and token-level classi-
+fication. The Transformer architecture (Vaswani
+et al., 2017) is a highly modularized neural network,
+where each Transformer layer consists of two sub-
+modules, namely the multi-head self-attention sub-4812
+layer (MHA) and the position-wise feed-forward
+network sub-layer (FFN). Both sub-modules are
+wrapped by a residual connection and layer normal-
+ization.
+MHA . The self-attention mechanism allows the
+model to identify complex dependencies between
+the elements of each input sequence. It can be
+formulated as querying a dictionary with key-value
+pairs. Formally,
+MHA (Q, K, V ) =Concat (head, ...,head)W
+(1)
+where Q, K , andVrepresent query, key, and value.
+his the number of heads. Each head is defined as:
+head=Attention (QW, KW, V W)
+=softmax (QW(KW)
+√d)
+| {z }V W(2)
+where W∈R, W∈R, W∈
+R, W∈Rare learned parameters.
+d, d,anddare dimensions of the hidden vec-
+tors. The main cost of MHA layer is the calculation
+of attention mapping matrix A∈Rin Eq. 2
+which is O(n)in time and space complexity. This
+quadratic dependency on the sequence length has
+become a bottleneck for Transformers.
+FFN . The self-attention sub-layer in each of the
+layers is followed by a fully connected position-
+wise feed-forward network, which consists of two
+linear transformations with a GeLU (Hendrycks
+and Gimpel, 2016) activation in between. Givena vector xin[x, ..., x]outputted by MHA sub-
+layer, FFN is defined as:
+FFN(x) =GeLU (xW+b)W+b,(3)
+where W, W, b, bare learned parameters.
+Previous research (Ganesh et al., 2021) has
+shown that in addition to MHA sub-layer, FFN
+sub-layer also consumes large memory in terms of
+model size and FLOPs. As a result, if we reduce
+the computational sequence length of MHA, the
+input and the consumption of FFN sub-layer will
+become less accordingly.
+4 Methodologies
+To shorten the computational sequence length of
+self-attention, our core motivation is to divide to-
+kens into informative and uninformative ones and
+replace the uninformative tokens with more effi-
+cient units. This section introduces each module of
+our model in detail.
+4.1 Scoring Strategy
+Our strategy of scoring the informativeness of to-
+kens is based on the self-attention map. Con-
+cretely, taking a single token vector xas an ex-
+ample, its attention head xis updated by: x=Pax(Eq. 2). ais an element in atten-
+tion map A. Therefore, arepresents the informa-
+tion contribution from token vector xtoxover
+head. Intuitively, we define the informativeness
+of a token by accumulating along the columns of4813
+attention map A:
+I(x) =Xa (4)
+The overall informativeness of xis defined as
+the average over the heads:
+I(x) =1
+hXI(x) (5)
+We next analyze some properties of defined in-
+formativeness in BERT-base. The first sub-figure in
+Figure 1 displays the normalized variance and stan-
+dard deviation of informativeness of layers from 1
+to 12 on RTE (classification dataset), which sup-
+ports the phenomenon that the informativeness dis-
+tributions at the bottom layers are relatively uni-
+form and the top layers are volatile. The last five
+sub-figures further present the informativeness dis-
+tributions of some BERT-base layers, where the
+first token is [CLS] and its representations are used
+for the final prediction. We can see that as the
+layers deepen, the informativeness is progressively
+concentrated on two tokens. This means that main-
+taining full-length token-level representations for
+the classification tasks may be redundant.A straightforward approach for reducing the se-
+quence length of self-attention is to maintain the
+informative tokens and prune the rest. We argue
+that this approach is effortless but encounters the
+risk of information loss, especially for lower layers.
+4.2 FCA Layer
+Instead of pruning, we propose to process the unin-
+formative tokens with more efficient units. Figure 2
+shows the architecture of FCA layer, which inserts
+a granularity hybrid sub-layer after MHA. At each
+layer, it first divides tokens into informative and
+uninformative ones based on their assigned infor-
+mativeness. The CLS token is always divided into
+informative part as it is used to derive the final
+prediction.
+Letx⊕Xbe the sequence of token vectors
+input to l-th layer, where X= [x, ..., x]and
+nis the sequence length of X. We gather the
+token vectors from Xwith the top- kinforma-
+tiveness to form the informative sequence Xand
+the rest vectors to form the uninformative sequence
+X, where X∈RandX∈R-.
+The length of the uninformative sequence is re-
+duced by performing certain type of aggregating
+operations along the sequence dimension, such as4814average pooling :
+X=Pooling (X) (6)
+orweighted average pooling with informativeness
+as weights:
+α=softmax (I(x))
+X=Pooling (αX)(7)
+where xis the token vector in X. The aggre-
+gated sequence X∈Randkis a fixed
+parameter. After hybrid layer, token sequence is up-
+dated to [ x⊕X⊕X] and sequence length
+is shortened by n-k-k. Therefore, in addition to
+the following layers, the computation cost of FFN
+inl-th layer is reduced as well. It should be noted
+that the relative position of uninformative tokens
+should be preserved, which contains their contex-
+tual features to a certain extent and they can be
+captured by aggregating operations.
+The parameter kis learnable and progressively
+shortened. Inspired by Goyal et al. (2020), we train
+nlearnable parameters to determine the configura-
+tion of k, denoted R= [r, ..., r]. The parameters
+are constrained to be in the range, i.e., r∈[0; 1]
+and added after MHA sub-layer. Given a token
+vector xoutput by MHA, it is modified by:
+x←rx (8)
+where pos(x)is the sorted position of xover in-
+formativeness. Intuitively, the parameter rrepre-
+sents the extent to which the informativeness of the
+token at i-th position is retained. Then, for the l-th
+layer, we obtain the configuration of kfrom the
+sum of the above parameters, i.e.,
+k=ceil(sum(l;R))
+s.t. k≤k(9)
+5 Loss Function
+LetΘbe the parameters of the baseline BERT
+model and L(·)be cross entropy loss or mean-
+squared error as defined in the original task. We
+adopt the multi-task learning idea to jointly mini-
+mize the loss in accuracy and total sequence length
+over all layers.
+Loss=L(Θ, R) +λXl·sum(l;R) (10)
+where L is the number of layers. L(Θ, R)controls
+the accuracy and sum(l;R)controls the sequence
+length of l-th layer. The hyper-parameter λtunes
+the trade-off.
+The training schema of our model involves three
+stages, which are given in Algorithm 1.
+Algorithm 1 Training Process
+Input: D = training set
+Initialize: Θ←BERT parameters
+Initialize: R←uniform distributionfine-tune ΘonDwith original loss L(·)addRafter MHA sub-layer and fine-tune Θ
+andRwith Eq. 10obtain the configuration of kon each layer,
+then re-train FCA-layer based BERT with L(·)
+6 Experiments
+6.1 Datasets
+Our experiments are mainly conducted on GLUE
+(General Language Understanding Evaluation)
+(Wang et al., 2018) and RACE (Lai et al., 2017)
+datasets. GLUE benchmark covers four tasks: Lin-
+guistic Acceptability, Sentiment Classification, Nat-
+ural Language Inference, and Paraphrase Similarity
+Matching. RACE is the Machine Reading Compre-
+hension dataset.
+For experiments on RACE, we denote the in-
+put passage as P, the question as q, and the four
+answers as {a, a, a, a}. We concatenate pas-
+sage, question and each answer as a input se-
+quence [CLS]P[SEP]q[SEP]a[SEP], where [CLS]
+and[SEP]are the special tokens used in the origi-
+nal BERT. The representation of [CLS]is treated as
+the single logit value for each a. Then, a softmax
+layer is placed on top of these four logits to obtain4815the normalized probability of each answer, which
+is used to compute the cross-entropy loss.
+The input length of BERT is set to 512 by de-
+fault. However, the instances in these datasets are
+relatively short, rarely reaching 512. If we keep
+the default length settings, most of the input tokens
+are [PAD] tokens. In this way, our model can eas-
+ily save computational resources by discriminating
+[PAD] tokens as the uninformative ones, which is
+meaningless. To avoid this, we constrained the
+length of the datasets. The statistic information of
+the datasets is summarized in Table 1.
+6.2 Evaluation Metrics
+For accuracy evaluation, we adopt Matthew’s Cor-
+relation for CoLA, F1-score for QQP, and Accuracy
+for the rest datasets. For efficiency evaluation, we
+use the number of floating operations (FLOPs) to
+measure the inference efficiency, as it is agnostic
+to the choice of the underlying hardware.
+6.3 Baselines
+We compare our model with both distillation and
+pruning methods. Distillation methods contain
+four models DistilBERT (Sanh et al., 2019), BERT-
+PKD (Sun et al., 2019), Tiny-BERT (Jiao et al.,
+2019), and Mobile-BERT (Sun et al., 2020). All
+four models are distillation from BERT-base and
+have the same structure (6 transformer layers, 12
+attention heads, dimension of the hidden vectors
+is 768). Pruning methods contain FLOP (Wang
+et al., 2020), SNIP (Lin et al., 2020), and PoWER-
+BERT (Goyal et al., 2020). PoWER-BERT (Goyal
+et al., 2020) is the state-of-the-art pruning method
+which reduces sequence length by eliminating
+word-vectors. To make fair comparisons, we set
+the length of our informative tokens at each layer
+same to the sequence length of PoWER-BERT.
+6.4 Implementation Details
+We deploy BERT-base as the standard model
+in which transformer layers L=12, hidden size
+d=512, and number of heads h=12. All models
+are trained with 3 epochs. The batch size is se-
+lected in list 16,32,64. The model is optimized
+using Adam (Kingma and Ba, 2014) with learning
+rate in range [2e-5,6e-5] for the BERT parameters
+Θ, [1e-3,3e-3] for R. Hyper-parameter λthat con-
+trols the trade-off between accuracy and FLOPs is
+set in range [1e-3,7e-3]. We conducted experiments
+with a V100 GPU. The FLOPs for our model and
+the baselines were calculated with Tensorflow andbatch size=1. The detailed hyper-parameters set-
+ting for each dataset are provided in the Appendix.
+6.5 Main Results
+Table 3 and Table 2 display the accuracy and infer-
+ence FLOPs of each model on GLUE benchmark
+respectively. As the FLOPs of PoWER-BERT is
+almost the same as that of FCA-BERT and the
+number of coarse units has little affect on FLOPs,
+Table 2 only lists the FLOPs of FCA-BERT.
+Comparison to BERT . The results demonstrate
+the high-efficiency of our model, which almost has
+no performance gap with BERT-base (<%1 accu-
+racy loss) while reduces the inference FLOPs by
+half on majority datasets. Table 4 presents the
+sequence length of FCA at each layer, which illus-
+trates substantial reduction of computation length
+for standard BERT. For example, the input se-
+quence length for the dataset QQP is 128. Hence,
+standard BERT needs to process 128*12=1536 to-
+kens over the twelve layers. In contrast, FCA only
+tackles [85, 78, 73, 69, 61, 57, 54, 52, 46, 41, 35,
+35] summing to 686 tokens. Consequently, the
+computational load of self-attention and the feed
+forward network is economized significantly.
+Among our models, the weighted average pool-
+ing operation raises the better performance than the
+average pooling operation. The number of coarse
+units contributes the model accuracy for both two
+operations, especially for pooling operation. This
+is reasonable as when the number of coarse units
+increases, the information stored in each FCA grad-
+ually approaches the standard BERT. But overmuch
+coarse units grow FLOPs. Therefore, it is neces-
+sary to balance impact on FLOPS and performance
+brought by the coarse units.
+Comparison to Baselines . We first compare our
+model to Distil-BERT. Our models dramatically
+outperform Distil-BERT in accuracy by a margin
+of at least 3 average score. As mentioned before,
+the line of distillation framework is orthogonal
+to our proposed method. We further investigate
+whether FCA is compatible with distillation mod-
+els. Table 5 shows the results of Distil-BERT with
+FCA-Pool, which verify that FCA could further
+accelerate the inference speed on the basis of the
+distillation model with <1% loss in accuracy. As
+for the SOTA distillation models, Tiny-BERT and
+Mobile-BERT, our models still outperform them on
+average performance. Combined with the results
+of Table 2 where our models have slightly fewer4816
+inference FLOPs than the distillation methods, it
+can be proved that FCA has better accuracy and
+computational efficiency than them.
+We next compare our model to the SOTA prun-
+ing model PoWER-BERT. Their acceleration ef-
+fects are comparable and we focus on comparing
+their accuracy. The results on Table 3 show that
+our models achieve better accuracy than PoWER-
+BERT on all datasets. This is because PoWER-
+BERT discards the computing units, which in-
+evitably causes information loss. Instead of prun-ing, FCA layer stockpiles the information of unin-
+formative tokens in a coarse fashion (aggregating
+operations). Moreover, we noticed that coarse units
+are not always classified as uninformative. In other
+words, they sometimes participate in the calcula-
+tion of self-attention as informative tokens. This
+shows the total informativeness contained in unin-
+formative tokens can not be directly negligible and
+can be automatically learned by self-attention.
+In order to visually demonstrate the advantages
+of our model, Figure 3 draws curves of trade-off
+between accuracy and efficiency on three datasets.
+The results of FCA-BERT and PoWER-BERT are
+obtained by tuning the hyper-parameter λ. For
+DistilBERT, the points correspond to the distilla-
+tion version with 4 and 6 Transformer layers. It
+can be seen that with the decrease of FLOPs, (1)
+PoWER-BERT and our model outperform Distil-
+BERT by a large margin; (2) our model exhibits the
+superiority over all the prior methods consistently;
+(3) more importantly, the advantage of our model
+over PoWER-BERT gradually becomes apparent.4817
+This is because PoWER-BERT prunes plenty of
+computation units to save FLOPs, which results in
+the dilemma of information loss. In contrast, our
+model preserves all information to a certain extent.
+Extensions to Other PLMs . To explore the gen-
+eralization capabilities of FCA, we extend FCA
+to other pre-trained language models (PLMs),
+such as distil-BERT, BERT-large, and ELECTRA-
+base (Clark et al., 2020). The test results are dis-
+played in Table 5, which proves that FCA is appli-
+cable to a variety of models, regardless of model
+size and variety.
+6.6 Pooling All Tokens
+In this section, we explore that can we not differ-
+entiate between tokens and perform the average
+pooling on all tokens to reduce the computation
+cost. To make fair comparisons, we set the length
+of pooled sequence at each layer equal to the FCA-
+BERT-Pool. The results show that pooling all
+tokens decreases the model accuracy from 75.0 to
+73.8. This is because the pooling operation weak-
+ens the semantic features learned by the informa-
+tive tokens, which are often decisive for the final
+prediction. On the contrary, our model does not
+conduct pooling on informative tokens and instead
+delegates the burden of saving computational over-
+head to uninformative tokens. And this does not
+cause serious damage to the representative features
+learned by the model.
+6.7 Distance with Standard BERT
+In this section, we further investigate the extent
+to which these compressed models can retain the
+essential information of the original BERT. Con-
+cretely, we adopt the Euclidean distance of the
+CLS representation between BERT and the com-
+pressed models as the evaluation metric, which
+is proportional to the information loss caused by
+model compression, formally:
+Distance(A,B) =XvuutX(A−B)
+where Mis the number of the instances in cor-
+responding dataset. Table 4 shows the distance
+of baselines and our models with standard BERT.
+Combining the results in Table 3, it can be found
+that the distance is consistent with the test accu-
+racy. Large distance leads to low accuracy and vice
+versa. This provides an inspiration, that is, we can
+add a distance regulation term to the objective func-
+tion to forcibly shorten the distance between the
+compression model and the original BERT, i.e.,
+Loss=L(Θ, R)+λXl·sum(l;R)+Distance (·)
+However, the experimental results show that the
+accuracy has not been significantly improved. This
+may be because the information learned by the com-
+pressed model has reached the limit of approaching
+the BERT, and the regulation term can not further
+improve the potential of the compressed model.
+7 Discussion
+Our proposed FCA is dedicated to the classifica-
+tion tasks that only require single-vector representa-
+tions, and it can not be directly applied to the tasks
+of requiring to maintain the full input sequence in4818the output layer, such as NER and extractive MRC.
+On these tasks, we need to make some modifica-
+tions of only performing FCA operation over K
+andVin self-attention and maintaining the full
+length of Q. The Eq. 2 is modified to:
+head=
+Attention (QW,FCA(K)W,FCA(V)W)
+(11)
+We also attempted to maintain the full length
+ofKandVand shorten Q, but the experimental
+results are unsatisfactory.
+8 Conclusion
+In this paper, we propose FCA, a fine- and coarse-
+granularity hybrid self-attention that reduces the
+computation cost through progressively shortening
+the computational sequence length in self-attention.
+Experiments on GLUE and RACE datasets show
+that BERT with FCA achieves 2x reduction in
+FLOPs over original BERT with <1% loss in accu-
+racy. Meanwhile, FCA offers significantly better
+trade-off between accuracy and FLOPs compared
+to prior methods.
+9 Acknowledge
+We would like to thank three anonymous review-
+ers for their useful feedback. This work is sup-
+ported by the National Key Research and De-
+velopment Program of China under Grant No.
+2020AAA0108600.
+References48194820

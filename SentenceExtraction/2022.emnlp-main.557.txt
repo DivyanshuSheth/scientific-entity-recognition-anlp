@@ -1,1 +1,832 @@
-8133 Proceedings of the 2022 Conference on Empirical Methods in Natural Language Processing , pages 8133 8149 December 7 - 11 , 2022 © 2022 Association for Computational Linguistics 8134 8135 8136 8137 8138 8139 8140 8141 8142 8143 8144 8145 8146 8147 8148 8149 
+
+Yijia ShaoMengyu ZhouYifan ZhongTao WuHongwei Han
+Shi HanGideon HuangDongmei ZhangPeking UniversityMicrosoft ResearchFudan UniversityMicrosoftTsinghua University
+shaoyj@pku.edu.cn ,{mezho , twu, shihan, gihuang, dongmeiz}@microsoft.com
+yfzhong20@fudan.edu.cn ,hhw20@mails.tsinghua.edu.cn
+Abstract
+Online forms are widely used to collect data
+from human and have a multi-billion market.
+Many software products provide online ser-
+vices for creating semi-structured forms where
+questions and descriptions are organized by pre-
+deﬁned structures. However, the design and
+creation process of forms is still tedious and
+requires expert knowledge. To assist form de-
+signers, in this work we present FormLM to
+model online forms (by enhancing pre-trained
+language model with form structural informa-
+tion) and recommend form creation ideas (in-
+cluding question / options recommendations
+and block type suggestion). For model training
+and evaluation, we collect the ﬁrst public online
+form dataset with 62K online forms. Experi-
+ment results show that FormLM signiﬁcantly
+outperforms general-purpose language models
+on all tasks, with an improvement by 4.71 on
+Question Recommendation and 10.6 on Block
+Type Suggestion in terms of ROUGE-1 and
+Macro-F1, respectively.
+1 Introduction
+Online forms are widely used to collect data in ev-
+eryday scenarios such as feedback gathering ( Ilieva
+et al. ,2002 ), application system ( Sylva and Mol ,
+2009 ), research surveys ( Yarmak ,2017 ),etc.With
+a multi-billion market ( Research and Markets ,
+2021 ), many software products – such as Survey
+Monkey ( Abd Halim et al. ,2018 ), Google ( Mondal
+et al.,2018 ) and Microsoft Forms ( Rhodes ,2019 ) –
+provide services to help users create online forms
+which consist of multiple blocks ( e.g., Figure 1).
+However, there are obstacles preventing the cre-
+ation of well-designed online forms, which could
+hurt response rate and quality ( Krosnick ,2018 ).
+For each form question, form designers need toFigure 1: An Example Online Form with the Three
+Tasks of Intelligent Form Creation Ideas.
+write an informative title, specify its type, and pro-
+vide other required components. This process is
+tedious and time-consuming even for experienced
+users. Also, non-experts may be unsure about what
+question to add or which question type to choose.
+To improve the experience and efﬁciency of form
+composing, it is desirable that online form services
+could recommend creation ideas to form designers.
+To address the above demands, in § 3we identify
+three machine learning (ML) tasks of Form Cre-
+ation Ideas , including Question Recommendation ,
+Block Type Suggestion , and Options Recommenda-
+tion. For example, in Figure 1, when one adds a
+text ﬁeld block as the second block, the Question
+Recommendation suggests “Employee ID” for the
+question based on the existing content (form title,
+description, and the ﬁrst question “Full Name”).
+When editing the third choice question block, the
+Options Recommendation suggests “Yes” and “No”8133as candidate options. Finally, if the user types
+“How happy are you with your current job?” for the
+fourth block but hasn’t selected a block type yet,
+the Block Type Suggestion predicts it as a rating
+type block.
+The above tasks require a speciﬁcally designed
+model to understand semi-structured forms, where
+natural language (NL) text is organized by prede-
+ﬁned structures. A form is composed of a title, a de-
+scription, and a series of blocks. For each block, its
+subcomponents also follow unique structures. For
+example, a Choice block contains a list of options
+which serve as candidate answers to the question
+displayed in the block title. Existing pre-trained
+language models (PLMs) focus on general-purpose
+free-form NL text ( Devlin et al. ,2019 ;Yang et al. ,
+2019 ). They may provide a good starting point
+to model the rich semantic information within NL
+contents of a form. However, they cannot directly
+handle the extra structural information of the form.
+Is it possible to infuse a PLM with structural infor-
+mation of online forms?
+In this paper, we propose FormLM to model
+both the semantic and structural information of on-
+line forms. As we will discuss in § 4, there are three
+key parts of FormLM. First, the form serialization
+procedure, which represents a form as a tree and
+converts it into a token sequence without informa-
+tion loss. Second, inheriting existing PLM with a
+small number of additional parameters: FormLM
+inherits the parameters of BART ( Lewis et al. ,
+2020 ) to leverage its language modelling capabili-
+ties. Also, by adding extra biases to the attention
+layers, FormLM explicitly handles the structural
+information. Third, continual pre-training with col-
+lected online forms: for better downstream appli-
+cation: We propose two structure-aware objectives
+– Span Masked Language Model and Block Title
+Permutation – to continually pre-train FormLM on
+top of the inherited and additional parameters.
+We evaluate FormLM on Form Creation Ideas
+tasks using our OOF (OpenOnline Forms) dataset.
+This dataset (see § 2.2) is created by crawling and
+parsing public forms on the Web. Comparing
+to PLMs such as BART, FormLM improves the
+ROUGE-1 score from 32.82 to 37.53 on Question
+Recommendation, and the Macro-F1 score from
+73.3 to 83.9 on Block Type Suggestion.
+In summary, our main contributions are:
+•We put forward the problem of online form
+modeling and formally deﬁne a group of taskson Form Creation Ideas. To the best of our
+knowledge, these problems have not been sys-
+tematically studied before.
+•FormLM is proposed by us to model both
+the semantic and structural information by en-
+hancing PLM with form serialization, struc-
+tural attention and continual pre-training.
+•The public OOF dataset with 62k forms is con-
+structed by us. To the best of our knowledge,
+this is the ﬁrst public online form dataset.
+OOF dataset, FormLM code and models are
+also open sourced at https://github.com/
+microsoft/FormLM .
+•Comprehensive experiments – especially base-
+line comparisons, ablation studies, design
+choices and empirical studies – are designed
+and run by us to evaluate the effectiveness of
+FormLM on the tasks of Form Creation Ideas
+with the form dataset.
+2 Preliminaries
+In this section, we further elaborate the predeﬁned
+structure in online forms, and introduce our col-
+lected dataset.
+2.1 Online Form Structure
+Modern online form services usually allow users
+to create a form by piling up different types of
+blocks. There are eight common block types: Text
+Field, Choice, Time, Date, Likert, Rating, Upload ,
+andDescription . Each block type has a predeﬁned
+structure ( e.g., the options of a choice block) and
+corresponds to a speciﬁc layout shown in the user
+interface ( e.g., bullet points or checkboxes of the
+options). The order of the blocks in a form usually
+matters because they are designed to organize ques-
+tions in an easy-to-understand way, and to collect
+data from various related aspects. For example, in
+Figure 1, easier proﬁle / fact questions are asked
+before the preference / opinion questions.
+As shown at the top of Figure 3, an online
+form can be viewed as an ordered tree. The
+root node Trepresents the form title, and its
+children nodes Ch(T) = ( Desc, B, ..., B)
+represent the form description and a series of
+blocks. The subtree structure of Bdepends
+on its type. For Choice and Rating blocks,
+Ch(B) = ( Type,Title,Desc, C, ..., C)
+where Care the options or scores; For8134Likert (Johns ,2010 ) blocks, Ch(B) =
+(Type,Title,Desc, R, ..., R, C, ..., C)
+where R are rows and C are
+columns; For the remaining block types,
+Ch(B) = ( Type,Title,Desc). All description
+parts (Desc) are optional.
+2.2 Online Form Dataset
+Since there is no existing dataset for online forms,
+we construct our own OOF (Open Online Forms)
+dataset by crawling public online forms created
+on a popular online form website. We ﬁlter out
+forms with low quality and only consider English
+forms in this work. In total, 62K public forms are
+collected across different domains, e.g., education,
+ﬁnance, medical, community activities, etc.
+Due to the semi-structured nature of online
+forms, we further parsed the crawled HTML pages
+into JSON format by extracting valid contents and
+associating each block with its type. Figure 2
+shows the distribution of block types in our col-
+lected dataset. More details of the dataset construc-
+tion and its statistics can be found in Appendix A.
+3 Form Creation Ideas
+As illustrated in Figure 1, when adding a new block,
+one needs to specify its type and title in the ﬁrst
+step. Then, other required components – such as
+a list of options for a Choice block – are added
+according to the block type. In this paper, we focus
+on the following three tasks which provide Form
+Creation Ideas to users in the ﬁrst and later steps.
+Question Recommendation The Question Rec-
+ommendation aims at providing users with a rec-
+ommended question based on the selected block
+type and the previous context. Formally, the
+model needs to predict Titlebased on T,Desc ,
+B, ..., BandType. For example, in Figure 1,
+it is desirable that the model could recommend
+“Employee ID” when the form designer creates a
+Text Field block after the ﬁrst block.
+Block Type Suggestion Different from the sce-
+nario of Question Recommendation, sometimesform designers may ﬁrst come up with a block ti-
+tle without clearly specifying its block type. The
+Block Type Suggestion helps users select a suit-
+able type in this situation. For example, for the last
+block of Figure 1, the model will predict it as a
+Rating block and suggest adding candidate rating
+scores if the form designer has not appointed the
+block type himself / herself. Formally, given Title
+and the available context ( T,Desc, B, ..., B),
+the model should predict Typein this task.
+Options Recommendation As Figure 2shows,
+Choice blocks are frequently used in online forms.
+When creating a Choice block, one should addition-
+ally provide a set of options, and the Options Rec-
+ommendation helps in this case. Given the previ-
+ous context ( T,Desc, B, ..., B) and Title, the
+model predicts C, ..., CifType=Choice .
+In this work, we expect the model to recommend a
+set of possible options at the same time, so the de-
+sired output of this task is C, ..., Cconcate-
+nated with a vertical bar. For example, in Figure 1,
+the model may output “Yes | No” to recommend
+options for the third block.
+4 Methodology
+As discussed in § 1, we propose FormLM to model
+forms for creation ideas. We select BART as the
+backbone model of FormLM because it is widely
+used in NL-related tasks and supports both gener-
+ation and classiﬁcation tasks. In the rest of this
+section, we will describe the design and training
+details of FormLM as demonstrated in Figure 3.
+4.1 Form Serialization
+As discussed in § 2.1, an online form could be
+viewed as an ordered tree. In FormLM we seri-
+alize the tree into a token sequence which is com-
+patible with the input format of common PLMs.
+Figure 3(A) depicts the serialization process which
+utilizes special tokens and separators. First, a spe-
+cial token is introduced for each block type to ex-
+plicitly encode Type. Second, the vertical bar “|”
+is used to concatenate a list of related items within
+a block – options / scores Cof aChoice /Rating
+block, and rows Ror columns Cof aLikert
+block. Finally, multiple subcomponents of Bare
+concatenated using <sep> . Note that there is no
+information loss in the serialization process, i.e.,
+the hierarchical tree structure of an online form can
+be reconstructed from the ﬂattened sequence.8135
+4.2 Structural Attention
+Beyond adding structural information into the in-
+put sequence, in FormLM we further enhance its
+backbone PLM with specially designed Structural
+Attention (StructAttn). Our intuition is that the at-
+tention calculation among tokens should consider
+their different roles and locations in a form. E.g.,
+tokens within a question title seldom correlates
+with the tokens of an option from another question;
+tokens in nearby blocks (or even the same block)
+are usually stronger correlated with each other than
+those from distant blocks.
+As illustrated in Figure 3(B), StructAttn en-
+codes the structural information of an online form
+by adding two bias terms based on the token
+type ( i.e., the role that a token plays in the ﬂat-
+tened sequence) and the block-level position. For
+each attention head, given the query matrix Q=
+[q,· · ·,q]∈R, the key matrix K=
+[k,· · ·,k]∈R, and the value matrix
+V= [v,· · ·,v]∈R, the original out-
+put is calculated by
+ˆA=QK
+√d,Attn( H) = softmax( ˆA)V (1)In FormLM, we add two biases to ˆAand the
+attention head output of StructAttn is calculated by
+(2)
+In Equation ( 2), the token type bias is calculated
+based on a learnable lookup table L[·,·]in each
+attention layer, and the lookup key type(·)is the
+type of the corresponding token within the form
+structure. Speciﬁcally, in our work, type(·)is cho-
+sen from 9 token types: FormTitle ,FormDesc ,
+BlockTitle ,BlockDesc ,Option ,LikertRow ,
+LikertColumn ,BlockType ,SepToken . IfQor
+Kcorresponds to the ﬂattened sequence given by
+form serialization, type(·)can be directly obtained
+from the original form tree; otherwise, in genera-
+tion tasks, QorKmay correspond to the target,
+and we set type(·)as the expected output token
+type, i.e.,BlockTitle when generating the ques-
+tion and Option when generating the options.
+Another bias term in Equation ( 2) is calculated
+by an exponential decay function to model the rela-
+tive block-level position, where d(q,k)is the
+block-level distance between the corresponding8136tokens of qandkon the form tree. To make
+d(q,k)well-deﬁned for each token pair, we set
+Desc as the 0-th block ( B) and specify d(q,k)
+as 0 if type(q)ortype(k)is equal to FormTitle .
+Note that there are two parameters λ, µin this term.
+We make them trainable and constrain their val-
+ues to be positive to ensure tokens in neighboring
+blocks give more attention to each other.
+We apply StructAttn to three parts of FormLM,
+self attentions of FormLM encoder, self attentions
+and cross attentions of FormLM decoder. Q,K,V
+of encoder self attentions and K,Vof decoder
+cross attentions correspond to the source sequence;
+whileQ,K,Vof decoder self attentions and Qof
+decoder cross attentions correspond to the target
+sequence. In classiﬁcation, both the source and the
+target are the ﬂattened form; while in generation,
+the target is the recommended question or options.
+In §5.5, we will prove the effectiveness of Struc-
+tAttn through ablation studies and comparing alter-
+native design choices of StructAttn.
+4.3 Continual Pre-training
+Note that it is difﬁcult to train a model for online
+forms from scratch due to the limited data. To
+effectively adapt FormLM to online forms, we con-
+duct continual pre-training on the training set of
+our collected dataset (see § 2.2) with the following
+two structure-aware objectives.
+Span Masked Language Model (SpanMLM)
+We adapt the masked language model (MLM) to
+forms by randomly selecting and masking some
+nodes on the form tree within the masking bud-
+get. Compared to SpanBERT ( Joshi et al. ,2020 )
+which improves the MLM objective by masking a
+sequence of complete words, we do the masking
+in a higher level of granularity based on the form
+structure. Our technique masks a block title, op-
+tion, etc., instead of arbitrarily masking subword
+tokens. The latter was proven suboptimal in Joshi
+et al. (2020 );Zhang et al. (2019 ). Speciﬁcally, we
+use a masking budget of 15% and replacing 80% of
+the masked tokens with <MASK> , 10% with random
+tokens and 10% with the original tokens.
+Block Title Permutation (BTP) As discussed in
+§2.1, each block can be viewed as a subtree. We
+introduce the block title permutation objective by
+permuting block titles in a form and requiring the
+model to recover the original sequence with the
+intuition that the model needs to understand the
+semantic relationship between BandCh(B)tosolve this challenge. We randomly shufﬂe all the
+block titles to construct the corrupted sequence.
+Following the pre-training process of BART, we
+unify these two objectives by optimizing a recon-
+struction loss, i.e., we input the sequence corrupted
+by SpanMLM and BTP and optimize the cross-
+entropy loss between the decoder’s output and the
+original intact sequence.
+5 Experiments
+5.1 Evaluation Data and Metrics
+We evaluate FormLM and other models on the three
+tasks of Form Creation Ideas (§ 3) with our OOF
+dataset (§ 2.2). The 62k public forms are split into
+49,904 for training, 6,238 for validation, and 6,238
+for testing. For each task, random sampling is fur-
+ther performed to construct an experiment dataset.
+Speciﬁcally, for each task, we randomly select no
+more than 5 samples from a single form to avoid
+sample bias introduced by those lengthy forms. For
+Question Recommendation and Block Type Sug-
+gestion, each sample corresponds to a block and
+its previous context (see § 3). 239,544, 29,558 and
+29,466 samples are selected for training, validation
+and testing, respectively. For Options Recommen-
+dation, each sample corresponds to a Choice block
+with context. 124,994, 15,640 and 15,867 samples
+are selected for training, validation, and testing.
+For Question and Options Recommendations,
+following the common practice in natural language
+generation research, we adopt ROUGE(Lin,
+2004 ) scores with the questions/options composed
+by human as the ground truth. During option rec-
+ommendation, because the model is expected to
+recommend a list of options at once, we concate-
+nate options with a vertical bar (described in § 4.1)
+for the comparison of generated results and ground
+truths. Since it is difﬁcult to have a thorough eval-
+uation of the recommendation quality through the
+automatic metric, we further include a qualitative
+study in Appendix Dand conduct human evalu-
+ations for these two generation tasks (details in
+Appendix E). For Block Type Suggestion, both ac-
+curacy and Macro-F1 are reported to take account
+of the class imbalance issue.
+5.2 Baselines
+As there was no existing system or model
+speciﬁcally designed for forms, we compare8137
+FormLM with three general-purposed PLMs –
+RoBERTa ( Liu et al. ,2020 ), GPT-2 ( Radford et al. ,
+2019 ) and BART ( Lewis et al. ,2020 ), which
+represent widely-used encoder, decoder, encoder-
+decoder based models, respectively. To construct
+inputs for these PLMs, we concatenate NL sen-
+tences in the available context (see § 3).
+MarkupLM ( Li et al. ,2022 ), a recent model for
+web page modeling, is also chosen as a baseline
+since forms can be displayed as HTML pages on
+the Internet. To keep accordance with the original
+inputs of MakupLM, we remove the tags without
+NL text ( e.g.,<script> ,<style> ) in the HTML
+ﬁle in OOF dataset.
+The number of parameters of each model can be
+found in Appendix B.
+5.3 FormLM Implementation
+We implement FormLM using the Transform-
+ers library ( Wolf et al. ,2020 ). FormLM and
+FormLM are based on the architecture and pa-
+rameters of BARTand BARTrespectively.
+For continual pre-training, we train FormLM for
+15k steps on 8 NVIDIA V100 GPUs with the total
+batch size of 32 using the training set of the OOF
+dataset. For all the three tasks of Forms Creation
+Ideas, we ﬁne-tune FormLM and all baseline mod-
+els for 5 epochs with the total batch size of 32 and
+the learning rate of 5e-5. More pre-training and
+ﬁne-tuning details are described in Appendix C.In the rest of this paper, each experiment with
+randomness is run for 3 times and reported with
+averaged evaluation metrics.
+5.4 Main Results
+For FormLM and the baseline models (see § 5.2),
+Table 1shows the results on the Form Creation
+Ideas tasks. FormLM signiﬁcantly outperforms the
+baselines on all tasks.
+Compared to its backbone BART model (well-
+known for conditional generation tasks), FormLM
+further improves the ROUGE-1 scores by 4.71 and
+1.12 on Question and Options Recommendations.
+Human evaluation results in Appendix Ealso con-
+ﬁrm the superiority of FormLM over other base-
+line models in these two generation tasks. Fig-
+ure4shows questions recommended by BART
+and FormLM on an example form from the test
+set. FormLM’s recommendations ( e.g., “Destina-
+tion”, “Departure Date”) are more speciﬁc and
+more relevant to the topic of this form, while
+BART’s recommendations ( e.g., “Name”, Special
+Requests”) are rather general. Also, after users
+create B, B, B, Band select Bas a Date
+type block, FormLM recommends “Departure Date”
+while BART recommends “Name” which is obvi-
+ously not suitable to B.
+On Block Type Suggestion, FormLM improves
+the Macro-F1 score by 10.6. The improvement of
+FormLM over BART ( ↑rows in Table 1) shows
+that our method is highly effective. We will further
+analyze this in § 5.5.
+Note that MarkupLM is a very strong baseline8138
+for Block Type Suggestion. This model can partly
+capture the structural information by parsing the
+form as a DOM ( Wood et al. ,1998 ) tree. However,
+since MarkupLM is not speciﬁcally designed for
+online forms, it is still 4.1 points worse in Macro-F1
+than FormLM on this task.
+5.5 Analysis of FormLM Designs
+To further investigate the effectiveness of the
+design choices in FormLM, we conduct ablation
+studies and controlled experiments (which are ﬁne-
+tuned under the same settings as described in § 5.3)
+on the following aspects.
+Form Serialization For Form Creation Ideas, it
+is important to model the complete form context
+(deﬁned in § 3). Row “ −Previous Context” of
+Table 2shows that there is a large performance
+drop on all the tasks if block title is the only input.
+Therefore, we also study the effect of form seri-
+alization (see § 4.1) which ﬂattens the form context
+while preserving its tree structure. A naive way of
+serialization is directly concatenating all available
+text as NL inputs. Results in this setting (row “ −
+Form Serialization” of Table 2) are much worse
+than the results of FormLM with form serialization
+technique. On Block Type Suggestion, the gap is
+as large as 8.4 on Macro-F1.
+Block Type Information A unique characteris-
+tic of online forms is the existence of block type
+(see § 2.1). To examine whether FormLM can lever-
+age the important block type information, we run
+a controlled experiment where block type tokens
+are replaced by with a placeholder token <type>
+during form serialization (while other tokens are
+untouched). As shown in Table 3, removing block
+type tokens hurts the model performance on all
+three tasks, which suggests that FormLM can effec-
+tively exploit such information.
+Structural Attention FormLM enhances its
+backbone PLM with StructAttn (§ 4.2). As the row
+“−Encoder StructAttn” of Table 2shows, when
+we ablate StructAttn from FormLM, the Macro-
+F1 score of Block Type Suggestion drops from
+83.9 to 77.9 and the performance on the generation
+tasks also drops. In FormLM, we apply StructAttn
+to both encoder and decoder parts. We compare
+it with the setting without modifying the decoder
+(row “ −Decoder StructAttn”) and ﬁnd applying
+StructAttn to both the encoder and decoder yields
+uniformly better results, which may be due to better
+alignment between the encoder and decoder.8139
+There are alternative design choices of Struc-
+tAttn for us to experiment. As Equation ( 2) shows,
+there are two bias terms to model the token type and
+the block-level distance. We compare this design
+choice (“Hybrid” in Figure 5) with adding only the
+token type bias (“Type”) and only the distance bias
+(“Dist”). Note that “Hybrid” encodes block-level
+distance through the exponential decay function,
+we also compare it with another intuitive design
+(“Hybrid*”) where we use a learnable bias to indi-
+cate whether two tokens are within the same block.
+Besides adding biases, another common practice of
+modifying attentions is masking. We experiment
+this design choice (“Mask”) by restricting atten-
+tions to those tokens in the same node or parent and
+grandparent nodes within the tree structure. The
+comparison results are demonstrated in Figure 5.
+“Mask” performs uniformly worse than adding bi-
+ases. Among the rest of design choices, “Hybrid”
+shows slightly better performance on Options Rec-
+ommendation and Block Type Suggestion.
+Continual Pre-training Objectives We design
+two objectives (§ 4.3), SpanMLM and BTP, to con-tinually pre-train FormLM on OOF dataset for bet-
+ter domain adaptation. Table 4shows the ablation
+results of different objectives. We ﬁnd FormLM
+trained with both SpanMLM and BTP performs the
+best. This suggests SpanMLM which focuses more
+on the recovery of a single node on the tree and
+BTP which focuses more on the relationship be-
+tween different nodes can complement each other.
+6 Related Work
+(Semi-)Structured Data Modeling In this paper,
+we mainly focus on modelling parsed form data.
+They follow well-deﬁned structure and are usually
+created by software such as online services men-
+tioned in § 1. Existing works ( Wang et al. ,2022a ;
+Xu et al. ,2021 ;Li et al. ,2021 ;Appalaraju et al. ,
+2021 ;Aggarwal et al. ,2020 ;He et al. ,2017 ) focus
+on another type of forms, scanned forms ( e.g., pho-
+tos and scanned PDF ﬁles of receipts or surveys),
+and process multi-modal inputs (text, image). This
+type of forms requires digitization and parsing be-
+fore passing to any downstream tasks, which are
+very different from forms studied in this paper.
+To the best of our knowledge, the modelling of
+parsed forms has not been studied before. Exist-
+ing (semi-)structured data modelling works mainly
+focus on tables ( Yin et al. ,2020 ;Wang et al. ,
+2021 ), documents ( Wan et al. ,2021 ;Liu and La-
+pata,2019 ;Wang et al. ,2019 ), web pages ( Wang
+et al.,2022b ),etc.Some works represent the (semi-
+)structured data as a graph and use graph neural net-
+work (GNN) for structural encoding ( Wang et al. ,
+2020 ;Cai et al. ,2021 ). Some other works convert
+(semi-)structured data into NL inputs to directly
+use PLMs ( Gong et al. ,2020 ) or modify a cer-
+tain part of transformer models – e.g., embedding
+layers ( Herzig et al. ,2020 ), attention layers ( Eisen-
+schlos et al. ,2021 ;Yang et al. ,2022 ), the encoder
+architecture ( Iida et al. ,2021 ). Although it is pos-
+sible to convert online forms to HTML pages to
+use models like MarkupLM ( Li et al. ,2022 ), the
+results are suboptimal as shown in § 5.4because the
+unique structural information of online forms are
+not fully utilized.
+Intermediate Pre-training In §4.3we discussed
+in FormLM how we adapt a general PLM to the
+form domain through continual pre-training. Inter-
+mediate pre-training of a PLM on the target data
+(usually in a self-supervised way) has been shown
+efﬁcient on bridging the gap between PLMs and
+target tasks ( Gururangan et al. ,2020 ;Rongali et al. ,81402020 ). Many domain speciﬁc models ( Xu et al. ,
+2019 ;Chakrabarty et al. ,2019 ;Lee et al. ,2020 ), in-
+cluding those for (semi-)structured data ( Yin et al. ,
+2020 ;Liu et al. ,2022 ), are built with this tech-
+nique. Following the previous approaches, we de-
+sign form-speciﬁc structure-aware training objec-
+tives for the continual pre-training process.
+7 Conclusion
+In this paper, we present FormLM for online form
+modeling. FormLM jointly consider the semantic
+and structural information by leveraging the PLM
+and designing form serialization and structural at-
+tention. Furthermore, we continually pre-train
+FormLM on our collected data with structure-aware
+objectives for better domain adaptation. An exten-
+sive set of experiments show that FormLM out-
+performs baselines on Form Creation Ideas tasks
+which assist users in the form creation stage.
+Limitations
+In this work, we conduct research on online form
+modeling for the ﬁrst time. While effective in the
+proposed tasks of Form Creation Ideas, FormLM
+has some limitations. First, FormLM is designed to
+assist form designers by recommending questions /
+options and suggesting the block type. We believe
+there are more to explore in recommending creation
+ideas and we plan to design more tasks for Form
+Creation Ideas, like recommending a whole block,
+auto-completion, etc., to fully exploit FormLM in
+the form creation stage. Also, since FormLM per-
+forms exceptionally well on Block Type Sugges-
+tion, it is worthwhile to consider more ﬁne-grained
+block types. Second, FormLM only models the
+form content and leaves out the collected responses.
+Although form content itself is very informative, it
+is an important research direction to jointly model
+online forms and their collected responses for they
+are useful to other stages of the online form life
+cycle, especially the form analyzing stage. Fur-
+thermore, our collected OOF dataset is limited to
+English forms and doesn’t have manual labels. We
+hope to enlarge our dataset with non-English forms
+and investigate the possibility of adding supervised
+labels to this dataset in the future to further facili-
+tate the study of online forms.
+Ethics Statement
+Datasets In this work, we collect the public OOF
+dataset for the research community to facilitate fu-ture study of online forms. We believe there is no
+privacy issue related to this dataset. First, the data
+sources are public available on the Internet, and
+are anonymously accessible. We complied with
+the Robots Exclusion Standard during the data col-
+lection stage. Second, our dataset only contains
+form contents and there are no responses or per-
+sonal information involved. A checklist has been
+completed at the researchers’ institution to ensure
+the collected dataset does not have ethical issues.
+Risks and Limitations Our work proposes
+FormLM to model online forms and recommend
+creation ideas to users in the form designing stage.
+FormLM uses a pre-trained language model, BART,
+as the backbone. PLMs have a number of ethical
+concerns in general, like generating biased or dis-
+criminative text ( Weidinger et al. ,2021 ) and in-
+volving lots of computing power in pre-training
+or ﬁne-tuning ( Strubell et al. ,2019 ). The primary
+risk of our work is that we formulated Question
+Recommendation and Options Recommendation
+as generation tasks, but did not include the post-
+processing of the generated texts in our pipeline.
+We suggest post-processing the outputs of FormLM
+to sift out biased or discriminative text before rec-
+ommending them to the users when applying our
+technique to online form services. Designing good
+post-processing technique is also an interesting av-
+enue for future work.
+Another limitation we see from an ethical point
+of view is that we only consider online forms which
+use English as the primary language. We are trying
+to collect online forms in other languages and leave
+it as a future work to provide a multilingual version
+of FormLM to assist more users in different parts
+of the world.
+Computational Resources The experiments in
+our paper require computational resources. How-
+ever, compared with other LMs pretrained from
+scratch, FormLM inherits the parameters of its
+backbone and is continually pre-trained with only
+50K online forms. It takes around 8 hours to com-
+plete the continual pre-training with 8 NVIDIA
+V100 GPUs. Despite this, we recognize that not all
+researchers have access to this resource level, and
+these computational resources require energy. No-
+tably, all GPU clusters within our organization are
+shared, and their carbon footprints are monitored
+in real-time. Our organization is also consistently
+upgrading our data centers in order to reduce the
+energy use.8141References814281438144A Details of Open Online Forms Dataset
+OOF (Open Online Forms) dataset consists of
+62K public forms collected on the Web, covering
+a wide range of domains and purposes. Figure 6
+shows some frequent words among titles of the
+collected data.
+A.1 Dataset Preprocessing
+We crawled 232,758 forms created by a popular
+online form service on the Internet and ﬁlter the
+crawled data using the following constraints: (1)
+have at least one question block; (2) have no du-
+plicate question blocks; (3) detected as “en”by
+Language Detection API of Azure Cognitive Ser-
+vice for Language. Finally, 62,380 forms meet all
+constraints. We randomly split them into 49,904 for
+training, 6,238 for validation and 6,238 for training.
+As introduced in § 2.2, we parsed the crawled
+HTML pages into JSON format according to
+the online form structure. Speciﬁcally, each
+JSON ﬁle contains keys of “title”, “description”
+and “body” which correspond to form title ( T),
+form description ( Desc ), and an array of blocks
+({B,· · ·, B}). Each block contains keys of “ti-
+tle”, “description” and “type”. For Choice type
+blocks and Rating type blocks, they further contain
+the key of “options”; for Likert type blocks, they
+further contain keys of “rows” and “columns”. For
+Description block, we only keep the plain NL text
+and remove possible information of other modali-
+ties ( i.e, image, video) because only around 0.1%
+ofDescription blocks contain video and 2.0% con-
+tain image. When parsing the HTML pages into
+JSON format, we also remove non-ASCII charac-
+ters within the form.A.2 Form Length Distribution
+We deﬁne the length of an online form as the num-
+ber of blocks within it. Around 80% of collected
+forms have a form length no greater than 20. The
+detailed distribution of form length is shown in Fig-
+ure7. As we have discussed in § 5.1, we further
+perform random sampling to construct our experi-
+ment dataset to avoid sample biases introduced by
+those lengthy forms.
+B Model Conﬁgurations
+We compare FormLM with four baseline mod-
+els, RoBERTa, GPT-2, MarkupLM, and BART.
+FormLM adds a small number of additional param-
+eters to its backbone model (278K for FormLM and
+208K for FormLM) to encode structural infor-
+mation in attention layers (§ 4.2). Table 5shows
+model conﬁgurations of FormLM and baselines in
+our experiments.
+C More Implementation Details
+Continual Pre-training Details We conduct con-
+tinual pre-training on the training set of the OOF
+dataset using SpanMLM and BTP objectives (§ 4.3).
+We adopt a masking budget of 15% in SpanMLM
+and do BTP on all training samples. We train8145FormLM for 15K steps on 8 NVIDIA V100 GPUs
+with 32G GPU memory. We set the total batch size
+as 32 and the max sequence length as 512. We use
+AdamW optimizer ( Loshchilov and Hutter ,2019 )
+withβ= 0.9,β= 0.999and the learning rate
+of 5e-5. It takes around 8 hours to complete the
+continual pre-training on our machine.
+Fine-tuning Details Among our downstream
+tasks, Next Question Recommendation and Op-
+tions Recommendation are formulated as condi-
+tional generation tasks. We use the form serial-
+ization procedure (§ 4.1) to convert the available
+context into model inputs. We ﬁne-tune FormLM
+for 5 epochs with the total batch size of 32, the
+max source sequence length of 512, and the max
+target sequence length of 64. We load the best
+model which has the highest ROUGE-2 score on
+the validation set in the training process. During
+generation, we do beam search and set the beam
+size as 5. Block Type Classiﬁcation is formulated
+as a sequence classiﬁcation task. We follow the
+original implementation of BART by feeding the
+same input into the encoder and decoder and pass-
+ing the ﬁnal hidden state of the last decoded token
+into a multi-class linear classiﬁer for classiﬁcation.
+We ﬁne-tune FormLM with 5 epochs with the total
+batch size as 32 and load the best model which has
+the highest Macro-F1 score on the validation set
+during the ﬁne-tuning process.
+D Qualitative Study
+Online forms, as a special format of questionnaires,
+are mainly used to collect information, i.e., demo-
+graphic information, needs, preferences, etc.(Kros-
+nick,2018 ). As shown in Figure 6, the online forms
+in the OOF dataset are more about objective top-
+ics like “Application” and “Registration” because
+these information collection scenarios prevail in
+the daily usage. To collect information effectively,
+a good questionnaire should include questions re-
+lated to the topic and these questions must be log-
+ically connected with each other. Also, for those
+close-ended questions (the majority of them are
+Choice type questions), they are expected to of-
+fer all possible answers for respondents to choose
+from but not include off-topic options which may
+cause confusion ( Reja et al. ,2003 ). These crite-
+ria of good questionnaires restrict the searching
+space of online form composition, thus making
+the automatic recommendation of creation ideas
+conceptually possible.In §5.4, Figure 4shows some questions rec-
+ommended by FormLM. FormLM is able to rec-
+ommend questions like “Destination”, “Departure
+Date”, “Type of Accommodation” which are highly
+related to the topic of travelling and can help collect
+meaningful information for the travel agency. For
+Options Recommendation, FormLM can accurately
+identify polar questions and recommend “Yes”,
+“No” as candidate options. Also, since FormLM is
+continually pre-trained on a large amount of online
+forms, it has no difﬁculty recommending options
+for those frequently asked questions, e.g., “Gen-
+der”, “Current Educational Qualiﬁcations”, etc..
+More interestingly, we notice that FormLM can pro-
+vide accurate recommendation for questions which
+are related to their previous contexts. Figure 8gives
+two sample outputs by FormLM for Options Rec-
+ommendation. In the left sample, FormLM gives
+concrete suggestions which are based on the form
+title; in the right sample, the recommended loca-
+tions are all related to school, and they accord well
+with the domain of this form. We assume that such
+good performance can be attributed to the effective
+understanding of form structure and context.
+E Human Evaluation
+Apart from reporting automatic evaluation results
+using ROUGE scores, we further conduct human
+evaluations for Question Recommendation and Op-
+tions Recommendation. We randomly choose 50
+samples from the test sets of the two task and col-
+lect the recommended question / options from 5
+models (GPT-2, BART, BART, FormLM,
+FormLM). We use an HTML website (actually an
+online form service) to collect the manual labels.
+Human evaluation instructions are shown in Fig-
+ure9and Figure 10. Eight experts familiar with
+online form software products participate in the ex-
+periment. For each sample of a task, we construct a
+Likert question containing the 5 outputs (randomly
+shufﬂed and anonymized) of the models. For each
+sample, three experts compare the 5 outputs using
+a rating scale of 1 to 5 (the higher, the better) at the
+same time to achieve better comparison and anno-
+tation consistency across different outputs. So in
+total, we collect 150 expert ratings for each model
+on each task.
+The evaluation results are shown in Table 6and
+Table 7. We can see FormLM and FormLM
+outperform all baseline models on both Question
+and Options Recommendation when manually eval-8146
+uated by the experts, which is in accordance with
+the automatic evaluation results.
+We further conduct Wilcoxon signed-rank
+test ( Woolson ,2007 ) which is a non-parametric
+hypothesis test for the matched-pair data to check
+statistical signiﬁcance of the comparison between
+FormLM, FormLM and their backbone mod-
+els. At 95% conﬁdence level, when comparing
+FormLM with BART and comparing FormLM
+with BART, both p-values from Wilcoxon test
+are less than 0.005. These results show that ourmodels have better performance on these two gen-
+eration tasks than their backbone PLMs which are
+well-known for conditional generation.814781488149

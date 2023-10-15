@@ -1,1 +1,736 @@
-5794 Proceedings of the 2022 Conference on Empirical Methods in Natural Language Processing , pages 5794 5806 December 7 - 11 , 2022 © 2022 Association for Computational Linguistics 5795 5796 5797 5798 5799 5800 5801 5802 5803 5804 5805 5806 
+
+Paul-Ambroise Duquenne
+Meta AI & InriaHongyu Gong
+Meta AIBenoît Sagot
+InriaHolger Schwenk
+Meta AI
+Abstract
+We present a new approach to perform zero-
+shot cross-modal transfer between speech and
+text for translation tasks. Multilingual speech
+and text are encoded in a joint fixed-size repre-
+sentation space. Then, we compare different ap-
+proaches to decode these multimodal and mul-
+tilingual fixed-size representations, enabling
+zero-shot translation between languages and
+modalities. All our models are trained with-
+out the need of cross-modal labeled translation
+data. Despite a fixed-size representation, we
+achieve very competitive results on several text
+and speech translation tasks. In particular, we
+outperform the state of the art for zero-shot
+speech translation on Must-C. We also intro-
+duce the first results for zero-shot direct speech-
+to-speech and text-to-speech translation.
+1 Introduction
+Most, if not all, current state-of-the-art text and
+speech translation systems are based on a sequence-
+to-sequence approach and an attention mechanism
+to connect the encoder and decoder. Such mod-
+els require labeled data to be trained end-to-end.
+For text-to-text (T2T) translation, this labeled data,
+called bitexts, is available in large amounts for
+a number of language pairs, in particular since
+large-scale bitext mining initiatives like ParaCrawl
+(Bañón et al., 2020) and CCMatrix (Schwenk et al.,
+2021). Finding training data for speech-to-text
+(S2T) translation is more challenging, but several
+data collection efforts exist, like mTEDx (Salesky
+et al., 2021), CoV oST (Wang et al., 2020a,b), and
+Must-C (Di Gangi et al., 2019). Finally, speech-to-
+speech (S2S) translation suffers from scarcity of
+end-to-end labeled data and current S2S systems
+are limited to a very small number of language
+pairs. Very recent works start to consider mining
+labeled data for S2S, e.g. (Duquenne et al., 2021).
+Unsupervised representation learning is very suc-
+cessfully used to initialize the encoder and/or de-
+coder of a sequence-to-sequence model, therebyFigure 1: Summary of the model architecture.
+lowering the amount of labeled data needed to train
+or fine-tune the model end-to-end. Approaches in-
+clude for instance XLM (Conneau and Lample,
+2019), XLSR (Conneau et al., 2020), wav2vec
+(Baevski et al., 2020), data2vec (Baevski et al.,
+2022) and mSLAM (Bapna et al., 2022).
+In this work, we propose a new modular architec-
+ture for text and speech translation, which is based
+on a common fixed-size multilingual and mul-
+timodal internal representation , and encoders
+and decoders which are independently trained. We
+explore several variants of teacher-student train-
+ing to learn text and speech encoders for multiple
+languages, which are compatible with the embed-
+ding space of the LASER encoder (Artetxe and
+Schwenk, 2019). In contrast to preceding works
+on multilingual and multimodal representations,
+we also train text decoders for multiple languages
+which are able to generate translations given the
+joint representation. Finally, we demonstrate that it
+is possible to train a speech decoder using raw au-
+dio only. Figure 1 visualizes the overall approach.
+We show that these encoders and decoders can be
+freely combined to achieve very competitive perfor-
+mance in T2T, S2T and (zero-shot) S2S translation.
+In summary, our contributions are as follows.5794•We apply a teacher-student approach to train
+multilingual text and speech encoders that are
+mutually compatible;
+•We show that the fixed-size representation
+can be efficiently decoded into multiple lan-
+guages;
+•We are able to train a speech decoder with raw
+speech only, which can be paired with our text
+and speech encoders for multiple languages;
+•We achieve very competitive results on several
+text and speech translation tasks, without any
+end-to-end labeled data and significantly im-
+prove the state of the art for zero-shot speech
+translation;
+•To the best of our knowledge, we are the first
+to build zero-shot direct S2S translation sys-
+tems.
+2 Related work
+Multilingual and multimodal representations
+Building multilingual representation for text or
+speech is key to develop state-of-the-art models
+based on these modalities. Conneau and Lam-
+ple (2019) introduce a multilingual pre-training
+method with good cross-lingual transfer capabili-
+ties. Conneau et al. (2020) extend the Wav2vec2
+(Baevski et al., 2020) architecture to the multilin-
+gual setting introducing a multilingual pre-trained
+model for speech. More recently, Bapna et al.
+(2022) pre-train a multilingual encoder model han-
+dling both speech and text in order to benefit from
+cross-modal transfer between speech and text.
+An important obstacle to good joint speech/text
+representations is the length mismatch between au-
+dio and text. On the other hand, several works
+have studied how to encode sentences in a fixed-
+size representation (Feng et al., 2020; Artetxe and
+Schwenk, 2019; Reimers and Gurevych, 2019). In
+the multilingual setting, these works highlight that
+paraphrases and translations are close in the sen-
+tence embedding space, enabling large-scale bitext
+mining. Recently, Duquenne et al. (2021) extended
+the existing LASER model (Artetxe and Schwenk,
+2019) built for multilingual text to the speech
+modality for several spoken languages. They show
+that this joint speech/text fixed-size representation
+can be efficiently used for large-scale mining of
+speech against text and even speech against speech.Zero-shot transfer in Machine Translation In
+Machine Translation, cross-lingual transfer to im-
+prove low-resource language directions has been
+widely studied. One way to encourage cross-
+lingual transfer is building a massively multilin-
+gual translation system as (Fan et al., 2021). Some
+other works such as (Zhang et al., 2022) make an
+efficient use of MT data involving a pivot language
+thanks to weight freezing strategies to force repre-
+sentations to be close to the pivot language repre-
+sentations. One extreme scenario of cross-lingual
+transfer learning is called zero-shot transfer, where
+you learn to translate one language and directly
+apply the decoding process to an unseen language.
+Several methods have been tried to improve zero-
+shot transfer. Arivazhagan et al. (2019); Pham et al.
+(2019) add language similarity regularization on
+pooled representations of encoders outputs as an
+auxiliary loss to a MT objective in order to improve
+zero-shot transfer. Liao et al. (2021); Vázquez
+et al. (2018); Lu et al. (2018) introduce shared
+weights between language-specific encoders and
+decoders, commonly called an interlingua that cap-
+tures language-independent semantic information.
+Finally, Escolano et al. (2020a, 2021a, 2020b) fo-
+cus on incremental learning of language-specific
+encoders-decoders using cross-entropy loss, alter-
+nately freezing parts of the model to ensure a shared
+representation between languages.
+Zero-shot transfer in Speech Translation Re-
+cent research focuses on direct speech translation
+where an encoder-decoder model directly translates
+speech into text (Bérard et al., 2016; Bansal et al.,
+2017; Weiss et al., 2017). Direct speech transla-
+tion models are closing the gap with their cascaded
+counterparts (Li et al., 2020; Babu et al., 2021;
+Bapna et al., 2022). Several works add MT data in
+S2T translation training, using an auxiliary loss to
+bridge the modality gap, like adversarial (Alinejad
+and Sarkar, 2020), or distance (Dong et al., 2021;
+Liu et al., 2020) regularization. (Xu et al., 2021)
+and (Li et al., 2020) use adaptor modules to address
+the length mismatch between audio and text repre-
+sentations. Several works studied how to efficiently
+perform zero-shot cross-modal transfer from text
+to speech in the frame of direct speech translation.
+Following (Escolano et al., 2020a, 2021a, 2020b)
+presented above for text, Escolano et al. learn a
+speech encoder compatible with decoders trained
+on text only, freezing the text decoder during train-
+ing and using cross-entropy on the output of the de-5795coder. This is the most similar work like ours, how-
+ever they did not use any joint fixed-representation
+and their zero-shot results using only speech tran-
+scriptions lagged behind supervised setting by a
+large margin. Other works such as (Dinh et al.,
+2022; Dinh, 2021) studied zero-shot speech transla-
+tion employing a cross-modal similarity regulariza-
+tion as an auxiliary loss. However, they obtained
+low zero-shot results possibly due to the mismatch
+in the encoder output lengths between speech and
+text.
+Direct speech-to-speech translation Finally,
+there is a surge of research interest in direct speech-
+to-speech translation (Jia et al., 2019, 2021; Lee
+et al., 2022a). An encoder-decoder model directly
+translates speech in a language into speech in an-
+other language without the need to generate text
+as an intermediate step. Speech-to-speech transla-
+tion research suffers from data scarcity of aligned
+speech with speech in different languages and often
+uses synthetic speech to overcome this issue.
+Recently, Lee et al. (2022b) introduce the first
+direct speech-to-speech model based on real speech
+data as target. They propose a speech normalization
+technique in order to normalize the target speech
+with respect to speaker and prosody. Lee et al.
+(2022a,b) extract HuBERT units of target speech
+as targets for a unit decoder during training. At
+test time, a vocoder is used to transform output
+units into speech. To the best of our knowledge, no
+work has tried to develop a direct speech-to-speech
+translation system in a zero-shot setting.
+3 Exploring training strategies
+The purpose of this work is to build a common
+fixed-size representation for multilingual speech
+and multilingual text that can be decoded in text
+and speech in different languages. We want to build
+language-specific encoders and decoders compat-
+ible with this fixed-size representation. Plugging
+one encoder with one decoder from different modal-
+ities and/or different languages enables performing
+zero-shot cross-modal translation.
+To this end, we first study how to efficiently
+decode fixed-size sentence representation for text.
+Second, we study how to improve similarity for
+sentence embeddings between languages. After an
+ablation study on the Japanese-English text trans-
+lation direction, we extend the best training strat-
+egy to several other languages and a new modality,
+speech.
+3.1 Better decoding of sentence embeddings
+Motivations Multilingual sentence embeddings
+have been widely studied in the research com-
+munity to perform bitext mining. For instance,
+LASER (Artetxe and Schwenk, 2019) is a multilin-
+gual sentence embedding space, where sentences
+are close in the embedding space if they are para-
+phrases or translations. LASER has been success-
+fully used for large-scale bitext mining like in the
+CCMatrix project (Schwenk et al., 2021). LASER
+has been trained with a decoding objective, whereas
+other works like LaBSE (Feng et al., 2020) have
+been trained with a contrastive objective.
+First, we studied how multilingual sentence em-
+beddings can be efficiently decoded. We focused
+on LASER as it originally has a decoder, and we
+studied how we can improve the decoding of sen-
+tence embeddings. As an initial experiment, we
+evaluated auto-encoding of English sentences from
+FLORES (Goyal et al., 2022) in Figure 2 left, with
+the original LASER encoder and decoder, buck-
+eting sentences by length, and reporting BLEU
+scores. The LASER encoder handles several lan-
+guages: decoding these multilingual embeddings
+enables to translate the input sentence into English
+with the original LASER decoder. We report the
+BLEU scores for the different sentence lengths in
+Figure 2 right for the German-English translation
+direction from FLORES. We notice that BLEU
+scores are low for both auto-encoding and transla-
+tion tasks and decrease with the sentence length.
+The fixed-size representation seems to be a bottle-
+neck for decoding tasks, especially for long sen-
+tences. However, the original LASER decoder is
+really shallow (one LSTM decoder layer), an in-
+teresting question is: can we improve decoding by
+training a new deeper decoder?
+Training new decoders We chose to train a new
+decoder to decode LASER sentence embeddings,
+with a transformer architecture and 12 layers. To5796train this new decoder, we use an auto-encoding ob-
+jective, feeding raw English sentences to the model:
+we use original LASER encoder, whose weights
+are not updated during training, and plug a new
+transformer decoder to decode the fixed-size sen-
+tence representation output by the LASER encoder
+(the decoder attends on the sentence embedding
+output by the encoder). We used 15B English sen-
+tences from CCnet (Wenzek et al., 2019) to train
+the decoder. We compare the new decoder with
+original LASER decoder on the auto-encoding task
+and the German-English translation task of FLO-
+RES in Figure 2.
+Results First, we notice an important boost on
+the auto-encoding task with the new decoder, with
+high BLEU scores even for sentences with more
+than 50 words. Second, training a new decoder
+with an auto-encoding objective improves the de-
+coding of sentence embeddings from another lan-
+guage, German. The new decoder can be directly
+applied to German sentence embeddings because
+German embeddings are supposed to be close to
+their English translations encoded with LASER.
+3.2 Making languages closer
+Motivations To get an idea of the closeness of
+translations in the LASER space, we inspected the
+L2 squared distances of sentence embeddings in
+different languages to their English translations
+sentence embeddings. A detailed analysis can be
+found in the appendix. We noticed that high re-
+source languages are closer in the LASER space to
+English, compared to low resource languages.
+We studied how our newly trained decoder is
+performing on a more distant language in LASER
+space, Japanese. We report the results of the ja-
+en translation task using the original decoder and
+the new decoder in Table 1. We notice that both
+decoders performs poorly on the ja-en translation
+tasks, and that the original LASER decoder leads
+to better results. An hypothesis is that the new de-
+coder has over-fitted English embeddings leading
+to bad generalization on distant Japanese embed-
+dings.
+Teacher-student training of text encoders To
+overcome this issue, we suggest to follow a method
+introduced by Reimers and Gurevych (2020),
+where new encoders are trained to fit an existing
+sentence embedding space. Here, we are trying
+to make the Japanese translations closer to En-
+glish embeddings in our 1024 dimensional space.
+The original LASER encoder is fixed during train-
+ing to encode English translation, behaving as the
+teacher, while we train a new Japanese encoder as
+a student to fit English sentence embeddings. We
+use bitexts from CCMatrix for the ja-en pair to
+train the Japanese text student. Following (Reimers
+and Gurevych, 2020), we minimize the MSE loss
+(equivalent to L2 squared distance) between the
+generated Japanese sentence embedding and the
+target English sentence embedding.
+The Japanese encoder is not trained from scratch,
+but we fine-tune XLM-R large. To extract the sen-
+tence embedding, we tested two methods: The
+classical output of the encoder corresponding to
+the beginning-of-sentence (BOS) token, a method
+widely used for text classification ; or max-pooling
+of the encoder outputs, less common but LASER
+has been trained with such pooling method.
+Finally, we tested another objective that is sup-
+posed to better match with our decoding task: we
+encode the Japanese sentence with the encoder be-
+ing trained, decode the pooled sentence embedding
+with our new decoder which weights are not up-
+dated during training, and we compute the cross
+entropy loss of the output of the new decoder with
+the English target sentence. The training was un-
+stable when using XLM-R weights as initializa-
+tion. Therefore, instead of fine-tuning XLM-R, we
+fine-tune the encoder obtained from our previous
+method (trained with MSE loss), which leads to a
+stable training. We report all the results in Table 1.
+For text-to-text translation results, we use spBLEU
+of M2M-100 with the public checkpoint and script
+to evaluate on FLORES.
+Results In Table 1, we first notice that learning a
+new Japanese student significantly improve the re-
+sults for the ja-en translation task. The best pooling
+method seems to be max-pooling, maybe because
+LASER has been trained with max-pooling. The
+second step of fine-tuning with cross entropy loss
+does not improve the results for our ja-en trans-
+lation task, despite of the significant decrease of5797cross entropy valid loss during this second step
+fine-tuning. This validates the use a simple MSE
+loss which seems sufficient for future decoding pur-
+poses and is a lot cheaper in term of computation
+compared to cross entropy loss. We conclude that
+learning a new Japanese student with max-pooling
+and MSE loss leads to the best results. Using this
+new Japanese encoder, our new decoder signifi-
+cantly outperforms the original LASER encoder.
+These experiments show that LASER sentence
+embeddings can be better decoded by training a
+new decoder on a large amount of raw text data.
+This new decoder can be used to decode sen-
+tence embeddings from other languages handled
+by LASER. However, translations are still more or
+less distant in the space, making them explicitly
+closer with a MSE loss objective significantly im-
+proves the results on a translation task. Therefore,
+we decide to extend this idea to other languages
+and a new modality, speech, to see if it can help
+performing cross-modal translation tasks.
+4 Overall architecture
+Text student encoders We now want to train sev-
+eral text students for different languages, in order
+to plug, at test time, these encoders to different
+decoders to perform translation tasks. We decide
+to use LASER English embeddings as our teacher.
+This English space has proven to have good seman-
+tic properties: paraphrases are close in the embed-
+ding space, and makes it a good teacher for English
+translations. Moreover, most of MT data involve
+English translations that we will use to learn our
+text students. We focus on 7 languages, namely,
+German, French, Spanish, Catalan, Japanese, Turk-
+ish, and Mongolian. We use CCMatrix bi-texts
+to learn our text students, and bi-texts mined with
+LASER3 (Heffernan et al., 2022) for Mongolian.
+Text decoders We saw above that we can train
+a new English decoder with raw English data, us-
+ing a fixed encoder and an auto-encoding objective.
+However, such an approach can lead to over-fitting
+to English sentence embeddings and bad general-
+ization on other languages. We made languages
+closer together in our 1024 dimensional space
+thanks to our new student encoders but translations
+are not perfectly mapped to a real English sentence
+embedding in this continuous space. Therefore,
+we explore different methods to make the decoders
+robust locally in the sentence embedding space in
+order to generalize better on unseen languages.
+First, we can improve our decoder training with
+an auto-encoding objective by adding synthetic
+noise in the sentence embedding space. We add
+noise to a sentence embedding by multiplying it by
+1 +ϵ, with ϵ∼ N (0, α). In our experiments, we
+tookα= 0.25, which leads to an empirical average
+L2 squared distance of approx. 0.05. between the
+noisy embedding and the original embedding.
+Second, we tested another approach to make
+our decoder robust to translations in the sentence
+embedding space: we added bi-texts from the de-en
+direction to the training of the English decoder.
+Finally, we trained decoders for five non-English
+languages to see how it behaves for other lan-
+guages. All text decoders are 12-layers transformer
+decoders.
+Speech student encoders Duquenne et al. (2021)
+showed that it is possible to learn speech students
+compatible with the LASER text space. The train-
+ing of speech students is similar to the one pre-
+sented above for text. They fine-tune XLSR, a
+multilingual pretrained model for speech and min-
+imized the cosine loss between the output of the
+speech encoder and the target LASER sentence em-
+bedding. We adapt this approach using a bigger
+XLSR model (Babu et al., 2021) with more than
+two billion parameters and extracting the fixed-size
+representation for speech with max-pooling to fol-
+low what we have done for text students. We mini-
+mize the MSE loss between the output of the speech
+encoder and the transcription/translation encoded
+by one of our text encoders. Unlike (Duquenne
+et al., 2021), we did not use the original LASER
+encoder to encode text transcripts but our newly
+trained text students which are supposed to be
+close to the LASER English embeddings. As in
+(Duquenne et al., 2021), we can use either tran-
+scriptions or written translations as teachers for
+our speech student. We used CoV oST 2, a speech
+translation dataset, as our training data. Figure 3
+summarizes the process to train a speech student
+with transcriptions only: First, we train a text stu-
+dent for the language we want to cover, we will5798
+use this encoder to encode transcriptions. Then, we
+train a speech student to fit text embeddings output
+by our text student.
+Speech decoders In this last part, we introduce
+a speech decoder in our framework, which can be
+learnt with raw speech data. We focus on English
+speech decoding but it could be extended to other
+languages. To learn to decode English speech, we
+follow the work done by Lee et al. (2022b), who
+learn to decode HuBERT units. At test time, the
+generated units are transformed into speech using
+a vocoder.
+One method is to follow the same approach pre-
+sented for raw text data to learn an English decoder.
+The English speech encoder previously trained to
+fit LASER text space on CoV oST 2 training set
+is used to encode raw speech, and its weights are
+not updated during training. We trained a unit de-
+coder to decode sentence embeddings output by
+the speech encoder. The unit targets correspond
+to the one of the input speech as we are trying
+to auto-encode speech. We follow the recipe of
+Lee et al. (2022b) to prepare target units as we are
+dealing with real speech data: we extract HuBERT
+units from input speech, normalize the units with
+the speech normalizer used in Lee et al. (2022b).
+This preparation of target data is done unsupervis-
+edly and any raw speech data can be processed
+with this method. We summarize the speech de-
+coder training in Figure 4. Another method is to
+leverage English speech recognition data where En-
+glish text transcripts are encoded through LASERencoder which weights are fixed during training
+and a decoder predicts the sequence of units of the
+corresponding speech.
+Once the English speech decoder is trained, we
+can plug any text or speech encoder to perform di-
+rect text-to-speech or speech-to-speech translation
+in a zero-shot way.
+5 Results and discussion
+Text-to-text translation As presented in sec-
+tion 4, we test different strategies to train an English
+decoder. When training a decoder with raw text
+data, we use 15 billion English sentences extracted
+from CCnet (Wenzek et al., 2019). When training
+with additional bi-text data, we use bi-texts from
+CCMatrix (Schwenk et al., 2021), and the English
+part of the bi-texts for the auxiliary auto-encoding
+loss in order to have a good balance between bi-
+texts and raw data. We present the results for text-
+to-text translation for xx-en directions in Table 2
+for the different decoder training methods on FLO-
+RES devtest. en-en decoder corresponds to the
+decoder trained with an auto-encoding objective,
+en-en+noise decoder corresponds to the decoder
+trained with an auto-encoding objective and ad-
+ditional noise in the sentence embedding space,
+anden-en+de-en decoder corresponds to the de-
+coder trained with a combination of de-en bitexts
+and english raw data. We compare our zero-shot
+text-to-text translation results with two supervised
+baselines: M2M-100 (Fan et al., 2021), a massively
+multilingual trained on many-to-many training data
+from different sources, with 24 encoder layers and
+24 decoder layers; and Deepnet (Wang et al., 2022)
+a recent work trained on 1932 language directions
+from different sources with 100 encoder layers and
+100 decoder layers. We put these results as a super-
+vised reference but we recall that in our framework,
+we perform zero-shot text-to-text translation for
+most of the language pairs. Please note the cross-
+lingual transfer we obtain thanks to our training5799
+method: the English decoder has never seen Span-
+ish embeddings before but is able to achieve com-
+petitive results compared to supervised baselines.
+In Table 2, we see that adding synthetic noise to
+the sentence embeddings helps translating low re-
+source languages unseen by the decoder. However,
+it slightly decreases the performance on high re-
+source languages. Moreover, natural noise from de-
+en translations leads to even better results for both
+high and low resource languages, getting closer
+to the state-of-the-art MT results which have been
+obtained with end-to-end training.
+Finally, we trained decoders for German, French,
+Spanish, Turkish and Mongolian in order to be
+able to translate from any of our languages to any
+other. A detailed analysis of the translation tasks
+with these new decoders can be found in the ap-
+pendix. Similar to what we noticed with our En-
+glish decoder, we obtain excellent zero-shot cross-
+lingual transfer: the German decoder has never
+seen Japanese embeddings before and Japanese has
+never been aligned to German. However, the ja-de
+results are competitive compared to state-of-the-art
+translation models trained in an end-to-end way
+with much more data.
+Speech-to-text translation Then, we tried to
+plug the decoders trained on text data to our speech
+encoders in order to perform zero-shot speech-to-
+text translation. We trained independent speech
+student encoders for German, French, Turkish,
+Japanese and Mongolian spoken languages on the
+CoV oST 2 training set. For Catalan and Spanish,
+we trained a single speech student encoder for both
+languages as they have high language similarity.
+We report direct speech translation results in Ta-
+ble 3 for speech encoders trained with transcrip-
+tions as teachers. We have put several baselines for
+direct speech translation: two supervised baselines
+based on finetuning XLSR (Babu et al., 2021) or
+mSLAM (Bapna et al., 2022) with speech trans-
+lation data. We also put the results on zero-shot
+cross-modal transfer from text to speech with the
+mSLAM pre-trained multimodal encoder, which is
+not working in this zero-shot setting.
+In our framework, the de-en speech translation
+direction benefits from cross-modal transfer while
+all other directions benefit from both cross-modal
+and cross-lingual transfer as the decoder has been
+trained on text and has only seen English and Ger-
+man embeddings. In this zero-shot cross-modal
+setting, we notice that the results are really com-
+petitive compared to supervised baselines trained
+end-to-end. Moreover, the supervised baselines use
+speech translation data, whereas our approach does
+not need speech translation data but only transcrip-
+tions. Except for Turkish, which has a really differ-
+ent morphological structure compared to English,
+speech translation results are close to their super-
+vised counterpart trained with XLSR. An interest-5800
+ing direction is ja-en, as we have a large amount of
+ja-en MT data but a really small amount of speech
+transcription data. For this task, we nearly doubled
+the BLEU score compared to supervised baselines
+without the need of ST data.
+We tested the different possible teachers for
+speech encoder training, namely transcription
+teacher (already presented), translation teacher, and
+both transcription and translation teachers. When
+using translation teacher, we use English text as
+the written translations from CoV oST 2. We focus
+on two language directions, de-en (high resource)
+and ja-en (low resource). Results are shown in Ta-
+ble 4. We notice that a translation teacher is better
+if using the en-en decoder, which was expected as
+the decoder was trained on English embeddings.
+However, when using a decoder trained on noisy
+embeddings or with additional bi-texts, results are
+better for speech encoders trained with transcrip-
+tion teacher rather than translation teacher. It may
+come from the fact that there exists a one-to-one
+mapping between transcriptions and audios, but not
+for audio and written translation (there can be sev-
+eral possible translations). For our high resource
+direction de-en, the best results are achieved when
+using both transcriptions and translations as teacher,
+reaching same performance level as with the end-
+to-end speech translation training of XLSR.
+Finally, we trained an English speech student
+with transcriptions on the Must-C training set and
+compare our approach with the zero-shot approach
+by Escolano et al. (2021b). We report the results in
+Table 5. We notice significant improvements in the
+BLEU score compared to the previous SOTA for
+zero-shot speech translation on the Must-C dataset.
+Translation of text/speech into speech As pre-
+sented in the section 4, we trained English speech
+decoders with raw English speech only or English
+speech transcriptions. We present three training set-tings: one decoder trained on raw English speech
+data from CoV oST ( ∼400h), another trained on
+raw English speech data from both Common V oice
+(∼2,000h) and Multilingual Librispeech (MLS)
+(∼40,000h), and finally another trained on English
+speech transcription data from both Common V oice
+and Multilingual Librispeech. At test time, we can
+now plug these English speech decoders to any text
+or speech encoder. We focused on es-en and fr-
+en language directions that have previously been
+covered for direct speech-to-speech translation (see
+Table 6). We also present text-to-speech transla-
+tion results, plugging text encoders to our speech
+decoders.
+Following Lee et al. (2022a,b) the evaluation
+is done by transcribing the output speech with an
+open-sourced ASR system for English and eval-
+uating the BLEU score of the transcribed speech
+with target text from CoV oST. We compare these
+results to a supervised baseline (Lee et al., 2022b)
+trained on real speech-to-speech translation data
+from V oxpopuli (Wang et al., 2021) and mined data
+from (Duquenne et al., 2021). We also provide a
+strong supervised baseline composed of a Speech-
+to-text translation model from (Wang et al., 2021)
+that is trained on a significant amount of speech
+translation data from V oxpopuli, EuroparlST and
+CoV oST, followed by a text-to-unit model.
+In Table 6, we notice that our speech decoders
+achieve strong results for this zero-shot setting,
+even with a limited amount of raw speech data.
+Incorporating much more raw speech data in the
+training, significantly improves the results. Using
+textual representation as input helps in speech de-
+coder training, leading to best results. To the best
+of our knowledge, these are the first results for
+zero-shot direct speech-to-speech translation.
+This last experiment again highlights the com-
+patibility between representations for different lan-
+guages and modalities. Our approach enables to5801efficiently leverage raw speech data for T2S and
+S2S tasks.
+6 Conclusion
+In this work, we studied how to build a common
+fixed-size representation for text and speech in dif-
+ferent languages, to perform zero-shot cross-modal
+translation. By imposing a fixed-size representation
+and aligning explicitly languages and modalities,
+we have overcome the sentence length mismatch
+between audio and text, and obtained multilingual
+and multimodal representations compatible with de-
+coders trained on other languages and/or modalities
+in a zero-shot setting. We were able to build text
+and speech encoders for multiple languages com-
+patible with text decoders for multiple languages as
+well as an English speech decoder. Our zero-shot
+cross-modal translation results for direct speech-to-
+text, text-to-speech and speech-to-speech transla-
+tion define a new zero-shot state-of-the-art baseline.
+To the best of our knowledge, this is the first work
+tackling zero-shot direct text-to-speech and speech-
+to-speech translation.
+Finally, we highlighted the modularity of our
+architecture; all type of data can be used to train
+decoders (unlabeled text or speech data ; T2T, S2T,
+S2S translation data; speech transcription data). Us-
+ing more types of training data may further enhance
+the robustness of the decoder to other languages or
+other modalities.
+Limitations
+We highlighted the modularity of our architecture,
+learning separately encoders and decoders. While
+it can be seen as a strength, as one does not need to
+retrain the whole system to add a new language to
+the framework, it can also be seen as a limitation as
+the number of modules increases linearly with the
+number of languages. Moreover, training multiple
+separate modules requires more time and compu-
+tation than one multilingual model. Multilingual
+training of encoders or decoders is left for future
+work.
+In machine translation, sequence-to-sequence
+models with fixed-size sentence representation
+were replaced by sequence-to-sequence models
+with attention that showed important performance
+boost for long sentences. Our work shows that
+competitive performance can still be achieved with
+fixed-size sentence representations and enables ef-
+ficient compatibility between languages and modal-ities. However, very long sequences, beyond usual
+sentence length, are expected to perform less well.
+We showed that it is possible to learn an English
+speech decoder with raw speech data, it would
+be interesting to extend this to other languages as
+target speech, and see how our method performs
+for a low resource spoken language.
+References580258035804A Appendix
+A.1 Distances in LASER text space
+We report the L2 squared distances of sentence
+embeddings in different languages to their English
+translations sentence embeddings in LASER space.
+A.2 Other text decoders
+With the conclusion that bi-text data can help the
+decoder be robust to other unseen languages, we
+trained decoders for German, French, Spanish,
+Turkish and Mongolian. We use en-xx bitexts, in
+addition to raw xx data to train the decoders. For all
+decoder trainings, we use bi-texts from CCMatrix
+(Schwenk et al., 2021), for the auto-encoding loss
+we use one side of the bi-texts corresponding to the
+language that we are trying to decode, except for
+Mongolian where we take all the raw Mongolian
+text data from CCnet. (Wenzek et al., 2019). We
+present the results in Table 7.
+A.3 Training details
+We use Fairseq to train our models. Text student
+encoders are trained on 32 Tesla V100 GPUs with
+a learning rate set to 10, maximum number of to-
+kens by GPU is 1400, and update frequency is set to
+4. Speech student encoders are trained on 48 Tesla
+V100 GPUs for a few days, with same learning rate
+as text students, maximum number of sentences is
+set to 32 by GPU. Text decoders are trained with the
+same configuration as mBART. Speech decoders
+are trained on 48 Tesla V100 GPUs with a learning
+rate set to 3·10, maximum number of sentences
+is set to 32 by GPU and update frequency is set
+to 4.58055806

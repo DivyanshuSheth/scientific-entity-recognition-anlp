@@ -1,1 +1,629 @@
-3774 Proceedings of the 60th Annual Meeting of the Association for Computational Linguistics Volume 1 : Long Papers , pages 3774 3784 May 22 - 27 , 2022 c(cid:13)2022 Association for Computational Linguistics 3775 3776 3777 3778 3779 3780 3781 3782 3783 3784 
+
+Le HouRichard Yuanzhe PangTianyi ZhouYuexin WuXinying Song
+Xiaodan SongDenny ZhouGoogleNew York UniversityUniversity of Maryland, College Park
+lehou@google.com ,yzpang@nyu.edu
+Abstract
+Transformer-based models generally allocate
+the same amount of computation for each to-
+ken in a given sequence. We develop a sim-
+ple but effective “token dropping” method to
+accelerate the pretraining of transformer mod-
+els, such as BERT, without degrading its per-
+formance on downstream tasks. In particular,
+we drop unimportant tokens starting from an
+intermediate layer in the model to make the
+model focus on important tokens more efﬁ-
+ciently if with limited computational resource.
+The dropped tokens are later picked up by the
+last layer of the model so that the model still
+produces full-length sequences. We leverage
+the already built-in masked language model-
+ing (MLM) loss to identify unimportant to-
+kens with practically no computational over-
+head. In our experiments, this simple approach
+reduces the pretraining cost of BERT by 25%
+while achieving similar overall ﬁne-tuning per-
+formance on standard downstream tasks.
+1 Introduction
+Nowadays, the success of neural networks in a va-
+riety of NLP tasks heavily relies on BERT-type lan-
+guage models containing millions to billions of pa-
+rameters. However, the pretraining process of these
+models is computationally expensive, generating
+signiﬁcant carbon dioxide emission (Strubell et al.,
+2019; Patterson et al., 2021). In practice, there is
+the need to perform large-scale language model pre-
+training for diverse applications (Lee et al., 2020;
+Chalkidis et al., 2020; Zou et al., 2021; Rogers
+et al., 2020) in different languages (Antoun et al.,
+2020; Sun et al., 2021). In this paper, we develop a
+technique that signiﬁcantly reduces the pretraining
+cost of BERT models (Devlin et al., 2019) without
+hurting their test performance on a diverse set of
+ﬁne-tuning tasks.Recent efforts of efﬁcient training involve mixed-
+precision training (Shoeybi et al., 2019), distributed
+training (You et al., 2020), better modeling on rare
+words and phrases (Wu et al., 2021), designing
+more effective and data-efﬁcient pretraining ob-
+jectives (Lan et al., 2020; Clark et al., 2020; Raf-
+fel et al., 2020), progressive stacking (Gong et al.,
+2019), and so on. While these approaches con-
+tribute to efﬁcient training with reduced compu-
+tational cost, most of them focus on the model
+architecture or the optimization process.
+In this paper, we focus on a simple but efﬁcient
+BERT-pretraining strategy that has been under-
+explored before, i.e., “token dropping,” which re-
+moves the redundant tokens in each sequence that
+are less informative to training. Since not all to-
+kens contribute equally to the output or the train-
+ing objective, and the computational complexity of
+transformer-based models grows at least linearly
+with respect to the sequence length, shortening the
+input sequences can accelerate the training effec-
+tively.
+Among existing studies, the depth-adaptive trans-
+former approach aims to reduce the autoregressive
+inference time by allocating less computation on
+easy-to-predict tokens (Elbayad et al., 2020). To
+improve the training efﬁciency, Dai et al. (2020)
+perform pooling on the embeddings of nearby to-
+kens. However, directly dropping tokens during
+pretraining was not studied until very recently in
+faster depth adaptive transformer (Liu et al., 2021),
+where the important tokens are identiﬁed either
+through (1) mutual information-based estimation
+between tokens and predeﬁned labels or through (2)
+a separate BERT model that exhaustively computes
+the masked language model (MLM) loss for each
+token. On the contrary, we focus on accelerating
+the task-agnostic pretraining phase without requir-
+ing any labels or any computation by a separate
+language model. Speciﬁcally, we identify impor-
+tant tokens as the ones hard to predict by the model3774itself through its loss during training, which is adap-
+tive to its training process and leads to practically
+no computational overhead. We show examples of
+dropped tokens in Figure 1.
+Recent approaches such as RoBERTa (Liu et al.,
+2019) suggest packing input sequences. In this
+way, there are no [PAD] tokens, which makes it
+a non-trivial task to identify unimportant tokens.
+We identify unimportant tokens in each sequence
+with the smallest historical MLM loss (we take the
+running average of the MLM loss of each token
+throughout the pretraining process). By removing
+them from intermediate layers of a BERT model
+during training, we save an enormous amount of
+computation and memory. We keep them in the
+ﬁrst several layers as well as in the last layer so
+that they are still present in the model. Therefore,
+the inputs and outputs of BERT model are kept
+consistent with the conventional all-token training
+process. Without modifying the original BERT
+architecture or training setting, this simple token-
+dropping strategy trains intermediate layers mainly
+on a few important tokens. As demonstrated in
+our experiments, models pretrained in this way
+generalize well on diverse downstream tasks with
+full sequences.
+To summarize, our contributions are as fol-
+lows. (1) We show that BERT models can
+be pretrained with only a subset of the layers
+focusing on important tokens. Even though
+the model is trained on sub-sequences of im-
+portant tokens only, it generalizes well to full
+sequences during ﬁne-tuning on downstream
+tasks. (2) We identify important tokens through
+the pretraining process by exploring the training
+dynamics, with minimal computational overhead
+and without modifying the model architecture.
+(3) We show that our token dropping strategy
+can save 25% of pretraining time while achiev-
+ing similar performance on downstream tasks.
+Code is available at https://github.com/
+tensorflow/models/tree/master/
+official/projects/token_dropping .
+2 Prerequisites
+2.1 Sequence Packing
+Recall that a sequence in BERT consists of two sen-
+tences as well as the “classiﬁcation” token [CLS]
+and the “separator” token [SEP] . If the resulting
+number of tokens is smaller than 512, then padding
+tokens are added to ensure that each sequence is
+exactly 512-token long.
+We decide to use sequence packing (Liu et al.,
+2019) so that there would be no [PAD] symbols,
+throughout the paper. We also remove the next-
+sentence prediction training criteria as well. The
+rationale for using sequence-packing is two-fold.
+First, sequence packing provides a competitive
+baseline in terms of pretraining efﬁciency (So et al.,
+2019; Liu et al., 2019; Kosec et al., 2021; Zhang
+et al., 2021). Second, using sequence-packing
+can stress-test our algorithm under the absence of
+padding symbols to see if it brings further improve-
+ments beyond dropping padding tokens: without
+sequence packing, our algorithm can label [PAD]
+as the unimportant tokens, which trivially improves
+pretraining efﬁciency; with sequence packing, how-
+ever, our algorithm has to identify and drop real
+tokens as unimportant tokens to improve the efﬁ-
+ciency.
+2.2 Multi-Head Attention
+DeﬁneTto be the input sequence length and d;d
+to be the size of each individual key and value vec-
+tor respectively. The multi-head attention function
+withhattention heads is deﬁned as:
+MultiHeadAttention( Q;K;V ) =
+concat(H;:::;H)W;
+where
+H= Attention( QW;KW;VW)
+= softmax 
+(QW)(KW)
+pd!
+VW:3775Used to denote the hidden size of the model
+(usually equal to hd). We have the following:
+Q;K;V2R;
+W2R; W2R;
+W2R; W2R:
+2.3 Feed-Forward Networks
+Besides the attention sub-layer, each BERT encoder
+layer also contains the feed-forward sub-layer (or
+“feed-forward network,” abbreviated as FFN). Each
+FFN is a position-wise function: it is applied to
+each position of the input, identically.
+The input to FFN is a matrix 2R. The
+input will be transformed by a two-layer perceptron
+(with ReLU activation in between) into an output
+matrix2R. In Vaswani et al. (2017), d=
+d and the hidden size of the intermediate layer
+d= 4d due to empirical investigation.
+3 Token-Dropping
+Suppose the input sequence contains 512 tokens.
+Having 512 hidden states (corresponding to 512
+tokens) after each encoder layer may not be nec-
+essary, given that certain words may never heav-
+ily inﬂuence the meaning of the sentence.More-
+over, removing unimportant tokens in intermediate
+layers would produce a “dropout” effect, so that
+our network would learn to reconstruct the masked
+words with more noisy hidden states. Therefore,
+we decide to allocate the full amount of computa-
+tion only to important tokens. Figure 2 gives an
+illustration of where the unimportant tokens are
+dropped in a BERT model.
+3.1 Stage-1 Pretraining
+Each row of query Q, keyK, and value Vin a
+self-attention module in each transformer encoder
+layer corresponds to a single token. Suppose L=
+Lis the set of layers whose input covers all the
+tokens;L=Lis the set of layers whose input
+only cover a proper subset of tokens.
+Separation. During stage-1 pretraining, if the
+layerl2Land the next layer l+12L, then we
+remove the rows in Qcorresponding to the unim-
+portant tokens for layer l+ 1but keepKandV
+intact. After the removal, we have Q2R
+whereMis the number of important tokens. We
+also haveK;V2RwhereTis the input
+sequence length.
+Supposelis the ﬁrst layer above layer l+1such
+thatl2L. Supposel+ 22L. Then, for layers
+l+ 2, . . . ,l 1, we haveQ;K;V2R,
+which means that their rows correspond to only the
+important tokens.
+Merging. Given thatlis the ﬁrst layer above
+layerl+ 1such thatl2L, before layer l, we3776
+merge the hidden states corresponding to the unim-
+portant tokens (taken from the outputs of layer l)
+with the hidden states corresponding to the impor-
+tant tokens (taken from the outputs of layer l 1).
+We keep the order of hidden states consistent with
+the order of the input tokens.
+Alternatively: token passing instead of token
+dropping. In layers where unimportant tokens
+are dropped, the input to the layers effectively cor-
+responds to partial and incoherent sentences. We
+thus attempt the token passing approach, which can
+ensure that the input to such layers corresponds to
+complete and coherent sentences. Token passing is
+described as follows.
+In layersl+ 1;:::;l 12L, we can keep the
+rows ofKandVcorresponding to the unimportant
+tokens. More speciﬁcally, the rows of Kthat cor-
+respond to important tokens come from the hidden
+states outputted by the previous encoder layer. The
+rows ofKthat correspond to unimportant tokens
+come from the hidden states outputted by layer
+l. This procedure results in Q2Rand
+K;V2Rfor layersl+ 1;:::;l 1. See
+Section 5 for empirical studies.
+Determining landl.We leave details on de-
+termininglandlto later sections. Empirically,
+l= 1andl=L 1consistently lead to
+good performance, where Lis the total number
+of encoder layers. For instance, if L= 12 , then
+the full layers in L(i.e., layers in which the query,
+key, and value matrices all have Trows) would be
+layers 1 through 5 as well as layer 12.
+3.2 (Optional) Stage-2 Pretraining
+At test-time or when we ﬁne-tune on downstream
+tasks, all the encoder layers are full layers, mean-ing we do not do any token dropping. Given the
+mismatch between the neural network in stage 1
+and the neural network used for ﬁne-tuning and
+test-time, during stage 2, we simply pretrain using
+the full model (i.e., all tokens passing through all
+layers). Stage-2 pretraining requires only a smaller
+number of steps, compared to stage-1 pretraining.
+However, stage-2 pretraining turns out to be unnec-
+essary, which we discuss in later sections.
+3.3 Identifying Important Tokens
+In this subsection, we elaborate on which tokens
+to drop (i.e., which corresponding rows to discard
+in the query, key, and value matrices) in a given
+sequence. First, we never drop special tokens in-
+cluding [MASK] ,[CLS] , and [SEP] . In other
+words, we always treat these tokens as important
+tokens. Recall that we use sequence packing in all
+of our experiments, unless noted otherwise. There-
+fore, there are no padding tokens [PAD] .
+We introduce two approaches for identifying im-
+portant tokens in the following sub-sections. In the
+ablation studies (Section 4.2), we will introduce
+more straightforward approaches as baselines.
+3.3.1 Dynamic Approach:
+Cumulative-Loss-Based Dropping
+Updating the cumulative loss vector. We use a
+vector m2Rto approximate the “difﬁculty” of
+learning a speciﬁc token in the vocabulary V. The
+vector mis updated throughout the pretraining.
+Recall that BERT pretraining involves the masked
+language modeling (MLM) objective, where the
+model is asked to predict the tokens of the masked-
+out input tokens. Suppose ntokens in a sequence
+are masked out, then we would obtain nMLM
+negative log-likelihood (NLL) losses. For each
+token, we update the corresponding entry in the
+cumulative loss vector as follows:
+m m+ (1 )`; (1)
+where`is the NLL loss that corresponds to the
+tokeniand2(0;1)is a coefﬁcient that is close
+to 1. In particular, we never update the cumulative
+losses corresponding to the aforementioned special
+tokens ( [MASK] ,[CLS] , and[SEP] ). The losses
+for those tokens are set to a large number such as
+10.3777Deciding which tokens are unimportant. We
+need to drop the rows in the query, key, and
+value matrices corresponding to the unimportant
+tokens. To decide which tokens will be treated
+as unimportant ones, given a sequence of 512
+tokens, we simply look up the 512 corresponding
+cumulative losses using m, and label the tokens
+that correspond to the smallest cumulative losses
+as unimportant tokens. In other words, suppose
+we have a sequence x= (x;x;:::;x)where
+Tis the sequence length. Use [T]to denote
+f1;2;:::;Tg. Suppose : [T]![T]is a
+function such that x;x;:::;xare
+the tokens sorted in decreasing order of the
+aforementioned cumulative loss. Then, we are
+treatingx;:::;xas important tokens
+(i.e., the tokens to keep), where Mis a positive
+integer (e.g., M= int(T=2)). We are treating
+x;:::;xas unimportant tokens.
+Optionally: adding randomness. We can op-
+tionally assign every token with a nonzero prob-
+ability to be selected as an important token,
+which can potentially make the model general-
+ize well on full sequences. For example, let
+J= int(0:05T), givenx;x;:::;xas
+described above, we replace the last Jimportant
+tokensx;:::;xwithJtokens ran-
+domly chosen from x;:::;x. Then,
+theJrandomly chosen tokens will be treated as
+important tokens. In later sections, we will empiri-
+cally investigate whether the randomness is helpful.
+3.3.2 Static Approach: Frequency-Based
+Dropping
+Before the start of pretraining, we count the num-
+ber of occurrences of each token in the vocabulary
+V. During pretraining, given a sequence, suppose
+there aresspecial tokens. This approach assigns
+the special tokens as well as the M stokens that
+correspond to the lowest frequency as important
+tokens, where Mis the target number of important
+tokens in a sequence. It treats the rest of the tokens
+as unimportant tokens.
+4 Experimental Details
+4.1 Datasets
+Pretraining. For pretraining, we use the same
+dataset as BERT: the BooksCorpus dataset (Zhu
+et al., 2015) and the English Wikipedia dataset.We use the sequence-packed version of the dataset
+(Section 2.1) so as to ensure that we have to drop
+meaningful tokens instead of the [PAD] tokens.
+Downstream tasks. We ﬁne-tune on GLUE
+tasks (Wang et al., 2018), whose datasets are on
+the larger end. We only use the 6 largest GLUE
+datasets: MNLI, where we use MNLI-m to denote
+MNLI-matched and MNLI-mm to denote MNLI-
+mismatched (Williams et al., 2018), QNLI (Ra-
+jpurkar et al., 2016), QQP, SST (Socher et al.,
+2013), and the GLUE diagnostics set AX (Wang
+et al., 2018). Additionally, we also experiment on
+the question answering datasets: SQuAD v1.1 (Ra-
+jpurkar et al., 2016) and SQuAD v2.0 (Rajpurkar
+et al., 2018). The evaluation metric for each task
+can be found in Table 1.
+4.2 Methods Tested
+By default, the total training steps of each model
+is 1 million, using the settings in Section 4.4. We
+experiment with the following models. First, we
+have the baseline models.
+baseline (no sequence packing) : The original
+BERT with the non-sequence-packed input.
+baseline : The original BERT with the
+sequence-packed input.
+baseline (75% steps) : The original BERT with
+the sequence-packed input but only trained
+for 75 % of the steps. This baseline is trained
+using a similar amount of computation as our
+proposed token dropping methods.
+Next, we have the following methods that aim
+to save pretraining time. For token dropping meth-
+ods, we drop 50% of the tokens (unless mentioned
+otherwise) in order to compare with the average
+pooling method (Dai et al., 2020) which reduces
+the sequence length by half.
+token drop : We perform stage-1 pretraining
+using the cumulative-loss token-dropping for
+1M steps.
+token drop (rand) : Similar to the “token drop”
+method, except that we randomly drop 50%
+non-special tokens in a sequence, instead of
+dropping unimportant tokens. Special tokens
+like[CLS] and[SEP] are not dropped.3778token drop (half-rand) : It is similar to the
+“token drop” method except adding extra ran-
+domness to the important token selection, as
+introduced in Section 3.3. This half-random
+method can be viewed as a combination of
+“token drop” and “token drop (rand).”
+token drop (layer rearranged) : It is similar
+to the “token drop” method except moving
+the last layer that processes all tokens to the
+beginning of the model. In other words, the
+layers in Figure 2 are rearranged such that
+full-sequence layers are only at the bottom.
+token drop (freq) : Similar to the “token
+drop” method, except that we identify im-
+portant tokens using the frequency-based
+token-dropping scheme, as discussed in Sec-
+tion 3.3.2.
+token avg : Similar to the “token drop” method,
+except that we use average-pooling to com-
+press the sequences instead of “token drop.”
+Suppose layer l2Land the immediate
+next layerl2L, as described in Section 3.
+Instead of dropping rows of the query, key,
+and value matrices, we apply average pool-
+ing with a window size of 2 and a stride
+of 2. In other words, suppose q;:::;q
+are the rows of the query vector. Then, the
+T=2new query vectors are (q+q)=2;(q+
+q)=2;:::; (q;q)=2, assuming that Tis
+an even number. This idea is introduced in
+Funnel transformer (Dai et al., 2020).
+token pass : As discussed in Section 3, we
+drop certain rows in the query, but we do not
+drop any row in the key and value matrices.
+We also experiment with adding the optional
+stage-2 pretraining phase to the methods described
+above. In such cases, we ﬁrst perform stage-1 pre-
+training for 900k steps and then stage-2 pretraining
+for 100k steps. To distinguish between the stage-1
+only methods, we add + stage-2 at the end of the
+method description.
+4.3 Model Architectures
+The BERT architectures are the same as the ones in
+Devlin et al. (2019). We experiment on both BERT-
+base and BERT-large. For each BERT architecture,
+we train with two different input sequence lengths:
+512 and 128. We use the sequence-packed input
+data, unless otherwise noted.4.4 Hyperparameters and Other Details
+We use TPUv3 to pretrain the BERT models. The
+batch size of each pretraining step is 512. We train
+each BERT model for 1 million steps. We use the
+AdamW optimizer (Loshchilov and Hutter, 2019).
+We adopt a peak learning rate of 1e 4and use the
+linear decay scheduler for the learning rate.
+We conduct extensive hyperparameter tuning
+for downstream tasks. For all GLUE tasks, we
+test different numbers of training epochs 2
+f2;3;4;5;6;8;10gand peak learning rate values
+2f5e 6;1e 5;2e 5;3e 5;4e 5gusing
+the baseline pretrained BERT model. 2f3;6g
+and2f1e 5;2e 5ggive the best overall
+results. Thus, for every pretrained model, we ﬁne-
+tune on each individual GLUE task using the com-
+binations of the two best andvalues (four set-
+tings in total) and take the best validation result.
+For SQuAD tasks, we test 2f1;2;3;4;5;6;8g
+and2f5e 5;6e 5;8e 5;1e 4;1:2e 4g
+using the baseline pretrained BERT model and ﬁnd
+out that2f4;8gand2f2e 5;4e 5gpro-
+duce the best results overall. Thus, we ﬁne-tune
+every model with these settings and report the best
+validation result.
+We apply the linear decay learning rate schedule
+that ends with zero for all experiments. For each
+method, we pretrain two models with different ran-
+dom seeds. Then these two models are ﬁne-tuned
+separately on individual downstream tasks. We
+then report the averaged result as the ﬁnal result for
+each task.
+5 Results
+Table 1 shows the ablation study. As mentioned,
+each number in the table corresponds to the aver-
+age performance of two pretrained models (using
+different random seeds) that are then separately
+ﬁne-tuned.
+5.1 Observations
+On whether stage-2 pretraining is useful.
+There is a mismatch between the neural network
+in stage-1 pretraining and the neural network used
+for ﬁne-tuning and test-time. Therefore, we pro-
+pose stage-2 pretraining where there is no token
+dropping so as to address the train-test mismatch.
+Comparing “token drop” with “token drop + stage-
+2” in Table 1, we see that the performance of the
+model trained without stage-2 pretraining and the
+model trained with stage-2 pretraining perform sim-3779
+ilarly. We hypothesize that the train-test mismatch
+can be easily addressed during downstream task
+ﬁne-tuning.
+On determining which tokens are important.
+Figure 1 shows which tokens are labeled as im-
+portant using three examples from our “token drop”
+model. Additionally, in Section 3.3, we propose to
+optionally replace the important tokens that have
+the lowest cumulative losses with unimportant to-
+kens. Comparing “token drop“ with “token drop
+(half-rand)” and “token drop (rand)” in Table 1, we
+see that adding randomness does not help. Finally,
+we see that the cumulative-loss-based dropping per-
+forms better than frequency-based dropping and
+random dropping.
+On how many tokens to drop. We report results
+with different token dropping percentages on train-
+ing the BERT-base model in Table 4. We see
+that dropping more than 62.5% of the tokens yield
+worse results. By default, our experiments drop
+50% of the tokens.
+On determining which layers to drop. Com-
+paring “token drop (half-rand) + stage-2” with “to-
+ken drop (layer rearranged) + stage-2,” we can see
+that putting one full-sequence layer at the end of
+the model yields better results.
+On token dropping vs. token passing. Com-
+paring “token drop + stage-2” with “token pass +
+stage-2,” we see that passing the unimportant to-
+kens instead of dropping them does not affect the
+performance. Recall that for layers where unim-
+portant tokens are dropped, token dropping wouldmake the input to such layers correspond to in-
+coherent sentences, which could impact BERT’s
+learning ability. However, we ﬁnd that doing to-
+ken passing makes pretraining slightly less efﬁcient
+while providing no improvement on downstream
+performance.
+On token dropping vs. token averaging. Com-
+paring “token drop + stage-2” with “token avg +
+stage-2,” we see that average pooling instead of
+dropping unimportant tokens yields slightly worse
+results. This means that our importance-driven
+token selection is more efﬁcient than directly aver-
+aging embedding across every nearby token pair.
+5.2 Results on Different BERT Models and
+Sequence Lengths
+We test our method on BERT-base and BERT-large
+with a sequence length of 128 and 512. We re-
+port the results in Table 2. Overall, our proposed
+method performs similarly as the baseline method.
+As shown in Table 3, when taking the average
+across all GLUE and SQuAD scores and across
+all four settings (two BERT models times two se-
+quence lengths) and two pretraining runs with dif-
+ferent random seeds, our proposed token dropping
+method outperforms the baseline method by 0.3%
+(85.16% to 85.45%) in addition to the 25% pre-
+training time reduction.
+6 Related Work
+One strategy to improve data efﬁciency during
+language model pretraining is by designing bet-
+ter pretraining objectives (Lan et al., 2020; Clark3780et al., 2020; Raffel et al., 2020). Concurrently,
+researchers have also been exploring certain hard-
+ware properties to improve pretraining efﬁciency,
+e.g., mixed-precision training (Shoeybi et al., 2019)
+and huge-batch distributed training (You et al.,
+2020). Recently, Wu et al. (2021) propose to
+tackle the efﬁcient pretraining problem through
+rare words or phrases, and they provide rare words
+with a “note embedding” to make models better
+aware of the contextual information in a sequence.
+The faster depth-adaptive transformer approach
+is applied to text classiﬁcation tasks (Liu et al.,
+2021). It identiﬁes important tokens by either com-
+puting the mutual information between each token
+and the given sequence label, or using a separate
+BERT model to exhaustively evaluate the masked
+language model loss for each token. There is a rich
+body of literature on faster inference of sequence
+generation problems, such as early layer exits dur-
+ing translation (Elbayad et al., 2020; Han et al.,
+2021), non-autoregressive machine translation (Gu
+et al., 2018; Tu et al., 2020b), and amortizing the
+cost of complex decoding objectives (Chen et al.,
+2018; Tu et al., 2020a; Pang et al., 2021a).
+Several ideas are particularly relevant to token-
+wise layer dropping: Zhang and He (2020) propose
+to use a ﬁxed probability to drop an entire layer dur-
+ing pretraining; here, we use the more ﬁne-grained3781token-wise layer dropping. The dynamic halting
+algorithm (Dehghani et al., 2019), motivated by
+the ﬁnding that transformers fail to generalize to
+many simple tasks, stops the processing of a token
+through upper layers if its representation is good
+enough. However, the implementation does not
+improve training time, as its goal is to improve
+performance.
+7 Conclusion
+We present a simple yet effective approach to save
+BERT pretraining time. Our approach identiﬁes
+unimportant tokens with practically no computa-
+tional overhead and cuts unnecessary computation
+on these unimportant tokens for training. Experi-
+ments show that BERT models pretrained in this
+manner save 25% pretraining time, while generaliz-
+ing similarly well on downstream tasks. We show
+that our token dropping approach performs better
+than average pooling along the sequence dimension.
+Future work will involve extending token dropping
+to pretraining transformer models that can process
+a much longer context, as well as extending this
+algorithm to a wider range of transformer-based
+tasks, including translation and text generation.
+Acknowledgments
+The authors thank the anonymous reviewers for
+helpful feedback.
+References37823783A Appendix
+A.1 Discussion on compute
+On a high level, the FLOPs for language model
+pretraining come largely from the MLP layers
+(Shoeybi et al., 2019).
+Given that the attention compute grows quadrati-
+cally with respect to sequence length, our approach
+saves>50% compute in the attention module in
+half of the encoder layers. But we ignore atten-
+tion from our discussion, given that the FLOPs for
+BERT come largely from the MLP layers. In fact,
+the attention operations typically use smaller than
+10% of the total compute, and other operations
+like layer norm and activations are more negligible
+(Brown et al., 2020; Shoeybi et al., 2019).
+The total MLP compute is proportional to TL
+whereTis the number of tokens in each sequence,
+andLis the number of total layers (Brown et al.,
+2020; Bahdanau, 2022). In our case, given that
+we are dropping 50% of the tokens in 50% of the
+layers, we would save around 25% of the FLOPs.
+A.2 Potential Limitations and Other
+Considerations
+Given that the community is paying more atten-
+tion to long-document tasks (Beltagy et al., 2020;
+Tay et al., 2021; Pang et al., 2021b), it is worth
+investigating whether token dropping can be used
+to pretrain transformers with a much larger context
+length, like Longformer encoder decoder (LED)
+(Beltagy et al., 2020) which accepts a context
+length of 16,384.
+One limitation is that our pretraining corpus and
+the downstream task datasets are in English. There
+is no guarantee that the same token dropping ratio
+applies to corpora or tasks in all other languages.3784

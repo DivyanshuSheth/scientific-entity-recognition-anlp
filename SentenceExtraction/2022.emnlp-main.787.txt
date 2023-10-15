@@ -1,1 +1,763 @@
-11444 Proceedings of the 2022 Conference on Empirical Methods in Natural Language Processing , pages 11444 11458 December 7 - 11 , 2022 © 2022 Association for Computational Linguistics 11445 11446 11447 11448 11449 11450 11451 11452 11453 11454 11455 11456 11457 11458 
+
+Daniel KhashabiGabriel StanovskyJonathan BraggNicholas LourieJungo Kasai
+Yejin ChoiNoah A. SmithDaniel S. Weld
+Abstract
+While often assumed a gold standard, effec-
+tive human evaluation of text generation re-
+mains an important, open area for research.
+We revisit this problem with a focus on pro-
+ducing consistent evaluations that are repro-
+ducible —over time and across different popu-
+lations. We study this goal in different stages
+of the human evaluation pipeline. In particu-
+lar, we consider design choices for the annota-
+tion interface used to elicit human judgments
+and their impact on reproducibility. Further-
+more, we develop an automated mechanism
+for maintaining annotator quality via a prob-
+abilistic model that detects and excludes noisy
+annotators. Putting these lessons together,
+we introduce G : a system for running
+standardized human evaluations across differ-
+ent generation tasks. We instantiate G
+with datasets representing four core challenges
+in text generation: machine translation, sum-
+marization, commonsense reasoning, and ma-
+chine comprehension. For each task, G
+offers a leaderboard that automatically crowd-
+sources annotations for submissions, evaluat-
+ing them along axes such as correctness, con-
+ciseness, and ﬂuency. We have made the G-leaderboards publicly available, and have
+already ranked 50 submissions from 10 differ-
+ent research groups.We hope G encour-
+ages further progress toward effective, stan-
+dardized evaluations for text generation.
+1 Introduction
+While the emergence of powerful language models
+(Radford et al., 2019; Raffel et al., 2020; Lewis
+et al., 2020) has made text generation omnipresent,
+effective evaluation of the resulting systems’ per-
+formance on open-ended generation tasks remains
+a challenge. This has motivated adoption of hu-
+man evaluation in recent works (Celikyilmaz et al.,
+2020; Fabbri et al., 2021), even though it posesFigure 1: The G architecture for evaluating text
+generation tasks, with a summarization example. Sim-
+ilar to automatic leaderboards, model developers sub-
+mit their predictions (top). G then evaluates with
+a standard human evaluation as well as with automatic
+metrics (center). These scores are then used to rank and
+track systems’ performance across time (bottom).
+several challenges (Clark et al., 2021; Karpinska
+et al., 2021). First, the estimates of system perfor-
+mance are not reproducible —over time and various
+annotator populations. Additionally, the setups are
+notstandardized . Different works use different
+annotation interfaces, even those working on the
+same dataset, despite substantial efforts needed for
+building an appropriate annotation interface and
+guidelines to extract quality human annotations
+and ﬁlter out noisy annotators.
+This work presents an investigation toward reli-
+ably repeatable and standardized human evaluation.
+First and foremost, we study the reproducibility of
+human annotations, in two stages of the annotation
+pipeline. We study this goal empirically as a func-11444tion of various design choices (§4) such as the way
+the judgments are aggregated. We then propose
+a probabilistic framework for detecting malicious
+annotators (§5) and isolating their annotations from
+the resulting performance estimates.
+Guided by the earlier studies, we present G-(Figure 1)—a framework for human evalua-
+tion of text generation, which scales to a variety
+of tasks and datasets (§6). G posts model
+predictions to a crowdsourcing platform,where
+human annotators evaluate them according to pre-
+deﬁned, dataset-speciﬁc guidelines. We describe
+mechanisms introduced into G to quantify an-
+notator variance and spread the annotations across
+various days, showing that G achieves reliable
+scores on the studied tasks. To show its applica-
+bility, we instantiate G with leaderboards for
+several popular text generation datasets in English
+from four diverse tasks—machine translation, ques-
+tion answering, summarization, and commonsense
+reasoning—and invite developers to extend it with
+more datasets. Since its deployment, G has
+analyzed and ranked about 50 submissions from 10
+different groups across all of our tasks, indicating
+the interest in standardized human evaluation.
+The G infrastructure opens the door for
+three avenues of research: (1) G provides de-
+velopers of text-generation models with the ease of
+the “leaderboard experience,” alleviating the eval-
+uation burden while ensuring high-quality, stan-
+dardized comparison against previous models. (2)
+G facilitates the study of human evaluation
+interfaces (Nenkova and Passonneau, 2004; Liu
+et al., 2016; Bragg et al., 2018; Shapira et al., 2019),
+addressing challenges such as annotator training,
+inter-annotator agreement, and reproducibility, all
+of which can be integrated into G to compare
+against other evaluation metrics on past and future
+model submissions. (3) G helps developers of
+automatic evaluation metrics (Zhang et al., 2020b),
+by serving as a hub of model submissions and as-
+sociated human scores.
+2 Related Work
+We survey relevant work on automatic and human-
+in-loop evaluation of text generation. See Welty
+et al. (2019); van der Lee et al. (2019); Celikyilmaz
+et al. (2020) for further in-depth discussion.(Semi-)automatic Metrics Many researchers
+have proposed automated metrics for text genera-
+tion tasks, such as BLEU (Papineni et al., 2002) and
+METEOR (Banerjee and Lavie, 2005). These met-
+rics initially correlated well with human judgments
+for contemporary models (Papineni et al., 2002;
+Doddington, 2002; Coughlin, 2003), though the
+correspondence breaks down as they become tar-
+gets for optimization (Callison-Burch et al., 2006;
+Sun et al., 2019) or as models become increasingly
+powerful (Ma et al., 2019; Edunov et al., 2020).
+Several more recent approaches aim to learn auto-
+mated metrics for text generation tasks, including
+for image description (Vedantam et al., 2015), para-
+phrasing (Sellam et al., 2020), and abstractive ques-
+tion answering (Chen et al., 2020). Such progress
+in automatic metrics is incorporated into recent
+leaderboards (Kasai et al., 2021). We integrate
+some of these metrics into our proposed system to
+track their correlation with human evaluation.
+Human Evaluation of Language Given the lim-
+itations of automatic metrics, much prior work
+has developed ways to conduct human evaluation
+of language generation in general, and machine
+translation in particular. Human evaluation for ma-
+chine translation (Graham et al., 2013, 2014; Sak-
+aguchi and Van Durme, 2018; Freitag et al., 2021)
+typically involves crowdsourcing where qualiﬁed
+crowd workers score output translations given the
+reference text. Results from manual evaluation are
+used as the primary metric in recent WMT com-
+petitions (Bojar et al., 2016, 2018; Barrault et al.,
+2020). However, to date, human evaluation ef-
+forts are typically conducted (1) on individual tasks
+such as machine translation, (2) by individual re-
+searchers with potentially varying design decisions,
+making results incomparable across evaluations, or
+(3) through shared tasks such as WMT, which force
+synchronization across teams for evaluation, slow-
+ing progress. As a result, most of the research on
+model development still evaluates models solely on
+automatic metrics such as BLEU (Papineni et al.,
+2002). G relaxes these limitations by pro-
+viding a continually-running leaderboard across
+language generation tasks with shared high-quality
+human evaluation templates.
+Human-in-the-loop Evaluation There are a few
+recent and concurrent leaderboards that incorporate
+manual analysis, tending to focus on individual
+tasks. For example, HYPE (Zhou et al., 2019) is an
+evaluation platform for image generation, ChatE-11445val (Sedoc et al., 2019) is an evaluation platform for
+chatbots, and, more recently, Zellers et al. (2021)
+present a leaderboard for the advice generation
+task introduced in their work. DynaBench (Kiela
+et al., 2021) is a related multi-task leaderboard
+but uses changing, adversarially-created datasets
+that do not support our goal of controlled model
+comparison across time. HUME (Hashimoto et al.,
+2019) was proposed as an evaluation metric for
+summarization and dialog which combines human
+annotations with automatic metrics for diversity
+and quality. STORIUM (Akoury et al., 2020) was
+introduced for human-in-the-loop generation and
+evaluation of long open-ended stories as a com-
+puter game. Concurrently, Gehrmann et al. (2021)
+introduced GEM, a workshop for participant-driven
+evaluation of language generation tasks. While
+such workshops inspire progress toward common
+goals, synchronized evaluations, often only once
+per year, likely slow progress. We take the view
+that evaluations on a more frequent, rolling basis
+will give researchers more ﬂexibility. To the best
+of our knowledge, G is the ﬁrst crowdsourced
+human-in-the-loop system that supports task leader-
+boards and is backed by principled design to ensure
+scoring reliability of human evaluations.
+3 G Principles for Human
+Evaluation of Generative Models
+There are many ways to run human evaluations.
+Reﬂecting on what’s needed to compare text gen-
+eration models across time, we formulated the fol-
+lowing principles to guide our design choices.
+Application-Motivated Ultimately, the evalua-
+tion’s purpose is to identify useful models and tech-
+niques. Thus, it should measure something infor-
+mative about the their usefulness in applications
+(such as a generated text’s correctness or ﬂuency).
+Reproducible To compare different models over
+time, the evaluation must be reproducible. If re-
+peated, it should give largely the same results.
+For example, results should hold across different
+groups of annotators, and remain stable across ap-
+propriate lengths of time.
+Interpretable The evaluation should help a re-
+searcher understand how the system behaves, and
+thus must measure an aspect of the system that
+is easy to understand. An evaluation which ranks
+models but isn’t interpretable has limited useful-
+ness, since different applications might prioritizedifferent things and researchers must navigate cost-
+beneﬁt trade offs between more expensive, higher
+performing models and cheaper ones.
+Scalar The evaluation should produce an abso-
+lute scalar measurement of the model performance
+(rather than a relative or comparative one) that fa-
+cilitates comparison of a new model to all those
+previously evaluated.
+Quantiﬁed Uncertainty All measurements are
+subject to uncertainty, including human evaluations.
+Thus, when comparing evaluations, we should con-
+sider how conﬁdent we can be that the resulting
+measurement is close to the true, latent measure-
+ment based on a more complete population of in-
+puts and human annotators.
+Rolling Given rapid recent advances in natu-
+ral language generation, it is essential to develop
+easily-accessible evaluation platforms for frequent
+model evaluations that do not require competing
+teams to synchronize with each other.
+Extensible Evaluation of NLP models is actively
+evolving, as new datasets are introduced and more
+is learned about how best to conduct human evalua-
+tion. Therefore, an evaluation framework should be
+easily extensible to new tasks or the latest practices.
+Next, we empirically study design decisions
+along the aforementioned evaluation desiderata.
+4 Design Decisions for Consistent
+Human Evaluations
+When designing an evaluation, some questions can
+be answered with principles, while others must
+be answered empirically. We investigate several
+questions around the prompt design that commonly
+occur across various tasks and impact evaluations’
+reproducibility and conﬁdence.
+(Q)Granularity of the elicitation: We examine
+two kinds of labels: (a) binary, and (b) Likert
+for 5 categories: Strongly agree, agree, neu-
+tral, disagree, and strongly disagree.
+(Q)Aggregation of per-example labels: Given
+multiple labels per example, we investigate
+aggregating by (a) averaging their scores, and
+(b) taking a majority vote.
+(Q)Labels per example: for a ﬁxed annotation
+budget, we compare collecting (a) 3 labels per
+annotation example (multilabeling), with (b)11446
+one label for three timesas many annotation
+examples (unilabeling).
+Case Study: Comparing Evaluation Designs for
+Open-domain Question Answering (ARC-DA
+To study these design choices, we evaluated T5-
+11B (Raffel et al., 2020) on the development set
+of ARC-DA (Clark et al., 2021), a generative ques-
+tion answering dataset (see §7.1 further details).
+We used modiﬁed versions of the same annota-
+tion interface as Bhakthavatsalam et al. (2021)
+(Figure 4). Each evaluation was run once with
+a Likert scale and once with a binary scale. All in-
+stances (n= 360 ) were annotated by 3 annotators,
+repeated three times across different weekdays.
+Then the quality judgments were mapped to nu-
+merical values.To produce the unilabeling and
+multilabeling results, we simulated these policies
+by randomly sampling with replacement for 500
+rounds, either a random 1/3 of the total number of
+examples (multilabeling) or 1/3 of the total number
+of annotations for each example (unilabeling).
+Figure 2 compares the reproducibility of differ-
+ent setups across time. Each subplot represents
+a choice of ( Q) scale (binary/Likert), and ( Q)aggregation (mean/majority-vote). We compare
+these setups across subplots, and within subplots
+compare ( Q) unilabeling and multilabeling. The
+choices of scale and aggregation appear to have lit-
+tle effect on the evaluation, with all combinations
+broadly stable across days, though Likert elicitation
+with mean aggregation is slightly more stable.
+Figure 3 compares the variance for all possible
+combinations. The choices of scale and aggrega-
+tion appear to have little effect, though the Likert
+scale with mean aggregation may have the lowest
+variance. The biggest impact comes from unil-
+abeling, which noticeably reduces the variance in
+comparison to multilabeling across all scenarios.
+This observation is consistent with previous work
+demonstrating the effectiveness of unilabeling for
+model training (Lin et al., 2014), but deviates from
+how annotations are often done in NLP (van der
+Lee et al., 2019). Our ﬁnding suggests that unilabel-
+ing is a promising strategy for model evaluation.
+Overall, unilabeling with Likert scales andmean
+aggregation appears most reliable among all con-
+ﬁgurations for ARC-DA, and therefore we use this
+conﬁguration in G . Moreover, for the main
+leaderboard evaluations we use 3–7 times more
+samples, and expect even less variation. Our analy-
+sis shows that these design choices provide a good
+starting point for reproducible experiments with
+conﬁdent estimates.
+5 Monitoring Annotation Quality
+Despite strict qualiﬁcation requirements, in our
+early experiments some annotators chose arbitrary
+labels after initially choosing correct ones. While
+a small percentage, these annotators complete a
+disproportionate share of tasks and signiﬁcantly im-
+pact evaluations. To solve this problem, we built a
+monitoring system with two components: automat-
+ically generated test questions and an unsupervised11447scoring model .
+Test Questions Because noisy annotators could
+favor marking examples as correct or incorrect, test
+questions need both positive andnegative examples.
+For positive examples, we replaced model predic-
+tions with gold responses. For negative examples,
+we cyclically permuted the gold generations, so
+no example was matched with its original. Thus,
+the negative examples look correct at a glance, but
+almost never are.
+Scoring Model Manually reviewing annotations
+can be time consuming and error prone, so we
+automate this process with a scoring model to in-
+fer if workers have acceptable accuracy. Proba-
+bilistic models of annotation have been richly stud-
+ied (Hovy et al., 2013; Passonneau and Carpen-
+ter, 2014; Paun et al., 2018). Much prior work
+uses worker agreement to identify noisy annotators.
+Since we use unilabeling (§4), workers annotate
+disjoint sets of examples and these methods are not
+applicable. Instead, we use a similar probabilistic
+model but applied to predict how often workers
+correctly answer the test questions. Such a model
+must be unsupervised , since new tasks won’t have
+identiﬁed noisy annotators, interpretable , since pa-
+rameters like conﬁdence thresholds must be set a
+priori, and sequential , so noisy annotators can be
+detected as soon as there is enough evidence.
+In our model, each worker, w, answersntest
+questions. The number of correctly answered test
+questions,X, is binomially distributed with mean
+P. EachPcomes from a mixture of betas prior.
+Thus, noisy and non-noisy annotators can be mod-
+eled with different mixture components.
+Z∼Categorical (θ,...,θ)
+P∼Beta(α,β)
+X∼Binomial (P,n)
+We compare two deﬁnitions of noisy annotators.
+Therate criterion deﬁnes them as workers with an
+accuracy (P) below a threshold ( 90%). The class
+criterion deﬁnes them as workers whose latent class
+(Z) corresponds to any mixture component be-
+sides the one with highest expected accuracy.
+We ﬁt the model parameters, θ,α,β, for mix-
+ture components i= 1,...k , with maximum likeli-
+hood via the EM algorithm (Dempster et al., 1977)for mixture models (Murphy, 2012). Then, we
+infer a posterior distribution for each worker’s ac-
+curacy (P) and latent class ( Z) given the number
+of questions they answered correctly ( X). Since
+the prior is a mixture of conjugate distributions,
+the posteriors have a closed-form (Diaconis and
+Ylvisaker, 1979).
+To adapt the Likert responses for this model, we
+binarize them at 0.5. Positive and negative test
+questions are modeled independently, and annota-
+tors are considered noisy if they are noisy on either.
+Since the difﬁculty of annotating different tasks
+varies, each G task is modeled separately. Fi-
+nally, to stabilize the EM algorithm and resulting
+parameter estimates, we augment the worker re-
+sponses with pseudo-data. See Appendix B.1 for
+the full technical details.
+Detecting Noisy Annotators for WMT21 To
+testG in a real-world scenario, we used it to
+evaluate the 24 systems submitted to WMT21 and
+several additional baselines on German-to-English
+translation (Akhbardeh et al., 2021). For the evalu-
+ations, the G leaderboards used 5% of exam-
+ples as positive and 5% as negative test questions.
+We manually reviewed test question statistics to
+identify and remove 5 noisy annotators from a pool
+of 88 (5.7%). As in our preliminary experiments,
+these noisy annotators represented a small fraction
+of annotators; however, we had previously found
+such annotators could annotate up to 50% of the
+HITs.By identifying and removing them, we
+prevented such a negative impact on our WMT
+evaluations.
+Simulation Study Even a fairly large real-world
+evaluation encounters only a few noisy annotators.
+So, we complement our WMT21 case study with
+simulations based on it, where we can run more
+trials and know the ground truth.
+We split the WMT21 annotations chronologi-
+cally into validation and test sets. The validation
+set was used during model development, while we
+evaluated the models by simulating 25 rounds of
+annotation based on the test set’s statistics.Simi-
+larly to the annotation models discussed in Karger
+et al. (2011), each worker was independently des-
+ignated as noisy and then assigned a rate at which11448they labeled test questions correctly. Based on the
+validation data’s statistics, for each round we drew
+the noisy annotator probability uniformly from 1–
+10%, and each annotator’s probability of being cor-
+rect uniformly between 0–50% for noisy annotators
+and 95–100% for the rest. The model predicted an-
+notators as noisy if the posteriors for ZandP
+assigned them at least 99% probability of being
+noisy annotators under the rate orclass criteria.
+We computed precision and recall across all the
+simulations, bucketing workers by how many test
+questions they answered.
+Table 1 shows the simulation results. In addition
+to varying the number of components ( k) in the
+learned priors, we also compared against uninfor-
+mative priors (the Jeffreys anduniform priors), and
+informative priors ( ﬁxed ). Noisy annotators lose
+the chance to answer additional test questions, thus
+it’s critical that models have high precision when
+marking workers as noisy. The uninformative pri-
+ors suffer from low precision, assigning too much
+probability to a worker being a noisy annotator.
+The informed and learned priors both perform well,
+with high precision and good recall—in some cases
+identifying almost all noisy annotators with fewer
+than 15 test questions. The learned priors have the
+additional advantage that they can adapt to different
+distributions by pooling information across anno-
+tators. Based on these results, the 2-component
+learned rate and class models have proven to be
+strong candidates for application.
+6 Automatically Managing Human
+Evaluation Leaderboards
+This section reviews the G system, which auto-
+mates much of the management of text generation
+leaderboards with human evaluations. While wenote that some human management, such as pro-
+viding support and handling disputes, should never
+be fully automated, G alleviates much of the
+overall burden. The next section (§7) describes its
+instantiation into the G leaderboards for four
+diverse text generation tasks.
+At a high level, the G system coordinates
+a leaderboard UI, data processing backend, and
+crowdsourcing campaigns on Amazon Mechani-
+cal Turk. After retrieving newly uploaded submis-
+sions, the backend computes automatic metrics.
+Upon success, the backend then creates annotation
+tasks on Amazon Mechanical Turk (AMT) using
+AMTI(A Mechanical Turk Inferface), an open-
+source Python package for working with AMT.
+Each leaderboard is a separate instance of the
+system, with its own crowdsourcing templates, in-
+cluding instructions, examples, and prompts (see
+§7). Following our observations in §4, all tem-
+plates use Likert scales which are then mapped to
+real-valued scores (cf. footnote 6) and averaged.
+The system also maintains a history of past an-
+notations (per-instance and per-worker), updating
+statistics after each evaluation. This has several
+immediate and future beneﬁts: worker statistics
+enable spam detection (§5), while the annotations
+can be used for future studies on human evaluation.
+These components enable the following features:
+Extensibility New tasks can be modularly added
+to the G system, creating new leaderboards.
+Each task requires a crowdsourcing template and a
+code object specifying how to push model predic-
+tions into and pull workers’ annotations from the
+crowdsourcing templates. We release an extensible
+open-source annotation template library,seeded
+with the four task templates used in this work.
+Uncertainty Quantiﬁcation To better inform
+model comparisons, we report scores with uncer-
+tainty estimates. Bootstrap resampling (samples
+with replacement from the observed annotations)
+provides the 95% conﬁdence intervals for the es-
+timated submission quality scores, as commonly
+done in machine translation (Koehn, 2004).
+Human Evaluations: Uncertainty vs Cost To
+balance conﬁdence with affordability, the system
+evaluates a subsample of the test sets. This subset
+is random, but ﬁxed to reduce the variance between11449model comparisons. Sentence-level tasks, such as
+translation of sentences, cost less to annotate per ex-
+ample. Depending on task difﬁculty, we adjust the
+pay rate per HIT such that we are paying workers at
+a higher rate than 15 USD per hour. For these tasks
+we annotate 800 instances at a cost of ∼$600 per
+submission (standard error <1.77%). For larger
+tasks, we evaluate 300 instances costing ∼$350
+per submission (standard error <2.89%).These
+evaluations are much larger than what was previ-
+ously done, e.g., 100 instances for MT in Ma et al.
+(2018) or around 100 instances for summarization
+(Kim et al., 2019; Hardy et al., 2019; Kryscinski
+et al., 2019; Fabbri et al., 2021).
+Automatic Metrics To supplement human eval-
+uations, we compute recent and popular automatic
+metrics for each task: METEOR (Banerjee and
+Lavie, 2005), ROUGE (Lin et al., 2006), BLEU (Pa-
+pineni et al., 2002), SacreBLEU (Post, 2018),
+BLEURT (Sellam et al., 2020) and BERTScore
+(Zhang et al., 2020b). Integrating these metrics
+into G enables researchers to examine their
+correlation with human judgments as well as ob-
+serving trends as more models are submitted.
+Quality Control To ensure annotation quality,
+annotators must pass strict qualiﬁcations require-
+mentsand task-speciﬁc qualiﬁcation tests based
+on a subset of the questions derived from the task’s
+training data. These tests check that the workers
+have carefully read the instructions and are comfort-
+able with annotating instances of the particular task.
+In addition, we replace 5% of examples with pos-
+itive and another 5% with negative test questions,
+which we analyze with the 2-component learned
+class model between submission evaluations, as
+described in §5. Accordingly, noisy annotations
+are excluded from results and annotators from the
+pool of eligible workers. Lastly, to eliminate vari-
+ability from evaluating at different times (weekend
+vs. weekdays, different work hours), we publish
+the AMT tasks on weekdays at 10am Paciﬁc Time.
+7 The G Leaderboards
+7.1 Tasks and Datasets
+We integrate in G datasets from four diverse
+text-generation tasks, representing longstanding
+challenges, as outlined below. We focus on English
+language datasets, mostly due to easy integration
+with crowdsourcing platforms. In the future, we
+hope to integrate other new datasets, particularly
+other languages. G is easily extensible; it
+uses community datasets and metrics via the open-
+source Datasets library.The templates for all
+tasks are exempliﬁed in Figure 4.
+Question Answering Given an input question
+about a given context, the system is expected to
+provide the answer in natural-language form. We
+use the ARC-DA dataset,which contains ques-
+tions about subjects from elementary-school sci-
+ence exams. See Figure 4 for an example.
+Commonsense Reasoning Given an input sce-
+nario, the task is to generate a plausible explana-
+tion, according to typical real-world human behav-
+ior and understanding. We use αNLG (Bhagavatula
+et al., 2020), a dataset for the conditional genera-
+tion task of explaining given observations in natural
+language. For evaluation, we use a template and
+instructions that are similar to those used by Bha-
+gavatula et al. (2020), as shown in Figure 4b.
+Machine Translation The task is to generate a
+translation in a target language given a text in a
+source language. Here we use the recent WMT19
+and WMT21 datasets with publicly available sys-
+tem outputs (Barrault et al., 2019; Akhbardeh et al.,
+2021).To ensure the generated text is evaluated
+by native speakers, we focus on German-to-English
+translation (DE-EN), and leave the expansion to11450
+other language pairs as future work. Importantly,
+WMT19 and WMT21 DE-EN test data only con-
+tain text that was originally in German (Barrault
+et al., 2019), avoiding overestimating the quality
+of translation systems due to translationese effects
+(Toral et al., 2018; Graham et al., 2019; Edunov
+et al., 2020). We follow the WMT human evalu-
+ation template to assess sentence-level translation
+quality against the reference (Barrault et al., 2019).
+The one difference is that, consistent with the other
+G tasks, we use a ﬁve-category Likert scale
+instead of a continuous one in WMT. See Figure 4c.
+Summarization The model is expected to gen-
+erate a summary of the key points mentioned in a
+given paragraph. Here we use XSUM (Narayan
+et al., 2018), a news summarization dataset. We
+chose XSUM over alternative datasets for text sum-
+marization (e.g., CNN/DM, Hermann et al., 2015)
+since the task involves more abstractive summaries
+and hence more difﬁcult to evaluate with existingautomatic metrics. For evaluating this task we use
+a template similar to that of Chaganty et al. (2018);
+Fabbri et al. (2021) and measure different aspects
+of quality (redundancy, ﬂuency, conciseness, etc.)
+that have traditionally been of interest (McKeown
+and Radev, 1995). See Figure 4d for an example.
+7.2 Evaluating G Baselines
+Here we evaluate several baseline models for each
+dataset using the G evaluation pipeline.
+Models We use models that are known to per-
+form strongly for each of our tasks. For all tasks
+but machine translation, we train and evaluate
+T5 (11B; Raffel et al., 2020), a powerful text-
+generation model that has shown promising results
+on a wide variety of text generation tasks.
+For WMT we evaluate other specialized models
+instead of T5, which is pre-trained only on En-
+glish (Raffel et al., 2020). For WMT21 DE-EN,
+we evaluate all publicly available shared task sub-11451
+missions (see footnote 17). Additionally, we train
+and evaluate four transformer-based baselines with
+varying sizes: G -large-6-6 (transformer large
+with a 6-layer encoder and a 6-layer decoder), G--base-6-6, G -base-3-3, and G -base-1-
+1.These models are trained solely on the given
+training data without ensembling, backtranslation,
+or any other data augmentation method, to support
+future research in low-compute settings.
+In addition to the above baselines we evaluate
+specialized baselines for each task. For αNLG,
+we evaluate an unsupervised baseline (Qin et al.,
+2020) based on GPT-2 (Radford et al., 2019). For
+summarization, we evaluate Pegasus (Zhang et al.,
+2020a). For ARC-DA, we evaluate a ﬁne-tunedversion of UniﬁedQA (Khashabi et al., 2020).
+Results The results are summarized in Table 3.
+The human judgment scores for each task are calcu-
+lated with our described pipeline (§6). Even though
+we have evaluated strong baselines for each task,
+the machine responses are far from what human
+judges consider perfect. In the WMT21 task, the
+transformer baselines are ranked in the expected
+order: large-6-6, base-6-6, base-3-3, followed by
+base-1-1. These results support the validity of our
+evaluations. We defer any further study of the cor-
+relations between human judgments and automatic
+metrics for future work since such a study would
+require more models to be evaluated.
+8 Limitations
+As with other works which deal with human an-
+notation, the results generated via our evaluation
+framework will have inherent variability. While
+we tried to mitigate sources of variation in various
+ways (see §5,6), some are bound to remain and
+are hard to account for. These include, for exam-
+ple, selection bias in the pool of annotators that
+choose to work on our tasks, who may come from
+speciﬁc countries and social status and select for
+certain tasks and their templates. We welcome fu-
+ture evolution of all parts of the G architecture,
+including its evaluation metrics.
+9 Conclusion and Future Work
+We introduce G , a uniﬁed approach to human-
+in-the-loop evaluation of text generation over a
+wide set of text generation tasks. G is open for
+use and will be adapted based on future adoption.
+We encourage submissions from all researchers
+interested in text generation models.
+Acknowledgments
+The authors would like to thank the leaderboard
+team at Allen Institute for AI, particularly Michal
+Guerquin and Sam Skjonsberg. We thank Peter
+Clark, Oyvind Tafjord and Daniel Deutsch for valu-
+able feedback throughout this project. We are
+grateful to the many AMT workers whose contribu-
+tions make human evaluation possible, and to the
+anonymous reviewers for their helpful feedback on
+this manuscript. This work was supported in part
+by DARPA MCS program through NIWC Paciﬁc
+(N66001-19-2-4031) and research grant 2336 from
+the Israeli Ministry of Science and Technology.11452References114531145411455A Details on Model Engineering
+Here we summarize the experimental details for
+building the models used in §7.2.
+T5 models. For various datasets (except WMT
+which requires a multi-lingual model) we trained
+T5 models of different sizes: 11 billion parame-
+ters (11B) and 3 billion parameters (3B). We used
+the default hyperparameters on these frameworks:
+token-limits of size 512 and 100 for inputs and
+outputs sequences, respectively; learning rates of
+1e-3 and batch sizes of 8. The models were trained
+for100ksteps on v3-8 TPUs which took about 24
+hours to ﬁnish, on average. The checkpoint with
+the highest score on the dev set of each task was
+selected for evaluation.
+G WMT models. Tables 4 and 5 list hyper-
+parameters for our G transformer baselines.
+BPE with 32K operations is applied jointly to Ger-
+man and English text. All embeddings are shared.
+B Monitoring Annotation Quality
+This appendix provides details on model construc-
+tion and evaluation for §5.
+B.1 Modeling
+Allratemodels used P= 0.9as the threshold for
+deﬁning a noisy annotator. All class models used
+the mixture component with highest average accu-
+racy to deﬁne non-noisy annotators. Workers were
+marked as noisy if the model assigned more than
+99% probability to them being so. For reproducibil-
+ity, we set Python and NumPy’s random seeds to 0
+at the beginning of our experiments.
+Uninformative Priors Both uninformative pri-
+ors had one beta mixture component. The Jeffreys
+model used a Jeffreys prior, or Beta(,). The
+uniform model used a uniform prior, or Beta(1,1).
+Informative Priors The 1-component ﬁxed rate
+model had one beta mixture component with pa-
+rametersα= 4andβ= 1. Both the 2-component
+ﬁxed rate model and the 2-component ﬁxed class
+model had two mixture components with proba-
+bilities 0.05and0.95and parameters α= 0.5,
+β= 4.5andα= 9.5,β= 0.5.
+Learned Priors The learned prior models were
+all ﬁt via the EM algorithm, as described below,
+and we tried 1 and 2 components for the rate model
+and 2 components for the class model.
+Optimization To stabilize the EM algorithm and
+regularize the parameter estimates, we augmented
+with pseudo-data. To the data, we added 40 pseudo-
+workers, each completing 20 tasks: 36 annotators
+with 19 successes, and four noisy annotators with
+1, 1, 5, and 10 successes, respectively. The EM
+algorithm was run with 10 initializations, each
+with up to 1,000 iterations and relative tolerance of
+1e−6for stopping. Components were initialized
+with equal mixture probabilities, uniformly random
+means from 0 to 1, and concentration parameters11456drawn from a gamma distribution with a shape pa-
+rameter of 2. Beta mixture components were ﬁt
+using the Dirichlet-multinomial ﬁxed point iterator
+from Minka (2000), 10,000 iterations and a relative
+tolerance of 1e−7.
+B.2 Evaluation
+For evaluation, we simulated 25 rounds of annota-
+tion. In each round, the number of test questions
+were the counts from the test set of annotations,
+a ﬁxed noisy annotator rate was drawn uniformly
+from 1%to10%, a mean and concentration param-
+eter for the beta distribution of noisy annotator’s
+success probabilities was respectively drawn uni-
+formly from 0to0.5and5to50, and a mean and
+concentration parameter for the beta distribution
+of regular annotator’s success probabilities was re-
+spectively drawn uniformly from 0.95to1and100
+to1,000. Each worker was assigned a noisy or
+regular annotator label and accordingly a success
+probability, then successes and failures were bino-
+mial distributed.
+C Standard Error
+Standard error quantiﬁes the variability of an es-
+timate, ˆθ. Mathematically, the standard error is
+the estimate’s standard deviation (as opposed to
+the standard deviation of a single sample). Often,
+the estimate is an average of multiple, independent
+samples, in which case the standard error is:
+σ√n
+wherenis the number of samples and σis the
+standard deviation of a single sample. When the
+estimate is an average, it’s approximately normally
+distributed due to the central limit theorem, mak-
+ingˆθ±1.96an approximate 95% conﬁdence
+interval.
+The Bhatia-Davis inequality (Bhatia and Davis,
+2000) bounds the variance of a random variable in
+terms of its upper bound, M, lower bound, m, and
+expectation, µ:
+σ≤(M−µ)(µ−m)
+Since the scores from our annotators are bounded
+between 0 and 1, the maximum standard deviation
+for any of them is 0.5. Moreover, if a model’s score
+is0.8on average, then the maximum standard devi-
+ation for its annotations is/radicalbig
+(1−0.8)(0.8−0) =0.4. Dividing by√ntranslates these into bounds
+on the worst-case standard error of our estimates:
+StandardError≤/radicalbigg
+µ(1−µ)
+n,
+whereµis the expected score.1145711458

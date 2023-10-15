@@ -1,1 +1,769 @@
-9141 Proceedings of the 61st Annual Meeting of the Association for Computational Linguistics Volume 1 : Long Papers , pages 9141–9154 July 9 - 14 , 2023 © 2023 Association for Computational Linguistics 9142 9143 9144 9145 9146 9147 9148 9149 9150 9151 9152 9153 9154 
+
+Jianfei Yu, Ziyan Li, Jieming Wang and Rui Xia
+School of Computer Science and Engineering,
+Nanjing University of Science and Technology, China
+{jfyu, zyanli, wjm, rxia}@njust.edu.cn
+Abstract
+In recent years, Multimodal Named Entity
+Recognition (MNER) on social media has at-
+tracted considerable attention. However, ex-
+isting MNER studies only extract entity-type
+pairs in text, which is useless for multimodal
+knowledge graph construction and insufficient
+for entity disambiguation. To solve these is-
+sues, in this work, we introduce a Grounded
+Multimodal Named Entity Recognition (GM-
+NER) task. Given a text-image social post,
+GMNER aims to identify the named entities
+in text, their entity types, and their bounding
+box groundings in image (i.e., visual regions).
+To tackle the GMNER task, we construct a
+Twitter dataset based on two existing MNER
+datasets. Moreover, we extend four well-known
+MNER methods to establish a number of base-
+line systems and further propose a Hierarchical
+Index generation framework named H-Index,
+which generates the entity-type-region triples
+in a hierarchical manner with a sequence-to-
+sequence model. Experiment results on our
+annotated dataset demonstrate the superiority
+of our H-Index framework over baseline sys-
+tems on the GMNER task. Our dataset anno-
+tation and source code are publicly released at
+https://github.com/NUSTM/GMNER .
+1 Introduction
+Fueled by the rise of phones and tablets with cam-
+era functions, user posts on social media platforms
+such as Twitter are increasingly multimodal, e.g.,
+containing images in addition to text. The explo-
+sive growth of multimodal posts is far beyond hu-
+mans’ capability to digest them. Hence, it presents
+a pressing need for automatically extracting im-
+portant information such as entities and relations
+from the large amount of multimodal posts, which
+is crucial for structured knowledge graph construc-
+tion to help people efficiently understand massive
+Figure 1:
+content. As an emerging subtask for multimodal
+knowledge graph construction (Liu et al., 2019),
+Multimodal Named Entity Recognition (MNER)
+on social media has recently attracted increasing
+attention (Zhang et al., 2018; Moon et al., 2018).
+Given a text-image social post, MNER aims to rec-
+ognize named entities in text and classify them into
+pre-defined types such as person (PER), location
+(LOC), and organization (ORG).
+Most previous studies formulate the MNER task
+as a sequence labeling problem, which focus on
+(1) designing effective attention mechanisms to
+model the vision-language interaction to obtain
+vision-aware word representations (Lu et al., 2018;
+Yu et al., 2020; Zhang et al., 2021a; Chen et al.,
+2022b) or (2) converting the images into the tex-
+tual space by generating image captions and object
+tags (Chen et al., 2021b; Wang et al., 2022a). In-
+spired by the success of applying the machine read-
+ing comprehension (MRC) framework in NER (Li
+et al., 2020b), several recent works formalize the
+MNER task as a MRC problem, which extract en-
+tities by answering queries about entity types (Jia
+et al., 2022, 2023).
+However, existing MNER studies mainly regard
+the visual features as additional clues to help en-
+hance the performance of the text-only NER task,
+which suffer from several limitations. First, as
+shown in Fig. 1, previous MNER works only ex-9141tract entity-type pairs in text, but failing to link the
+entities to their corresponding bounding boxes in
+image. The extracted entity-type pairs are solely
+useful for constructing text-only knowledge graph
+rather than multimodal knowledge graph. More-
+over, only identifying entity-type pairs in text is
+often insufficient for entity disambiguation. For
+example, in Fig. 1, without the grounded yellow
+bounding box, it is hard to infer the ( Michael Jor-
+dan,PER) pair refers to the professor in UC Berke-
+ley rather than the famous basketball player.
+To address these issues, in this paper, we propose
+a new task named Grounded Multimodal Named
+Entity Recognition (GMNER), aiming to extract
+the named entities in text, their entity types, and
+their bounding box groundings in image. Given the
+example in Fig. 1, the goal is to extract three entity-
+type-region multimodal triples, i.e., ( Michael Jor-
+dan,PER,yellow box ), (the Fields Institute ,ORG ,
+blue box ) and ( Toronto ,LOC ,None ). GMNER
+presents the following challenges: (1) apart from
+extracting entity-type pairs, it requires predicting
+whether each entity has a grounded region in im-
+age; (2) for entities with visually grounded regions,
+it needs to locate its corresponding bounding box
+groundings (i.e., visual regions).
+To tackle the GMNER task, we first construct
+a Twitter dataset based on two benchmark MNER
+datasets, in which we manually annotate the bound-
+ing box groundings for each entity-type pair la-
+beled by the two datasets. With the new dataset,
+we benchmark the GMNER task by establishing
+a number of baseline systems based on four well-
+known MNER methods. Furthermore, inspired by
+the success of the index generation framework in
+the NER task (Yan et al., 2021), we formulate the
+GMNER task as a multimodal index generation
+problem by linearizing all the entity-type-region
+triples into a position index sequence. We then pro-
+pose a Hierarchical Index generation framework
+named H-Index, aiming to address the aforemen-
+tioned two challenges of GMNER in a hierarchical
+manner. Specifically, a pre-trained sequence-to-
+sequence model BART (Lewis et al., 2020) is first
+employed to encode the textual and visual inputs to
+generate a set of triples, which contain the indexes
+of entity positions, entity types, and groundable
+or ungroundable indicators. Moreover, for ground-
+able entities, we further stack a visual output layer
+to predict the distribution over candidate visual
+regions for entity grounding.The main contributions of our work can be sum-
+marized as follows:
+•We introduce a new task named Grounded Mul-
+timodal Named Entity Recognition (GMNER),
+which aims to extract all the entity-type-region
+triples from a text-image pair. Moreover, we
+construct a Twitter dataset for the task based on
+two existing MNER datasets.
+•We extend four well-known MNER methods to
+benchmark the GMNER task and further pro-
+pose a Hierarchical Index generation framework
+named H-Index, which generates the entity-type-
+region triples in a hierarchical manner.
+•Experimental results on our annotated dataset
+show that the proposed H-Index framework per-
+forms significantly better than a number of uni-
+modal and multimodal baseline systems on the
+GMNER task, and outperforms the second best
+system by 3.96% absolute percentage points on
+F1 score.
+2 Task Formulation
+Given a multimodal input containing a piece of text
+withnwords s=(s, . . . , s)and an accompany-
+ing image v, the goal of our Grounded Multimodal
+Named Entity Recognition (GMNER) task is to
+extract a set of multimodal entity triples:
+Y={(e, t, r), . . . , (e, t, r)},(1)
+where (e, t, r)denotes the i-th triple, eis one of
+the entities in text, trefers to the type of ewhich
+belongs to four pre-defined entity types including
+PER,LOC ,ORG , and MISC , and rdenotes the
+visually grounded region of entity e. It is worth
+noting that if there is no grounded region of en-
+titye,risNone ; otherwise, rconsists of a 4-D
+spatial feature containing the top-left and bottom-
+right positions of the grounded bounding box, i.e.,
+(r, r, r, r).
+3 Dataset
+Since there was no available corpus for the GM-
+NER task, we construct a Twitter dataset as follows.
+Data Collection. Our dataset is built on two
+benchmark MNER datasets, i.e., Twitter-15 (Zhang
+et al., 2018) and Twitter-17 (Yu et al., 2020), which
+have already annotated all the entities and their
+types for each multimodal tweet. To alleviate the
+annotation difficulty, we filter samples with missing
+images or with more than 3 entities belonging to9142
+the same type, and then merge the remaining 12K+
+samples as our raw dataset for annotation.
+Bounding Box Annotation. We employ three
+graduate students to independently annotate the
+grounded regions (i.e., bounding boxes) for each
+labeled entity based on a widely-used image anno-
+tation tool named LabelImg. Fleiss Kappa (Fleiss,
+1971) is adopted to measure the annotation agree-
+ment. Note that if the Intersection over Union (IoU)
+score between two annotations is larger than 0.5,
+we regard them as consistent annotations. The
+Fleiss score between three annotators is K= 0.84,
+indicating a substantial annotation agreement. To
+ensure the quality of our dataset, we remove sam-
+ples in which the IoU score between annotations
+is less than 0.5. Finally, we obtain 10,159 samples
+and randomly select 10K samples as our Twitter-
+GMNER dataset, followed by averaging the three
+annotations as the ground-truth bounding box an-
+notation for each sample.
+Dataset Analysis. Following Moon et al. (2018),
+we divide our dataset into train (70%), validation
+(15%), and test sets (15%). As shown in Table 1,
+our dataset contains 16,778 entities and around
+60% entities do not have a grounded bounding box.
+For the remaining 6,716 groundable entities, we
+manually annotate a total of 8,090 bounding boxes,
+which indicates that each entity may correspond to
+more than one bounding box.
+In Table 2, we compare our dataset with six NER
+datasets for social media. WNUT16 (Strauss et al.,
+2016) and WNUT17 (Derczynski et al., 2017) are
+two text-only NER datasets released at the 2nd
+and 3rd Workshop on Noisy User-generated Text.
+Twitter-Snap, Twitter-15, and Twitter-17 are three
+benchmark MNER datasets released by Lu et al.
+(2018), Zhang et al. (2018), and Yu et al. (2020), re-
+spectively. WikiDiverse is a new dataset introduced
+by Wang et al. (2022b). Compared with existing
+datasets, our dataset contains more annotated sam-
+ples (i.e., 10K) and is the first dataset containing
+both textual and visual annotations.
+Fig. 2 (left) shows the distribution of the number
+of bounding boxes in each sample. We can observe
+that the image in 44.2% samples is unrelated to any
+entity mentioned in text, whereas 41.8% samples
+only contain one bounding box and around 14.0%
+samples contain two or more bounding boxes. This
+indicates the necessity and challenge of achieving
+text-image and entity-image alignments for GM-
+NER. In Fig. 2 (right), we show that most enti-
+ties with the PER type are grounded in the image,
+whereas entities with the other three types (espe-
+cially LOC ) are usually not grounded in the image.
+4 Methodology
+In this section, we present the details of our pro-
+posed Hierarchical Index generation (H-Index)
+framework.
+Overview. As illustrated in Fig. 3, H-Index for-
+mulates the GMNER task as an index generation
+problem, which resorts to a pre-trained sequence-
+to-sequence model BART (Lewis et al., 2020) to
+encode the textual and visual inputs, followed
+by decoding the indexes of entities, types, and
+groundable or ungroundable indicators. For en-
+tities with groundable indicators, another output
+layer is added to predict the distribution over visual
+regions for entity grounding.
+4.1 Feature Extraction
+Text Representation. Given the input text s=
+(s, . . . , s), we feed it to the embedding matrix9143
+of BART to obtain the text representation as T=
+{e, . . . ,e}, where e∈R.
+Visual Representation. Given the input image
+v, we employ a widely-adopted object detection
+method VinVL (Zhang et al., 2021b) to identify all
+the candidate objects (i.e., visual regions). After
+ranking these objects based on their detection prob-
+abilities, we keep the top- Kobjects and extract the
+mean-pooled convolutional features from VinVL
+to obtain fixed-size embeddings for visual regions,
+denoted by R={r, . . . ,r}, where r∈R
+is the representation of the i-th region. We then use
+a linear layer to transform Rinto the same dimen-
+sion of text, and thus the regional representation is
+denoted as V={v, . . . ,v}, where v∈R.
+4.2 Design of Multimodal Indexes
+As mentioned before, the GMNER task requires ex-
+tracting three kinds of information, including entity
+mentions in text, entity types, and visual regions in
+image. To project these different information into
+the same output space, we draw inspiration from
+the NER task (Yan et al., 2021) and use unified
+position indexes to pointing to these information.
+Specifically, we can infer from Table 1 that
+around 60% entities do not have grounded visual
+regions in image, which indicates the correct pre-
+diction of the relevance between entities and im-
+ages is essential to entity grounding. Thus, we
+first transform the entity-image relation into two
+indexes (i.e., 1and2in the left of Fig. 3) to indicatewhether each entity is groundable or ungroundable.
+Next, we use four indexes (i.e., 3to6) to refer to
+four entity types. Because the input text sis a se-
+quence with nwords, we directly use nposition
+indexes starting from 7to refer to each word in s.
+For example, given the textual and visual inputs
+in Fig. 3, its output index sequence contains three
+entity-relation-type triples. The first triple [7,8,1,3]
+refers to { Michael Jordan ,groundable ,PER}, the
+second triple [12,2,4] denotes { Toronto ,unground-
+able,LOC }, and the third triple [19,20,21,1,5]
+refers to { the Fields Institute ,groundable ,ORG }.
+Formally, let us use yto denote the output index
+sequence.
+4.3 Index Generation Framework
+Given a multimodal input, we employ a sequence-
+to-sequence model BART (Lewis et al., 2020) to
+generate the output index sequence y.
+Encoder. We first feed the concatenation of text
+and visual representations to the BART encoder to
+obtain the hidden representation as follows:
+H= [H;H] =Encoder ([T;V]),(2)
+where H∈RandH∈Rare textual
+and visual parts of H∈R, respectively.
+Decoder. At the i-th time step, the decoder takes
+Hand the previous decoder output yas inputs9144to predict the output probability distribution p(y):
+h=Decoder (H;y), (3)
+¯H=/parenleftbig
+T+MLP (H)/parenrightbig
+/2, (4)
+p(y) =Softmax ([C;¯H]·h), (5)
+where MLP refers to a multi-layer perceptron, C
+=TokenEmbed (c)refers to the embeddings of two
+indicator indexes, four entity type indexes, and
+special tokens such as the “end of sentence” token
+</s> , and·denotes the dot product.
+The cross entropy loss is used to optimize the
+parameters of the generative model as follows:
+L=−1
+NM/summationdisplay/summationdisplaylogp(y), (6)
+where NandMrefer to the number of samples and
+the length of output index sequence, respectively.
+4.4 Entity Grounding
+Lastly, for groundable entities, we further stack
+another output layer to perform entity grounding.
+Specifically, let us use hto refer to the time
+step whose predicted index is the groundable indi-
+cator (i.e., index 1). We then obtain the probability
+distribution over all the visual regions from VinVL,
+denoted by p(z)as follows:
+¯H=/parenleftbig
+V+MLP (H)/parenrightbig
+/2, (7)
+p(z) =Softmax (¯H·h). (8)
+Region Supervision. As shown in the top of
+Fig. 3, since the visual regions from VinVL are dif-
+ferent from the ground-truth (GT) bounding boxes,
+we first compute the overlap between visual regions
+and GT bounding boxes based on their Intersection
+over Union (IoU) scores. Note that for each visual
+region, we compute its IoU scores with respect to
+all GT bounding boxes of a given entity and take
+the maximum value as its IoU score. Moreover, for
+visual regions whose IoU score is less than 0.5, we
+follow the practice in visual grounding (Yu et al.,
+2018b) by setting its IoU score as 0. Next, we re-
+normalize the IoU score distribution as the region
+supervision for a given entity, denoted by g(z).
+The objective function of entity grounding is to
+minimize the Kullback-Leibler Divergence (KLD)
+loss between the predicted region distribution p(z)
+and the region supervision g(z)：
+L=1
+NE/summationdisplay/summationdisplayg(z) logg(z)
+p(z),(9)Algorithm 1 Our Entity-Groundable/Ungrounable-
+Type Triple Recovery Algorithm
+Input: Predicted sequence ˆy= [ˆy, ...,ˆy]and
+ˆy∈[1, n+|c|], where cis the list of two
+indicator indexes, four entity type indexes, and
+special tokens.
+Output: Triples EE={}, e= [], i= 1while i <=ldo y=Y[i] ify<|c|then iflen(e)>0then ifindexes in e is ascending then ify= 1ory= 2then E.add (e, c, c) end if end if end if e= [] i=i+ 2 else e.append (y) end if i=i+ 1end whilereturn E
+where Eis the number of groundable entities.
+In the training stage, we combine LandLas
+the final loss of our H-Index model:
+L=L+L. (10)
+4.5 Entity-Type-Region Triple Recovery
+In the inference stage, given a multimodal input, we
+use the trained H-Index model to generate the index
+sequence ˆyin an autoregressive manner based on
+greedy search, and predict the region distribution
+p(ˆz)for the k-th groundable entity.
+With the output index sequence, we can first
+convert each index to its original meaning and then
+recover ( entity ,groundable/ungroundable ,type)
+triples based on the index span of each element.
+The full algorithm is shown in Algorithm 1.
+For the j-th ungroundable entity, the predicted
+triple is ( e, t,None ). For the k-th groundable
+entity, we regard the visual region with the highest
+probability in p(ˆz)as the predicted bounding box,
+and take its 4-D coordinates r= (x, y, x, y)
+as the visual output. Thus, the predicted triple of
+thek-th groundable entity is ( e, t, r).91455 Experiments
+5.1 Experimental Settings
+For our proposed framework H-Index, we employ
+the pre-trained VinVL model released by (Zhang
+et al., 2021b) to detect top- Kvisual regions, and
+use the pre-trained BARTmodel from (Lewis
+et al., 2020) to initialize the parameters in the index
+generation framework in Section 4.3. Hence, the
+hidden dimension dis set to the default setting 768.
+The batch size and training epoch are set to 32
+and 30, respectively. During training, we use the
+AdamW optimizer for parameter tuning. For the
+learning rate and the number of candidate visual
+regions K, we set their values to 3e-5 and 18 after
+a grid search over the combinations of [1e-5, 1e-4]
+and [2, 20] on the development set.
+Evaluation Metrics. The GMNER task involves
+three elements, i.e., entity, type, and visual region.
+For entity and type, we follow previous MNER
+works to use the exact match for evaluation (Zhang
+et al., 2018). For visual region, if it is unground-
+able, the prediction is considered as correct only
+when it is None ; otherwise, the prediction is consid-
+ered as correct only when the IoU score between
+the predicted visual region and one of the ground-
+truth (GT) bounding boxes is large than 0.5 (Mao
+et al., 2016). The correctness of each element is
+computed as follows:
+C/C=/braceleftbigg1, p/p=g/g;
+0, otherwise .(11)
+C=
+
+1, p=g=None ;
+1,max( IoU, ...,IoU)>0.5;
+0, otherwise .(12)
+where C,C, and Cdenote the correctness of
+entity, type, and region predictions, p,p, andp
+denote the predicted entity, type, and region, g,g,
+andgdenote the gold entity, type, and region, and
+IoUdenotes the IoU score between the predicted
+region pwith the j-th GT bounding box g. We
+then calculate precision (Pre.), recall (Rec.), and
+F1 score to measure the performance of GMNER:
+correct =/braceleftbigg1, CandCandC;
+0, otherwise .(13)
+Pre=#correct
+#predict, Rec =#correct
+#gold, (14)
+F1 =2×Pre×Rec
+Pre+Rec, (15)where #correct denotes the number of predicted
+triples that match the gold triples, and #predict and
+#gold are the number of predicted and gold triples.
+5.2 Baseline Systems
+Since GMNER is a new task and there is no existing
+method for comparison, we first consider several
+text-only methods as follows:
+•HBiLSTM-CRF-None , which uses the hierar-
+chical BiLSTM-CRF model (Lu et al., 2018)
+to extract entity-type pairs, followed by setting
+the region prediction to the majority class, i.e.,
+None ;
+•BERT-None ,BERT-CRF-None , and BARTNER-
+None , which replace the hierarchical BiLSTM-
+CRF model in HBiLSTM-CRF-None with
+BERT (Devlin et al., 2019), BERT-CRF, and
+BARTNER (Yan et al., 2021), respectively.
+Moreover, we develop a pipeline approach as
+a strong baseline, which first uses any previous
+MNER method to extract entity-type pairs and then
+predicts the bounding box for each pair with an
+Entity-aware Visual Grounding (EVG) model.
+Specifically, given the i-th extracted entity-type
+pair(e, t)from existing MNER methods as well
+as the textual input s, we construct the textual input
+as follows: [[CLS] ,s,[SEP] , e,[SEP] , t,[SEP]] ,
+which is fed to a pre-trained BERTmodel (De-
+vlin et al., 2019) to obtain the text representation
+T. We then use the feature extraction method in
+Section 4.1 to obtain the visual representation V.
+Next, a Cross-Model Transformer layer (Tsai et al.,
+2019) is utilized to model the interaction between
+the text and visual representations as follows: H=
+CMT (V,T,T), where VandTare regarded as
+queries and keys/values, and H={h, . . . ,h}
+is the generated hidden representation. For each
+visual region h∈R, we add an output layer to
+predict whether it is the grounded region of (e, t):
+p(y)=sigmoid (wh), where w∈Ris the
+weight matrix. During inference, we choose the
+visual region with the highest probability. If the
+probability is higher than a tuned threshold, it im-
+plies the input entity-type pair is groundable and
+the predicted region is the top visual region; other-
+wise, the prediction region is None .
+As shown in Table 3, we stack the EVG model
+over four well-known MNER methods as follows:
+•GVATT-RCNN-EVG , which uses GV ATT (Lu
+et al., 2018), a visual attention method based on9146
+the BiLSTM-CRF model (Lample et al., 2016),
+to extract entity-type pairs, followed by apply-
+ing the EVG model based on the objects de-
+tected by Faster R-CNN (Anderson et al., 2018);
+•UMT-RCNN-EVG , which replaces the MNER
+method in GVATT-RCNN-EVG with UMT (Yu
+et al., 2020), a Multimodal Transformer ap-
+proach with an auxiliary entity span detection
+task. UMT-VinVL-EVG is a variant of UMT-
+RCNN-EVG , which replaces Faster R-CNN with
+VinVL;
+•UMGF-VinVL-EVG is a variant of UMT-VinVL-
+EVG using UMGF (Zhang et al., 2021a) for
+MNER, which models text-image interactions
+with a multimodal graph fusion network;
+•ITA-VinVL-EVG is another variant of UMT-
+VinVL-EVG using ITA (Wang et al., 2022a) for
+MNER, which translates images to captions and
+object tags, followed by sequence labeling.
+•BARTMNER-VinVL-EVG is a variant of our H-
+Index approach, which first uses the index gener-
+ation framework in Section 4.3 to identify entity-
+type pairs, and then uses the EVG model to pre-
+dict the grounded bounding box for each pair.
+5.3 Main Results
+In Table 3, we show the results of different methods
+on the GMNER task. To better compare these meth-
+ods, we also report the F1 score of two subtasks
+of GMNER, including MNER and Entity Extrac-
+tion & Grounding (EEG). Note that MNER aims
+to identify the entity-type pairs whereas EEG aims
+to extract the entity-region pairs.
+Results on GMNER. First, for text-based meth-
+ods, it is clear that BARTNER-None significantly
+outperforms the other methods, which shows the
+effectiveness of the index generation frameworkand agrees with the observation in existing NER
+works (Yan et al., 2021). Second, all the multi-
+modal approaches consistently perform much bet-
+ter than text-based methods. This indicates the
+usefulness of our proposed Entity-aware Visual
+Grounding (EVG) baseline. Third, comparing
+all the multimodal baseline systems, BARTMNER-
+VinVL-EVG obtains the best result, primarily due to
+its outstanding performance on the MNER subtask.
+Finally, we can clearly observe that our proposed
+H-Index framework outperforms the best baseline
+BARTMNER-VinVL-EVG by 3.96 absolute percent-
+age points based on F1 score. The main reason for
+the performance gain is that all the baseline sys-
+tems extract entity-types pairs followed by visual
+grounding, which suffer from the common error
+propagation issue of pipeline methods. In contrast,
+H-Index uses the unified index generation frame-
+work to directly generate the entity-type-region
+triples with a sequence-to-sequence model.
+Results on MNER and EEG. First, for the
+MNER subtask, we can see that our H-Index frame-
+work performs generally better than most base-
+lines but worse than BARTMNER-VinVL-EVG . We
+conjecture the reason is that all the baselines are
+pipeline methods and should achieve the best per-
+formance on each stage, whereas our H-Index
+model is an end-to-end approach for entity-type-
+region triple extraction, which may only obtain the
+sub-optimal model on the MNER task. In addition,
+for the EEG subtask, H-Index significantly outper-
+forms the best baseline by 5.44 absolute percentage
+points. These observations verify the effectiveness
+of our H-Index framework.
+5.4 In-Depth Analysis
+Ablation Study. In Table 5, we conduct ablation
+study of our H-Index framework. First, we replace9147
+the KLD loss in Equation (9) with the cross-entropy
+loss. We find that the performance slightly drops,
+indicating that the KLD loss can better capture
+the relations between different visual regions for
+region detection. Moreover, we remove the hierar-
+chical prediction of the groundable/ungroundable
+indicator in Section 4.3 and entity grounding in
+Section 4.4. Specifically, we use a special token
+to indicate whether the current time step in the de-
+coder is for visual grounding, and then add a binary
+classification layer for each visual region, which
+is the same as the EVG baseline. As shown in Ta-
+ble 5, removing the hierarchical prediction leads to
+a performance drop of 2.09 percentage points.
+Sensitivity Analysis of K.We use our H-Index
+model and BARTMNER-VinVL-EVG to analyze the
+impact of the number of object regions from VinVL
+on GMNER and EEG tasks. In Fig. 4, we can find
+the two methods gradually perform better as Kbe-
+comes larger. This is because when Kis small, the
+top-Kregions from VinVL may not cover ground-
+truth visual regions. When Kequals to 18, the two
+methods consistently achieve the best performance.
+5.5 Case Study
+We further conduct case study to compare the pre-
+dictions of UMT-RCNN-EVG ,BARTMNER-VinVL-
+EVG , and H-Index on two test samples in our
+dataset. In Table 4.a, we find that all the methods
+correctly identify the three entity-type pairs. How-
+ever, UMT-RCNN-EVG is confused with the two
+PER entities and wrongly predicts their grounded
+regions, while BARTMNER-VinVL-EVG fails to
+identify the grounded region of Rose Byrne . In
+contrast, our H-Index model correctly identifies the
+bounding box groundings for the two PER entities.
+Similarly, in Table 4.b, the two baselines fail to
+identify either the correct entity type or the correct
+bounding box of Loki, whereas H-Index correctly
+grounds Loki onto the visual region with the dog,
+and predicts its type as MISC .
+6 Related Work
+NER on Social Media. Many supervised learn-
+ing methods have achieved satisfactory results on
+formal text (Li et al., 2020a), including feature en-
+gineering methods (Finkel et al., 2005; Ratinov and
+Roth, 2009) and deep learning methods (Chiu and
+Nichols, 2016; Ma and Hovy, 2016). However,
+most of them perform poorly on social media, be-
+cause the text on social media is often informal
+and short. To handle this problem, many social
+text-based features such as hashtags (Gimpel et al.,
+2010) and freebase dictionary (Ritter et al., 2011)
+are designed to enhance the performance of both
+feature-based methods (Baldwin et al., 2015) and
+deep learning methods (Limsopatham and Collier,
+2016; Gerguis et al., 2016; Lin et al., 2017; Suman
+et al., 2021).
+Multimodal NER on Social Media. With the9148rapid growth of multimodal posts on social me-
+dia, MNER has recently attracted much attention.
+Most existing MNER methods focus on modeling
+the text-image interactions by designing various
+kinds of cross-modal attention mechanism (Moon
+et al., 2018; Lu et al., 2018; Zheng et al., 2020).
+With the recent advancement of deep learning tech-
+niques, many studies focus on designing different
+neural networks for MNER, including Transformer-
+based methods (Sun et al., 2021; Xu et al., 2022;
+Chen et al., 2022a; Jia et al., 2023), Graph Neural
+Network-based methods (Zhang et al., 2021a; Zhao
+et al., 2022), Modality Translation-based meth-
+ods (Chen et al., 2021b; Wang et al., 2022a), and
+Prompt-based models (Wang et al., 2022c). Despite
+obtaining promising results, these methods solely
+utilize the visual clues to better extract entity-type
+pairs. In contrast, the goal of our work is to extract
+entity-type-region triples from each multimodal
+post.
+Visual Grounding. Given a natural language
+query, Visual Grounding (VG) aims to locate the
+most relevant object or region in an image. Most ex-
+isting works on VG belong to two categories, i.e.,
+one-stage methods and two-stage methods. The
+former focuses on utilizing recent end-to-end ob-
+ject detection models such as YOLO (Redmon and
+Farhadi, 2018) and DETR (Carion et al., 2020) to
+directly predict the visual region (Yang et al., 2019;
+Deng et al., 2021; Ye et al., 2022). The latter aims
+to first leverage object detection models (Ren et al.,
+2015; Zhang et al., 2021b) to obtain region propos-
+als and then rank them based on their relevance to
+the text query (Yu et al., 2018a; Yang et al., 2020;
+Chen et al., 2021a). Our work follows the latter line
+of methods, which detects candidate visual regions
+with VinVL, followed by entity grounding.
+7 Conclusion
+In this paper, we introduced a new task named
+Grounded Multimodal Named Entity Recognition
+(GMNER), aiming to identify the named entities,
+their entity types, and their grounded bounding
+boxes in a text-image social post. Moreover, we
+constructed a new Twitter dataset for the task, and
+then extended four previous MNER methods to
+benchmark the task. We further proposed a Hi-
+erarchical Index generation framework (H-Index),
+which generates the entity-type-region triples in a
+hierarchical manner. Experimental results demon-
+strate the effectiveness of our H-index framework.Limitations
+Although we introduce a new GMNER task and
+propose a number of baseline systems and an H-
+Index framework, there are still some limitations
+in this work.
+First, our GMNER task only requires identifying
+the visual regions that are correspondent to named
+entities mentioned in text. However, for each im-
+age, many visual regions may contain real-world
+entities that are not mentioned in text. Therefore, it
+would be interesting to further annotate the entities
+that only occur in the image and explore a more
+complete MNER task in the future.
+Second, our work is a preliminary exploration of
+the GMNER task, and the proposed approaches are
+primarily based on previous representative NER or
+MNER methods. We hope this work can encour-
+age more research to apply the recent advanced
+techniques from both the NLP and computer vision
+communities to improve its performance.
+Ethics Statement
+Our dataset is constructed based on two public
+MNER datasets, i.e., Twitter-15 (Zhang et al., 2018)
+andTwitter-17 (Yu et al., 2020). Three graduate stu-
+dents are employed as our annotators. The average
+time to annotate every 1,000 samples for each an-
+notator is around 17 hours. Since the two datasets
+publicly released the text, images, and named enti-
+ties, each annotator is asked to independently an-
+notate the bounding box groundings for each entity
+without accessing to the user account. To ensure
+that the annotators were fairly compensated, we
+paid them at an hourly rate of CNY 36 (i.e., USD
+5.2 per hour), which is higher than the current av-
+erage wage in Jiangsu Province, China. We do not
+share personal information and do not release sen-
+sitive content that can be harmful to any individual
+or community. Because it is easy to retrieve multi-
+modal tweets via image IDs from the two MNER
+datasets, we will release our annotation based on
+the textual modality and unique image IDs.
+Acknowledgements
+The authors would like to thank the anonymous
+reviewers for their insightful comments. This work
+was supported by the Natural Science Foundation
+of China (62076133 and 62006117), and the Nat-
+ural Science Foundation of Jiangsu Province for
+Young Scholars (BK20200463) and Distinguished
+Young Scholars (BK20200018).9149References915091519152ACL 2023 Responsible NLP Checklist
+A For every submission:
+/squareA1. Did you describe the limitations of your work?
+We report our limitations in the last section.
+/squareA2. Did you discuss any potential risks of your work?
+We do not think there are any potential risks of our work.
+/squareA3. Do the abstract and introduction summarize the paper’s main claims?
+We summarize our contributions in the introduction.
+/squareA4. Have you used AI writing assistants when working on this paper?
+Left blank.
+B/squareDid you use or create scientiﬁc artifacts?
+We introduce our new dataset in section 3.
+/squareB1. Did you cite the creators of artifacts you used?
+The artifacts we use are referenced and brieﬂy introduced in section 5.1.
+/squareB2. Did you discuss the license or terms for use and / or distribution of any artifacts?
+We use the publicly available Twitter datasets released by previous MNER works to study our GMNER
+task with further annotations. We will state the original licenses when releasing the dataset.
+/squareB3. Did you discuss if your use of existing artifact(s) was consistent with their intended use, provided
+that it was speciﬁed? For the artifacts you create, do you specify intended use and whether that is
+compatible with the original access conditions (in particular, derivatives of data accessed for research
+purposes should not be used outside of research contexts)?
+We discuss the intended use of our proposed dataset in section 1.
+/squareB4. Did you discuss the steps taken to check whether the data that was collected / used contains any
+information that names or uniquely identiﬁes individual people or offensive content, and the steps
+taken to protect / anonymize it?
+The data we use is based on the publicly available datasets, which have been checked and pre-
+processed by previous works.
+/squareB5. Did you provide documentation of the artifacts, e.g., coverage of domains, languages, and
+linguistic phenomena, demographic groups represented, etc.?
+We analyze our proposed Twitter-GMNER dataset in section3.
+/squareB6. Did you report relevant statistics like the number of examples, details of train / test / dev splits,
+etc. for the data that you used / created? Even for commonly-used benchmark datasets, include the
+number of examples in train / validation / test splits, as these provide necessary context for a reader
+to understand experimental results. For example, small differences in accuracy on large test sets may
+be signiﬁcant, while on small test sets they may not be.
+We analyze our proposed Twitter-GMNER dataset in section3.
+C/squareDid you run computational experiments?
+We introduce our experiments in section 5.
+/squareC1. Did you report the number of parameters in the models used, the total computational budget
+(e.g., GPU hours), and computing infrastructure used?
+We introduce the experimental details in appendix A.3.9153/squareC2. Did you discuss the experimental setup, including hyperparameter search and best-found
+hyperparameter values?
+We introduce the experiment settings in section 5.1.
+/squareC3. Did you report descriptive statistics about your results (e.g., error bars around results, summary
+statistics from sets of experiments), and is it transparent whether you are reporting the max, mean,
+etc. or just a single run?
+Because we have divided our dataset into train, dev, and test sets, we choose a model which obtains
+the best result on the dev set with a single run, and report its performance on the test set.
+/squareC4. If you used existing packages (e.g., for preprocessing, for normalization, or for evaluation), did
+you report the implementation, model, and parameter settings used (e.g., NLTK, Spacy, ROUGE,
+etc.)?
+We introduce the parameter settings in section 5.1.
+D/squareDid you use human annotators (e.g., crowdworkers) or research with human participants?
+We introduce human annotation details in section3 and appendix A.1.
+/squareD1. Did you report the full text of instructions given to participants, including e.g., screenshots,
+disclaimers of any risks to participants or annotators, etc.?
+We introduce the annotation procedure in appendix A.1.
+/squareD2. Did you report information about how you recruited (e.g., crowdsourcing platform, students)
+and paid participants, and discuss if such payment is adequate given the participants’ demographic
+(e.g., country of residence)?
+We introduce this information in appendix A.1.
+/squareD3. Did you discuss whether and how consent was obtained from people whose data you’re
+using/curating? For example, if you collected data via crowdsourcing, did your instructions to
+crowdworkers explain how the data would be used?
+We build the Twitter-GMNER dataset based on the public datasets and follow their usage require-
+ments.
+/squareD4. Was the data collection protocol approved (or determined exempt) by an ethics review board?
+The dataset we use is based on publicly available datasets, which have been approved by an ethics
+review board in previous works.
+/squareD5. Did you report the basic demographic and geographic characteristics of the annotator population
+that is the source of the data?
+We include this information in section 3.9154

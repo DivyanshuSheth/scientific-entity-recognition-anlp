@@ -1,1 +1,710 @@
-4363 Proceedings of the 2022 Conference of the North American Chapter of the Association for Computational Linguistics : Human Language Technologies , pages 4363 4374 July 10 - 15 , 2022 © 2022 Association for Computational Linguistics 4364 4365 4366 4367 4368 4369 4370 4371 4372 4373 4374 
+
+Minh Van Nguyen, Bonan Min, Franck Dernoncourt, and Thien Huu NguyenDept. of Computer and Information Science, University of Oregon, Eugene, OR, USARaytheon BBN Technologies, USAAdobe Research, San Jose, CA, USAVinAI Research, Vietnam
+{minhnv,thien}@cs.uoregon.edu ,
+bonan.min@raytheon.com ,dernonco@adobe.com
+Abstract
+Event trigger detection, entity mention recog-
+nition, event argument extraction, and relation
+extraction are the four important tasks in in-
+formation extraction that have been performed
+jointly (Joint Information Extraction - JointIE)
+to avoid error propagation and leverage depen-
+dencies between the task instances (i.e., event
+triggers, entity mentions, relations, and event
+arguments). However, previous JointIE models
+often assume heuristic manually-designed de-
+pendency between the task instances and mean-
+field factorization for the joint distribution of
+instance labels, thus unable to capture optimal
+dependencies among instances and labels to
+improve representation learning and IE per-
+formance. To overcome these limitations, we
+propose to induce a dependency graph among
+task instances from data to boost representation
+learning. To better capture dependencies be-
+tween instance labels, we propose to directly
+estimate their joint distribution via Conditional
+Random Fields. Noise Contrastive Estimation
+is introduced to address the maximization of the
+intractable joint likelihood for model training.
+Finally, to improve the decoding with greedy
+or beam search in prior work, we present Simu-
+lated Annealing to better find the globally opti-
+mal assignment for instance labels at decoding
+time. Experimental results show that our pro-
+posed model outperforms previous models on
+multiple IE tasks across 5 datasets and 2 lan-
+guages.
+1 Introduction
+To extract structured information from unstructured
+text, a typical information extraction (IE) pipeline
+involves four major tasks: event trigger detection
+(ETD), event argument extraction (EAE), entity
+mention recognition (EMR), and relation extraction
+(RE). Previous work has performed such IE tasks
+via pipelined approaches (Li et al., 2013; Chen
+et al., 2015; Du and Cardie, 2020; Li et al., 2020),
+where a model for one task uses output predic-
+tions from other models performing other tasks.Consequently, errors from the predictions can be
+propagated between the models in the pipeline.
+Recently, ETD, EMR, EAE, and RE have been
+solved jointly in a single model, i.e., Joint Infor-
+mation Extraction - JointIE (Wadden et al., 2019;
+Lin et al., 2020; Nguyen et al., 2021a; Zhang and
+Ji, 2021), to avoid error propagation and leverage
+dependency between prediction instances of the
+four IE tasks (i.e., event trigger, entity mention,
+relation, and event argument candidates in a sen-
+tence). For example, if a Person entity mention is a
+Victim argument for a Dieevent, it is likely that the
+same entity mention is also a Target argument for
+anAttack event in the same sentence. To implic-
+itly exploit instance dependency for representation
+learning, Wadden et al. (2019) and Lin et al. (2020)
+employ a shared encoder to obtain representation
+vectors to classify instances of different IE tasks.
+Later work heuristically captures dependency be-
+tween IE task instances via explicitly connecting
+the task instances that share an entity mention or
+event trigger (Nguyen et al., 2021a) or aligning the
+task instances that share text spans with some nodes
+on a semantic graph (Zhang and Ji, 2021) to aid
+representation learning. While natural, these man-
+ual designs for dependency between task instances
+might not be optimal for representation learning of
+JointIE.
+In addition to representation learning, at the pre-
+diction level, previous work tends to factorize the
+joint distribution of labels for all the task instances
+in JointIE into the product of label distributions
+for each individual instance (i.e., performing local
+normalization), thus hindering the ability to fully
+exploit the interactions of instance labels across IE
+tasks. (Lin et al., 2020) and (Zhang and Ji, 2021)
+mitigate this problem by decoding instance labels
+with handcrafted global features while (Nguyen
+et al., 2021a) focuses on encoding label interactions
+via consistency regularization over global type de-
+pendency graphs. However, these approaches still4363
+assume a factorization of the joint label distribu-
+tion for prediction instances, thus unable to funda-
+mentally address the label dependency encoding
+issue. Recently, some works have attempted to di-
+rectly model the joint distribution of instance labels
+by reformulating JointIE tasks as text generation
+problems using state-of-the-art pre-trained seq2seq
+models, e.g., BART or T5 (Lewis et al., 2020; Raf-
+fel et al., 2020). In such generative models, text
+spans and labels for task instances are generated by
+the decoder in an autoregressive fashion to encode
+label dependency for joint distribution computa-
+tion (Lu et al., 2021; Hsu et al., 2021). Unfortu-
+nately, this approach needs to assume an order of
+the task instances to be decoded (e.g., from left to
+right) that disallows later instances in the order to
+interfere/correct predictions for earlier instances,
+causing suboptimal performance for JointIE.
+In this work, we aim to overcome these issues by
+inducing dependency between the task instances
+for JointIE from data to boost representation learn-
+ing, and directly modeling the joint distribution of
+the labels for all the task instances to fully enable la-
+bel interactions. To this end, we consider each task
+instance as a node in a fully connected dependency
+graph; the weight for each edge is then learned
+to capture the dependency level between two cor-
+responding instances. Note that this is different
+from prior work (Nguyen et al., 2021a; Zhang and
+Ji, 2021) that heuristically designs sparser depen-
+dency graphs with disconnected task instance pairs,
+thus failing to explore all possible interactions be-
+tween instance pairs for optimal representations.
+In our method, the induced dependency graph for
+instance nodes is then employed by Graph Con-
+volutional Networks (GCNs) (Kipf and Welling,2017; Nguyen and Grishman, 2018) to enhance the
+representation for each instance node with infor-
+mation from all the other nodes according to their
+dependency levels. Afterwards, the enhanced in-
+stance representations and the induced dependency
+graph are utilized to estimate the joint distribution
+of instance labels via Conditional Random Fields
+(CRFs) (Lafferty et al., 2001). This formulation en-
+ables us to approximately maximize the intractable
+joint likelihood of the ground-truth instance labels
+via Noise Contrastive Estimation (NCE) (Gutmann
+and Hyvärinen, 2012), which converts the maxi-
+mization problem into the nonlinear logistic regres-
+sion discriminating between the true labels and the
+noise labels.
+Finally, previous work for JointIE has employed
+a greedy or beam search for decoding instance la-
+bels, which is not optimal due to their greedy nature.
+In this work, we propose a novel decoding algo-
+rithm for JointIE via Simulated Annealing (SA)
+(Kirkpatrick et al., 1983), which has been shown
+to be able to approximate the global optimum of a
+function (Kirkpatrick et al., 1983; Van Laarhoven
+and Aarts, 1987). Experimental results show that
+our proposed model for JointIE significantly out-
+performs previous models on multiple tasks with
+large margins across 5 datasets and 2 languages.
+2 Problem Statement
+Given an input sentence, ETD aims to predict text
+spans and event types for event triggers based on
+a predefined set of event types, e.g., “Attack” and
+“Transport” (Lai et al., 2020). Similarly, EMR seeks
+to determine text spans and entity types (e.g., “Per-
+son” ,“Organization” ) for entity mentions in the
+sentence (Nguyen et al., 2016b). Different from the4364first two tasks, EAE and RE involves predictions
+for a pair of objects at a time. Given an event trig-
+ger and an entity mention, EAE aims to predict the
+argument role (e.g, “Victim” ) of the entity mention
+for the event trigger (Veyseh et al., 2020c). An ar-
+gument role can be “Not-an-argument” indicating
+that the entity mention is not an argument for the
+trigger. For RE (Veyseh et al., 2020a,b), the task
+focuses on the classification of relation (e.g, “Work
+for”) for a given pair of entity mentions. There is
+also a special type “No-relation” to specify no rela-
+tion between two entity mentions. As such, we call
+the union set Cof the predefined event types, en-
+tity types, argument roles, and relation types as the
+information types (excluding “Not-an-argument”
+and“No-relation” ).
+3 Model
+To capture dependency among task instances for
+JointIE, an approach is to obtain all text spans for
+entity/event mention candidates along with their
+possible pairs to form the nodes for a dependency
+graph to improve representation learning. How-
+ever, this approach will retain many text spans for
+non-entity/event mentions to introduce noise into
+the modeling. It will also entail a large depen-
+dency graph that can hinder the efficiency of the
+model. To this end, our model for JointIE first
+identifies text spans for entity mentions and event
+triggers. Afterwards, all possible pairs of event-
+entity and entity-entity mentions are considered to
+identify positive pairs for event arguments and re-
+lations respectively. The detected entity mentions,
+event triggers, event arguments, and relations are
+called task instances that should be classified to
+obtain corresponding information types in C. In
+our model, a dependency graph among the detected
+task instances will be learned to provide inputs for
+GCNs to compute dependency-enhanced represen-
+tations for the task instances. Finally, the enhanced
+representations will be used to compute a joint dis-
+tribution over labels for all the task instances to
+train our model. We will also employ Simulated
+Annealing to achieve the global optimum for label
+assignment of the task instances in the decoding
+phase.
+3.1 Identifying event and entity mentions
+Given an input sentence w= [w, . . . , w]with
+Nwords, we identify its event triggers and entity
+mentions by solving two corresponding sequencetagging problems for event and entity mentions.
+In particular, we use the BIO tagging schema to
+assign two labels to each word in wto mark the
+text spans of event triggers and entity mentions,
+i.e., { “B-TRIGGER” ,“I-TRIGGER” ,“O”} labels
+for event triggers, and { “B-ENTITY” ,“I-ENTITY” ,
+“O”} labels for entity mentions. The pre-trained
+transformer-based language model BERT (Devlin
+et al., 2019) is first utilized to obtain the contextu-
+alized embeddings for the words in the sentence:
+X=x, . . . , x=BERT ([w, . . . , w]).
+Next, the vector sequence Xis sent to two dif-
+ferent CRF layers (Lafferty et al., 2001; Chiu and
+Nichols, 2016) to compute two distributions for
+the tag sequences of wfor event triggers and event
+mentions. The negative log-likelihoods LandL
+for golden trigger and entity tag sequences are then
+obtained to be included in the overall training loss.
+At test time, the Viterbi algorithm (Forney, 1973)
+is employed to determine the best tag sequences
+for event triggers and event mentions in w.
+LetVandVbe the sets of text spans for event
+triggers and entity mentions respectively in w(i.e.,
+golden spans in the training time and predicted
+spans in the test time). To prepare for the next com-
+ponents, we compute the representations vectors
+zandzfor each event trigger/instance t∈V
+and entity mention/instance e∈Vrespectively
+by averaging over the contextualized embeddings
+of the words inside the spans.
+3.2 Identifying event arguments and relations
+Given the detected event triggers and entity men-
+tions, we obtain a representation vector zfor each
+pair of event-entity mentions a= (t, e)(i.e.,
+t∈V,e∈V), and a representation vector z
+for each pair of entity-entity mentions r= (e, e)
+(i.e.,e, e∈V) via:
+z=FFN(concat (z,z))andz=
+FFN(concat (z,z)).
+Here, we use the feed-forward networks
+FFN andFFN to make sure that z,
+z,z, and zhave the same dimensionality. Next,
+the pair representation vectors zandzare sent
+into two different feed-forward networks followed
+by sigmoid activations to compute the possibili-
+ties for being positive examples for event argu-
+ments and relations of aandrrespectively:
+p=σ(FFN(z)), and p=σ(FFN(z)).
+Here, p∈(0,1)is the probability for the en-
+tity mention ebeing an actual argument for the4365event trigger twhile p∈(0,1)is the likelihood
+that there exists a relation of interest between the
+entity mentions eande. At training time, we
+obtain the the negative log-likelihoods LandL
+for the golden event argument and relation identi-
+fication to be included in the overall loss function
+for minimization. At test time, the event-entity pair
+aand entity-entity pair rare retained as positive
+examples for event arguments and relations if their
+likelihooods pandpare greater than 0.5.
+For convenience, let VandVbe the sets of
+positive event-entity pairs a(called argument in-
+stances) and entity-entity pairs r(called relation
+instances) respectively. Also, let V=V∪V∪
+V∪Vbe the set of all detected event, entity,
+argument, and relation instances. For each instance
+v∈V, we will use vfor its corresponding in-
+stance representation (i.e., from z,z,z, orz).
+3.3 Inducing Instance Dependency
+Given the detected event, entity, argument, and re-
+lation instances in V, it remains to predict the infor-
+mation types in Cfor the instances to solve JointIE.
+While it is possible to directly employ the instance
+representations vfor label prediction, our goal is
+to exploit instance dependency in IE to enhance
+the representation vector for one instance with the
+information from other instances to facilitate type
+prediction. In particular, using the instances vin
+Vas the nodes in a dependency graph G, we aim
+to enrich instance representations by feeding them
+into a GCN model. As such, instead of assuming
+a heuristic manually-designed dependency graph
+among the instances as in previous work (Zhang
+and Ji, 2021; Nguyen et al., 2021a), we propose to
+automatically learn the dependency graph Gfor the
+instances in V. To this end, our dependency graph
+Gis a fully connected graph among the nodes in
+Vwhere a weight α∈(0,1)is learned for each
+edge to quantify the dependency between the in-
+stances vandvinV. In this work, we present two
+sources of information that can be used for deter-
+mining the dependency between the task instances:
+(i) semantic and (ii) syntactic information.
+Semantic Information: The semantic-based
+weight αfor the edge between vandvquanti-
+fies their relatedness/dependency based on seman-
+tic information, i.e., via the representation vec-
+torsvandv:α=FFN(concat (v,v)).
+Here, FFNis a feed-forward network with the
+sigmoid function in the end.Syntactic Information: The syntax-based weight
+αfor the edge between vandvis computed
+in a similar way as α. In particular, for each
+word w∈w, we retrieve the dependency relation
+dbetween wand its governor in the dependency
+tree of w, which is generated by the Trankit’s de-
+pendency parser (Nguyen et al., 2021b). We then
+obtain the embedding mofdforwby look-
+ing up the learnable dependency embedding matrix
+M. Afterwards, the syntax-based representation
+vector ufor the instance v∈Vis computed via:
+u=max-pool(m). Here, SPAN
+involves the words in the corresponding text span
+ofvinwifvis an event trigger or entity mention
+instance. Otherwise, SPANcontains the words
+inside the text spans of the involving event triggers
+and entity mentions in the pair for v. As such, we
+compute the syntax-based dependency weight α
+forvandvvia:α=FFN(concat (u,u))
+where FFNis also a feed-forward network
+with the sigmoid function in the end. Finally, we
+combine the semantic- and syntax-based weights
+to obtain the overall dependency weight αforv
+andvinV:α= (α+α)/2.
+3.4 Enhancing Representations with GCNs
+To enhance the representation vectors for the in-
+stances v∈V, a GCN model with Klayers is
+applied over the induced dependency graph Gto
+compute richer representations for the instances:
+Here, his the representation for the instance vat
+thek-th layer of the GCN ( h≡v), and W,b
+are trainable weight and bias for the layer.
+In this way, representation information from all
+the other instances v(j̸=i) will be incorporated
+into the enhanced representation vector for vac-
+cording to their learned dependency weights. Fi-
+nally, the last layer’s representation h≡h(we
+omitKfor simplicity) is used to compute the score
+vector s∈Rforv, where s[c]measure the
+possibility for vto have the c-th label in the label
+setC:s=FFN(h)(FFNis a scor-
+ing feed-forward network). The score vectors s
+will later be used for modeling the joint distribution
+of the labels for all the instances in V.
+3.5 Computing Joint Distribution of Labels
+LetYbe the set of labels yfor the instances vin
+V. To infer the labels for the instances in V, we4366need to estimate the joint distribution P(Y|w, V).
+In previous work (Wadden et al., 2019; Lin et al.,
+2020; Nguyen et al., 2021a; Zhang and Ji, 2021),
+JointIE methods mostly focus on learning repre-
+sentations for the task instances to compute a la-
+bel distribution for each instance vfor predic-
+tion: P(y|w, V):=softmax (s). This practice
+essentially implies the following factorization for
+P(Y|w, V):P(Y|w, V) =/producttextP(y|w, V).
+As a result, this factorization assumes the indepen-
+dence of the instance labels, thus unable to fully
+capture beneficial label dependency for IE tasks.
+To address this issue, we directly estimate the
+joint distribution P(Y|w, V)so that the depen-
+dency between instance labels can be facilitated to
+improve prediction performance. To this end, we
+formulate the joint distribution P(Y|w, V)with
+Conditional Random Fields (Lafferty et al., 2001):
+where ψ(y, y, V)is a positive po-
+tential function defined on the edge
+(v, v)of the dependency graph G, and
+Z(V) =/summationtext/producttextψ(y, y, V)is the
+normalization term to make sure that P(Y|w, V)
+is a valid probability distribution ( Cis the set of
+all possible label assignments Yfor the instances
+inV). Considering the instance information, the
+instance dependency, and the label dependency, we
+propose the potential function as:
+where s[y]is the local score for instance vbe-
+ing assigned with the label y,αis the induced
+dependency weight for the edge (v, v)inG, and
+πis a learnable transition score indicating the
+dependency between the labels yandy. With this
+formulation, we can derive the joint distribution
+P(Y|w, V):
+where:
+is the global score for the label assign-
+ment/configuration Yof the instances. γis a hyper-
+parameter to balance the local and transition scores.
+To train the model, we need to maximize
+the joint likelihood in Equation (4)for thegolden label configuration Y. However, this re-
+quires the computation of the normalization term/summationtextexp(s(Y)), which is intractable. To over-
+come this issue, we employ Noise Contrastive Es-
+timation (NCE) (Gutmann and Hyvärinen, 2012;
+Mikolov et al., 2013). NCE converts the maximiza-
+tion problem into the nonlinear logistic regression
+that discriminates between the golden label config-
+urations and the noise label configurations. In par-
+ticular, the maximization of P(Y|w, V)is done
+with NCE via minimizing the contrastive loss:
+where σis the sigmoid function and Nis the
+number of noise configurations Ydrawn from
+P, assumed to be a uniform distribution. In-
+tuitively, the minimization of Lincreases the
+global score s(Y)for the true label configuration
+Ywhile decreasing the global scores s(Y)for the
+noise label configurations Yto appropriately train
+the model. To the end, the overall loss function to
+train our model is: L=L+L+L+L+L.
+Algorithm 1: Simulated Annealing Search
+3.6 Joint Decoding via Simulated Annealing
+At inference time, we need to search for the con-
+figuration ˆYthat has the highest global score s(ˆY)
+inC:ˆY=argmaxs(Y). A brute-force
+search for ˆYcannot be done as the search space
+Cis exponentially large ( |C|=|C|). Previ-
+ous work has made several attempts to deal with
+this issue. (Wadden et al., 2019) and (Nguyen et al.,
+2021a) simply perform greedy decoding for each4367instance label independently, thus unable to exploit
+the label dependency. (Lin et al., 2020) and (Zhang
+and Ji, 2021) resort to beam search that step by
+step constructs a complete decoding assignment
+Yfor the instances in Vby expanding an initially
+empty assignment. Each step corresponds to an in-
+stance in Vwhere only top candidate labels for the
+instance are considered for assignment expansion
+and only top partial assignments produced so far
+are kept for the next step. Unfortunately, the selec-
+tion of top candidate labels for expansion at each
+step is based only on the local scores s, which
+might discard the candidates that can eventually
+provide greater global scores. To overcome this
+issue, we propose to apply Simulated Annealing
+(SA) (Kirkpatrick et al., 1983) to search for the
+optimal assignment ˆYforV. SA is a probabilis-
+tic algorithm that is able to approximately find the
+global optimum of a function (Kirkpatrick et al.,
+1983; Van Laarhoven and Aarts, 1987). Algorithm
+1 presents our implementation for SA to find ˆY.
+The input for the algorithm is the initial config-
+uration ˆY=ˆY={ˆy}, which contains the
+greedily predicted labels for each instance: ˆy=
+argmaxs[c]. The algorithm then runs over
+Niterations to improve the global score s(ˆY)
+for the current label configuration ˆY. This is
+done via updating the current configuration to a suc-
+cessor configuration ˆYthat gives a higher global
+score (i.e., δ>0). A successor configuration
+is obtained via the function random _successor ()
+by randomly changing some label ˆy∈ˆY. Dif-
+ferent from beam search decoding with partial as-
+signments, each searching step in SA examines a
+complete label assignment for the instances in V
+to provide complete information to measure theglobal scores/quality of the assignments. Impor-
+tantly, SA sometimes allows the current configura-
+tion to transition to a successor configuration with
+a lower global score (i.e., δ≤0) with an accep-
+tance probability of p=exp(). Here, tis the
+temperature of the algorithm, gradually decreased
+viat←T/n (Tis a hyper-parameter). This ex-
+ploration property enables SA to escape from local
+optimum configurations, thus increasing the chance
+to find the globally optimal configuration ˆY.
+4 Experiments
+Datasets : Following previous work (Wadden et al.,
+2019; Lin et al., 2020; Zhang and Ji, 2021; Nguyen
+et al., 2021a; Lu et al., 2021; Hsu et al., 2021), we
+conduct experiments on 5 different datasets cre-
+ated by the 2005 Automatic Content Extraction
+(ACE05) (Walker et al., 2006) and Entity Relation
+Event (ERE) (Song et al., 2015) programs. The
+three ACE05 datasets feature ACE05-R ,ACE05-
+E, and ACE-E+ , all in English, involving 33 event
+types, 7 entity types, 6 relation types, and 22 argu-
+ment roles. The two ERE datasets are ERE-EN
+(English portion) and ERE-ES (Spanish portion),
+introducing 38 event types, 7 entity types, 5 rela-
+tion types, and 20 argument roles. We use the same
+data processing and train/dev/test splits as the prior
+work for a fair comparison. Detailed statistics for
+the datasets are shown in Table 1.
+Baselines : We compare our method, called Gra-
+phIE , with the following baselines for JointIE:
+Generative baselines: Text2event (Lu et al.,
+2021) and DEGREE (Hsu et al., 2021). The gen-
+erative baselines perform ETD and EAE via for-
+mulating the tasks as text generation. The models
+receive an input sentence and generate an output
+text containing text spans and labels for event trig-
+gers and event arguments, structured in a way that
+a post-processing step can be used to extract ETD
+and EAE predictions for the models.
+Classification baselines: OneIE (Lin et al.,
+2020), AMRIE (Zhang and Ji, 2021), and FourIE
+(Nguyen et al., 2021a). The classification baselines
+represent the instances for ETD, EMR, EAE, and
+RE via a shared encoder and perform classification
+for the instances based on task-specific label dis-
+tributions. AMRIE andFourIE employ a heuristic
+dependency graph among task instances to improve
+representation learning. Dependency between in-
+stance labels is exploited in OneIE andAMRIE via
+a beam search decoding with manually-designed4368
+global features, and in FourIE via global type de-
+pendency regularization. FourIE andAMRIE are
+the current state-of-the-art models for JointIE.
+Hyper-parameters : Prior work for JointIE em-
+ploys two different versions of pre-trained language
+models (PLM), i.e., BERT (Devlin et al., 2019; Lin
+et al., 2020; Nguyen et al., 2021a) and RoBERTa
+(Liu et al., 2019; Zhang and Ji, 2021), which might
+cause incompatible compassion. To this end, we ex-
+plore both BERT and RoBERTa to obtain the word
+representations xforGraphIE for a fair compar-
+ison. For the Spanish ERE-ES dataset, following
+prior work (Lin et al., 2020; Nguyen et al., 2021a),
+we utilize the multilingual versions of BERT and
+RoBERTa. For each PLM, we fine-tune the hyper-
+parameter for GraphIE on the development data.
+In particular, the best values for the hyper-
+parameters of the proposed model are reported as
+follows. We employ the learning rate of 1e−5for
+the models with the BERT-based PLM (i.e., using
+bert-large-cased andbert-multilingual-cased ) and
+the learning rate of 5e−6for the RoBERTa-based
+PLM (i.e., using roberta-large andxlm-roberta-
+large ). For other hyper-parameters, our tuning pro-
+cess results in the same values for BERT-based and
+RoBERT-based models: Adam (Kingma and Ba,
+2014) for the optimizer, batch size of 10, 100 for
+the size of the dependency relation embeddings,
+400 for the size of the hidden vector for the feed-
+forward networks, 200 for the hidden vector size
+in the GCN model, 2 for the number of layers for
+the feed-forward networks and GCN model, γ= 1
+for the trade-off hyper-parameter for the global
+score, N= 5for the number of noise examples
+for the contrastive loss (we re-sample the noise
+examples every epoch), T= 5for the initial tem-
+perature, N= 50 for the number of iterations
+of Simulated Annealing (SA), and ϵ= 0.1for the
+temperature threshold for the SA decoding.Comparison with Baselines : We compare the pro-
+posed model GraphIE with the baselines on test
+data of the 5 datasets in Table 2. As can be seen,
+the generative baselines perform worse than the
+classification models on most of the settings. This
+might be due the implicit modeling of the label
+distributions and the assumption of a decoding or-
+der for task instances that limit the interactions of
+instance labels. Comparing OneIE ,FourIE andAM-
+RIE, it is clear that the exploitation of instance and
+label dependency in the training phase in FourIE
+can lead to better performance for JointIE than
+using such dependency in the decoding phase as
+done by OneIE andAMRIE over most tasks and
+PLMs. Most importantly, the proposed GraphIE
+significantly outperforms all the baselines across a
+majority of settings for tasks, datasets and PLMs,
+thus demonstrating the benefits of induced depen-
+dency graph, joint label distribution estimation, and
+simulated annealing for decoding in our method.
+Ablation Study : To understand the contributions
+of each proposed component to GraphIE , we con-
+duct ablation experiments where we remove each
+component from the full model and evaluate the
+performance of the remaining models.
+The first three ablated models in Table 3 are “-
+induced dep” ,“- semantic dep” , and “- syntac-
+tic dep” , formed by excluding the dependency
+weight induction of α(i.e., setting α= 1),4369the semantic-based dependency α, and the
+syntactic-based dependency α(respectively)
+from the model computation. In each case, the
+performance of GraphIE decreases significantly;
+the removal of both semantic- and syntactic-based
+dependency in “- induced dep” leads to the largest
+performance drop. This shows that the semantic
+and syntactic weighting captures complementary
+information for instance dependency induction that
+is useful for our model. The next ablated model
+“- induced dep + heuristic dep” is obtained by re-
+placing the induced dependency graph represented
+byαwith the heuristic dependency graph for in-
+stances from the best baseline FourIE . The decrease
+in the performance of this model suggests that the
+induced dependency graph is better than the heuris-
+tic graph for JointIE. The final ablated model “-
+GCN” in Table 3 eliminates the GCN component
+from our full model. The result shows that GCN is
+beneficial to exploit the induced dependency graph
+to improve representation learning.
+In Table 4, we first eliminate the computation of
+the joint label distribution P(Y|w, V)from Gra-
+phIE . As such, the “- joint distribution” model
+employs the local label distributions P(y|w, V)to
+train models and infer labels (with greedy decod-
+ing). Due to the significantly worse performance
+of“- joint distribution” , it is clear that directly es-
+timating the joint label distribution is helpful for
+JointIE. To evaluate the benefit of the proposed
+SA, we replace it with other decoding algorithms
+forGraphIE , including greedy search, beam search
+and hill climbing. The beam search is implemented
+with our global score function s(Y)and follows
+those in (Lin et al., 2020; Zhang and Ji, 2021) while
+hill climbing is implemented by removing the con-
+figuration exploration in lines 11-12 of Algorithm
+1. As reported in Table 4, SA performs much better
+than other decoding algorithms for GraphIE , thusdemonstrating SA’s ability to find globally optimal
+labels. In addition, we also attempt to replace the
+beam search decoding in OneIE andAMRIE with
+SA, which indeed leads to worse performance for
+such models as shown in the last four rows of Table
+4. We attribute this to the learning of the global
+scores for configurations in OneIE andAMRIE that
+involves a limited set of predefined global features.
+Such features do not exist for many possible as-
+signments YforV, thus causing poor global score
+computation and hindering the configuration rank-
+ing critically required by SA.
+Analysis : To further understand the advantages of
+GraphIE over baseline models, we manually ana-
+lyze the instances on the ACE05-E+ development
+data where GraphIE can make correct predictions,
+but the best baseline model FourIE fails. Figure
+2 presents some instances along with their edges
+and weights in the dependency graphs. The most
+important insight from our analysis is that GraphIE
+is able to connect an instance (e.g., blew) with other
+supporting instances (e.g., suicide ) in the depen-
+dency graph to provide vital information to facili-
+tate correct prediction. Such supporting instances
+do not share any event trigger or entity mention
+with the current instance that cannot establish links
+inFourIE and lead to failure predictions.
+Finally, Table 5 shows the transition scores
+πlearned by GraphIE for some label pairs
+in ACE05-E+. The table show that our model is
+able to learn high scores for correlated label pairs
+(e.g., the Execute andSentence event types) and
+very low scores for uncorrelated label pairs (e.g.,
+an argument for a Transport event cannot play the
+roleAttacker ).
+5 Related Work
+Capturing dependency between IE tasks has been
+a main focus of previous work on Joint IE. Early
+work employed feature engineering methods (Roth
+and Yih, 2004; Yu and Lam, 2010; Li et al., 2013;4370
+Yang and Mitchell, 2016). Later work applied deep
+learning via shared parameters to facilitate joint
+modeling for IE, however, for only two or three
+tasks (Nguyen et al., 2016a; Zheng et al., 2017;
+Bekoulis et al., 2018; Luan et al., 2019; Zhang
+et al., 2019; Nguyen and Nguyen, 2019). Recently,
+the four IE tasks have been solved jointly (Wadden
+et al., 2019; Lin et al., 2020; Zhang and Ji, 2021;
+Paolini et al., 2021; Lu et al., 2021; Nguyen et al.,
+2021a). However, such recent works only employ
+heuristics to manually design dependency graphs
+for instances. Mean-field factorization of the joint
+label distribution for JointIE instances is dominant
+in prior work.
+Our work is also related to prior work that uses
+CRFs (Lafferty et al., 2001; Chiu and Nichols,
+2016) to estimate joint distribution of instance la-
+bels. Sequence labeling is a typical problem that
+has been solved by CRFs, including part of speech
+tagging and named entity recognition (Lafferty
+et al., 2001; Ekbal et al., 2007; Shishtla et al., 2008;
+Sobhana et al., 2010; Zea et al., 2016; Chiu and
+Nichols, 2016; Xu et al., 2017). However, these
+prior work only employ CRFs for simple graph
+structures (i.e., linear chains). A few prior work
+has considered CRFs for more complicated graph
+structures (Sun et al., 2017; Gao et al., 2019; Qu
+et al., 2019; Yuan and Ji, 2020); however, none of
+such works has applied CRFs for JointIE as we do.
+6 Conclusion
+We propose a novel model for jointly solving four
+IE tasks (EMR, ETD, EAE, and RE). Our proposed
+model learns a dependency graph among the in-stances of the tasks via a novel edge weighting
+mechanism. We also estimate the joint distribu-
+tion among instance labels to fully enable inter-
+actions between instance labels for improved per-
+formance. The experimental results show that our
+model achieves best performance for multiple Join-
+tIE tasks across 5 datasets and 2 languages. In the
+future, we plan to extend our method to cover more
+IE tasks such as event coreference resolution.
+Acknowledgement
+This research has been supported by the Army Re-
+search Office (ARO) grant W911NF-21-1-0112
+and the NSF grant CNS-1747798 to the IU-
+CRC Center for Big Learning. This research is
+also based upon work supported by the Office
+of the Director of National Intelligence (ODNI),
+Intelligence Advanced Research Projects Activ-
+ity (IARPA), via IARPA Contract No. 2019-
+19051600006 under the Better Extraction from Text
+Towards Enhanced Retrieval (BETTER) Program.
+The views and conclusions contained herein are
+those of the authors and should not be interpreted
+as necessarily representing the official policies, ei-
+ther expressed or implied, of ARO, ODNI, IARPA,
+the Department of Defense, or the U.S. Govern-
+ment. The U.S. Government is authorized to re-
+produce and distribute reprints for governmental
+purposes notwithstanding any copyright annotation
+therein. This document does not contain technol-
+ogy or technical data controlled under either the
+U.S. International Traffic in Arms Regulations or
+the U.S. Export Administration Regulations.4371References437243734374

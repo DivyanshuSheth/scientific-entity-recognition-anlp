@@ -1,1 +1,867 @@
-5660 Proceedings of the 61st Annual Meeting of the Association for Computational Linguistics Volume 1 : Long Papers , pages 5660–5676 July 9 - 14 , 2023 © 2023 Association for Computational Linguistics 5661 5662 5663 5664 5665 5666 5667 5668 5669 5670 5671 5672 5673 5674 5675 5676 
+
+Kung-Hsiang HuangHou Pong ChanHeng JiDepartment of Computer Science, University of Illinois Urbana-ChampaignFaculty of Science and Technology, University of Macau{khhuang3, hengji}@illinois.eduhpchan@um.edu.mo
+Abstract
+Faithfully correcting factual errors is critical
+for maintaining the integrity of textual
+knowledge bases and preventing hallucinations
+in generative models. Drawing on humans’
+ability to identify and correct factual errors, we
+present a zero-shot framework that formulates
+questions about input claims, looks for correct
+answers in the given evidence, and assesses
+the faithfulness of each correction based on its
+consistency with the evidence. Our zero-shot
+framework outperforms fully-supervised ap-
+proaches, as demonstrated by experiments on
+theFEVER andSF datasets, where our
+outputs are shown to be more faithful. More
+importantly, the decomposability nature of our
+framework inherently provides interpretability.
+Additionally, to reveal the most suitable
+metrics for evaluating factual error corrections,
+we analyze the correlation between commonly
+used metrics with human judgments in terms
+of three different dimensions regarding
+intelligibility and faithfulness.
+1 Introduction
+The task of correcting factual errors is in high de-
+mand and requires a significant amount of human
+effort. The English Wikipedia serves as a notable
+case in point. It is continually updated by over
+120K editors, with an average of around six factual
+edits made per minute. Using machines to correct
+factual errors could allow the articles to be updated
+with the most current information automatically.
+This process, due to its high speed, can help retain
+the integrity of the content and prevent the spread
+of false or misleading information.
+In addition, the hallucination issues have been
+shown to be a prime concern for neural models,Figure 1: An example of a factual but unfaithful
+correction leading to misleading information. While
+it is technically true that the majority of people
+infected with COVID-19 will recover, there is no
+information in the evidence that supports the final
+correction. Additionally, when this statement is taken
+out of context, it could mislead people to believe that
+COVID-19 is not dangerous and that there is no need
+for precautions, which is false. A factual and faithful
+correction is “COVID-19 is highly contagious.”.
+where they are prone to generate content factu-
+ally inconsistent with the input sources due to the
+unfaithful training samples (Maynez et al., 2020)
+and the implicit “knowledge” it learned during
+pre-training (Niven and Kao, 2019). Factual er-
+ror correction can be used in both pre-processing
+and post-processing steps to rectify the factual in-
+consistencies in training data and generated texts,
+respectively. This can help build trust and confi-
+dence in the reliability of language models.
+Prior work typically formulates factual error cor-
+rection as a sequence-to-sequence task, either in a
+fully supervised or in a distantly supervised man-
+ner (Shah et al., 2020; Thorne and Vlachos, 2021).
+While these approaches have made great strides in
+generating fluent and grammatically valid correc-
+tions, they only focus on the aspect of factuality :
+whether the outputs are aligned with facts . Little
+emphasis was placed on faithfulness :the factual
+consistency of the outputs with the evidence . Faith-
+fulness is critical in this task as it indicates whether
+a generated correction reflects the information we
+intend to update. If faithfulness is not ensured,5660this could lead to the spread of misleading content,
+causing serious consequences. Figure 1 shows a
+concrete example. In the context of automatically
+updating textual knowledge bases, the topic of an
+unfaithful output would likely deviate much from
+that of the expected correction. Therefore, such an
+edit is not desirable, even if it is factual.
+In this work, we present the first study on the
+faithfulness aspect of factual error correction.
+To address faithfulness, we propose a zero-shot
+factual error correction framework ( ZFEC ),
+inspired by how humans verify and correct factual
+errors. When humans find a piece of information
+suspicious, they tend to first identify potentially
+false information units, such as noun phrases, then
+ask questions about each information unit, and
+finally look for the correct answers in trustworthy
+evidence (Saeed et al., 2022; Chen et al., 2022).
+Following a similar procedure, ZFEC breaks
+the factual error correction task into five sub-tasks:
+(1)claim answer generation : extracting all
+information units, such as noun phrases and verb
+phrases, from the input claim; (2) question genera-
+tion: generating question given each claim answer
+and the original claim such that each claim answer
+is the answer to each generated question; (3) ques-
+tion answering : answering each generated question
+using the evidence as context; (4) QA-to-claim :
+converting each pair of generated question and
+answer to a declarative statement; (5) correction
+scoring : evaluating corrections based on their
+faithfulness to the evidence, where faithfulness
+is approximated by the entailment score between
+the evidence and each candidate correction. The
+highest-scoring correction is selected as the final
+output. An overview of our framework is shown in
+Figure 2. Our method ensures the corrected infor-
+mation units are derived from the evidence, which
+helps improve the faithfulness of the generated
+corrections. In addition, our approach is naturally
+interpretable since the questions and answers
+generated directly reflect which information units
+are being compared with the evidence.
+Our contributions can be summarized as follows:
+•We propose ZFEC , a factual error cor-
+rection framework that effectively addresses
+faithfulness by asking questions about the in-
+put claim, seeking answers in the evidence,
+and scoring the outputs by faithfulness.
+•Our approach outperforms all prior methods,
+including fully-supervised approaches trainedon 58K instances, in ensuring faithfulness on
+two factual error correction datasets, FEVER
+(Thorne et al., 2018) and S (Wadden
+et al., 2020).
+•We analyze the correlation of human judg-
+ments with automatic metrics to provide in-
+tuition for future research on evaluating the
+faithfulness, factuality, and intelligibility of
+factual error corrections.
+2 Task
+In Thorne and Vlachos (2021)’s setting, retrieved
+evidence is used, which means the model may be
+able to correct factual errors, even though there is
+no supporting information in the evidence. In this
+case, although the prediction is considered correct,
+the model is hallucinating, which is not a desired
+property. Additionally, due to the way data was
+collected, they require systems to alter the input
+claim even if the input claim is already faithful to
+the evidence. We argue that no edit is needed for
+claims that are faithful to the evidence .
+To address these shortcomings, our setup aims
+to edit a claim using a given piece of grounded
+evidence that supports or refutes the original claim
+(see Figure 2). Using gold-standard evidence
+avoids the issue where a system outputs the correct
+answer by chance due to hallucinations. In our
+setting, a system must be faithful to the evidence
+to correct factual errors, allowing us to evaluate
+system performance more fairly. Furthermore, we
+require the model not to edit the original claim if
+it is already factually consistent with the provided
+evidence.
+Concretely, the input to our task is a claim Cand
+a piece of gold-standard evidence Ethat supports
+or refutes C. The goal of factual error correction
+is to produce a corrected claim ˆCthat fixes factual
+errors in Cwhile being faithful to E. IfCis already
+supported by E, models should output the original
+claim (i.e. ˆC=C).
+3 Proposed Methods
+Our framework, ZFEC , faithfully cor-
+rects factual errors using question-answering
+and entailment. Specifically, we represent
+the input claim Cas question-answer pairs
+{(Q, A), ...,(Q, A)}such that each question
+Qreflects the corresponding information unit
+A, such as noun phrases and adjectives (§3.1 and
+§3.2). Based on each question Q, we look for an5661
+answer Ain the given evidence Eusing a learned
+QA model (§3.3). Each candidate correction S
+is obtained by converting the corresponding pair of
+QandAinto a declarative statement (§3.4). This
+guarantees that the corrected information units we
+replace factual errors with are derived from the
+evidence and thus ensures high faithfulness. The
+final output of ZFEC is the Swith the highest
+faithfulness score computed by an entailment
+model (§3.5). An overview of our framework is
+shown in Figure 2.
+One major challenge that makes our task more
+difficult than prior studies on faithfulness (Wang
+et al., 2020; Fabbri et al., 2022a) is that we need
+to handle more diverse factual errors, such as nega-
+tion errors and errors that can only be abstractively
+corrected. For instance, in the second example of
+in Table 2, the QA model should output “Yes” as
+the answer, which cannot be produced by extrac-
+tive QA systems. To address this issue, we adopt
+abstractive QG and QA models that can handle
+diverse question types and train our QA-to-claim
+model on multiple datasets to cover cases that can-
+not be handled by extractive systems. The fol-
+lowing subsections illustrate the details of eachcomponent in our framework.
+3.1 Claim Answer Generation
+The goal of claim answer generation is to iden-
+tify information units in the input claim that may
+be unfaithful to E. We aim to maximize the re-
+call in this step since the missed candidates cannot
+be recovered in later steps. Therefore, we extract
+all noun chunks and named entities using Spacy
+and extract nouns, verbs, adjectives, adverbs, noun
+phrases, verb phrases using Stanza. Additionally,
+we also extract negation terms, such as “not” and
+“never”, from the input claim. We name the ex-
+tracted information units claim answers , denoted
+asA={A, A, ..., A}.
+3.2 Question Generation
+Upon claim answers are produced, we generate
+questions that will be later used to look for cor-
+rect information units in the evidence. Questions
+are generated conditioned on the claim answers
+using the input claim as context. We denote the
+question generator as G. Each claim answer Ais5662concatenated with the input claim Cto generate a
+question Q=G(A,C). We utilize MixQG (Mu-
+rakhovs’ka et al., 2022) as our question generator
+Gto cover the wide diversity of factual errors and
+candidates extracted. MixQG was trained on nine
+question generation datasets with various answer
+types, including boolean, multiple-choice, extrac-
+tive, and abstractive answers.
+3.3 Question Answering
+The question answering step identifies the correct
+information units Acorresponding to each ques-
+tionQin the given evidence E. Our QA mod-
+ule answers questions from the question gener-
+ation steps with the given evidence as context.
+LetFdenote our QA model. We feed the con-
+catenation of a generated question and the evi-
+dence to the QA model to produce an evidence
+answer A=F(Q,E). UnifiedQA-v2 (Khashabi
+et al., 2022) is used as our question answering
+model. UnifiedQA-v2 is a T5-based (Raffel et al.,
+2020b) abstractive QA model trained on twenty
+QA datasets that can handle diverse question types.
+3.4 QA-to-Claim
+After questions and answers are generated, we
+transform each pair of question and answer into
+a declarative statement, which serves as a candi-
+date correction that will be scored in the next step.
+Previous studies on converting QAs to claims focus
+on extractive answer types only (Pan et al., 2021).
+To accommodate diverse types of questions and
+answers, we train a sequence-to-sequence model
+that generates a claim given a question-answer pair
+on three datasets: QA2D (Demszky et al., 2018)
+for extractive answers, BoolQ (Clark et al., 2019)
+for boolean answers, and SciTail (Khot et al., 2018)
+for covering scientific domain QAs. Note that sam-
+ples in BoolQ do not contain converted declarative
+statements. Using Stanza’s constituency parser, we
+apply heuristics to transform all QAs to their declar-
+ative forms in BoolQ. Our QA-to-claim model
+is a T5-base fine-tuned on these three datasets.
+Concretely, let Mdenote our QA-to-claim model.
+Mtakes in a generated question Qand an evi-
+dence answer Aas inputs and outputs a statement
+S=M(Q, A).
+3.5 Correction Scoring
+The final correction is produced by scoring the
+faithfulness of each candidate correction from theprevious steps w.r.t. the evidence. We use en-
+tailment score to approximate faithfulness. Here,
+DocNLI (Yin et al., 2021) is used to compute
+such document-sentence entailment relations. Doc-
+NLI is more generalizable than other document-
+sentence entailment models, such as FactCC
+(Kryscinski et al., 2020), since it was trained on
+five datasets of various tasks and domains. Conven-
+tional NLI models trained on sentence-level NLI
+datasets, such as MNLI (Williams et al., 2018), are
+not applicable since previous work has found that
+these models are ill-suited for measuring entail-
+ment beyond the sentence level (Falke et al., 2019).
+In addition, to prevent the final correction from
+deviating too much from the original claim, we
+also consider ROUGE-1 scores, motivated by Wan
+and Bansal (2022). The final metric used for scor-
+ing is the sum of ROUGE-1 scoreand DocNLI
+entailment score. Formally,
+where Cis the final correction produced by our
+framework. Furthermore, to handle cases where the
+input claim is already faithful to the evidence, we
+include the input claim in the candidate correction
+list to be scored.
+3.6 Domain Adaptation
+During the early stage of our experiments, we
+found that our proposed framework did not per-
+form well in correcting factual errors in biomedical
+claims. This results from the fact that our QA and
+entailment models were not fine-tuned on datasets
+in the biomedical domain. To address this issue,
+we adapt U QA-2andDNLI on two
+biomedical QA datasets, PMQA(Jin et al.,
+2019) and BASQ (Tsatsaronis et al., 2015), by
+further fine-tuning them for a few thousand steps.
+We later show that this simple domain adaptation
+technique successfully improves our overall fac-
+tual error correction performance on a biomedi-
+cal dataset without decreasing performance in the
+Wikipedia domain (see §5.1).
+4 Experimental Setup
+4.1 Datasets
+We conduct experiments on two English datasets,
+FEVER andSF.FEVER (Thorne and Vla-5663chos, 2021) is repurposed from the corresponding
+fact-checking dataset (Thorne et al., 2018) that
+consists of evidence collected from Wikipedia and
+claims written by humans that are supported or
+refuted by the evidence. Similarly, SF is
+another fact-checking dataset in the biomedical
+domain (Wadden et al., 2020). We repurpose it for
+the factual error correction task using the following
+steps. First, we form faithful claims by taking all
+claims supported by evidence. Then, unfaithful
+claims are generated by applying Knowledge
+Base Informed Negations (Wright et al., 2022), a
+semantic altering transformation technique guided
+by knowledge base, to a subset of the faithful
+claims. Appendix A shows detailed statistics.
+4.2 Evaluation Metrics
+Our evaluation focuses on faithfulness. Therefore,
+we adopt some recently developed metrics that have
+been shown to correlate well with human judg-
+ments in terms of faithfulness. BARTScore (Yuan
+et al., 2021) computes the semantic overlap be-
+tween the input claim and the evidence by calculat-
+ing the logarithmic probability of generating the ev-
+idence conditioned on the claim. FactCC (Kryscin-
+ski et al., 2020) is an entailment-based metric that
+predicts the faithfulness probability of a claim w.r.t.
+the evidence. We report the average of the C- probability across all samples. In addition,
+we consider QAFE (Fabbri et al., 2022a),
+a recently released QA-based metric that achieves
+the highest performance on the S Cfactual
+consistency evaluation benchmark (Laban et al.,
+2022). Furthermore, we also report performance on
+SARI (Xu et al., 2016), a lexical-based metric that
+has been widely used in the factual error correction
+task (Thorne and Vlachos, 2021; Shah et al., 2020).
+4.3 Baselines
+We compare our framework with the following
+baseline systems. T5-F (Thorne and Vlachos,
+2021) is a fully-supervised model based on T5-base
+(Raffel et al., 2020a) that generates the correction
+conditioned on the input claim and the given evi-
+dence. MC (Shah et al., 2020) and
+T5-D (Thorne and Vlachos, 2021) are both
+distantly-supervised methods that are composed of
+a masker and a sequence-to-sequence (seq2seq)
+corrector. The masker learns to mask out informa-
+tion units that are possibly false based on a learned
+fact verifier or an explanation model (Ribeiro et al.,
+2016) and the seq2seq corrector learns to fill inthe masks with factual information. The biggest
+difference is in the choice of seq2seq corrector.
+T5-D uses T5-base, while MC- utilizes a two-encoder pointer generator. For
+zero-shot baselines, we selected two post-hoc edit-
+ing frameworks that are trained to remove hallu-
+cinations from summaries, R R(Adams
+et al., 2022) and C E(Fabbri et al., 2022b).
+R Ris trained on synthetic data where
+hallucinating samples are created by entity swaps.
+C Elearns to remove factual errors with
+sentence compression, where training data are gen-
+erated with a separate perturber that inserts entities
+into faithful sentences.
+4.4 Implementation Details
+No training is needed for ZFEC . As for
+ZFEC-DA , we fine-tune U QA-2
+andDNLI on the BASQ andPMQA
+datasets for a maximum of 5,000 steps using
+AdamW (Loshchilov and Hutter, 2019) with a
+learning rate of 3e-6 and a weight decay of 1e-6.
+During inference time, all generative components
+use beam search with a beam width of 4.
+5 Results
+5.1 Main Results
+Table 1 summarizes the main results on the
+FEVER andSF datasets. Both ZFEC
+andZFEC-DA achieve significantly better per-
+formance than the distantly-supervised and zero-
+shot baselines. More impressively, they surpass the
+performance of the fully-supervised model on most
+metrics, even though the fully-supervised model is
+trained on 58K samples in the FEVER experiment.
+The improvements demonstrate the effectiveness
+of our approach in producing faithful factual error
+correction by combining question answering and
+entailment predictions. In addition, even though
+our domain adaptation technique is simple, it suc-
+cessfully boosts the performance on the SF
+dataset while pertaining great performance on the
+FEVER dataset. The first example in Table 2 illus-
+trates an instance where domain adaptation fixes an
+error made by ZFEC . The absence of domain
+adaptation results in incorrect predictions by Z-FEC , as DocNLI assigns a significantly lower
+entailment score to the correct candidate “Clathrin
+stabilizes the spindle fiber apparatus during mitosis
+phase.” and a higher score to the wrong candidate
+“Clathrin stabilizes the spindle apparatus during5664
+anaphase?”, indicating poor entailment assessment.
+With domain adaptation, ZFEC-DA resolves
+this issue by enabling DocNLI to approximate faith-
+fulness more accurately.
+It is true that ZFEC-DA requires additional
+training, which is different from typical zero-shot
+methods. However, the key point remains that
+our framework does not require any task-specific
+training data. Hence, our approach still offers the
+benefits of zero-shot learning by not requiring any
+additional training data beyond what was already
+available for the question answering task, a field
+with much richer resources compared to the fact-
+checking field.
+5.2 Qualitative Analysis
+To provide intuition for our framework’s ability to
+produce faithful factual error corrections, we man-
+ually examined 50 correct and 50 incorrect outputs
+made by ZFEC on the FEVER dataset. The in-
+terpretability of ZFEC allows for insightful ex-
+aminations of the outputs. Among the correct sam-
+ples, our framework produces faithful corrections
+because all intermediate outputs are accurately pro-
+duced rather than “being correct by chance”. For
+the incorrect outputs, we analyze the source of mis-
+takes, as shown in Figure 3. The vast majority of
+failed cases result from DocNLI’s failure to score
+candidate corrections faithfully. In addition to the
+mediocre performance of DocNLI, one primary
+reason is that erroneous outputs from other compo-nents would not be considered mistakes so long as
+the correction scoring module determines the result-
+ing candidate corrections unfaithful to the evidence.
+A possible solution to improve DocNLI is to further
+fine-tune it on synthetic data generated by perturb-
+ing samples in FEVER andSF. Examples
+of correct and incorrect outputs are presented in
+Table 7 and Table 8 of Appendix D, respectively.
+5.3 Human Evaluation
+To further validate the effectiveness of our pro-
+posed method, we recruited three graduate students
+who are not authors to conduct human evaluations
+on 100 and 40 claims from FEVER andSF,
+respectively. For each claim, human judges are pre-
+sented with the ground-truth correction, the gold-
+standard evidence, and output produced by a fac-
+tual error correction system and tasked to assess
+the quality of the correction with respect to three
+dimensions. Intelligibility evaluates the fluency
+of the correction. An intelligible output is free of
+grammatical mistakes, and its meaning must be5665
+understandable by humans without further explana-
+tion. Factuality considers whether the input claim
+is aligned with facts. Systems’ output can be fac-
+tual and semantically different from the gold cor-
+rection as long as it is consistent with the world’s
+knowledge. Faithfulness examines whether the in-
+put is factually consistent with the given evidence.
+Note that a faithful output must be factual since
+we assume all evidence is free of factual error. To
+evaluate the annotation quality, we compute the
+inter-annotator agreement. Krippendorff’s Alpha
+(Krippendorff, 2011) is 68.85%, which indicates a
+moderate level of agreement. Details of our human
+evaluation can be found in Appendix B.
+The human evaluation results are demonstrated
+in Table 3. We observe that: (1) ZFEC
+and ZFEC-DA achieve the best overall
+performance in Factuality and Faithfulness
+on both datasets, even when compared to the
+fully-supervised method, suggesting that ourapproach is the best in ensuring faithfulness for
+factual error correction. (2) Our domain adaptation
+for the biomedical domain surprisingly improves
+faithfulness and factuality in the Wikipedia domain
+(i.e. FEVER ). This suggests that fine-tuning the
+components of our framework on more datasets
+helps improve robustness in terms of faithfulness.
+(3) Factual output produced by ZFEC and
+ZFEC-DA are always faithful to the evidence,
+preventing the potential spread of misleading
+information caused by factual but unfaithful
+corrections. The second example in Table 2
+demonstrates an instance of factual but unfaithful
+correction made by baseline models. Here, the
+output of T5- is unfaithful since the
+evidence does not mention whether Fuller House
+airs on HBO. In fact, although Fuller House
+was not on HBO when it premiered, it was later
+accessible on HBO Max. Therefore, the correction
+produced by T5- is misleading.
+5.4 Correlation with Human Judgments
+Recent efforts on faithfulness metrics have been
+mostly focusing on the summarization task. No
+prior work has studied the transferability of these
+metrics to the factual error correction task. We seek
+to bridge this gap by showing the correlation be-
+tween the automatic metrics used in Table 1 and the
+human evaluation results discussed in §5.3. Using
+Kendall’s Tau (Kendall, 1938) as the correlation5666
+measure, the results are summarized in Table 4.
+We have the following observations. (1) SARI
+is the most consistent and reliable metric for
+evaluating Factuality andFaithfulness across two
+datasets. Although the other three metrics devel-
+oped more recently demonstrate high correlations
+with human judgments of faithfulness in multiple
+summarization datasets, their transferability to the
+factual error correction task is limited due to their
+incompatible design for this particular task. For
+example, QA-based metrics like QAFE
+are less reliable for evaluating faithfulness in this
+task due to their inability to extract a sufficient
+number of answers from a single-sentence input
+claim. In contrast, summaries in summarization
+datasets generally consist of multiple sentences,
+enabling the extraction of a greater number
+of answers. To validate this, we analyzed the
+intermediate outputs of QAFE. Our
+analysis confirms that it extracts an average of only
+1.95 answers on the FEVER dataset, significantly
+lower than the more than 10 answers typically
+extracted for summaries. (2) Across the two
+datasets, the correlations between all automatic
+metrics and Intelligibility are low. The extremely
+high proportion of intelligible outputs may explain
+the low correlation. (3) The correlation for
+learning-based metrics, including QAFE
+and FCC, drop significantly when applied
+toSF. This is likely caused by the lack of
+fine-tuning or pre-training with biomedical data.
+6 Related Work
+6.1 Factual Error Correction
+An increasing number of work began to explore
+factual error correction in recent years, following
+the rise of fact-checking (Thorne et al., 2018; Wad-
+den et al., 2020; Gupta and Srikumar, 2021; Huang
+et al., 2022b) and fake news detection (Shu et al.,
+2020; Fung et al., 2021; Wu et al., 2022; Huang
+et al., 2022a). Shah et al. (2020) propose a distant
+supervision learning method based on a masker-corrector architecture, which assumes access to a
+learned fact verifier. Thorne and Vlachos (2021)
+created the first factual error correction dataset
+by repurposing the FEVER (Thorne et al., 2018)
+dataset, which allows for fully-supervised train-
+ing of factual error correctors. They also extended
+Shah et al. (2020)’s method with more advanced
+pre-trained sequence-to-sequence models. Most
+recently, Schick et al. (2022) proposed PEER , a
+collaborative language model that demonstrates su-
+perior text editing capabilities due to its multiple
+text-infilling pre-training objectives, such as plan-
+ning and realizing edits as well as explaining the
+intention behind each edit.
+6.2 Faithfulness
+Previous studies addressing faithfulness are mostly
+in the summarization field and can be roughly di-
+vided into two categories, evaluation and enhance-
+ment. Within faithfulness evaluation, one line of
+work developed entailment-based metrics by train-
+ing document-sentence entailment models on syn-
+thetic data (Kryscinski et al., 2020; Yin et al., 2021)
+or human-annotated data (Ribeiro et al., 2022;
+Chan et al., 2023), or applying conventional NLI
+models at the sentence level (Laban et al., 2022).
+Another line of work evaluates faithfulness by com-
+paring information units extracted from summaries
+and input sources using QA (Wang et al., 2020;
+Deutsch et al., 2021). There is a recent study that
+integrates QA into entailment by feeding QA out-
+puts as features to an entailment model (Fabbri
+et al., 2022a). We combine QA and entailment by
+using entailment to score the correction candidates
+produced by QA.
+Within faithfulness enhancement, some work im-
+proves factual consistency by incorporating auxil-
+iary losses into the training process (Nan et al.,
+2021; Cao and Wang, 2021; Tang et al., 2022;
+Huang et al., 2023). Some other work devises
+factuality-aware pre-training and fine-tuning ob-
+jectives to reduce hallucinations (Wan and Bansal,
+2022). The most similar to our work are studies
+that utilize a separate rewriting model to fix hal-
+lucinations in summaries. For example, Cao et al.
+(2020) present a post-hoc corrector trained on syn-
+thetic data, where negative samples are created via
+perturbations. Adams et al. (2022) fix factually in-
+consistent information in the reference summaries5667to prevent the summarization from learning hallu-
+cinating examples. Fabbri et al. (2022b) propose a
+compression-based post-editor to correct extrinsic
+errors in the generated summaries. By contrast, we
+leverage the power of QA and entailment together
+to address faithfulness.
+7 Conclusions and Future Work
+We have presented ZFEC , a zero-shot frame-
+work that asks questions about an input claim and
+seeks answers from the given evidence to correct
+factual errors faithfully. The experimental results
+demonstrate the superiority of our approach over
+prior methods, including fully-supervised methods,
+as indicated by both automatic metrics and human
+evaluations. More importantly, the decomposabil-
+ity of ZFEC naturally offers interpretability,
+as the questions and answers generated directly
+reflect which information units in the input claim
+are incorrect and why. Furthermore, we reveal the
+most suitable metric for assessing faithfulness of
+factual error correction by analyzing the correlation
+between the reported automatic metrics and human
+judgments. For future work, we plan to extend our
+framework to faithfully correct misinformation in
+social media posts and news articles to inhibit the
+dissemination of false information. In addition, it
+may be meaningful to explore extending zero-shot
+factual error correction to multimedia task settings,
+such as identifying inconsistencies between chart
+and text (Zhou et al., 2023).
+8 Limitations
+Although our approach has demonstrated advan-
+tages in producing faithful factual error corrections,
+we recognize that our approach is not capable of
+correcting all errors, particularly those that require
+domain-specific knowledge, as illustrated in Ta-
+ble 3. Therefore, it is important to exercise caution
+when applying this framework in user-facing set-
+tings. For instance, end users should be made aware
+that not all factual errors may be corrected.
+In addition, our approach assumes evidence is
+given. Although this assumption is also true for
+applying our method to summarization tasks since
+the source document is treated as evidence, it does
+not hold for automatic textual knowledge base up-
+dates. When updating these knowledge bases, it is
+often required to retrieve relevant evidence from
+external sources. Hence, a reliable retrieval system
+is required when applying our method to this task.9 Ethical Considerations
+While no fine-tuning is needed for ZFEC ,
+its inference time and memory usage are three
+to four times more than similar-sized baseline
+systems due to its multi-component architecture,
+implying higher environmental costs during test
+time. In addition, the underlying components
+of our method are based on language models
+pre-trained on data collected from the internet.
+These language models have been shown to exhibit
+potential issues, such as political or gender biases.
+While we did not observe such biases during our
+experiments, users of these models should be
+aware of these issues when applying them.
+Acknowledgement
+This research is based upon work supported by U.S.
+DARPA SemaFor Program No. HR001120C0123,
+DARPA AIDA Program No. FA8750-18-2-0014,
+and DARPA MIPs Program No. HR00112290105.
+The views and conclusions contained herein are
+those of the authors and should not be interpreted
+as necessarily representing the official policies,
+either expressed or implied, of DARPA, or the
+U.S. Government. The U.S. Government is
+authorized to reproduce and distribute reprints
+for governmental purposes notwithstanding any
+copyright annotation therein. Hou Pong Chan was
+supported in part by the Science and Technology
+Development Fund, Macau SAR (Grant Nos.
+FDCT/060/2022/AFJ, FDCT/0070/2022/AMJ) and
+the Multi-year Research Grant from the University
+of Macau (Grant No. MYRG2020-00054-FST).
+References5668566956705671A Dataset Statistics
+Details of the dataset statistics are shown in Table 5.
+B Human Evaluation Details
+In this section, we describe the details of our hu-
+man evaluation. We recruit three engineering and
+science graduate students to ensure high-quality
+evaluation. For each HIT, annotators are provided
+with an input claim, the corresponding evidence
+and gold correction, and a predicted correction gen-
+erated by a model. Based on the presented predic-
+tions, annotators are tasked to answer three ques-
+tions shown on the right segment of the interface,
+each of which corresponds to Intelligence ,Factu-
+ality, and Faithfulness . They need to determine
+whether the predicted correction meets the three
+criteria according to each prompt. Our human eval-
+uation interface is displayed in Figure 4.
+Since the evaluation questions are self-
+explanatory, we only provide the human evaluators
+with terminology definitions and multiple exam-
+ples of how evaluations should be conducted.
+Terminology is defined as follows:
+•Input claim : A sentence fed into a factual
+error correction system.
+•Predicted correction : The output from the
+factual error correction system.
+•Gold correction : Ground-truth label that the
+system aims to produce.
+•Evidence : A document that the factual error
+correction system used to fix factual errors.
+We maintain frequent communication with the
+human evaluators, including answering any ques-
+tions they may have, to facilitate the evaluation
+process.
+C Ablation Studies
+To understand how each component contributes
+to the performance of ZFEC , we conducted
+ablation studies by replacing a given component
+inZFEC with other models while keeping all
+other components the same as ZFEC . We re-
+port the performance on the FEVER dataset in
+SARI andQAFE since these two metrics
+demonstrate the highest correlation with human
+judgments regarding faithfulness. Ablation results
+are presented in Table 6.
+Effect of Question Generation We compared
+MixQG with a T5-base model trained on SQuAD
+(Rajpurkar et al., 2016). The results indicate that
+the final performance is not significantly affected
+by the use of either model. Upon further inves-
+tigation, we surprisingly discovered that despite
+SQuAD exclusively comprising extractive ques-
+tion answering examples, the T5-base trained on it
+could generalize to other answer types. For exam-
+ple, given an answer “not” and a claim “Cleopatre
+is not a queen.”, T5-base (SQuAD) generates “Is
+Cleopatre a queen?”. Therefore, the training of
+MixQG on multiple QA datasets does not yield
+advantages.
+Effect of Question Answering We experi-
+mented with an abstractive QA model, UnifiedQA
+(Khashabi et al., 2020), and two extractive QA mod-
+els trained on SQuAD. We found that UnifiedQA
+performs similarly to UnifiedQA-v2, whereas using
+both extractive QA models leads to significant per-
+formance drops. This is likely due to the fact that
+SQuAD only includes extractive answer types. Al-
+though the encoder-decoder architecture of T5-base
+allows it to output words that do not present in the
+context, it fails to generate these types of answers.
+For instance, given a question “Was Cleopatre a5672
+queen.” and a context “Cleopatra VII Philopator
+was Queen of the Ptolemaic Kingdom of Egypt...”,
+T5-base (SQuAD) would output “Queen” instead
+of “Yes”.
+Effect of QA-to-claim For QA-to-claim, we ab-
+lated different training data while keeping the same
+model architecture. Similar to our findings in the
+ablation studies on QA, when T5-base is only
+trained on QA2D or SciTail, it cannot convert
+boolean-typed questions and answers to declara-
+tive sentences, resulting in a marked decline in
+performance.
+Effect of Correction Scoring We studied other
+scoring methods, including replacing DocNLI with
+FactCC and removing ROUGE-1. Using FactCC
+leads to a great performance drop, suggesting that
+DocNLI is likely a better approximation of faith-
+fulness than FactCC. Furthermore, incorporating
+ROUGE-1 into the scoring criteria allows us to se-
+lect a faithful correction that is most relevant to
+the input claim. Thus, we observe a huge drop in
+SARI when ROUGE-1 is removed.
+D Additional Qualitative Analysis
+As mentioned in §5.1, we analyzed 50 correct and
+50 incorrect outputs produced by ZFEC . All
+50 correct outputs are generated by asking the cor-
+rect questions, answering correctly using the evi-
+dence, and scoring faithfully w.r.t. the evidence.
+Examples are demonstrated in Table 7. For in-
+correct outputs, most of the errors are caused by
+DocNLI’s inability to approximate faithfulness, as
+shown by the last instance in Table 8, even though
+DocNLI is the state-of-the-art document-sentence
+entailment model. In addition, annotation errors oc-
+cur due to how the FEVER dataset was constructed(i.e. for fact-checking purposes). As demonstrated
+by the first example in Table 8, our correction is
+faithful to the evidence, and it is also more relevant
+to the input claim compared to the ground truth. As
+for errors in the question answering module, most
+of them are under-specified answers. For example,
+in the second instance in Table 8, the generated
+answer “pop music duo” is faithful to the evidence
+but is under-specified compared to the expected
+answer “R&B singers”.
+ESoftware and Hardware Configurations
+All experiments were conducted on a Ubuntu
+18.04.6 Linux machine with a single NVIDIA
+V100. We use PyTorch 1.11.0 with CUDA 10.2
+as the Deep Learning framework and utilize Trans-
+formers 4.19.2 to load all pre-trained language mod-
+els.
+F Number of Parameters
+The number of parameters for each component in
+ZFEC is provided in parentheses: MixQG-
+base (220M), UnifiedQA-v2-base (220M), QA-to-
+claim (220M), DocNLI (355M).
+G Scientific Artifacts
+The licenses for all the models and software
+used in this paper are listed below in parentheses:
+Spacy (MIT License), Stanza (Apache License 2.0),
+MixQG-base (BSD-3-Clause License), UnifiedQA-
+v2 (Apache License 2.0), T5-base (Apache Li-
+cense 2.0), DocNLI (BSD-3-Clause License), py-
+ROUGE (Apache License 2.0), FCC(BSD-3-
+Clause License), QAFE (BSD-3-Clause
+License), SARI (GPL-3.0 License), BARTS
+(Apache License 2.0).56735674ACL 2023 Responsible NLP Checklist
+A For every submission:
+/squareA1. Did you describe the limitations of your work?
+Section 8.
+/squareA2. Did you discuss any potential risks of your work?
+Section 9.
+/squareA3. Do the abstract and introduction summarize the paper’s main claims?
+Abstract and section 1.
+/squareA4. Have you used AI writing assistants when working on this paper?
+We use Grammarly to check the language/grammar.
+B/squareDid you use or create scientiﬁc artifacts?
+Appendix G.
+/squareB1. Did you cite the creators of artifacts you used?
+Section 3 & 4.
+/squareB2. Did you discuss the license or terms for use and / or distribution of any artifacts?
+Appendix G.
+/squareB3. Did you discuss if your use of existing artifact(s) was consistent with their intended use, provided
+that it was speciﬁed? For the artifacts you create, do you specify intended use and whether that is
+compatible with the original access conditions (in particular, derivatives of data accessed for research
+purposes should not be used outside of research contexts)?
+Not applicable. Left blank.
+/squareB4. Did you discuss the steps taken to check whether the data that was collected / used contains any
+information that names or uniquely identiﬁes individual people or offensive content, and the steps
+taken to protect / anonymize it?
+Not applicable. Left blank.
+/squareB5. Did you provide documentation of the artifacts, e.g., coverage of domains, languages, and
+linguistic phenomena, demographic groups represented, etc.?
+Section 4, Appendix G.
+/squareB6. Did you report relevant statistics like the number of examples, details of train / test / dev splits,
+etc. for the data that you used / created? Even for commonly-used benchmark datasets, include the
+number of examples in train / validation / test splits, as these provide necessary context for a reader
+to understand experimental results. For example, small differences in accuracy on large test sets may
+be signiﬁcant, while on small test sets they may not be.
+Appendix A.
+C/squareDid you run computational experiments?
+Section 4.
+/squareC1. Did you report the number of parameters in the models used, the total computational budget
+(e.g., GPU hours), and computing infrastructure used?
+Appendix E & F .5675/squareC2. Did you discuss the experimental setup, including hyperparameter search and best-found
+hyperparameter values?
+Section 4.
+/squareC3. Did you report descriptive statistics about your results (e.g., error bars around results, summary
+statistics from sets of experiments), and is it transparent whether you are reporting the max, mean,
+etc. or just a single run?
+Sections 4 & 5.
+/squareC4. If you used existing packages (e.g., for preprocessing, for normalization, or for evaluation), did
+you report the implementation, model, and parameter settings used (e.g., NLTK, Spacy, ROUGE,
+etc.)?
+Sections 3 & 4.
+D/squareDid you use human annotators (e.g., crowdworkers) or research with human participants?
+Section 5. Appendix B.
+/squareD1. Did you report the full text of instructions given to participants, including e.g., screenshots,
+disclaimers of any risks to participants or annotators, etc.?
+Appendix B.
+/squareD2. Did you report information about how you recruited (e.g., crowdsourcing platform, students)
+and paid participants, and discuss if such payment is adequate given the participants’ demographic
+(e.g., country of residence)?
+Appendix B.
+/squareD3. Did you discuss whether and how consent was obtained from people whose data you’re
+using/curating? For example, if you collected data via crowdsourcing, did your instructions to
+crowdworkers explain how the data would be used?
+Not applicable. Left blank.
+/squareD4. Was the data collection protocol approved (or determined exempt) by an ethics review board?
+Not applicable. Left blank.
+/squareD5. Did you report the basic demographic and geographic characteristics of the annotator population
+that is the source of the data?
+Appendix B.5676

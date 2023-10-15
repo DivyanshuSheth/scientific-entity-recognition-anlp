@@ -1,1 +1,679 @@
-4984 Proceedings of the 2022 Conference on Empirical Methods in Natural Language Processing , pages 4984 4994 December 7 - 11 , 2022 © 2022 Association for Computational Linguistics 4985 4986 4987 4988 4989 4990 4991 4992 4993 4994 
+
+Shuai Fan, Chen Lin, Haonan Li, Zhenghao Lin, Jinsong SuHang Zhang,
+Yeyun Gong, Jian Guo, Nan DuanSchool of Informatics, Xiamen University, ChinaThe University of Melbourne, AustraliaIDEA Research, ChinaMicrosoft Research Asia
+Abstract
+Most existing pre-trained language representa-
+tion models (PLMs) are sub-optimal in senti-
+ment analysis tasks, as they capture the senti-
+ment information from word-level while under-
+considering sentence-level information. In
+this paper, we propose SentiWSP , a novel
+Senti ment-aware pre-trained language model
+with combined Word-level and Sentence-level
+Pre-training tasks. The word level pre-training
+task detects replaced sentiment words, via a
+generator-discriminator framework, to enhance
+the PLM’s knowledge about sentiment words.
+The sentence level pre-training task further
+strengthens the discriminator via a contrastive
+learning framework, with similar sentences as
+negative samples, to encode sentiments in a sen-
+tence. Extensive experimental results show that
+SentiWSP achieves new state-of-the-art perfor-
+mance on various sentence-level and aspect-
+level sentiment classification benchmarks. We
+have made our code and model publicly avail-
+able at https://github.com/XMUDM/SentiWSP.
+1 Introduction
+Sentiment analysis plays a fundamental role in
+natural language processing (NLP) and powers
+a broad spectrum of important business applica-
+tions such as marketing (HaCohen-Kerner, 2019)
+and campaign monitoring (Sandoval-Almazán and
+Valle-Cruz, 2020). Two typical sentiment analy-
+sis tasks are sentence-level sentiment classifica-
+tion (Xu et al., 2019; Yin et al., 2020; Tang et al.,
+2022) and aspect-level sentiment classification (Li
+et al., 2021b).
+Recently, pre-trained language representation
+models (PLMs) such as ELMo (Peters et al., 2018),
+GPT (Radford et al., 2018, 2019), BERT (Devlin
+et al., 2019), RoBERTa (Liu et al., 2019) and XL-
+Net (Yang et al., 2019) have brought impressive per-
+formance improvements in many NLP problems,including sentiment analysis. PLMs learn a robust
+encoder on a large unlabeled corpus, through care-
+fully designed pre-training tasks, such as masked
+token or next sentence prediction.
+Despite their progress, the application of general
+purposed PLMs in sentiment analysis is limited,
+because they fail to distinguish the importance of
+different words to a specific task. For example, it is
+shown in (Kassner and Schütze, 2020) that general
+purposed PLMs have difficulties dealing with con-
+tradictory sentiment words or negation expressions,
+which are critical in sentiment analysis. To ad-
+dress this problem, recent sentiment-aware PLMs
+introduce word-level sentiment information, such
+as token sentiments and emoticons (Zhou et al.,
+2020), aspect word (Tian et al., 2020), word-level
+linguistic knowledge (Ke et al., 2020), and im-
+plicit sentiment-knowledge information (Li et al.,
+2021b). These word-level pre-training tasks, e.g.,
+sentiment word prediction and word polarity predic-
+tion, mainly learn from the masked words and are
+not efficient to capture word-level information for
+all input words. Furthermore, sentiment expressed
+in a sentence is beyond the simple aggregation of
+word-level sentiments. However, general purposed
+PLMs and existing sentiment-aware PLMs under-
+consider sentence-level sentiment information.
+In this paper, we propose a novel sentiment-
+aware pre-trained language model called
+SentiWSP , to combine word-level pre-training
+and sentence-level pre-training. Inspired by
+ELECTRA (Clark et al., 2020), which pre-trains
+a masked language model with significantly less
+computation resource, we adopt a generator-
+discriminator framework in the word-level
+pre-training. The generator aims to replace
+masked words with plausible alternatives; and the
+discriminator aims to predict whether each word in
+the sentence is an original word or a substitution.
+To tailor this framework for sentiment analysis, we
+mask two types of words for generation, sentiment4984words and non-sentiment words. We increase the
+portion of masked sentiment words so that the
+model focuses more on the sentiment expressions.
+For sentence-level pre-training, we design a con-
+trastive learning framework to improve the encoded
+embeddings by the discriminator. The query for
+the contrastive learning is constructed by masking
+sentiment expressions in a sentence. The positive
+example is the original sentence. The negative ex-
+amples are selected firstly from in-batch samples
+and then from cross-batch similar samples using
+an asynchronously updated approximate nearest
+neighboring (ANN) index. In this way, the dis-
+criminator, which will be used as the encoder for
+downstream tasks, learns to distinguish different
+sentiment polarities even if they are superficially
+similar.
+Our main contributions are in three folds: 1).
+SentiWSP strengthens word-level pre-training via
+masked sentiment word generation and detection,
+which is more sample-efficient and benefits various
+sentiment classification tasks; 2). SentiWSP com-
+bines word-level pretraining with sentence-level
+pre-training, which has been underconsidered in
+previous studies. SentiWSP adopts contrastive
+learning in the pre-training, where sentences are
+progressively contrasted with in-batch and cross-
+batch hard negatives, so that the model is empow-
+ered to encode detailed sentiment information of a
+sentence; 3). We conduct extensive experiments on
+sentence-level and aspect-level sentiment classifi-
+cation tasks, and show that SentiWSP achieves new
+state-of-the-art performance on multiple bench-
+marking datasets.
+2 Related Work
+Pre-training and Representation Learning Pre-
+training models has shown great success across var-
+ious NLP tasks (Devlin et al., 2019; Yang et al.,
+2019; Liu et al., 2019). Existing studies mostly
+use a Transformer-based (Vaswani et al., 2017) en-
+coder to capture contextual features, along with
+masked language model (MLM) and/or next sen-
+tence prediction (Devlin et al., 2019) as the pre-
+training tasks. Yang et al. (2019) propose XL-
+Net which is pre-trained using a generalized au-
+toregressive method that enables learning bidirec-
+tional contexts by maximizing the expected like-
+lihood over all permutations of the factorization
+order. ELECTRA (Clark et al., 2020) is a generator-
+discriminator framework, where the generator per-forms the masked token generation and the dis-
+criminator performs replaced token detection pre-
+training task. It is more efficient than MLM be-
+cause the discriminator models over all input to-
+kens rather than the masked tokens only. Our work
+improves ELECTRA’s performance on sentiment
+analysis tasks, by specifying masked sentiment
+words at word-level pre-training, and combining
+sentence-level pre-training.
+In addition to the pre-training models that en-
+code token representations, sentence-level and
+passage-level representation learning have under-
+gone rapid development in recent years. A surge
+of work demonstrates that contrastive learning is
+an effective framework for sentence- and passage-
+level representation learning (Meng et al., 2021;
+Wei et al., 2021; Gao et al., 2021; Li et al., 2021a).
+The common idea of contrastive learning is to pull
+together an anchor and a “positive” sample in the
+embedding space, and push apart the anchor from
+“negative” samples. Recently, COCO-LM (Meng
+et al., 2021) creates positive samples by masking
+and cropping tokens from sentences. Gao et al.
+(2021) demonstrate that constructing positive pairs
+with only standard dropout as minimal data aug-
+mentation works surprisingly well on the Natural
+Language Inference (NLI) task. Karpukhin et al.
+(2020) investigate the impact of different nega-
+tive sampling strategies for passage representation
+learning based on the task of passage retrieval and
+question answering. ANCE (Xiong et al., 2021)
+adopts approximate nearest neighbor negative con-
+trastive learning, a learning mechanism that selects
+hard negatives globally from the entire corpus, us-
+ing an asynchronously updated Approximate Near-
+est Neighbor (ANN) index. Inspired by COCO-
+LM (Meng et al., 2021) and ANCE (Xiong et al.,
+2021), we construct positive samples by masking
+a span of words from a sentence, and construct
+cross-batch hard negative samples to enhance the
+discriminator at sentence-level pre-training.
+Pre-trained Models for Sentiment Analysis In
+the field of sentiment analysis, BERT-PT (Xu et al.,
+2019) conducts post-training on the corpora which
+belong to the same domain of the downstream
+tasks to benefit aspect-level sentiment classifica-
+tion. SKEP (Tian et al., 2020) constructs three
+sentiment knowledge prediction objectives in or-
+der to learn a unified sentiment representation for
+multiple sentiment analysis tasks. SENTIX (Zhou
+et al., 2020) investigates domain-invariant senti-4985
+ment knowledge from large-scale review datasets,
+and utilizes it for cross-domain sentiment classifi-
+cation tasks without fine-tuning. SentiBERT (Yin
+et al., 2020) proposes a two-level attention mech-
+anism on top of the BERT representation to cap-
+ture phrase-level compositional semantics. Senti-
+LARE (Ke et al., 2020) devises a new pre-training
+task called label-aware masked language model
+to construct knowledge-aware language represen-
+tation. SCAPT (Li et al., 2021b) captures both
+implicit and explicit sentiment orientation from re-
+views by aligning the representation of implicit
+sentiment expressions to those with the same senti-
+ment label.
+3 Sentiment-Aware Word-Level and
+Sentence-Level Pre-training
+The overall framework of SentiWSP is depicted in
+Figure 1. SentiWSP consists of two pre-training
+phases, namely Word-level pre-training (Sec. 3.1,
+and Sentence-level pre-training (Sec. 3.2), before
+fine-tuning (Sec. 3.3) on a downstream sentiment
+analysis task.
+Inword-level pre-training , an input sentence
+flows through a word-masking step, followed by
+a generator to replace the masked words, and a
+discriminator to detect the replacements. The gen-
+erator and discriminator are jointly trained in this
+stage. Then, the training of discriminator continues
+insentence-level pre-training . Each input sen-
+tence is masked at sentiment words to construct a
+query, while the original sentence is treated as the
+positive sample. Their embeddings encoded by the
+discriminator are contrasted to two types of nega-
+tive samples constructed in an in-batch warm-uptraining step and a cross-batch approximate nearest
+neighbor training step. Finally, the discriminator is
+fine-tuned on the downstream task.
+Compared with previous studies, the discrimina-
+tor in SentiWSP has three advantages. (1) Instead
+of random token replacement and detection, Sen-
+tiWSP masks a large portion of sentiment words,
+and thus the discriminator pays more attention to
+word-level sentiments. (2) Instead of pure masked
+token prediction, SentiWSP incorporates context
+information from all input words via a replacement
+detection task. (3) SentiWSP combines sentence-
+level sentiments with word-level sentiments by pro-
+gressively contrasting a sentence with missing sen-
+timents to a superficially similar sentence.
+3.1 Word-Level Pre-training
+Word masking Different from previous random
+word masking (Devlin et al., 2019; Clark et al.,
+2020), our goal is to corrupt the sentiment of the
+input sentence.
+In detail, we first randomly mask 15% words,
+the same as ELECTRA (Clark et al., 2020). Then,
+we use SentiWordNet (Baccianella et al., 2010) to
+mark the positions of sentiment words in a sen-
+tence, and mask the sentiment words until a certain
+proportion pof sentiment words are hidden. We
+empirically find that the sentiment word masking
+proportion p= 50% achieves the best results.
+In the example in Figure 1 (left), the sentiment
+words “sassy” and “charming” are masked while
+“smart” is not masked, “comedy” is masked as a
+random non-sentiment word.
+Generator Next, a generator Gprocesses the
+masked sentence and generates a corrupted sen-4986tence. As in ELECTRA (Clark et al., 2020), the
+generator is a small sized Transformer. Formally,
+the sentence is a sequence of words, i.e., s=
+[w, w, . . . , w], the mask indicators are denoted
+asm= [m, m, . . . , m], m∈ {0,1}, we ob-
+tainsfrom the word masking step. For masked
+out words, the word is replaced by “MASK", i.e.,
+∀m= 1, w= [“MASK ”]. The generator G
+encodes the input to contextualized representations
+h(s) = [h, . . . , h].
+For a given position t, (in our case only positions
+where w= [“MASK ”]), the generator Goutputs
+a probability p/parenleftbig
+w|s/parenrightbig
+for generating a par-
+ticular token wwith a softmax layer:
+p/parenleftbig
+w|s/parenrightbig
+=exp/parenleftbig
+eh(s)/parenrightbig
+/summationtextexp/parenleftig
+eh(s)/parenrightig(1)
+where edenotes word embeddings for word w.
+We then replace the current word wwith a
+random sample strategy based on p/parenleftbig
+w|s/parenrightbig
+.
+Sampling introduces randomness and thus it is ben-
+eficial for training the discriminator. On the con-
+trary, selecting the word with the highest probabil-
+ity is likely to generate the original word, and the
+training for discriminator will be more challeng-
+ing as the discriminator is likely to be trapped to
+distinguish an original word from a substitution.
+Formally, the replacing process can be defined
+as∀m= 1,ˆw∼p/parenleftbig
+w|s/parenrightbig
+. We denote
+the corrupted sequence as s= [w, . . . , w],
+where ∀m= 1, w= ˆw.
+Discriminator For the corrupted sentence, the
+discriminator D, i.e., a larger sized Transformer,
+encodes the corrupted sentence to h(s), and
+predicts whether each word wcomes from the
+data or the generator, using a sigmoid output layer:
+D(s, t) =σ/parenleftbig
+eh(s)/parenrightbig
+(2)
+We jointly train the generator and the discriminator.
+The generator Gis trained by maximal likelihood
+estimation, and the discriminator Dis trained by
+cross entropy.
+min/summationdisplayL(s, θ) +λL(s, θ) (3)
+L=/summationdisplay−logp/parenleftbig
+w|s/parenrightbig
+L=/summationdisplay−I(w=w) logD(s, i)
+−/parenleftbig
+1−I(w=w)/parenrightbig
+log (1−D(s, i))where Xdenotes a large corpus of raw text and λ
+is the coefficient of the discriminator loss.
+3.2 Sentence-Level Pre-training
+For sentence-level pre-training, we follow the con-
+trastive framework in Chen et al. (2020). The goal
+of contrastive learning is to learn effective repre-
+sentations by pulling together similar samples (i.e.,
+the positive samples) and pushing away different
+samples (i.e., the negative samples).
+One critical question in contrastive learning is
+how to construct a pair of query (anchor) and posi-
+tive/negative samples, i.e.,/parenleftbig
+q, d/parenrightbig
+,/parenleftbig
+q, d/parenrightbig
+. As
+the example shown in Figure 1 (right), given a
+sentence sfrom corpus C, we first mask out a cer-
+tain percentage (70% in this research) of sentiment
+words in the sentence to construct q, and treat the
+raw sentence as the positive example d.
+In-batch warm-up training Then we fetch the
+already trained (in word-level pre-training) discrim-
+inator model Dand conduct a warm-up sentence-
+level training with in-batch negatives. In detail, We
+feed the input/parenleftbig
+q, d/parenrightbig
+to the encoder Dto get the
+representations fandf, and train the encoder to
+minimize the distance between the positive pairs
+within a mini-batch using the neg log-likelyhood
+loss defined as:
+min−/summationdisplaylogexp(sim/parenleftbig
+f,f/parenrightbig
+/τ)
+/summationtextexp(sim/parenleftig
+f,f/parenrightig
+/τ)(4)
+where τis a temperature hyperparameter, |B|de-
+notes size of the mini-batch B,sim (·,·)denotes
+cosine similarity between two vectors.
+Cross-batch approximate nearest neighbor
+training Since in-batch negatives are unlikely
+to provide informative samples, we use the Ap-
+proximate nearest neighbor Negative Contrastive
+Estimation, (ANCE) (Xiong et al., 2021) to se-
+lect “hard” negative samples from the entire cor-
+pus, to improve the discriminator’s distinguishing
+power, using an asynchronously updated Approx-
+imate Nearest Neighbor (ANN) index. In detail,
+after the warm-up training of the model D, we use
+it to infer the sentence embedding on the entire
+corpus Cand then use ANN search to retrieve top-
+knegative examples closest to each query. Then
+we sample tnegative examples as hard-negative
+examples from the top- knegatives. The hyperpa-
+rameters kandtare set to 100 and 7, respectively.4987
+To maintain an up-to-date ANN index two op-
+erations are required: (1) inference: refresh the
+embeddings of all sentences in the corpus with
+the updated model D; and (2) indexing: rebuild
+the ANN index with the updated embeddings. Al-
+though indexing is efficient (Johnson et al., 2021),
+inferential computing for each batch is expensive
+as it needs to be passed forward across the entire
+corpus. In order to balance the time cost between
+inference and indexing, we use an asynchronous
+refresh mechanism similar to Guu et al. (2020)
+and update the ANN index every msteps. As illus-
+trated in the top right part in Figure 1, we construct
+a trainer to optimize D, and an inferencer that uses
+the latest checkpoint (e.g., checkpoint k−1) to re-
+calculate the encoding fof the entire corpus and
+and update ANN. Then, the trainer optimizes
+a cross-entropy objective function with negative
+samples generated from ANNand the original
+positive example pair/parenleftbig
+q, d/parenrightbig
+.
+min/summationdisplay−log/parenleftbig
+sim(f,f)/parenrightbig
+(5)
+−/summationdisplaylog(1−sim(f,f))
+where Bis the mini-batch batch at checkpoint
+k,f,f,findicate the discriminator D’s embed-
+dings of the query, positive, and negative samples
+generated from the asynchronously updated ANN,
+respectively.
+3.3 Fine-tuning
+After the pre-training, we fine-tune our model on
+downstream sentiment analysis tasks. For sentence-level sentiment classification task, we format the
+input sequence as: [CLS ],e, . . . ,e,[SEP ], and
+take the representation at the [CLS ]token to pre-
+dict the sentiment label y, which indicates the sen-
+timent polarity of the sentence.
+For aspect-level sentiment classification
+task, we format the input sequence as:
+[CLS ],a, . . . ,a,[SEP ],e, . . . ,e,[SEP ].
+where a, . . . ,adenotes the phrase of a partic-
+ular aspect. We fetch the representation at the
+[CLS ]token to predict the sentiment label yof
+the sentence in the aspect.
+4 Experiment
+4.1 Datasets
+ForSentiWSP pre-training, we use the same En-
+glish Wikipedia corpus as Devlin et al. (2019). We
+select 2 million sentences with a maximum length
+of 128 for the word-level pre-training, and select
+500,000 sentences which have 20%-30% propor-
+tion of sentiment words for the sentence-level pre-
+training.
+After pre-training, we fine-tune our model
+on sentence-level sentiment classification bench-
+marks including Stanford Sentiment Treebank
+(SST) (Socher et al., 2013), IMDB (Maas et al.,
+2011), Movie Review (MR) (Pang and Lee, 2005),
+and Yelp-2/5 (Zhang et al., 2015). For aspect-
+level sentiment classification tasks, we choose Se-
+mEval2014 Task 4 in laptop (Laptop14) and restau-
+rant (Restaurant14) domains (Pontiki et al., 2014).
+Table 3 shows the statistics of these datasets, in-
+cluding the amount of training, validation, and test4988ModelSentence-level Aspect-level
+IMDB SST-5 Yelp-2 Yelp-5 MR Restaurant14 Laptop14
+Acc Acc Acc Acc Acc Acc MF1 Acc MF1
+SentiWSP-base 95.57 58.12 98.08 71.09 90.46 87.14 81.33 82.12 78.34
+w/o WP 95.46 57.64 98.02 70.82 90.17 86.82 80.02 81.83 77.87
+w/o SP 95.41 57.97 98.01 70.78 90.12 86.75 79.98 81.75 77.54
+w/o WP,SP 94.98 57.17 97.59 70.67 89.82 86.13 79.53 81.35 77.23
+SentiWSP-large 96.26 59.32 98.25 71.69 92.41 88.75 82.85 83.69 80.82
+w/o WP 96.12 58.67 98.21 71.31 91.87 87.87 82.13 82.97 79.35
+w/o SP 96.17 58.34 98.17 71.35 91.77 87.56 81.85 82.89 79.13
+w/o WP,SP 95.62 57.89 97.87 71.27 90.81 87.32 81.63 82.13 78.25
+splits, the average length and the number of classes.
+Since there is no validation set in MR, IMDB, and
+yelp-2/5, we randomly select a subset from the
+training set for validation.
+4.2 Baselines
+We compare our model with both general pur-
+posed pre-trained models and sentiment-aware pre-
+trained models. For general purposed pre-trained
+models, we choose BERT (Devlin et al., 2019),
+XLNet (Yang et al., 2019), and RoBERTa (Liu
+et al., 2019) as baselines. For sentiment-aware
+pre-trained models, we choose BERT-PT (Xu
+et al., 2019), SentiBERT (Yin et al., 2020), Sen-
+tiLARE (Ke et al., 2020), SENTIX (Zhou et al.,
+2020), and SCAPT (Li et al., 2021b). We also im-
+plement TransBERT (Li et al., 2019), in the same
+transfer manner as SentiLARE.4.3 Implementation Details
+During pre-training, we use the AdamW optimizer
+and linear learning rate scheduler, and we set the
+max sequence length to 128. The learning rate is
+initialized with 2e-5 and 1e-5 for the base and large
+model, respectively. For word-level pre-training,
+we use ELECTRA (Clark et al., 2020) initialize
+GandD. We set the proportion of sentiment
+word mask to p= 0.5and we keep other hyper-
+parameters the same as ELECTRA. For sentence-
+level pre-training, we follow the settings of un-
+supervised SimCSE (Gao et al., 2021) to do the
+warm-up training, and set the proportion of senti-
+ment word mask p= 0.7. The detailed batch size
+and training steps for different level of pre-training
+are listed in Appendix A.
+For fine-tuning, we use the hyperparameters
+from Clark et al. (2019) for the most parts. We
+fine-tune 3-5 epochs for sentence-level sentiment
+classification and 7-10 epochs for aspect-level sen-
+timent classification tasks. The learning rate of
+the base and large model for the fine-tunning is
+set to 2e-5 and 1e-5, respectively. We use a linear
+learning rate scheduler with 10% warm-up steps.
+4.4 Comparative Results
+We list the performance of different models in Ta-
+ble 1. According to the results, we have several
+findings: (1) SentiWSP consistently outperforms
+all baselines on sentence-level classification tasks,
+which demonstrates the superiority of SentiWSP to
+capture sentence-level semantics. (2) On the aspect-
+level sentiment classification tasks, the proposed
+SentiWSP boosts the ACC by 0.93and increases
+MF1 by 1.67on Laptop14 dataset. It also achieves4989Model pIMDB MR
+SentiWSP-only WP 0 95.59 90.83
+SentiWSP-only WP 0.3 96.13 91.67
+SentiWSP-only WP 0.5 96.17 91.77
+SentiWSP-only WP 0.7 95.98 91.07
+SentiWSP-only WP 1 95.97 91.26
+a competitive performance on Resturant14 dataset,
+i.e., the second best among all competitors. (3)
+SentiWSP is significantly better than ELECTRA,
+on both sentiment analysis tasks, on all datasets.
+This observation verifies the effectiveness of the
+proposed sentiment-aware pretraining strategy.
+4.5 Ablation Study
+To further investigate the effectiveness of the com-
+bining word-level and sentence-level pre-training,
+we conduct an ablation study with different model
+sizes (details in Appendix A). From the results (Ta-
+ble 2) we have the following observations: (1) With-
+out sentence-level pre-training and word-level pre-
+training (i.e., “w/o WP,SP"), SentiWSP degrades
+to ELECTRA. It performs worst in terms of all
+metrics. This proves the necessity of tailoring pre-
+training paradigms for sentiment analysis tasks. (2)
+The full version of SentiWSP produced the best re-
+sults across different tasks and datasets. Word-level
+pre-training and sentence-level pre-training capture
+sentiment information at different granularity, and
+combining multi-granularity pre-training is benefi-
+cial. (3) Comparing sentence-level pre-training
+and word-level pre-training, SentiWSP without
+sentence-level pre-training is generally worse than
+SentiWSP without word-level pre-training. The
+performance decline is consistent on Aspect-level
+sentiment classification task. We think the reason is
+that the global context is essential for analyzing as-
+pect sentiments, while focusing only on word-level
+information leads to less robust prediction.
+4.6 Impacts of Hyper-parameters
+In this section, we explore the impact of different
+hyper-parameters for the proposed model on IMDB
+and MR datasets.
+Word masking. For word-level pre-training, we
+experiment with replacing different proportions of
+sentiment words p(Table 4). From the table,Model pIMDB MR
+SentiWSP-only SP 0.3 96.02 91.18
+SentiWSP-only SP 0.5 95.86 91.36
+SentiWSP-only SP 0.7 96.12 91.87
+SentiWSP-only SP 1 95.89 91.61
+Model k IMDB MR
+In-batch N/A 95.85 91.60
+ANCE 1 95.97 91.69
+ANCE 3 96.15 91.87
+ANCE 5 96.12 91.79
+ANCE 7 96.26 92.41
+ANCE 10 96.27 92.12
+ANCE 13 96.19 91.83
+we find that the model performs the worst when
+p= 0 (i.e., the same mask strategy as ELEC-
+TRA) , which verifies our assumption that extra
+sentiment word masking is beneficial for the model
+to encode sentiment information. Besides, we find
+that masking and replacing 50% of the sentiment
+words yields the best result. We argue the reason
+is that replacing 50% sentiment words is difficult
+enough for the model to learn meaningful features,
+while keeping half of the original sentiment words
+provides useful clues for the model to detect other
+sentiment words.
+Sentence-level positive sample construction.
+Similar to the word-level experiment, we mask dif-
+ferent proportions of sentiment words to construct
+positive samples for sentence-level pre-training. As
+shown in Table 5, the best performance is achieved
+by masking 70% of the sentiment words. The un-
+derlying reason is that, the ideal positive sample
+should resemble the query, yet the augmentation
+can provide additional information for the model
+to learn meaningful representations. We believe
+70% of sentiment word masking is a good balanc-
+ing point. It is worthy to point out that, even the
+worst performances, i.e., when p= 0.5on IMDB
+andp= 0.3on MR, are better than most of the
+competitors in Table 1.
+Negative sample size. In Table 6, we report4990Loss Similarity IMDB MR
+Triplet Dot Product 96.05 91.95
+Triplet Cosine 96.16 92.12
+NLL Dot Product 96.21 92.27
+NLL Cosine 96.26 92.41
+the results with different negative samples in the
+sentence-level pre-training. From the table we have
+two findings: (1) when only in-batch negative sam-
+ples are used, the model performs worst. We argue
+the reason is that in-batch negatives are too simple
+for the model to distinguish from a positive sample,
+and continue training on these “easy” negatives
+does not make further improvements. (2) When
+we increase the cross-batch negative sample size
+from 1to10, the model is provided with more in-
+formative negative samples. Therefore, the model
+can learn more detailed sentiment information and
+the accuracy is improved. However, when we use a
+large amount of cross-batch negative samples (e.g.,
+13), the negative samples vary in quality, and thus
+the model suffers from less similar negatives.
+Similarity and loss function. For sentence-level
+pre-training, we compare two commonly adopted
+similarity functions, i.e., cosine distance and dot
+product, to measure the similarity between two
+sentence embeddings. The difference between dot
+product and cosine distance is that dot product does
+not incorporate L2 normalization. We also compare
+two widely used loss functions, i.e., Negative Log-
+Likelihood (NLL) loss and Triplet loss (Schroff
+et al., 2015), in contrastive learning and ranking
+problems. The difference between NLL loss and
+Triplet loss is that Triplet loss compares a positive
+example and a negative one directly with respect
+to a query. We report the comparisons in Table 7.
+From the table we have two observations: (1) With
+different loss functions, the cosine distance appears
+to be a more accurate measurement for sentence
+similarity and outperforms the dot product. (2) The
+NLL loss produces better results, with different
+similarity functions, than the Triplet loss.
+4.7 Training Loss Convergence
+Our final model is trained on 4 NVIDIA Tesla A100
+GPUs with a total training time of fewer than 24
+hours. For word-level pre-training, we can observe
+from Figure 3 that the generator and discrimina-
+tor compete in joint training and gradually con-
+verge within 20,000steps. For sentence-level pre-
+training, we can observe from Figure 2 that when
+the hard-negative example is refreshed every 2000
+steps, the loss of the model increases temporarily,
+which indicates that our ANN search can form a
+more demanding test for the model and improve
+the model’s capability on these hard testing cases
+in the following steps.
+5 Conclusion
+In this paper, we introduce SentiWSP , which im-
+proves pre-training models on sentiment analy-
+sis task, by capturing the sentiment information
+from word-level and sentence-level simultaneously.
+Extensive experimental results on five sentence-
+level sentiment classification benchmarks show that
+SentiWSP establishes new state-of-the-art perfor-
+mance on all of them. We conduct experiment
+on two aspect-level sentiment classification bench-
+marks. The results show that SentiWSP beats most
+existing models on Restaurant14 and achieves new
+state-of-the-art on Laptop14. We further analyze
+several hyper-parameters that may affect the model
+performance, and show that SentiWSP can achieve
+satisfying performance with respect to different
+hyper-parameter settings.
+Limitations
+SentiWSP , as most of the current state-of-the-
+art pre-training models, requires relatively large4991computation resources. As shown in Table 2,
+SentiWSP -large performs better than SentiWSP -
+base, the performance divergence is more signif-
+icant on the MR dataset. We also observe some
+bad cases when sentiment expressions are implicit
+suggested in a sentence, i.e., with very few senti-
+ment words, SentiWSP has difficulty in masking
+and generating, and constructing positive samples.
+In the future, we plan to devise an adaptive masking
+mechanism for sentiment words.
+Acknowledgements
+The project was supported by National Natural
+Science Foundation of China (No. 61972328,
+No. 62276219, No. 62036004), Natural Sci-
+ence Foundation of Fujian Province of China (No.
+2020J06001), and Youth Innovation Fund of Xi-
+amen (No. 3502Z20206059). We also thank the
+reviewers for their insightful comments.
+References49924993A Pre-train details
+We provide detailed hyper-parameter settings in
+Table 8 Table 8.
+Parameter base large
+Word-level
+pretrainingBatch size 128 64
+Warm up steps 1500 1500
+Max steps 20000 20000
+In-batch
+Warm upBatch size 64 32
+Warm up steps 500 500
+Max steps 2000 2000
+Sentence-level
+pretrainingBatch size 64 32
+Iteration steps 2000 2000
+Max iterations 4 4
+Max steps 8000 80004994

@@ -1,1 +1,482 @@
-7360 Proceedings of the 60th Annual Meeting of the Association for Computational Linguistics Volume 1 : Long Papers , pages 7360 7371 May 22 - 27 , 2022 c(cid:13)2022 Association for Computational Linguistics 7361 7362 7363 7364 7365 7366 7367 7368 7369 7370 7371 
+
+Dara Bahri, Hossein Mobahi, Yi Tay
+Google Research
+{dbahri,hmobahi,yitay}@google.com
+Abstract
+The allure of superhuman-level capabilities
+has led to considerable interest in language
+models like GPT-3 and T5, wherein the re-
+search has, by and large, revolved around
+new model architectures, training tasks, and
+loss objectives, along with substantial engi-
+neering efforts to scale up model capacity
+and dataset size. Comparatively little work
+has been done to improve the generalization
+of these models through better optimization.
+In this work, we show that Sharpness-Aware
+Minimization (SAM), a recently proposed op-
+timization procedure that encourages conver-
+gence to ﬂatter minima, can substantially im-
+prove the generalization of language models
+without much computational overhead. We
+show that SAM is able to boost performance
+on SuperGLUE, GLUE, Web Questions, Nat-
+ural Questions, Trivia QA, and TyDiQA, with
+particularly large gains when training data for
+these tasks is limited.
+1 Introduction
+Over the last several years, remarkable progress
+has been made within the domain of natural lan-
+guage understanding, with machine-learned mod-
+els able to solve some tasks at near or above human-
+level performance. This progress has, by and large,
+been fueled by research centered around 1) bet-
+terinductive biases , such as the attention-enabled
+Transformer architecture (Vaswani et al., 2017),
+2) the clever leverage of massive corpora of tex-
+tual data that was historically disregarded as “un-
+labeled,” usually in the form of pre-training objec-
+tives that strive to teach the model the structure
+of language (Radford et al., 2019; Devlin et al.,
+2018), 3) scaling up model capacity and the meth-
+ods to support it (Shazeer and Stern, 2018), 4)
+multi-task learning (Raffel et al., 2019), and lastly,
+5) larger and more diverse datasets along with ever-
+improving benchmarks that attempt to test the true
+capabilities of these models. Although these effortsall share the single goal of improving the model’s
+generalization, doing so by explicit changes to the
+optimization of the loss function has received less
+attention in comparison.
+Recently, motivated by the both empirical and
+theoretical ﬁndings that ﬂatter minima lead to bet-
+ter generalization (Kleinberg et al., 2018; Shirish
+Keskar et al., 2016; Chaudhari et al., 2019; Smith
+and Le, 2017), Foret et al. (2020) proposed a novel
+modiﬁcation to vanilla stochastic gradient descent
+they term “Sharpness-Aware Minimization,” or
+SAM. They show theoretically and empirically that
+optimizing with SAM encourages convergence to
+ﬂatter points in the loss landscape and with it comes
+the anticipated improvement in out-of-sample error.
+While their empirical ﬁndings are limited to com-
+puter vision tasks and datasets using convolutional
+neural networks (ResNets), follow-up work (Chen
+et al., 2021) showed how SAM is particularly ef-
+fective on Vision transformers (ViTs) (Dosovitskiy
+et al., 2020) and MLP-Mixers (Tolstikhin et al.,
+2021), architectures that are more prone than con-
+volutional ones to land in sharp minima. Crucially,
+they show that when equipped with SAM, ViTs
+outperform ResNets of similar size and throughput
+without the need for large-scale pre-training .
+Encouraged by wins in the vision domain, we
+ask whether SAM can deliver similar gains in the
+language domain. Our contributions are as follows:
+1.We show that blithely applying SAM when
+ﬁne-tuning public pre-trained checkpoints
+of the text-to-text transformer (T5) (Raffel
+et al., 2019) and its multilingual counterpart,
+mT5 (Xue et al., 2020) on SuperGLUE (Wang
+et al., 2019), GLUE (Wang et al., 2018),
+TyDiQA-GoldP (Clark et al., 2020) and the
+Closed-Book Question Answering (CBQA)
+tasks from Roberts et al. (2020) – Web Ques-
+tions (Berant et al., 2013), Natural Ques-
+tions (Kwiatkowski et al., 2019), and Trivia
+QA (Joshi et al., 2017) – improves test perfor-7360mance quite markedly. Furthermore, by em-
+ploying an approximation suggested by Brock
+et al. (2021), these gains come only at the cost
+of about 25% extra compute.
+2.The improvement brought by SAM often in-
+creases with less labeled training data, making
+SAM indispensable for data-limited tasks. We
+test this by subsampling the training splits of
+CBQA and SuperGLUE datasets at rates rang-
+ing from 2%to80%.
+2 Related Works
+Better Generalization. In light of ﬂatter minima
+generalizing better, Smith and Le (2017) showed
+that the inherent noise in SGD serves as a form
+ofimplicit regularization , preventing the optimiza-
+tion from ever entering sharp valleys. Like SAM,
+entropy SGD (Chaudhari et al., 2019) explicitly
+encourages ﬂatter minima. Smith et al. (2021); Bar-
+rett and Dherin (2020) analyzed SGD’s generaliza-
+tion formally by way of continuous-time gradient
+ﬂow. Optimization routines based on adversarial
+risk (Zhu et al., 2019; He et al., 2020) and trust
+regions (Jiang et al., 2019; Aghajanyan et al., 2020)
+have been proposed and shown to improve general-
+ization across settings.
+While the number of methods which provide im-
+plicit or explicit regularization is overwhelmingly
+large, methods like early stopping, weight decay
+(or`-regularization), dropout (Srivastava et al.,
+2014), teacher-student or self-distillation (Hinton
+et al., 2015; Mobahi et al., 2020), label smooth-
+ing (Müller et al., 2019), batch normalization (Ioffe
+and Szegedy, 2015), mixup (Zhang et al., 2017),
+and data-augmentation more broadly are among
+the most widely used in practice. Marginalization
+of Bayesian neural networks, though challenging,
+has been shown to result in superior generaliza-
+tion in some settings (Wilson and Izmailov, 2020;
+MacKay, 1995).
+While ﬁrst-order optimization via SGD has been
+the prevailing way of training neural networks
+due to its efﬁciency and effectiveness, alternative
+second-order methods like K-FAC (Martens and
+Grosse, 2015) and Shampoo (Gupta et al., 2018)
+have slowly gained traction, often enabled by clever
+engineering to make them feasible at scale. No-
+tably, Anil et al. (2020) presents a scalable imple-
+mentation of Shampoo that provides signiﬁcant
+convergence and wall-clock time improvements
+compared to ﬁrst-order methods. They demonstratesuperior performance on machine translation and
+language modeling.
+SAM. While this is, to the best of our knowledge,
+the ﬁrst work detailing the beneﬁts of SAM for
+language tasks, there have been successful applica-
+tions of SAM in the vision domain. Notably, Chen
+et al. (2021) showed that convolution-free vision
+models like vision transformers (ViTs) (Dosovit-
+skiy et al., 2020) and MLP-Mixers (Tolstikhin et al.,
+2021) suffer from sharp minima and that SAM
+indeed smooths their loss landscapes. They cru-
+cially show that ViTs and MLP-Mixers outperfom
+ResNets of similar and greater size on ImageNet
+without the use of pre-training or data augmenta-
+tions that would otherwise be necessary to achieve
+reasonable performance. They show that SAM in-
+duces sparsity in both architectures and leads to
+more perceptive attention maps in ViTs. They ob-
+serve empirically that data augmentation and SAM
+are alike in that they both smooth the landscape on
+average, but the latter does so by explicitly control-
+ling the worst-case curvature, whereas the former
+smooths over the directions induced by the aug-
+mentations. Furthermore, they observe that SAM
+encourages linearity with respect to the input, ex-
+hibiting an effect similar to that of mixup (Zhang
+et al., 2017). Lastly, they show that SAM helps
+contrastive learning and that it enables better ro-
+bustness on corrupted examples from ImageNet-
+C (Hendrycks and Dietterich, 2019) and ImageNet-
+R (Hendrycks et al., 2021).
+In a similar spirit, Brock et al. (2021) proposed
+speeding up SAM signiﬁcantly by using fewer ex-
+amples when computing the ascent step, a strategy
+which we employ in this work, and they were able
+to apply it to ResNet model variants to advance the
+state of the art on ImageNet without extra data.
+Meanwhile, in an attempt to make SAM’s radius
+invariant to the scale of the model parameters,
+Kwon et al. (2021) proposed an adaptive version
+named Adaptive Sharpness-Aware Minimization
+(ASAM), which they then show empirically to out-
+perform normal SAM on a set of benchmark vision
+tasks.
+3 Review of Sharpness-Aware
+Minimization (SAM)
+We begin by brieﬂy reviewing the SAM algorithm;
+interested readers can see the original paper for a
+thorough treatment. In our presentation, we use
+the`norm (p= 2using notation from the origi-7361nal paper), assume a general optimizer (instead of
+vanilla SGD), and use the approximation proposed
+by Brock et al. (2021) to compute the ascent gra-
+dient (adversarial point) efﬁciently. Given a loss
+functionL:WXY! R, SAM seeks to
+ﬁnd the parameter wwhose neighborhood has low
+training loss by optimizing the minimax objective:
+minmaxL(w+):
+Finding the exact optima of the inner-
+maximization is challenging, so Foret et al. (2020)
+employ a ﬁrst-order approximation, resulting in:
+^(w) = argminL(w) +rL(w)
+=rL(w)=jjrL(w)jj:
+That is, ^is just a scaling of the loss gradient
+at the current parameters. After computing ^(w),
+SAM performs gradient descent using the gradient
+rL(w)jat the nearby “adversarial” point
+w(w),w+ ^(w).
+Put another way, SAM plugs-and-plays with any
+ﬁrst-order optimizer by simply replacing the gra-
+dient of the mini-batch Bat the current model
+weightsw2W with the gradient computed at
+w.witself is computed by taking a gradient
+ascent step of sizealong the unit gradient vector
+rL(w)=jjrL(w)jjj, whereMcan be
+the mini-batchB, or a subset of it for enhanced
+efﬁciency. We found that setting Mto be 1=4-th
+ofBsped up the method signiﬁcantly with little
+loss in quality, in line with the recommendation of
+Brock et al. (2021). The end-to-end algorithm is
+outlined in Algorithm 1.
+4 Experiments
+With SAM reviewed, we now discuss our exper-
+iments. We evaluate SAM on a range of natural
+language understanding tasks using the T5 (text-to-
+text Transformer) framework (Raffel et al., 2019).
+T5 casts NLU tasks as sequence-to-sequence ones
+that are learned using an encoder-decoder Trans-
+former (Vaswani et al., 2017) architecture setup.
+These Transformer models are typically pre-trained
+on large corpora, like the Colossal Clean Crawled
+Corpus (C4) (Raffel et al., 2019), with, for exam-
+ple, the objective of predicting a short contiguous
+span of text that was intentionally corrupted in a
+snippet of input text. The pre-trained model is typ-
+ically ﬁne-tuned on a single task or a mixture ofAlgorithm 1 Efﬁcient SAM Algorithm.input: training setS,[f(x;y)g, loss
+functionL:WXY! R, batch sizeb,
+neighborhood size >0(default 0:15), ascent
+micro-batch size ab(defaultb=4), ﬁrst-
+order optimizer update opt :WW!W .initialize parameters w,t= 0.while not converged do sample batchB=f(x;y);:::;(x;y)g. sample ascent micro-batch M =
+f(x;y);:::;(x;y)g. compute adversarial (ascent) point: w=
+w+j. compute gradient approximation for the
+SAM objective: g=rL(w)j. update parameters: w= opt(w;g).t=t+ 1.end whilereturnw
+multiple tasks, the latter enabled by the fact that the
+framework treats all tasks as simple input-to-target
+sequence predictions.
+To this end, we evaluate SAM in two ways:
+1.When publicly available pre-trained check-
+points of the T5.1.1 model variant are ﬁne-
+tuned with and without SAM, on SuperGLUE,
+GLUE, TyDiQA, and the Closed-Book Ques-
+tion Answering benchmarks: Web Questions,
+Natural Questions, TriviaQA. We show SAM
+improves generalization across benchmarks
+and four model sizes: Small (77M parame-
+ters), Base (250M), Large (800M), and XL
+(3B).
+2.To show how it helps when task data is limited,
+we report results when the training splits of
+these benchmarks at various rates, ranging
+from 2%to80%.
+4.1 Setup
+Framework. For all experiments, we train us-
+ing Jax (Bradbury et al., 2018) and Google Cloud
+TPUs. To ensure fair comparisons, eliminate the
+impact of exogenous factors, and reduce the possi-
+bility of software bugs, we train both standard and
+SAM-enabled models using the same codebase and
+settings, so that the code paths are identical except
+for the gradient calculation at each step, wherein7362
+Model avg. (F1/EM)
+Small 73.4 / 62.1
+Small + SAM (0.02) 74.3 / 63.0
+Base 81.6 / 71.0
+Base + SAM (0.02) 82.0 / 71.3
+Large 85.6 / 75.3
+Large + SAM (0.02) 85.9 / 76.1
+XL 87.0 / 77.4
+XL + SAM (0.05) 87.3 / 77.7
+SAM behaves differently. Our implementation of
+SAM is an adaptation of an existing open-sourceimplementationto ﬁt our framework for training
+language models.
+Efﬁcient SAM. In Foret et al. (2020), the idea of
+partitioning the ascent mini-batch into mdisjoint
+micro-batches and computing a distinct adversar-
+ial point for each micro-batch and then averaging
+the SAM-gradients at each of these points was pro-
+posed under the name m-sharpness. It was noted
+there and in follow-up work (Chen et al., 2021)
+thatm> 1can result in better performance. This
+modiﬁcation incurs m-times more compute under
+a naive sequential implementation (though it can be
+parallelized well if multiple devices are available).
+Meanwhile, Brock et al. (2021) suggests (in
+the Appendix) using roughly 20% of the exam-
+ples from the mini-batch for computing the adver-
+sarial point, observing little loss in model quality.
+Withm= 1, this approximation roughly reduces
+SAM’s relative runtime from 2x to 1:2x. Since
+we understand how a 2m-x slow-down of model
+training may be prohibitive or signiﬁcantly deter
+SAM’s widespread adoption, we, at the possible7363Model Natural Q. Web Q. TriviaQA
+Small 16.7 / 12.4 22.8 / 16.5 10.2 / 7.3
+Small + SAM (0.05) 17.5 / 13.1 23.5 / 16.9 11.0 / 7.8
+Base 23.2 / 18.1 29.7 / 22.5 19.3 / 15.3
+Base + SAM (0.15) 25.7 / 20.6 31.0 / 24.5 21.5 / 17.4
+Large 27.4 / 22.3 34.3 / 27.6 25.2 / 20.9
+Large + SAM (0.15) 30.6 / 25.0 36.4 / 29.6 28.5 / 24.2
+XL 33.5 / 27.5 39.3 / 31.6 36.5 / 31.1
+XL + SAM (0.15) 34.7 / 28.8 40.7 / 33.3 38.0 / 32.6
+Model Natural Q. Web Q. TriviaQA
+Small 19.2 / 15.0 23.8 / 17.7 10.9 / 8.1
+Small + SAM (0.05) 20.8 / 16.5 25.9 / 20.4 12.3 / 9.4
+Base 26.3 / 21.1 31.6 / 26.0 20.6 / 16.8
+Base + SAM (0.15) 27.8 / 22.6 33.6 / 27.5 23.7 / 19.5
+Large 28.1 / 23.0 32.7 / 25.8 25.1 / 20.8
+Large + SAM (0.15) 30.8 / 25.3 34.4 / 28.0 28.8 / 24.2
+XL 33.4 / 27.3 37.1 / 30.6 35.5 / 30.2
+XL + SAM (0.15) 34.2 / 28.3 39.4 / 32.3 37.6 / 32.0
+loss of larger improvements, set m= 1 and use
+1/4-th (25%) of the mini-batch, or the number of
+available training devices (TPU cores in our case),
+whichever is larger, to compute SAM’s adversarial
+point. This is necessary because the mini-batch
+gradient computation is parallelized over devices
+and each device must receive at least one example.
+We’ve observed from wall-clock times that with
+these settings, SAM is all in all about 25% slower
+than standard training.
+Hyper-parameters. SAM has a single hyper-
+parameter, which is size of the step taken along
+the unit adversarial gradient vector. We search
+the range [0:02;0:05;0:1;0:15;0:2;0:3]asingle
+time only when ﬁne-tuning on SuperGLUE. We
+found that 0:05is a reasonable choice for T5.1.1
+small models, and 0:15for the Base, Large, and
+XL variants, and so for all subsequent experiments
+except for TyDiQA, we use these choices with-out additional tuning. For the mT5 model on Ty-
+DiQA, we found that a smaller was necessary for
+good performance. For this, we searched the range
+[0:01;0:02;0:05].
+For all ﬁne-tuning, we use the AdaFactor opti-
+mizer with learning rate 1e-3, 128 batch size, and
+the T5.1.1 settings. For SuperGLUE, we use 10%
+dropout rate, 512 input sequence length, 62 target
+sequence length, and ﬁne-tune for 250k steps. For
+Natural Questions, Web Questions, and TriviaQA,
+we use 5% dropout, 38 input sequence length, 18
+target sequence length, and ﬁne-tune for 20k steps.
+For TyDiQA, we use the ofﬁcial, public mT5 check-
+points, 10% dropout, 1024 input sequence length,
+512 target sequence length, and ﬁne-tune for 20k
+steps. We run each experiment once, due to re-
+source constraints, and we take the best checkpoint
+(stored every 1k steps for SuperGLUE and GLUE
+and every 200 steps for all other datasets) across7364
+training steps. Following standard practice, we re-
+port the best checkpoint for each task-metric pair
+(e.g. SuperGLUE CB F1) individually.
+4.2 Full Data Results
+Results for SuperGLUE and GLUE are shown in
+Table 1 and Table 2 respectively. We observe that
+SAM improves the overall scores for both bench-
+marks across all T5 model sizes. For Base and XL
+sizes on SuperGLUE, SAM brings 4.2% and 2.1%
+relative gains in overall score respectively, while
+the gain for Large on GLUE is 2.4%. As shown
+in Table 4, on Natural Questions, Web Questions,
+and Trivia QA tasks, we observe improvementsfor each task, metric (F1 and EM), and model size.
+For Base, we see a 13.8%, 8.8%, and 13.7% gain
+on the exact match metric for Natural Questions,
+Web Questions, and Trivia QA respectively. For
+Large, these ﬁgures are 12.1%, 7.2%, and 15.7%.
+Table 3 shows the results for TyDiQA-GoldP. Here,
+we observe more modest improvements in the 1-2%
+range.
+SAM improves performance on all model sizes.
+In light of the conventional wisdom that “larger
+models generalize better,” we suspected, a priori,
+that SAM would be more helpful for the smaller
+models we consider, like Small and Base, and that
+we should expect substantial diminishing returns7365
+Model Natural Q. Web Q. TriviaQA
+Small 4.9 / 2.9 4.8 / 1.8 3.0 / 1.3
+Small + SAM (0.05) 6.0 / 3.7 7.1 / 2.2 3.3 / 1.6
+Base 7.9 / 4.8 13.7 / 4.6 7.6 / 4.2
+Base + SAM (0.15) 8.6 / 5.6 12.2 / 5.7 7.7 / 4.4
+Large 8.7 / 5.2 14.0 / 7.0 9.8 / 6.0
+Large + SAM (0.15) 10.5 / 6.6 14.9 / 7.7 10.6 / 7.1
+XL 13.1 / 8.0 20.6 / 11.9 19.6 / 15.3
+XL + SAM (0.15) 13.4 / 8.1 22.9 / 13.6 19.1 / 14.5
+as we scale up the model size. Surprisingly, we did
+not observe any clear pattern with regards to size:
+indeed, sometimes the gains on XL were larger
+than those on Small. Thus, we lean to recommend
+SAM to all practitioners regardless of the regime
+in model capacity they are working in.
+SAM improves single-task and multi-task
+learning alike. Thus far, SAM has been trained
+on a mixture of tasks, where the inﬂuence of a
+particular task is proportional to the number of ex-
+amples in its training split (i.e. no artiﬁcial up or
+down-weighting). To rule out the possibility that
+the gains observed are solely due to some ability of
+SAM’s to leverage multi-task learning and improve
+cross-task transfer, we conduct the following abla-
+tion. For each of the three CBQA tasks, we train
+only on a single task and report the performance
+on that task’s test set. Results are shown in Table 5.
+Indeed, we see similar gains when training and test-
+ing on each single task individually. We conclude
+that the mechanism driving SAM’s improvements
+affect single-task and multi-task learning alike.4.3 When training data is limited
+We now switch gears and evaluate whether or not
+SAM helps when training data is scarce. Prior
+work (Chen et al., 2021) showed that for vision
+models and tasks, SAM helps more when there is
+less training data to learn from. To test whether
+this holds for language, we do as follows: we sub-
+sample the training splits for both SuperGLUE
+and CBQA datasets at rates ranging from 2%to
+80%, and observe test performance when the public
+checkpoint is ﬁne-tuned with and without SAM. Su-
+perGLUE and CBQA results at a 5%sampling rate
+are shown in Tables 6 and 7 respectively. In both
+cases we see again that SAM boosts performance
+across the board, adding, for example, a whopping
+7:2%relative improvement on the Base model on
+5%SuperGLUE and a relative 8:86%=16:6%to
+F1/EM on Natural Questions.
+Figure 1 plots the performance on the three
+CBQA tasks as a function of the sampling rate. We
+observe consistent gains from SAM across the size
+of the subsampled training set, with the relative im-
+provement appearing largest when the subsampling7366rate is around 20%.
+4.4 Sensitivity to hyper-parameters
+Figure 2 shows the impact of SAM’s hyper-
+parameters, the ascent micro-batch size a, and
+the sharpness factor mon the (full) SuperGLUE
+benchmark for the Base model. For , we see that
+all tested values perform better than ﬁne-tuning
+without SAM. However, 0:15is a “sweet spot,” per-
+forming better than values below or above it. Thus,
+practitioners with little computational budget for
+hyper-parameter tuning may still see large gains by
+using a non-optimal , while those with a gener-
+ous budget should consider tuning. For the ascent
+micro-batch size a, we see that when the normal
+(descent) batch size is 128, there is improvement
+asais increased to 32 but little past this point.
+Thus, setting ato be 1/4-th the descent batch size,
+as we do throughout our experiments, provides a
+good trade-off between performance and computa-
+tional overhead. Increasing the sharpness m, where
+each of themascent micro-batches has size 32=m,
+does not improve performance here. We thus rec-
+ommend a default of 1, which is the setting used
+across our experiments. Full results are shown in
+the Appendix.
+5 Conclusion
+To the best of our knowledge, this paper is the
+ﬁrst to demonstrate how the recently-proposed
+Sharpness-Aware Minimization can be applied for
+ﬁne-tuning the ubiquitous text-to-text Transformer
+(T5) and its multilingual counterpart mT5 on lan-
+guage tasks of broad interest. We thereby corrob-
+orate the already-documented success the method
+has had in the vision domain. Furthermore, we
+reveal SAM’s beneﬁts when data is limited by ﬁne-
+tuning on subsamples of the original task training
+split. By approximating the ascent step of the algo-
+rithm via fewer samples, we show how large gains
+can be had across benchmarks and model sizes
+while adding only around 25% additional compute
+and wall-clock training time. Our hope is that this
+work will spur SAM’s adoption in the natural lan-
+guage processing community the way it is starting
+to in the vision one.
+References7367736873696 Appendix
+6.1 TyDiQA-GoldP Results
+Table 8 shows the per-language TyDiQA-GoldP
+scores. We found that the multilingual mT5 model
+beneﬁted from a smaller than the vanilla T5
+model.
+6.2 Impact of hyper-parameters on
+SuperGLUE
+Table 9 shows the full (no subsampling) Super-
+GLUE results for the Base model for different
+hyper-parameter choices.73707371

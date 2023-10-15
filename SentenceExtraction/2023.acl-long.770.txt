@@ -1,1 +1,1005 @@
-13766 Proceedings of the 61st Annual Meeting of the Association for Computational Linguistics Volume 1 : Long Papers , pages 13766–13784 July 9 - 14 , 2023 © 2023 Association for Computational Linguistics 13767 13768 13769 13770 13771 13772 13773 13774 13775 13776 13777 13778 13779 13780 13781 13782 13783 13784 
+
+Nuno M. GuerreiroPierre ColomboPablo PiantanidaAndré F. T. MartinsInstituto de Telecomunicações, Lisbon, PortugalInstituto Superior Técnico & LUMLIS (Lisbon ELLIS Unit), University of Lisbon, PortugalUnbabel, Lisbon, PortugalMICS, CentraleSupélec, Université Paris-SaclayILLS - CNRS, CentraleSupélec
+Abstract
+Neural machine translation (NMT) has become
+the de-facto standard in real-world machine
+translation applications. However, NMT mod-
+els can unpredictably produce severely patho-
+logical translations, known as hallucinations,
+that seriously undermine user trust. It becomes
+thus crucial to implement effective preventive
+strategies to guarantee their proper function-
+ing. In this paper, we address the problem of
+hallucination detection in NMT by following
+a simple intuition: as hallucinations are de-
+tached from the source content, they exhibit
+cross-attention patterns that are statistically dif-
+ferent from those of good quality translations.
+We frame this problem with an optimal trans-
+port formulation and propose a fully unsuper-
+vised, plug-in detector that can be used with
+any attention-based NMT model. Experimental
+results show that our detector not only outper-
+forms all previous model-based detectors, but
+is also competitive with detectors that employ
+external models trained on millions of samples
+for related tasks such as quality estimation and
+cross-lingual sentence similarity.
+1 Introduction
+Neural machine translation (NMT) has achieved
+tremendous success (Vaswani et al., 2017; Kocmi
+et al., 2022), becoming the mainstream method
+in real-world applications and production systems
+for automatic translation. Although these mod-
+els are becoming evermore accurate, especially in
+high-resource settings, they may unpredictably pro-
+duce hallucinations . These are severely pathologi-
+cal translations that are detached from the source
+sequence content (Lee et al., 2018; Müller et al.,
+2020; Raunak et al., 2021; Guerreiro et al., 2022).
+Crucially, these errors have the potential to seri-
+ously harm user trust in hard-to-predict ways (Perez
+et al., 2022), hence the evergrowing need to develop
+security mechanisms. One appealing strategy to
+address this issue is to develop effective on-the-fly
+detection systems.In this work, we focus on leveraging the cross-
+attention mechanism to develop a novel hallucina-
+tion detector. This mechanism is responsible for
+selecting and combining the information contained
+in the source sequence that is relevant to retain dur-
+ing translation. Therefore, as hallucinations are
+translations whose content is detached from the
+source sequence, it is no surprise that connections
+between anomalous attention patterns and hallu-
+cinations have been drawn before in the literature
+(Berard et al., 2019; Raunak et al., 2021; Ferrando
+et al., 2022). These patterns usually exhibit scat-
+tered source attention mass across the different to-
+kens in the translation (e.g. most source attention
+mass is concentrated on a few irrelevant tokens
+such as punctuation and the end-of-sequence to-
+ken). Inspired by such observations, previous work
+has designed ad-hoc heuristics to detect hallucina-
+tions that specifically target the anomalous maps.
+While such heuristics can be used to detect hallu-
+cinations to a satisfactory extent (Guerreiro et al.,
+2022), we argue that a more theoretically-founded
+way of using anomalous attention information for
+hallucination detection is lacking in the literature.
+Rather than aiming to find particular patterns, we
+go back to the main definition of hallucinations and
+draw the following hypothesis: as hallucinations—
+contrary to good translations—are not supported by
+the source content, they may exhibit cross-attention
+patterns that are statistically different from those
+found in good quality translations. Based on this
+hypothesis, we approach the problem of hallu-
+cination detection as a problem of anomaly de-
+tection with an optimal transport (OT) formu-
+lation (Kantorovich, 2006; Peyré et al., 2019).
+Namely, we aim to find translations with source
+attention mass distributions that are highly distant
+from those of good translations. Intuitively, the
+more distant a translation’s attention patterns are
+from those of good translations, the more anoma-
+lous it is in light of that distribution.13766Our key contributions are:
+•We propose an OT-inspired fully unsupervised
+hallucination detector that can be plugged into
+any attention-based NMT model;
+•We find that the idea that attention maps for
+hallucinations are anomalous in light of a ref-
+erence data distribution makes for an effective
+hallucination detector;
+•We show that our detector not only outper-
+forms all previous model-based detectors, but
+is also competitive with external detectors
+that employ auxiliary models that have been
+trained on millions of samples.
+2 Background
+2.1 Cross-attention in NMT models
+A NMT model Mdefines a probability distribution
+p(y|x)over an output space of hypotheses Ycon-
+ditioned on a source sequence xcontained in an
+input space X. In this work, we focus on models
+parameterized by an encoder-decoder transformer
+model (Vaswani et al., 2017) with a set of learned
+weights θ. In particular, we will look closely at the
+cross-attention mechanism, a core component of
+NMT models that has been extensively analysed
+in the literature (Bahdanau et al., 2014; Raganato
+and Tiedemann, 2018; Kobayashi et al., 2020; Fer-
+rando and Costa-jussà, 2021). This mechanism is
+responsible for computing, at each generation step,
+a distribution over all source sentence words that in-
+forms the decoder on the relevance of each of those
+words to the current translation generation step. We
+follow previous work that has drawn connections
+between hallucinations and cross-attention (Berard
+et al., 2019; Raunak et al., 2021), and focus specifi-
+cally on the last layer of the decoder module. Con-
+cretely, for a source sequence of arbitrary length
+nand a target sequence of arbitrary length m, we
+will designate as Ω∈[0,1]the matrix of atten-
+tion weights that is obtained by averaging across
+all the cross-attention heads of the last layer of
+the decoder module. Further, given the model M
+we will designate π(x) :=[Ω(x)]1∈ △
+as the source (attention) mass distribution com-
+puted by Mwhenxis presented as input, where
+△={p∈R|p≥0,1p= 1}is the (n−1)-
+dimensional probability simplex.2.2 Optimal Transport Problem and
+Wasserstein Distance
+The first-order Wasserstein distance between two
+arbitrary probability distributions µ∈ △and
+ν∈ △is defined as
+W(µ,ν) = infE[c(u, v)],(1)
+where c: [n]×[m]→Ris a cost function,and
+Π(µ,ν) ={γ∈ △:γ1=µ;γ1=ν}is
+the set of all joint probability distributions whose
+marginals are µ,ν. The Wasserstein distance arises
+from the method of optimal transport (OT) (Kan-
+torovich, 2006; Peyré et al., 2019): OT measures
+distances between distributions in a way that de-
+pends on the geometry of the sample space. In-
+tuitively, this distance indicates how much prob-
+ability mass must be transferred from µtoνin
+order to transform µintoνwhile minimizing the
+transportation cost defined by c.
+A notable example is the Wasserstein-1 distance,
+W, also known as Earth Mover’s Distance (EMD),
+obtained for c(u, v) =∥u−v∥. The name follows
+from the simple intuition: if the distributions are in-
+terpreted as “two piles of mass” that can be moved
+around, the EMD represents the minimum amount
+of “work” required to transform one pile into the
+other, where the work is defined as the amount of
+mass moved multiplied by the distance it is moved.
+Although OT has been explored for robust-
+ness (Paty and Cuturi, 2019; Staerman et al., 2021)
+and out-of-distribution detection (Wang et al.,
+2021; Yan et al., 2021; Cheng et al., 2022) in com-
+puter vision, the use of OT for anomaly detection
+in NLP applications remains largely overlooked.
+2.3 The problem of hallucinations in NMT
+Hallucinations are translations that lie at the ex-
+treme end of NMT pathologies (Raunak et al.,
+2021). Despite being a well-known issue, re-
+search on the phenomenon is hindered by the fact
+that these translations are rare, especially in high-
+resource settings. As a result, data with hallucina-
+tions is scarce. To overcome this obstacle, many
+previous studies have focused on amplified settings
+where hallucinations are more likely to occur or
+are easier to detect. These include settings where
+(i) perturbations are induced either in the source13767sentence or in the target prefix (Lee et al., 2018;
+Müller and Sennrich, 2021; V oita et al., 2021; Fer-
+rando et al., 2022); (ii) the training data is corrupted
+with noise (Raunak et al., 2021); (iii) the model
+is tested under domain shift (Wang and Sennrich,
+2020; Müller et al., 2020); (iv) the detectors are
+validated on artificial hallucinations (Zhou et al.,
+2021). Nevertheless, these works have provided im-
+portant insights towards better understanding of the
+phenomenon. For instance, it has been found that
+samples memorized by an NMT model are likely
+to generate hallucinations when perturbed (Raunak
+et al., 2021), and hallucinations are related to lower
+source contributions and over-reliance on the target
+prefix (V oita et al., 2021; Ferrando et al., 2022).
+In this work, we depart from artificial settings,
+and focus on studying hallucinations that are nat-
+urally produced by the NMT model. To that end,
+we follow the taxonomy introduced in Raunak et al.
+(2021) and later extended and studied in Guerreiro
+et al. (2022). Under this taxonomy, hallucinations
+are translations that contain content that is detached
+from the source sentence. To disentangle the dif-
+ferent types of hallucinations, they can be catego-
+rized as: largely fluent detached hallucinations or
+oscillatory hallucinations . The former are trans-
+lations that bear little or no relation at all to the
+source content and may be further split according
+to the severity of the detachment (e.g. strong or
+full detachment) while the latter are inadequate
+translations that contain erroneous repetitions of
+words and phrases. We illustrate in Appendix A
+the categories described above through examples
+of hallucinated outputs.
+3 On-the-fly detection of hallucinations
+On-the-fly hallucination detectors are systems that
+can detect hallucinations without access to refer-
+ence translations. These detectors are particularly
+relevant as they can be deployed in online applica-
+tions where references are not readily available.
+3.1 Categorization of hallucination detectors
+Previous work on on-the-fly detection of hallucina-
+tions in NMT has primarily focused on two cate-
+gories of detectors: external detectors and model-
+based detectors. External detectors employ auxil-
+iary models trained for related tasks such as qualityestimation (QE) and cross-lingual embedding sim-
+ilarity. On the other hand, model-based detectors
+only require access to the NMT model that gener-
+ates the translations, and work by leveraging rele-
+vant internal features such as model confidence and
+cross-attention. These detectors are attractive due
+to their flexibility and low memory footprint, as
+they can very easily be plugged in on a vast range
+of NMT models without the need for additional
+training data or computing infrastructure. More-
+over, Guerreiro et al. (2022) show that model-based
+detectors can be predictive of hallucinations, out-
+performing QE models and even performing on par
+with state-of-the-art reference-based metrics.
+3.2 Problem Statement
+We will focus specifically on model-based detec-
+tors that require obtaining internal features from
+a model M. Building a hallucination detector
+generally consists of finding a scoring function
+s:X → Rand a threshold τ∈Rto build a
+binary rule g:X → { 0,1}. For a given test
+sample x∈ X,
+g(x) = 1{s(x)> τ}. (2)
+Ifsis an anomaly score, g(x) = 0 implies
+that the model Mgenerates a ‘normal’ translation
+for the source sequence x, andg(x) = 1 implies
+thatMgenerates a ‘hallucination’ instead.
+4 Unsupervised Hallucination Detection
+with Optimal Transport
+Anomalous cross-attention maps have been con-
+nected to the hallucinatory mode in several
+works (Lee et al., 2018; Berard et al., 2019; Raunak
+et al., 2021). Our method builds on this idea and
+uses the Wasserstein distance to estimate the cost
+of transforming a translation source mass distribu-
+tion into a reference distribution. Intuitively, the
+higher the cost of such transformation, the more
+distant—and hence the more anomalous— the at-
+tention of the translation is with respect to that of
+the reference translation.
+4.1 Wass-to-Unif : A data independent
+scenario
+In this scenario, we only rely on the generated
+translation and its source mass distribution to de-
+cide whether the translation is a hallucination or
+not. Concretely, for a given test sample x∈ X:13768
+1.We first obtain the source mass attention distri-
+bution π(x)∈ △;
+2.We then compute an anomaly score, s(x),
+by measuring the Wasserstein distance between
+π(x)and a reference distribution u:
+s(x) =W(π(x),u). (3)
+Choice of reference translation. A natural choice
+foruis the uniform distribution, u=·1, where
+1is a vector of ones of size n. In the context of our
+problem, a uniform source mass distribution means
+that all source tokens are equally attended.
+Choice of cost function. We consider the 0/1 cost
+function, c(i, j) =1[i̸=j], as it guarantees that
+the cost of transporting a unit mass from any token
+ito any token j̸=iis constant. For this distance
+function, the problem in Equation 1 has the follow-
+ing closed-form solution (Villani, 2009):
+W(π(x),u) =/∥π(x)−u∥.(4)
+This is a well-known result in optimal transport: the
+Wasserstein distance under the 0/1cost function is
+equivalent to the total variation distance between
+the two distributions. On this metric space, the
+Wasserstein distance depends solely on the proba-
+bility mass that is transported to transform π(x)
+tou. Importantly, this formulation ignores the
+starting locations and destinations of that proba-
+bility mass as the cost of transporting a unit mass
+from any token ito any token j̸=iis constant.Interpretation of Wass-to-Unif .Attention maps
+for which the source attention mass is highly con-
+centrated on a very sparse set of tokens (regardless
+of their location in the source sentence) can be very
+predictive of hallucinations (Berard et al., 2019;
+Guerreiro et al., 2022). Thus, the bigger the dis-
+tance between the source mass distribution of a
+test sample and the uniform distribution, the more
+peaked the former is, and hence the closer it is to
+such predictive patterns.
+4.2 Wass-to-Data : A data-driven scenario
+In this scenario, instead of using a single refer-
+ence distribution, we use a set of reference source
+mass distributions, R, obtained with the same
+model. By doing so, we can evaluate how anoma-
+lous a given translation is compared to a model
+data-driven distribution, rather than relying on an
+arbitrary choice of reference distribution.
+First, we use a held-out dataset Dthat con-
+tains samples for which the model Mgenerates
+good quality translations according to an auto-
+matic evaluation metric (in this work, we use
+COMET (Rei et al., 2020)). We use this dataset
+to construct (offline) a set of held-out source atten-
+tion distributions R={π(x)∈ △:x∈
+D}. Then, for a given test sample x∈ X, we
+apply the procedure illustrated in Figure 1:
+1.We generate a translation ˆy= (y, . . . , y)and
+obtain the source mass attention distribution
+π(x)∈ △;
+2.We apply a length filter to construct the sample13769reference set R, by restricting Rto contain
+source mass distributions of Rcorrespon-
+dent to translations of size [(1−δ)m,(1+δ)m]
+for a predefined δ∈]0,1[;
+3.We compute pairwise Wasserstein-1 distances
+between π(x)and each element rofR:
+W=/parenleftbig
+W(π(x),r), . . . , (5)
+W(π(x),r)/parenrightbig
+.
+4.We obtain the anomaly score s(x)by averag-
+ing the bottom- kdistances in W:
+s(x) =/summationtexts, (6)
+where Sis the set containing the ksmallest
+elements of W.
+Interpretation of Wass-to-Data .Hallucinations,
+unlike good translations, are not fully supported by
+the source content. Wass-to-Data evaluates how
+anomalous a translation is by comparing the source
+attention mass distribution of that translation to
+those of good translations. The higher the Wass-
+to-Data score, the more anomalous the source at-
+tention mass distribution of that translation is in
+comparison to those of good translations, and the
+more likely it is to be an hallucination.
+Relation to Wass-to-Unif .The Wasserstein-1
+distance (see Section 2.2) between two distribu-
+tions is equivalent to the ℓ-norm of the differ-
+ence between their cumulative distribution func-
+tions (Peyré and Cuturi, 2018). Note that this
+is different from the result in Equation 4, as the
+Wasserstein distance under c(i, j) =1[i̸=j]as
+the cost function is proportional to the norm of the
+difference between their probability mass functions .
+Thus, Wass-to-Unif will be more sensitive to the
+overall structure of the distributions (e.g. sharp
+probability peaks around some points), whereas
+Wass-to-Data will be more sensitive to the specific
+values of the points in the two distributions.
+4.3 Wass-Combo : The best of both worlds
+With this scoring function, we aim at combining
+Wass-to-Unif andWass-to-Data into a single de-
+tector. To do so, we propose using a two-stage
+process that exploits the computational benefitsofWass-to-Unif overWass-to-Data .Put simply,
+(i) we start by assessing whether a test sample is
+deemed a hallucination according to Wass-to-Unif ,
+and if not (ii) we compute the Wass-to-Data score.
+Formally,
+s(x) = 1[s(x)> τ]×˜s(x) (7)
++ 1[s(x)≤τ]×s(x)
+for a predefined scalar threshold τ. To set that
+threshold, we compute W={s(x) :x∈
+D}and set τ=P, i.eτis the Kper-
+centile of WwithK∈]98,100[ (in line with
+hallucinatory rates reported in (Müller et al., 2020;
+Wang and Sennrich, 2020; Raunak et al., 2022)).
+5 Experimental Setup
+5.1 Model and Data
+We follow the setup in Guerreiro et al. (2022). In
+that work, the authors released a dataset of 3415
+translations for WMT18-news translation
+data (Bojar et al., 2018) with annotations on criti-
+cal errors and hallucinations. Our analysis in the
+main text focuses on this dataset as it is the only
+available dataset that contains human annotations
+on hallucinations produced naturally by an NMT
+model (we provide full details about the dataset
+and the model in Appendix A). Nevertheless, in
+order to access the broader validity of our methods
+for other low and mid-resource language pairs and
+models, we follow a similar setup to that of Tang
+et al. (2022) in which quality assessments are con-
+verted to hallucination annotations. For those ex-
+periments, we use the-(mid-resource) and-(low-resource) translations from the MLQE-
+PE dataset (Fomicheva et al., 2022). In Appendix J,
+we present full details on the setup and report the
+results of these experiments. Importantly, our em-
+pirical observations are similar to those of the main
+text. For all our experiments, we obtain all model-
+based information required to build the detectors
+using the same models that generated the transla-
+tions in consideration.13770
+5.2 Baseline detectors
+5.2.1 Model-based detectors
+We compare our methods to the two best per-
+forming model-based methods in Guerreiro et al.
+(2022).
+Attn-ign-SRC .This method consists of comput-
+ing the proportion of source words with a total
+incoming attention mass lower than a threshold λ:
+s(x) =/summationtext 1/bracketleftbig
+(Ω(x)1)< λ/bracketrightbig
+.(8)
+This method was initially proposed in Berard et al.
+(2019). We follow their work and use λ= 0.2.
+Seq-Logprob. We compute the length-normalised
+sequence log-probability of the translation:
+s(x) =/summationtextlogp(y|y,x).(9)
+5.2.2 External detectors
+We provide a comparison to detectors that exploit
+state-of-the-art models in related tasks, as it helps
+monitor the development of model-based detectors.
+CometKiwi .We compute sentence-level quality
+scores with CometKiwi (Rei et al., 2022), the
+winning reference-free model of the WMT22 QE
+shared task (Zerva et al., 2022). It has more than
+565M parameters and it was trained on more than
+1M human quality annotations. Importantly, this
+training data includes human annotations for sev-
+eral low-quality translations and hallucinations.
+LaBSE .We leverage LaBSE (Feng et al., 2020)
+to compute cross-lingual sentence representations
+for the source sequence and translation. We use
+the cosine similarity of these representations as
+the detection score. The model is based on the
+BERT (Devlin et al., 2019) architecture and wastrained on more than 20 billion sentences. LaBSE
+makes for a good baseline, as it was optimized in
+a self-supervised way with a translate matching
+objective that is very much aligned with the task of
+hallucination detection: during training, LaBSE is
+given a source sequence and a set of translations
+including the true translation and multiple negative
+alternatives, and the model is optimized to specif-
+ically discriminate the true translation from the
+other negative alternatives by assigning a higher
+similarity score to the former.
+5.3 Evaluation metrics
+We report the Area Under the Receiver Operating
+Characteristic curve (AUROC) and the False Posi-
+tive Rate at 90% True Positive Rate (FPR@90TPR)
+to evaluate the performance of different detectors.
+5.4 Implementation Details
+We use WMT18-data samples from the held-
+out set used in Guerreiro et al. (2022), and construct
+Dto contain the 250k samples with highest
+COMET score. To obtain Wass-to-Data scores,
+we set δ= 0.1,|R|= 1000 andk= 4. To ob-
+tainWass-to-Combo scores, we set τ=P.
+We perform extensive ablations on the construc-
+tion of Rand on all other hyperparameters in
+Appendix G. We also report the computational run-
+time of our methods in Appendix D.
+6 Results
+6.1 Performance on on-the-fly detection
+We start by analyzing the performance of our pro-
+posed detectors on a real world on-the-fly detection
+scenario. In this scenario, the detector must be able
+to flag hallucinations regardless of their specific
+type as those are unknown at the time of detection.
+Wass-Combo is the best model-based detector.
+Table 1 shows that Wass-Combo outperforms most13771
+other methods both in terms of AUROC and FPR.
+When compared to the previous best-performing
+model-based method ( Seq-Logprob ),Wass-Combo
+obtains boosts of approximately 4and10points in
+AUROC and FPR, respectively. These performance
+boosts are further evidence that model-based fea-
+tures can be leveraged, in an unsupervised manner,
+to build effective detectors. Nevertheless, the high
+values of FPR suggest that there is still a significant
+performance margin to reduce in future research.
+The notion of data proximity is helpful to detect
+hallucinations. Table 1 shows that Wass-to-Data
+outperforms the previous best-performing model-
+based method ( Seq-Logprob ) in both AUROC and
+FPR (by more than 10%). This supports the idea
+that cross-attention patterns for hallucinations are
+anomalous with respect to those of good model-
+generated translations, and that our method can ef-
+fectively measure this level of anomalousness. On
+the other hand, compared to Wass-to-Uni ,Wass-to-
+Data shows a significant improvement of 30 FPR
+points. This highlights the effectiveness of lever-
+aging the data-driven distribution of good trans-
+lations instead of the ad-hoc uniform distribution.
+Nevertheless, Table 1 and Figure 2 show that com-
+bining both methods brings further performance
+improvements. This suggests that these methods
+may specialize in different types of hallucinations,
+and that combining them allows for detecting a
+broader range of anomalies. We will analyze this
+further in Section 6.2.
+Our model-based method achieves comparable
+performance to external models. Table 1 shows
+thatWass-Combo outperforms CometKiwi , with
+significant improvements on FPR. However, there
+still exists a gap to LaBSE , the best overall detector.
+This performance gap indicates that more powerful
+detectors can be built, paving the way for future
+work in model-based hallucination detection. Nev-
+ertheless, while relying on external models seems
+appealing, deploying and serving them in practice
+usually comes with additional infrastructure costs,
+while our detector relies on information that can be
+obtained when generating the translation.
+Translation quality assessments are less predic-
+tive than similarity of cross-lingual sentence rep-
+resentations. Table 1 shows that LaBSE outper-
+forms the state-of-the-art quality estimation system
+CometKiwi , with vast improvements in terms of
+FPR. This shows that for hallucination detection,
+quality assessments obtained with a QE model are
+less predictive than the similarity between cross-
+lingual sentence representations. This may be ex-
+plained through their training objectives (see Sec-
+tion 5.2.2): while CometKiwi employs a more
+general regression objective in which the model
+is trained to match human quality assessments,
+LaBSE is trained with a translate matching training
+objective that is very closely related to the task of
+hallucination detection.
+6.2 Do detectors specialize in different types
+of hallucinations?
+In this section, we present an analysis on the per-
+formance of different detectors for different types
+of hallucinations (see Section 2.3). We report both
+a quantitative analysis to understand whether a de-
+tector can distinguish a specific hallucination type
+from other translations (Table 2), and a qualitative
+analysis on a fixed-threshold scenario(Figure 3).13772
+This analysis is particularly relevant to better under-
+stand how different detectors specialize in different
+types of hallucinations. In Appendix J, we show
+that the trends presented in this section hold for
+other mid- and low-resource language pairs.
+Fully detached hallucinations. Detecting fully
+detached hallucinations is remarkably easy for
+most detectors. Interestingly, Wass-to-Unif sig-
+nificantly outperforms Wass-to-Data on this type
+of hallucination. This highlights how combin-
+ing both methods can be helpful. In fact, Wass-
+Combo performs similarly to Wass-to-Unif , and
+can very easily separate most fully detached halluci-
+nations from other translations on a fixed-threshold
+scenario (Figure 3). Note that the performance
+ofWass-to-Unif for fully detached hallucinations
+closely mirrors that of Attn-ign-SRC . This is not
+surprising, since both methods, at their core, try to
+capture similar patterns: translations for which the
+source attention mass distribution is highly concen-
+trated on a small set of source tokens.
+Strongly detached hallucinations. These are the
+hardest hallucinations to detect with our meth-
+ods. Nevertheless, Wass-Combo performs com-
+petitively with the previous best-performing model-
+based method for this type of hallucinations ( Seq-
+Logprob ). We hypothesize that the difficulty in
+detecting these hallucinations may be due to the
+varying level of detachment from the source se-
+quence. Indeed, Figure 3 shows that Wass-Combo
+scores span from a cluster of strongly detached hal-
+lucinations with scores similar to other data sam-
+ples to those similar to the scores of most fully
+detached hallucinations.Oscillatory hallucinations. Wass-to-Data and
+Wass-Combo significantly outperform all previous
+model-based detectors on detecting oscillatory hal-
+lucinations. This is relevance in the context of
+model-based detectors, as previous detectors no-
+tably struggle with detecting these hallucinations.
+Moreover, Wass-Combo also manages to outper-
+form LaBSE with significant improvements in FPR.
+This hints that the repetition of words or phrases
+may not be enough to create sentence-level rep-
+resentations that are highly dissimilar from the
+non-oscillatory source sequence. In contrast, we
+find that CometKiwi appropriately penalizes oscilla-
+tory hallucinations, which aligns with observations
+made in Guerreiro et al. (2022).
+Additionally, Figure 3 shows that the scores
+for oscillatory hallucinations are scattered along
+a broad range. After close evaluation, we observed
+that this is highly related to the severity of the oscil-
+lation: almost all non-detected hallucinations are
+not severe oscillations (see Appendix I).
+7 Conclusions
+We propose a novel plug-in model-based detec-
+tor for hallucinations in NMT. Unlike previous at-
+tempts to build an attention-based detector, we do
+not rely on ad-hoc heuristics to detect hallucina-
+tions, and instead pose hallucination detection as
+an optimal transport problem: our detector aims to
+find translations whose source attention mass distri-
+bution is highly distant from those of good quality
+translations. Our empirical analysis shows that
+our detector outperforms all previous model-based
+detectors. Importantly, in contrast to these prior
+approaches, it is suitable for identifying oscillatory
+hallucinations, thus addressing an important gap in13773the field. We also show that our detector is competi-
+tive with external detectors that use state-of-the-art
+quality estimation or cross-lingual similarity mod-
+els. Notably, this performance is achieved without
+the need for large models, or any data with quality
+annotations or parallel training data. Finally, thanks
+to its flexibility, our detector can be easily deployed
+in real-world scenarios, making it a valuable tool
+for practical applications.
+Limitations
+We highlight two main limitations of our work.
+Firstly, instead of focusing on more recent NMT
+models that use large pretrained language models
+as their backbone, our experiments were based on
+transformer base models. That is because we used
+the NMT models that produced the translations in
+the datasets we analyze, i.e, the models that actually
+hallucinate for the source sequences in the dataset.
+Nevertheless, research on hallucinations for larger
+NMT models makes for an exciting line of future
+work and would be valuable to assess the broad
+validity of our claims.
+Secondly, although our method does not require
+any training data or human annotations, it relies on
+access to a pre-existing database of source mass
+distributions. This can be easily obtained offline by
+running the model on monolingual data to obtain
+the distributions. Nevertheless, these datastores
+need not be costly in terms of memory. In fact, in
+Appendix J, we validate our detectors for datastores
+that contain less than 100k distributions.
+Acknowledgments
+This work is partially supported by the European
+Research Council (ERC StG DeepSPIN 758969),
+by EU’s Horizon Europe Research and Innova-
+tion Actions (UTTER, contract 101070631), by
+the P2020 program MAIA (LISBOA-01-0247-
+FEDER-045909), by the Portuguese Recovery
+and Resilience Plan through project C645008882-
+00000055 (NextGenAI, Center for Responsi-
+ble AI), and by the FCT through contract
+UIDB/50008/2020. This work was also granted
+access to the HPC resources of IDRIS under the
+allocation 2021- AP010611665 as well as under
+the project 2021- 101838 made by GENCI.References137741377513776A Model and Data Details
+NMT Model. The NMT model used in Guerreiro
+et al. (2022) to create the hallucination dataset is
+a Transformer base model (Vaswani et al., 2017)
+(hidden size of 512, feedforward size of 2048, 6 en-
+coder and 6 decoder layers, 8 attention heads). The
+model has approximately 77M parameters. It was
+trained with the fairseq toolkit (Ott et al., 2019)
+on WMT18-data (excluding Paracrawl): the
+authors randomly choose 2/3 of the dataset for train-
+ing and use the remaining 1/3 as a held-out set for
+analysis. We use that same held-out set in this
+work.
+Dataset Stats. The dataset used in this paper was
+introduced in Guerreiro et al. (2022). It consists of
+3415 translations from WMT18-data with
+structured annotations on different types of halluci-
+nations and pathologies. Overall, the dataset con-
+tains 118 translations annotated as fully detached
+hallucinations, 90 as strongly detached hallucina-
+tions, and 86 as oscillatory hallucinations.The
+other translations are either incorrect (1073) or cor-
+rect (2048). Details on annotation, a high-level
+overview and other statistics can be found in the
+original paper. We show examples of hallucinations
+for each category in Table 3.
+B Details on External Detectors
+COMET .We use models available in the of-
+ficial repository:wmt22-cometkiwi-da for
+CometKiwi and wmt20-comet-da for COMET.
+LaBSE .We use the version available in
+sentence-transformers (Reimers and
+Gurevych, 2019).
+C Performance of reference-free
+COMET-based models
+Guerreiro et al. (2022) used the COMET-QE
+version wmt20-comet-qe-da , whereas we are
+using the latest iteration wmt22-cometkiwi-da
+(CometKiwi). CometKiwi was trained on
+human annotations from the MLQE-PEdataset (Fomicheva et al., 2022), which con-
+tains a high percentage of hallucinations for some
+language pairs (Specia et al., 2021; Tang et al.,
+2022). We show the performance of both these
+versions in Table 4. CometKiwi significantly
+outperforms the previous iteration of COMET-QE.
+This hints that training quality estimation models
+with more negative examples can improve their
+ability to adequately penalize hallucinations.
+D Computational runtime of our
+detectors
+Our detectors do not require access to a GPU ma-
+chine. All our experiments have been ran on a ma-
+chine with 2 physical Intel(R) Xeon(R) Gold 6348
+@ 2.60GHz CPUs (total of 112 threads). Obtaining
+Wass-to-Unif scores for all the 3415 translations
+from the Guerreiro et al. (2022) dataset takes less
+than half a second, while Wass-to-Data scores are
+obtained in little over 4 minutes.
+E Evaluation Metrics
+We use scikit-learn (Pedregosa et al., 2011)
+implementations of our evaluation metrics.
+F Tracing-back performance boosts to
+the construction of the reference set R
+In Section 6.1 in the main text, we showed that
+evaluating how distant a given translation is com-
+pared to a data-driven reference distribution–rather
+than to an ad-hoc reference distribution– led to
+increased performance. Therefore, we will now
+analyze the construction of the reference set R
+to obtain Wass-to-Data scores (step 2 in Figure 1).
+We conduct experiments to investigate the impor-
+tance of the two main operations in this process:
+defining and length-filtering the distributions in
+R.
+Construction of R.To construct R, we
+first need to obtain the source attention mass dis-
+tributions for each sample in D. IfDis a
+parallel corpus, we can force-decode the reference
+translations to construct R. As shown in Ta-
+ble 5, this construction produces results similar to
+using good-quality model-generated translations.
+Moreover, we also evaluate the scenario where
+Ris constructed with translations of any qual-
+ity. Table 5 shows that although filtering for quality13777
+improves performance, the gains are not substan-
+tial. This connects to findings by Guerreiro et al.
+(2022): hallucinations exhibit different properties
+from other translations, including other incorrect
+translations. We offer further evidence that prop-
+erties of hallucinations—in this case, the source
+attention mass distributions—are not only differ-
+ent to those of good-quality translations but also to
+most other model-generated translations.
+Length-filtering the distributions in R.The
+results in Table 6 show that length-filtering boosts
+performance significantly. This is expected: our
+translation-based length-filtering penalizes transla-
+tions whose length is anomalous for their respective
+source sequences. This is particularly useful for
+detecting oscillatory hallucinations.
+G Ablations
+We perform ablations on Wass-to-Data andWass-
+Combo for all relevant hyperparameters: the length-
+filtering parameter δ, the maximum cardinality
+ofR,|R|, the value of kto compute the
+Wass-to-Data scores (step 4 in Figure 1), and the
+threshold on Wass-to-Unif scores to compute Wass-
+Combo scores. The results are shown in Table 7 to
+Table 10, respectively. We also report in Table 11
+the performance of Wass-to-Data with a 0/1 cost
+function instead of the ℓdistance function.
+On length-filtering. The results in Table 7 show
+that, generally, the bigger the length window, the
+worse the performance. This is expected: if the
+test translation is very different in length to those
+obtained for the source sequences in R, the more
+penalized it may be for the length mismatch instead
+of source attention distribution pattern anomalies.
+On the choice of |R|.Table 8 shows that in-
+creasing |R|leads to better performance, with
+reasonable gains obtained until |R|= 2000 .13778
+While this increase in performance may be desir-
+able, it comes at the cost of higher runtime.
+On the choice of k.The results in Table 9 show
+that the higher the value of k, the worse the perfor-
+mance. However, we do not recommend using the
+minimum distance ( k= 1) as it can be unstable.
+On the choice of threshold on Wass-to-Unif
+scores. Table 10 show that, generally, a higher
+threshold τleads to a better performance of Wass-
+Combo .Wass-to-Unif scores are generally very
+high for fully detached hallucinations, a type of
+hallucinations that Wass-to-Data struggles more
+to detect. Thus, when combined in Wass-Combo ,
+we obtain significant boosts in overall performance.
+However, if the threshold on Wass-to-Unif scores
+is set too low, Wass-to-Combo will correspond
+toWass-to-Unif more frequently which may not
+be desirable as Wass-to-Data outperforms it for
+all other types of hallucinations. If set too high,
+fewer fully detached hallucinations may pass that
+threshold and may then be misidentified with Wass-
+to-Data scores.
+On the choice of Wass-to-Data cost function.
+Table 11 shows that using the ℓcost function in-
+stead of using the 0/1 cost function to compute
+Wass-to-Data scores leads to significant improve-
+ments. This suggests that when comparing the
+source mass attention distribution of a test transla-
+tion to other such distributions obtained for other
+translations (instead of the ad-hoc uniform distribu-
+tion used for Wass-to-Unif scores), the information
+from the location of the source attention mass is
+helpful to obtain better scores.
+On the formulation of Wass-Combo .To com-
+bine the information from Wass-to-Unif andWass-
+to-Data , we could also perform a convex combina-
+tion of the two scores:
+s(x) =λs(x) + (1 −λ)˜s(x) (10)
+for a predefined scalar parameter λ. In Table 12, we
+show that this method is consistently subpar to our
+two-pass approach. In fact, this linear interpolation
+is not able to bring additional gains in performance
+for any of the tested parameters λwhen compared
+toWass-to-Data .
+H Analysis against ALTI+
+Concurrently to our work, Dale et al. (2022) lever-
+aged ALTI+ (Ferrando et al., 2022), a method that
+evaluates the global relative contributions of both
+source and target prefixes to model predictions, for
+detection of hallucinations. As hallucinations are
+translations detached from the source sequence,
+ALTI+ is able to detect them by identifying sen-
+tences with minimal source contribution. In Ta-
+ble 13, we show that ALTI+ slightly outperforms
+Wass-Combo for fully detached hallucinations, but
+lags considerably behind on what comes to de-13779
+tecting strongly detached and oscillatory hallucina-
+tions.
+I Error Analysis of Wass-Combo
+We show a qualitative analysis on the same fixed-
+threshold scenario described in Section 6.2 in Fig-
+ure 4. Differently to Figure 3, we provide examples
+of translations that have not been detected by Wass-
+Combo for the chosen threshold.
+Our detector is not able to detect fully detached
+hallucinations that come in the form of exact copies
+of the source sentence. For these pathological trans-
+lations, the attention map is mostly diagonal and
+is thus not anomalous. Although these are severe
+errors, we argue that, in a real-world application,
+such translations can be easily detected with string
+matching heuristics.
+We also find that our detector Wass-Combo
+struggles with oscillatory hallucinations that come
+in the form of mild repetitions of 1-grams or 2-
+grams (see example in Figure 4). To test this hy-
+pothesis, we implemented the binary heuristic top
+n-gram count (Raunak et al., 2021; Guerreiro et al.,
+2022) to verify whether a translation is a severe os-
+cillation: given the entire D, a translation is
+flagged as an oscillatory hallucination if (i) it is in
+the set of 1% lowest-quality translations according
+toCometKiwi and (ii) the count of the top repeated
+4-gram in the translation is greater than the count
+of the top repeated source 4-gram by at least 2.
+Indeed, more than 90% of the oscillatory halluci-
+nations not detected by Wass-Combo in Figure 4
+were not flagged by this heuristic. We provide 8
+examples randomly sampled from the set of oscilla-
+tory hallucinations not detected with Wass-Combo13780
+in Table 14. Close manual evaluation of these hal-
+lucinations further backs the hypothesis above.
+J Experiments on the MLQE-PE dataset
+In order to establish the broader validity of our
+model-based detectors, we present an analysis on
+their performance for other NMT models and on
+mid and low-resource language pairs. Overall, the
+detectors exhibit similar trends to those discussed
+in the main text (Section 6).
+J.1 Model and Data
+The dataset from (Guerreiro et al., 2022) analysed
+in the main text is the only available dataset that
+contains human annotations of hallucinated trans-
+lations. Thus, in this analysis we will have to make
+use of other human annotations to infer annotations
+for hallucinations. For that end, we follow a simi-
+lar setup to that of (Tang et al., 2022) and use the
+MLQE-PE dataset (Fomicheva et al., 2022)— that
+has been reported to contain low-quality transla-
+tions and hallucinations for-and-(Spe-
+cia et al., 2021)— to test the performance of our
+detectors on these language pairs.
+The-and-MLQE-PE datasets con-
+tain 7000 translations and their respective human
+quality assessments (from 1 to 100). Each transla-
+tion is scored by three different annotators. As hal-lucinations lie at the extreme end of NMT patholo-
+gies (Raunak et al., 2021), we consider a translation
+to be a hallucination if at least two annotators (ma-
+jority) gave it a quality score of 1.This process
+leads to 30 hallucinations for-and 237 hallu-
+cinations for-. Although the number of hallu-
+cinations for-is relatively small, we decide
+to also report experiments on this language pair
+because the type of hallucinations found for-
+is very different to those found for-: almost
+all-hallucinations are oscillatory, whereas
+almost all-are fully detached.
+To obtain all model-based information required
+to build the detectors, we use the same Trans-
+former models that generated the translations in
+the datasets in consideration. All details can be
+found in Fomicheva et al. (2022) and the official
+project repository. Moreover, to build our held-
+out databases of source mass distributions, we
+used readily available Europarl data (Koehn, 2005)
+for-(∼100k samples), and filtered Nepali
+Wikipedia monolingual dataused in (Koehn et al.,13781
+2019) for-(∼80k samples).
+J.2 Results
+The trends in Section 6.1 hold for other language
+pairs. The results in Table 15 establish the broader
+validity of our detectors for other NMT models and,
+importantly, for mid and low-resource language
+pairs. Similarly to the analysis in 6.1, we find
+that our detectors (i) exhibit better performance
+than other model-based detectors with significant
+gains on the low-resource-language pair;
+and (ii) can be competitive with external detectors
+that leverage large models.
+The trends in Section 6.2 hold for other language
+pairs. In Section A, we remark that almost all-hallucinations are oscillatory, whereas almost
+all-hallucinations are fully detached. With
+that in mind, the results in Table 15 establish the va-
+lidity of the claims in the main-text (Section 6.2) on
+these language pairs: (i) detecting fully detached
+hallucinations is remarkably easy for most detec-
+tors, and Wass-to-Unif outperforms Wass-to-Data
+on this type of hallucinations (see results for-); and (ii) our detectors significantly outperform
+all previous model-based detectors on detecting
+oscillatory hallucinations (see results for-),
+which further confirms the notion that some detec-
+tors specialize on different types of hallucinations
+(e.gAttn-ign-SRC is particularly fit for detecting
+fully detached hallucinations, but it does not work
+for oscillatory hallucinations).13782ACL 2023 Responsible NLP Checklist
+A For every submission:
+/squareA1. Did you describe the limitations of your work?
+Limitations Section
+/squareA2. Did you discuss any potential risks of your work?
+Not applicable. Left blank.
+/squareA3. Do the abstract and introduction summarize the paper’s main claims?
+Introduction is Section 1
+/squareA4. Have you used AI writing assistants when working on this paper?
+ChatGPT; DeepL; Grammarly; Assistance purely with the language of the paper. Used throughout
+the paper.
+B/squareDid you use or create scientiﬁc artifacts?
+5 and Appendix
+/squareB1. Did you cite the creators of artifacts you used?
+5 and Appendix
+/squareB2. Did you discuss the license or terms for use and / or distribution of any artifacts?
+1 and Appendix
+/squareB3. Did you discuss if your use of existing artifact(s) was consistent with their intended use, provided
+that it was speciﬁed? For the artifacts you create, do you specify intended use and whether that is
+compatible with the original access conditions (in particular, derivatives of data accessed for research
+purposes should not be used outside of research contexts)?
+Not applicable. Left blank.
+/squareB4. Did you discuss the steps taken to check whether the data that was collected / used contains any
+information that names or uniquely identiﬁes individual people or offensive content, and the steps
+taken to protect / anonymize it?
+Not applicable. Left blank.
+/squareB5. Did you provide documentation of the artifacts, e.g., coverage of domains, languages, and
+linguistic phenomena, demographic groups represented, etc.?
+5 and Appendix
+/squareB6. Did you report relevant statistics like the number of examples, details of train / test / dev splits,
+etc. for the data that you used / created? Even for commonly-used benchmark datasets, include the
+number of examples in train / validation / test splits, as these provide necessary context for a reader
+to understand experimental results. For example, small differences in accuracy on large test sets may
+be signiﬁcant, while on small test sets they may not be.
+5 and Appendix
+C/squareDid you run computational experiments?
+5, 6, Appendix
+/squareC1. Did you report the number of parameters in the models used, the total computational budget
+(e.g., GPU hours), and computing infrastructure used?
+Appendix13783/squareC2. Did you discuss the experimental setup, including hyperparameter search and best-found
+hyperparameter values?
+Appendix
+/squareC3. Did you report descriptive statistics about your results (e.g., error bars around results, summary
+statistics from sets of experiments), and is it transparent whether you are reporting the max, mean,
+etc. or just a single run?
+6 and Appendix
+/squareC4. If you used existing packages (e.g., for preprocessing, for normalization, or for evaluation), did
+you report the implementation, model, and parameter settings used (e.g., NLTK, Spacy, ROUGE,
+etc.)?
+Appendix
+D/squareDid you use human annotators (e.g., crowdworkers) or research with human participants?
+Left blank.
+/squareD1. Did you report the full text of instructions given to participants, including e.g., screenshots,
+disclaimers of any risks to participants or annotators, etc.?
+No response.
+/squareD2. Did you report information about how you recruited (e.g., crowdsourcing platform, students)
+and paid participants, and discuss if such payment is adequate given the participants’ demographic
+(e.g., country of residence)?
+No response.
+/squareD3. Did you discuss whether and how consent was obtained from people whose data you’re
+using/curating? For example, if you collected data via crowdsourcing, did your instructions to
+crowdworkers explain how the data would be used?
+No response.
+/squareD4. Was the data collection protocol approved (or determined exempt) by an ethics review board?
+No response.
+/squareD5. Did you report the basic demographic and geographic characteristics of the annotator population
+that is the source of the data?
+No response.13784

@@ -1,1 +1,737 @@
-13417 Proceedings of the 61st Annual Meeting of the Association for Computational Linguistics Volume 1 : Long Papers , pages 13417–13432 July 9 - 14 , 2023 © 2023 Association for Computational Linguistics 13418 13419 13420 13421 13422 13423 13424 13425 13426 13427 13428 13429 13430 13431 13432 
+
+Yongfeng Huang, Yanyang Li, Yicong Xu,
+Lin Zhang, Ruyi Gan, Jiaxing Zhang, Liwei WangDepartment of Computer Science and Engineering, The Chinese University of Hong KongSenseTime Group Inc.International Digital Economy Academy (IDEA), ChinaMicrosoft Cognitive Services Research
+{yfhuang22, yyli21, lwwang}@cse.cuhk.edu.hk
+yicxu@microsoft.com,{zhanglin, ganruyi, zhangjiaxing}@idea.edu.cn
+Abstract
+Recent advances in pre-trained language mod-
+els (PLMs) have facilitated the development of
+commonsense reasoning tasks. However, ex-
+isting methods rely on multi-hop knowledge
+retrieval and thus suffer low accuracy due to
+embedded noise in the acquired knowledge. In
+addition, these methods often attain high com-
+putational costs and nontrivial knowledge loss
+because they encode the knowledge indepen-
+dently of the PLM, making it less relevant to the
+task and resulting in a poor local optimum. In
+this work, we propose Multi-View Knowledge
+Retrieval with Prompt Tuning (MVP-Tuning).
+Our MVP-Tuning leverages similar question-
+answer pairs in training set to improve knowl-
+edge retrieval and employs a single prompt-
+tuned PLM to model knowledge and input text
+jointly. We conduct our experiments on five
+commonsense reasoning QA benchmarks to
+show that MVP-Tuning outperforms all other
+baselines in 4 out of 5 datasets with only as
+most 2% trainable parameters. The ensemble
+of our MVP-Tuning models even gets a new
+state-of-the-art performance on OpenBookQA
+and is ranked first place on the leaderboard.
+Our code and data are available.
+1 Introduction
+Endowing machines with human-like common-
+sense reasoning capabilities has gained increas-
+ing interest in natural language processing in re-
+cent years (Talmor et al., 2019; Rajpurkar et al.,
+2018). Large pre-trained language models (De-
+vlin et al., 2018; Radford et al., 2019; Yang et al.,
+2019; Brown et al., 2020a; Roberts et al., 2020; He
+et al., 2020) offer unprecedented potential to mineknowledge because of their unique capability in in-
+context learning. However, given their black-box
+nature, these models lack essential interpretability,
+resulting in the embedded knowledge that is al-
+ways implicit, difficult to interpret, and fragmented.
+Therefore, people have developed methods to ex-
+plicitly inject external knowledge, such as knowl-
+edge graphs (KG), as contextual knowledge into
+downstream tasks like commonsense reasoning.
+The main challenge of the above solution lies
+in utilizing knowledge to serve individual queries
+while suffering the scalability issue since there can
+be millions of nodes in the knowledge graph. Intu-
+itively, how to extract a partial knowledge graph,
+i.e., a subgraph, effectively and efficiently is cru-
+cial. Recent efforts focus on the multi-hop knowl-
+edge retrieval strategy (Feng et al., 2020a), which
+anchors input context entities to KG nodes and
+obtains relevant subgraphs from these nodes and
+the corresponding multi-hop neighbors. Knowl-
+edge triplets retrieved by multi-hop retrieval need
+to be directly connected in the knowledge graph
+and form a path. This process is highly sensitive
+to the quality of the knowledge graph, e.g., it tends
+to fail when necessary triplets are distant from the
+query and even in another subgraph. Therefore,
+the knowledge extracted by this strategy is often
+incomplete and biased as the neighbors of the in-
+put context entities bound the search span. To this,
+we propose multi-view retrieval , which expands
+the pool of knowledge triplet candidates with addi-
+tional highly-related question-answer pairs. This
+method does not suffer from the limitation of multi-
+hop retrieval and is able to connect distant or dis-
+joint triplets via some similarity measurements, re-
+sulting in broader and more diverse triplets from the
+KG. Figure 1 compares these two retrieval strate-
+gies. For example, given the question “What are
+candles good for eliminating?”, two retrieved multi-
+view knowledge triplets “(candle, CapableOf, emit13417
+light)” and “(candle, AtLocation, dark)” are suffi-
+cient to guide the PLM to reason and output the
+answer “dark” directly. On the other hand, the con-
+ventional multi-hop strategy needs to retrieve three
+triplets “(dark, Antonym, light)”, “(light, Antonym,
+heavy)”, and “(dark, IsA, illumination)”, which are
+much noisier and more challenging to reason.
+Having extracted the target knowledge, how can
+we harness this knowledge to serve the ultimate pur-
+pose of reasoning? An intuitive way is to employ
+Graph Neural Networks (GNNs) to output node em-
+beddings for KGs and then fuse them with embed-
+dings of other input texts from PLMs (Schlichtkrull
+et al., 2018; Lin et al., 2019; Feng et al., 2020a;
+Yasunaga et al., 2021; Wang et al., 2021a; Jin-
+hao Jiang and Wen, 2022). Despite being straight-
+forward, this solution inherits critical issues from
+GNNs, such as over-smoothness. Instead, we ex-
+plore a new way of encoding knowledge from KGs,
+simple yet effective. For encoding, we directly
+combine the retrieved knowledge triplets as texts
+and concatenate them with other textual informa-
+tion as the input of the PLM. Our approach can
+alleviate the computational cost and reduce the in-
+formation loss compared to previous GNNs based
+approaches.
+In this paper, our proposed multi-view knowl-
+edge retrieval scheme can outperform existing work
+regarding efficiency and accuracy by a large mar-
+gin when built with recent successful parameter-
+efficient learning techniques, such as prompt-
+tuning (Li and Liang, 2021; Liu et al., 2021c; Lester
+et al., 2021) with a PLM. Therefore, we name our
+framework as Multi-View Knowledge Retrieval
+with Prompt Tuning (MVP-Tuning). The multi-
+view knowledge retrieval strategy brings more ac-
+curate knowledge localization with less computa-
+tional cost. The obtained knowledge is fed into aPLM model to augment the information in text. To
+further improve the capability of our model, we in-
+tegrate parameter-efficient learning in this context.
+In summary, our primary contributions are:
+•We proposed a multi-view knowledge graph
+retrieval algorithm that acquires knowledge
+using similar question-answer pairs as com-
+plementary queries.
+•We point out that the KG encoder is non-
+essential and propose a simple yet effective
+unified paradigm, that is, a single PLM jointly
+models the text and knowledge without any
+KG encoder, for commonsense reasoning
+tasks.
+•We present a systematic study on the effec-
+tiveness of prompt learning in commonsense
+QA, including the impact of prompt length
+and initialization strategy.
+•We conduct experiments on five popular com-
+monsense QA benchmarks, including Com-
+monsenseQA, OpenBookQA, SoicalIQA,
+PIQA, and Riddle-Sense, and compare with
+extensive baselines. Our MVP-Tuning outper-
+forms other approaches in 4 out of 5 datasets
+with at most 2% of the trainable parameters
+of the same-scale PLM. MVP-Tuning also
+improves previous state-of-the-art results on
+CommonsenseQA and OpenBookQA under
+the low-resource setting. We submitted the
+predictions of our MVP-Tuning model to the
+leaderboards of CommonsenseQA and Open-
+BookQA, where it achieves state-of-the-art
+results in comparison to other models with a
+similar scale PLM. Our MVP-Tuning ensem-
+bled predictions even obtain the best result, to
+date, on OpenBookQA’s leaderboard.134182 Related Work
+GNN-Powered Structured Knowledge Utiliza-
+tion Existing techniques often combine PLMs
+with a variety of KG encoders to leverage knowl-
+edge and context information. There are a num-
+ber of developed knowledge encoders. Some en-
+code retrieved knowledge using complex neural
+network designs, like RGCN (Schlichtkrull et al.,
+2018), GconAttn (Lin et al., 2019), MHGRN (Feng
+et al., 2020a), and QAGNN (Yasunaga et al., 2021).
+Others attempt to build knowledge encoders with
+simpler designs that exhibit superior performance.
+GSC (Wang et al., 2021b) creates a basic graph neu-
+ral counter that beats more complicated approaches,
+indicating that GNN-based encoders are merely do-
+ing simple counting. SAFE (Jinhao Jiang and Wen,
+2022) encodes relation routes using a simple two-
+layer MLP. However, these approaches encode text
+and knowledge independently. GreaseLM (Zhang
+et al., 2022), on the other hand, integrates the rep-
+resentations of both KG and PLM encoders over
+multiple layers of modal interaction processes.
+Prompt-Based Unstructured Knowledge Utiliza-
+tion A line of research has investigated the use of
+unstructured knowledge sources, such as Wikipedia
+and dictionaries, for commonsense reasoning (Xu
+et al., 2021b; Lv et al., 2020a). These methods
+append related knowledge to the input context as
+a prompt to improve commonsense reasoning. For
+example, Bhakthavatsalam et al. (2020) combined
+knowledge from ConceptNet, WordNet, and other
+corpora to create 3.5 million generic statements
+and show that this knowledge can enhance both ac-
+curacy and explanation quality. Other studies have
+focused on comparing different methods for in-
+corporating external knowledge from relevant cor-
+pora (Mitra et al., 2020). Additionally, there have
+been efforts to generate missing facts from PLMs
+to supplement external knowledge sources. For
+instance, Bosselut et al. (2019) fine-tuned a PLM
+on ATOMIC for commonsense knowledge graph
+completion, and Liu et al. (2021a) prompted GPT-
+3 (Brown et al., 2020b) directly to obtain knowl-
+edge for reasoning.
+Prompt Learning Prompt learning is a simple
+yet effective approach to adapt a PLM for specific
+downstream tasks by adding prompt tokens in the
+input. A line of prompt learning works utilizes au-
+tomated search techniques to identify appropriate
+discrete prompting words (Shin et al., 2020; Deng
+et al., 2022). In contrast to these discrete prompt
+learning methods, there are also a number of works
+known as soft prompt learning that has been de-
+veloped. These include Prompt Tuning (Lester
+et al., 2021), P-tuning (Liu et al., 2021c), Prefix-
+Tuning (Li and Liang, 2021), and P-Tuning v2 (Liu
+et al., 2021b). These approaches use trainable soft
+prompt tokens to steer PLMs’ generation.
+3 Problem Statement
+In this work, we study the multiple-choice com-
+monsense question answering (Talmor et al., 2019;
+Mihaylov et al., 2018). Given a natural language
+question qand a collection of nresponse candi-
+dates C={c,···, c}, the purpose is to pick the
+most appropriate candidate c∈Cto answer the
+question qbased on the requisite commonsense
+knowledge. In accordance with previous work (Lin
+et al., 2019), we address this commonsense rea-
+soning task in a knowledge-aware setting that em-
+braces a commonsense knowledge graph (CSKG)
+as the commonsense knowledge source.
+An external CSKG can be described formally as
+a multi-relational graph G= (V,R,E), where Vis
+the set of all concept nodes (e.g., legandfire),Ris
+the set of relation types (e.g., CapableOf andIsA),
+andE ⊆ V×R×V is the set of relational edges that
+connects two concept nodes in the V. Specifically,
+We employ ConceptNet (Speer et al., 2017), which
+consists of 799,273 nodes and 2,487,003 edges.
+4 Approach: MVP-Tuning
+As shown in Figure 2, MVP-Tuning is based on
+the PLM and includes the multi-view knowledge
+retrieval module and the prompt tuning module.
+We augment the input context with multi-view re-
+trieved knowledge, and the prompt tuning module
+optimizes the PLM in a parameter-efficiency way.
+4.1 Multi-View Knowledge Retrieval Module
+We retrieve knowledge in CSKG from two views:
+1) self-view that selects triplets related to the
+question-choice pair (q, c), and 2) consensus-view13419that retrieves triplets of other question-answer pairs
+that are semantically similar to (q, c).
+Self-View Knowledge Retrieval Following
+KEAR (Xu et al., 2021a), we implement self-view
+knowledge by retrieving the most relevant relation
+triplet in the CSKG. We denote the self-view
+knowledge retrieval process as K. Given a
+question-choice pair (q, c),K(q, c)returns the
+most relevant triplet (e, r, e)in ConceptNet
+as self-view knowledge. The self-view knowl-
+edge retrieval process Kis performed as the
+following: Firstly, we use the entity linking
+tool (Loper and Bird, 2002) to find all entities
+E={e, ..., e}, E={e, ..., e}ap-
+pearing in the question qand choice crespectively,
+where nandnare the number of entities in q
+andc. We filter out entities in EandEwhose
+lengths do not match the Wiktionary definition.
+After that, we select the entity with the maximum
+length in EandEas the question and choice
+entity eande. Then we find all triplets in
+ConceptNet containing both eandeand choose
+the one with the maximum total length as retrieved
+self-view knowledge (e, r, e). If there is no
+such triplet, we retrieve all triplets sourcing from
+the choice entity ein ConceptNet. Each triplet
+j’s score sis the product of its confidence w
+(given by ConceptNet) and the relation type weight
+t:s=w·t=w·, where ris the
+relation type of j,Nis the total number of triplets
+originating from the choice entity e, and Nis
+the number of triplets having relation ramong
+these triplets. We select the triplet with the largest
+score as self-view knowledge (e, r, e).
+Consensus-View Knowledge Retrieval Self-
+view knowledge is obtained by querying KG
+with the question-choice pair, which is limited
+in scope. Meanwhile, the knowledge retrieved
+by conventional multi-hop knowledge retrieval is
+still restricted or even noisy, as depicted in Sec-
+tion 1. To address this limitation, we propose
+consensus-view knowledge retrieval with query ex-
+pansion to improve the retrieval performance. In
+query expansion, a given query is reformulated
+by first discovering semantically related queries,
+and then re-weighting the terms in the original
+query (Vechtomova and Wang, 2006; Azad and
+Deepak, 2019; Carpineto and Romano, 2012). In
+our consensus-view knowledge retrieval, similarquestion-answer pairs in the training set collec-
+tively retrieve more relevant knowledge from KG.
+We define the consensus-view knowledge retrieval
+process as K. Given a question-choice pair
+(q, c)and the number of retrieved items m, the
+consensus-view knowledge retrieval process is
+as follow: We employ BM25 (Robertson et al.,
+2009) to choose the mmost pertinent question-
+answer pairs {(q, a),(q, a),···,(q, a)}
+from the training data for the given the question-
+choice pair (q, c). Then we use the self-
+view knowledge of these selected question-
+answer pairs to construct the consensus-view
+knowledge of (q, c), denoted as K(q, c) =
+{K(q, a),K(q, a),···,K(q, a)}.
+Constructing Multi-View Knowledge Aug-
+mented Input Given the question qand its re-
+lated choices (c,···, c,···, c), we first ob-
+tain the self-view knowledge K(q, c)and the
+consensus-view knowledge K(q, c)for each
+possible question-choice pair (q, c). We then
+append the corresponding multi-view knowledge
+K(q, c)andK(q, c)to each (q, c)to con-
+struct its augmented text representation text=
+q⊕c⊕K(q, c)⊕K(q, c), where ⊕denotes
+the string concatenation. Finally, we merge the aug-
+mented text representations of all question-choice
+pairs as the multi-view knowledge augmented input
+text = text⊕text⊕ ··· ⊕ textfor predicting
+the answer of the question q.
+4.2 Prompt Tuning Module
+To perform parameter-efficient learning, our MVP-
+Tuning framework employs prompt tuning (Li
+and Liang, 2021; Liu et al., 2021b; Lester et al.,
+2021) of the pre-trained Transformer encoder. The
+core mechanism of prompt tuning is to learn soft
+prompts, which steers a frozen pretrained language
+model to perform specific downstream tasks.
+Transformers The Transformer encoder consists
+of a list of layers, each of which contains a multi-
+head self-attention module and a feed-forward net-
+work (FFN). In the multi-head self-attention, each
+attention head is defined as:
+Attention( x) = softmax(QK
+√d)V (1)
+where dis the hidden size, Q=xW, K=
+xW, V=xWandW∈R, W∈
+R, W∈Rare three learnable weight
+matrices. The multi-head self-attention performs
+Nheads in parallel and concatenates their outputs13420to form the input to FFN. FFN is defined as:
+FFN( x) = max(0 , xW+b)W+b (2)
+where W∈R, W∈Rare weights,
+b∈R, b∈Rare biases and dis the FFN
+hidden size.
+P-Tuning v2 In our MVP-Tuning framework,
+we choose P-Tuning v2 (Liu et al., 2021b) as the
+prompt tuning technique because it shows decent
+performance on NLU tasks. P-Tuning v2 prepends
+a trainable prefix key and prefix value to the key K
+and value Vin Eq. 1 at each layer, respectively.
+Concretely, we denote the original key and
+value at the l-th Transformer encoder layer as K
+andV. We then define a learnable prefix key
+P∈Rand prefix value P∈R,
+where Lis the number of layers and nis the length.
+These prefix key and value will be added to K
+andVviaK= [P;K], V= [P;V], where
+[; ]is the concatenation along the first dimension,
+P∈RandP∈Ris the corre-
+sponding prefix key and value for l-th layer in P
+andP.KandVwill replace the original Kand
+Vwhen performing the multi-head self-attention.
+During training, we only optimize PandPand
+freeze the pretrained model.
+Previous work (Lester et al., 2021) suggests that
+the initialization of prefix key and value is crucial
+for the downstream task performance. We thus
+explore the following two initialization strategies:
+Random Initialization PandPare randomly
+initialized by a Gaussian distribution.
+Relation Augmentation Initialization To intro-
+duce additional relation information, we initialize
+PandPby the relation embeddings. We list all
+CSKG relations and encode them using the word
+embeddings from the pretrained model. Since a re-
+lation could contain multiple words, we average all
+word embeddings of one relation to build a fixed-
+length relation embedding. The concatenation of
+all relation embeddings P∈Rwill pass
+through a MLP to obtain PandP(Liu et al.,
+2021b), where the prefix length nnow equals the
+number of relations in CSKG.
+5 Experiments
+As shown in Table 1, we experiment on five com-
+monsense reasoning multiple-choice QA datasets.
+5.1 Datasets
+OpenBookQA (Mihaylov et al., 2018) is a 4-
+way multiple-choice QA dataset consisting of el-
+ementary scientific questions intended to evaluate
+science commonsense knowledge. We report the
+accuracy of our final system on the official test
+set (Mihaylov and Frank, 2018) and submit the test
+results to the leaderboard.
+CommonsenseQA (Talmor et al., 2019) is a 5-
+way multiple-choice QA dataset. It is constructed
+using ConceptNet (Speer et al., 2017). Common-
+senseQA has two split schemes, including in-house
+split (Lin et al., 2019) and official split (Talmor
+et al., 2019). We therefore report results in both the
+in-house splitand the official split. The test set
+of CommonsenseQA is not publicly available, so
+we submit our model’s predictions to the official
+leaderboard to evaluate the test accuracy.
+SocialIQA (Sap et al., 2019) is a 3-way multiple-
+choice QA dataset used to assess social common-
+sense knowledge comprehension. The test set is
+unavailable. For a fair comparison, we report re-
+sults on the development set (Shwartz et al., 2020).
+PIQA (Bisk et al., 2020) is a set of binary-choice
+questions about physical common sense. Because
+PIQA does not release the test set, all assessments
+are based on the development set.
+Riddle-Sense (Lin et al., 2021) is a five-choice
+QA dataset regarding commonsense riddles. Since
+the Riddle-Sense test is hidden, evaluations are
+carried out on its development set.
+5.2 Implementation and Training Details
+For fair comparison, our MVP-Tuning method
+utilizes the same pretrained models as the above
+benchmark. We primarily seed our MVP-Tuning
+method with the RoBERTa-large (Liu et al., 2019b)
+model for all datasets. We additionally test Aris-
+toRoBERTa (Clark et al., 2020)for OpenBookQA.13421
+To evaluate the effectiveness of our method, we test
+MVP-Tuning with larger PLMs, such as DeBERTa-
+xlarge and DeBERTa-xxlarge (He et al., 2020). De-
+tailed hyperparameter setting can be found in Ap-
+pendix A.1.
+5.3 Baselines
+Fine-tuned PLMs We fine-tune RoBERTa-large
+to study the impact of vanilla fine-tuned PLM,
+which does not use any KG and is only fed with
+the question and choices. For the OpenBookQA,we also fine-tune AristoRoBERTa.
+PLM+KG Models combine PLMs with ex-
+tra GNN-based KG encoders. With the same
+fine-tuned PLM, we evaluate eight KG encoder
+variants, including RN (Santoro et al., 2017),
+RGCN (Schlichtkrull et al., 2018), GconAttn (Lin
+et al., 2019), MHGRN (Feng et al., 2020a),
+QAGNN (Yasunaga et al., 2021), GSC (Wang
+et al., 2021b), GreaseLM (Zhang et al., 2022) and
+SAFE (Jinhao Jiang and Wen, 2022). Details can
+be seen in Appendix A.2.
+5.4 Main Results
+Results on OpenBookQA According to Ta-
+ble 2, MVP-Tuning outperforms the current
+PLM+KG methods in either RoBERTa-large or
+AristoRoBERTa setting. Although this improve-
+ment seems to be minor, it is achieved with no more
+than 2% trainable parameters (6.02M for MVP-
+Tuning vs. 355M for Fine-tuned PLM). MVP-
+Tuning allows us to use a larger PLM with a low
+training cost. Table 3 shows that the test perfor-
+mance of MVP-Tuning with DeBERTa-xxlarge is
+4% better than the best PLM+KG model, while
+having 20 ×fewer trainable parameters (17.7M
+vs. 355M). Compared to other systems on the
+leaderboard of OpenbookQA (Table 4), our MVP-
+Tuning with DeBERTa-xxlarge ranks 3rd with only13422
+17.7M trainable parameters, while most of the other
+QA systems are built on the T5 model with 11B
+trainable parameters. Moreover, our ensembled
+MVP-Tuningrank top-1 to date. We note that the
+runner-up with a public technical report, GENMC-
+ensemble (Huang et al., 2022), combines 7 fine-
+tuned T5-11B models and has 4000 times more
+trainable parameters than ours. Table 4 also indi-
+cates that our MVP-Tuning with AristoRoBERTa
+performs better than the current GNN-based QA
+methods with the same scale PLMs.
+Results on CommonsenseQA We compared our
+MVP-Tuning with existing PLM+KG models and
+fine-tuned PLMs. All of them are based on the
+RoBERTa-large model. As we can see in Table 5,
+MVP-Tuning shows a constant improvement un-
+der three evaluation settings, with 2.04% higher
+mean accuracy on the official dev split, 2.02%
+higher mean accuracy on in-house dev split, and
+1.41% higher mean accuracy on the in-house test
+split, all without a KG encoder and with no more
+than 2% (4.92M vs. 355M) trainable parameters
+of PLM. Moreover, the variance of MVP-Tuning
+is smaller than the baselines, which implies the
+robustness of our method. We also submit our
+MVP-Tuning model based on RoBERTa-large to
+CommonsenseQA’s official leaderboard. As can
+be seen from Table 6, MVP-Tuning offers a non-
+trivial advantage over every other GNN-based QA
+system with a comparable scale PLM.
+Results on Other QA Datasets To further assess
+the effectiveness of the proposed MVP-Tuning, we
+also compare our method to the aforementioned
+baselines on other commonsense reasoning datasets
+from different domains or tasks. As shown in Ta-
+ble 7, our MVP-Tuning obtains the best perfor-
+mance in most cases, which indicates that our ap-
+proach is generally effective for various common-
+sense reasoning datasets or tasks in a unified and
+parameter-efficient way.
+6 Analysis
+6.1 Low-Resource Setting
+To test the robustness of MVP-Tuning, we examine
+its performance in low-resource settings, with three
+different proportions of training data, i.e., 5%, 10%
+and 20%, in CommonsenseQA and OpenBookQA.
+For the CommonsenseQA, we still use the in-house
+split setting. We follow SAFE (Jinhao Jiang and
+Wen, 2022) setting to report the average test per-13423
+formance of three runs, and the best results are
+highlighted in bold. According to Table 8, our
+MVP-Tuning consistently outperforms other ap-
+proaches on different training data sizes, which
+shows the remarkable low-resource capability of
+our method. And we observe that our MVP-Tuning
+performs the best when the number of shots is ap-
+proximately between 500 and 1000, which obtains
+an improvement of over 5% accuracy.
+6.2 Ablation Study
+We conduct the ablation study on the proposed
+MVP-Tuning. For the multi-view knowledge re-
+trieval, we augment the input text with self-view
+knowledge, consensus-view knowledge, and multi-
+view knowledge separately, then evaluate their per-
+formance on various datasets. In addition, we also
+examine the influence of the number of retrieved
+consensus-view knowledge. For the prompt-tuning
+module, we explore the influence of the prefix ini-
+tialization strategy and prefix length.
+Effect of Different Types of Knowledge Ac-
+cording to Table 9, multi-view knowledge canprovide the most comprehensive and diverse in-
+formation for commonsense reasoning QA tasks,
+and thus achieve the best result. Consensus-view
+knowledge performs worse than self-view knowl-
+edge, suggesting that although consensus-view
+knowledge is complementary to self-view knowl-
+edge, it still misses some important knowledge.
+We further evaluate the performance of multi-hop
+knowledge. Our findings reveal that multi-hop
+knowledge exhibits inferior performance not only
+in comparison to multi-hop knowledge but also
+when compared to self-view knowledge. These
+comparative results demonstrate the efficacy of
+multi-view retrieval as a retrieval technique.
+Effect of the Quantity of Retrieved Consensus-
+View Knowledge Figure 3 shows the impact
+of the quantity of consensus-view knowledge re-
+trieved in MVP-Tuning. The performance gener-
+ally improves with more consensus-view knowl-
+edge, but too much consensus-view information
+introduces noises that ultimately hurt performance.
+Effect of Prefix Initialization Strategies We
+compare two prompt tuning module initializa-
+tion strategies in Table 10. Random initialization
+slightly outperforms relation augmentation initial-
+ization, indicating that the basic prompt tuning is
+already a good baseline for MVP-Tuning.
+Effect of the Number of Soft Prefix Tokens We
+studied the effect of the number of soft prefix to-
+kens. Figure 4 indicates that our system is not
+sensitive to the length of soft prefix.
+Case Study We also provide some examples in
+Appendix A.4 to illustrate the effectiveness of our
+multi-view knowledge retrieval.
+7 Conclusion
+In this work, we propose MVP-Tuning, a simple
+and effective approach to building a strong com-13424
+monsense reasoning QA system. It strengthens
+the conventional knowledge retrieval results via
+multi-view knowledge and unifies the modeling
+of input text and retrieved knowledge in a single
+prompt-tuned PLM. Extensive experiments show
+the superiority of MVP-Tuning, as it beats other
+sophisticated approaches in 4 out of 5 popular com-
+monsense QA benchmarks while having less than
+2% trainable parameters. MVP-Tuning achieves a
+new state-of-the-art performance in OpenBookQA
+and wins first place in the leaderboard.
+Limitation
+This paper presents the MVP-Tuning framework,
+which combines multi-view knowledge retrieval
+with prompt tuning and incorporates retrieved
+knowledge in a simple KG-encoder-free paradigm.
+However, there are limitations to our approach.
+Firstly, multi-view knowledge consists of self-view
+and consensus-view knowledge, which are one-hop
+triplets in the knowledge graph. However, not all
+question-choice pairs have one-hop triplets, lead-
+ing to null knowledge being retrieved. Additionally,
+excessive consensus-view knowledge can lead to
+noisy retrieved knowledge. Therefore, our knowl-
+edge retrieval system needs further improvement
+to obtain sufficient, high-quality knowledge. Sec-
+ondly, we focus on the empirical study of prompt
+tuning in commonsense reasoning tasks. Although
+we conduct extensive experiments, including ini-
+tialization schemes and prefix token length, we do
+not fully understand the mechanism behind prompt
+tuning and sometimes experience unstable perfor-
+mance. Although prompt tuning has been proven to
+be an efficient tuning paradigm for commonsense
+reasoning tasks, it requires further exploration.
+Acknowledgements
+Liwei Wang is also a Principal Investigator of Cen-
+tre for Perceptual and Interactive Intelligence Lim-
+ited (CPII). This work is supported in part by CPII,
+in part by the UGC under Research Matching GrantScheme and Direct Grant at CUHK.
+References134251342613427
+A Appendix
+A.1 Hyperparameter Settings for Datasets
+and Models
+Table 11 shows hyperparameter settings for
+datasets and models.
+A.2 Details of PLM+KG Baselines
+•RN (Santoro et al., 2017) utilizes a relational
+reasoning structure in order to incorporate in-
+formation from a commonsense knowledge
+graph (CSKG).
+•RGCN (Schlichtkrull et al., 2018) uses a graph
+concept attention model to gather entity data
+from the CSKG.
+•GconAttn (Lin et al., 2019) enhances the
+GCN (Kipf and Welling, 2016) by adding
+relation-specific weights.•MHGRN (Feng et al., 2020a) is a GNN archi-
+tecture that uses both GNNs and path-based
+models to reason over the CSKG.
+•QAGNN (Yasunaga et al., 2021) employs a
+GAT (Veli ˇckovi ´c et al., 2017) to jointly reason
+over the CSKG and incorporate information
+from the CSKG into its processing.
+•GSC (Wang et al., 2021b) utilizes a simple
+graph neural counter as the KG encoder in or-
+der to incorporate knowledge from the CSKG.
+•GreaseLM (Zhang et al., 2022) combines en-
+coder representations from a pre-trained lan-
+guage model (PLM) and KG encoder through
+the use of multiple modality interaction lay-
+ers, allowing for the integration of knowledge
+from the CSKG into the PLM’s processing.
+•SAFE (Jinhao Jiang and Wen, 2022) merely
+utilize MLP-based KG encoder to extract fea-
+tures from relation paths in the retrieved multi-
+hop knowledge subgraph.
+A.3 Training Curve Analysis
+We additionally investigate the learning of our
+MVP-Tuning. We compare the training curves
+of prompt-tuning and fine-tuning with multi-view
+knowledge retrieval and a backbone PLM Roberta-
+large. Figure 5 demonstrates that the fine-tuning ap-
+proach converges rapidly and starts to overfit soon,
+where the val loss rises with fluctuations. On the
+other hand, prefix-tuning converges more slowly
+and smoothly due to its fewer trainable parameters.
+A.4 Case Study
+In Table 12, we provide two examples from CSQA
+to illustrate how the model may reason using re-
+trieved multi-view knowledge to arrive at the cor-
+rect answer. For the first question, self-knowledge
+helps eliminate the incorrect answer be dismem-
+bered by a chainsaw , as “child” is incapable of
+doing so. The consensus-view knowledge veri-
+fies the “Desires” relationship between“kids” and
+“play”, indicating that “play tag” is the right re-
+sponse. Again, self-view knowledge excludes hurt
+from the second question, as there is no link be-
+tween “hurt” and “having fun” in the CSKG. The
+consensus-view knowledge contains triplets whose
+tail entity is a synonym of “pleasure” such as “hap-
+piness” and “enjoyment”, which helps to affirm
+the correct answer. This suggests that multi-view
+knowledge is essential for obtaining the correct an-
+swer. Multi-view knowledge retrieval facilitates
+model reasoning to choose the right candidate.134281342913430ACL 2023 Responsible NLP Checklist
+A For every submission:
+/squareA1. Did you describe the limitations of your work?
+The last setction
+/squareA2. Did you discuss any potential risks of your work?
+This paper does not have such risk since it is a multi-choice question answering setting.
+/squareA3. Do the abstract and introduction summarize the paper’s main claims?
+Abstract && Section 1 Introduction
+/squareA4. Have you used AI writing assistants when working on this paper?
+Left blank.
+B/squareDid you use or create scientiﬁc artifacts?
+Section 5 experiments
+/squareB1. Did you cite the creators of artifacts you used?
+Section 5 experiments
+/squareB2. Did you discuss the license or terms for use and / or distribution of any artifacts?
+Section 5 experiments
+/squareB3. Did you discuss if your use of existing artifact(s) was consistent with their intended use, provided
+that it was speciﬁed? For the artifacts you create, do you specify intended use and whether that is
+compatible with the original access conditions (in particular, derivatives of data accessed for research
+purposes should not be used outside of research contexts)?
+Section 5 experiments
+/squareB4. Did you discuss the steps taken to check whether the data that was collected / used contains any
+information that names or uniquely identiﬁes individual people or offensive content, and the steps
+taken to protect / anonymize it?
+Section 5 experiments
+/squareB5. Did you provide documentation of the artifacts, e.g., coverage of domains, languages, and
+linguistic phenomena, demographic groups represented, etc.?
+Section 5 experiments
+/squareB6. Did you report relevant statistics like the number of examples, details of train / test / dev splits,
+etc. for the data that you used / created? Even for commonly-used benchmark datasets, include the
+number of examples in train / validation / test splits, as these provide necessary context for a reader
+to understand experimental results. For example, small differences in accuracy on large test sets may
+be signiﬁcant, while on small test sets they may not be.
+Section 5 experiments
+C/squareDid you run computational experiments?
+Appendix A.4
+/squareC1. Did you report the number of parameters in the models used, the total computational budget
+(e.g., GPU hours), and computing infrastructure used?
+Section 5 experiments13431/squareC2. Did you discuss the experimental setup, including hyperparameter search and best-found
+hyperparameter values?
+Appendix A.1
+/squareC3. Did you report descriptive statistics about your results (e.g., error bars around results, summary
+statistics from sets of experiments), and is it transparent whether you are reporting the max, mean,
+etc. or just a single run?
+Section 5 experiments
+/squareC4. If you used existing packages (e.g., for preprocessing, for normalization, or for evaluation), did
+you report the implementation, model, and parameter settings used (e.g., NLTK, Spacy, ROUGE,
+etc.)?
+Section 5 experiments
+D/squareDid you use human annotators (e.g., crowdworkers) or research with human participants?
+This paper does not involve human annotation or research with human subjects:
+/squareD1. Did you report the full text of instructions given to participants, including e.g., screenshots,
+disclaimers of any risks to participants or annotators, etc.?
+This paper does not involve human annotation or research with human subjects:
+/squareD2. Did you report information about how you recruited (e.g., crowdsourcing platform, students)
+and paid participants, and discuss if such payment is adequate given the participants’ demographic
+(e.g., country of residence)?
+This paper does not involve human annotation or research with human subjects:
+/squareD3. Did you discuss whether and how consent was obtained from people whose data you’re
+using/curating? For example, if you collected data via crowdsourcing, did your instructions to
+crowdworkers explain how the data would be used?
+This paper does not involve human annotation or research with human subjects:
+/squareD4. Was the data collection protocol approved (or determined exempt) by an ethics review board?
+This paper does not involve human annotation or research with human subjects:
+/squareD5. Did you report the basic demographic and geographic characteristics of the annotator population
+that is the source of the data?
+This paper does not involve human annotation or research with human subjects:13432

@@ -1,1 +1,769 @@
-6675 Proceedings of the 60th Annual Meeting of the Association for Computational Linguistics Volume 1 : Long Papers , pages 6675 6689 May 22 - 27 , 2022 c(cid:13)2022 Association for Computational Linguistics 6676 6677 6678 6679 6680 6681 6682 6683 6684 6685 6686 6687 6688 6689 
+
+Soumya Chatterjee
+IIT Bombay
+soumya@cse.iitb.ac.inSunita Sarawagi
+IIT Bombay
+sunita@iitb.ac.inPreethi Jyothi
+IIT Bombay
+pjyothi@cse.iitb.ac.in
+Abstract
+Online alignment in machine translation refers
+to the task of aligning a target word to a
+source word when the target sequence has only
+been partially decoded. Good online align-
+ments facilitate important applications such as
+lexically constrained translation where user-
+deﬁned dictionaries are used to inject lexical
+constraints into the translation model. We
+propose a novel posterior alignment technique
+that is truly online in its execution and su-
+perior in terms of alignment error rates com-
+pared to existing methods. Our proposed in-
+ference technique jointly considers alignment
+and token probabilities in a principled man-
+ner and can be seamlessly integrated within
+existing constrained beam-search decoding al-
+gorithms. On ﬁve language pairs, including
+two distant language pairs, we achieve con-
+sistent drop in alignment error rates. When
+deployed on seven lexically constrained trans-
+lation tasks, we achieve signiﬁcant improve-
+ments in BLEU speciﬁcally around the con-
+strained positions.
+1 Introduction
+Online alignment seeks to align a target word to a
+source word at the decoding step when the word
+is output in an auto-regressive neural translation
+model (Kalchbrenner and Blunsom, 2013; Cho
+et al., 2014; Sutskever et al., 2014). This is un-
+like the more popular ofﬂine alignment task that
+uses the entire target sentence (Och and Ney, 2003).
+State of the art methods of ofﬂine alignment based
+on matching of whole source and target sentences
+(Jalili Sabet et al., 2020; Dou and Neubig, 2021)
+are not applicable for online alignment where we
+need to commit on the alignment of a target word
+based on only the generated preﬁx thus far.
+An important application of online alignment
+is lexically constrained translation which allows
+injection of domain-speciﬁc terminology and other
+phrasal constraints during decoding (Hasler et al.,2018; Hokamp and Liu, 2017; Alkhouli et al., 2018;
+Crego et al., 2016). Other applications include
+preservation of markups between the source and
+target (Müller, 2017), and supporting source word
+edits in summarization (Shen et al., 2019). These
+applications need to infer the speciﬁc source token
+which aligns with output token. Thus, alignment
+and translation is to be done simultaneously.
+Existing online alignment methods can be cate-
+gorized into Prior and Posterior alignment methods.
+Prior alignment methods (Garg et al., 2019; Song
+et al., 2020) extract alignment based on the atten-
+tion at time step twhen outputting token y. The at-
+tention probabilities at time-step tare conditioned
+on tokens output before time t. Thus, the alignment
+is estimated prior to observing y. Naturally, the
+quality of alignment can be improved if we condi-
+tion on the target token y(Shankar and Sarawagi,
+2019). This motivated Chen et al. (2020) to propose
+a posterior alignment method where alignment is
+calculated from the attention probabilities at the
+next decoder step t+ 1. While alignment qual-
+ity improved as a result, their method is not truly
+online since it does not generate alignment syn-
+chronously with the token. The delay of one step
+makes it difﬁcult and cumbersome to incorporate
+terminology constraints during beam decoding.
+We propose a truly online posterior alignment
+method that provides higher alignment accuracy
+than existing online methods, while also being syn-
+chronous. Because of that we can easily integrate
+posterior alignment to improve lexicon-constrained
+translation in state of the art constrained beam-
+search algorithms such as VDBA (Hu et al., 2019).
+Our method (Align-VDBA) presents a signiﬁ-
+cant departure from existing papers on alignment-
+guided constrained translation (Chen et al., 2020;
+Song et al., 2020) that employ a greedy algorithm
+with poor constraint satisfaction rate (CSR). For
+example, on a ja!en their CSR is 20 points lower
+than ours. Moreover, the latter does not beneﬁt6675from larger beam sizes unlike VDBA-based meth-
+ods that signiﬁcantly improve with larger beam
+widths. Compared to Chen et al. (2020), our
+method improves average overall BLEU scores by
+1.2 points and average BLEU scores around the
+constrained span by up to 9 points. In the evalua-
+tions performed in these earlier work, VDBA was
+not allocated the slightly higher beam size needed
+to pro-actively enforce constraints without com-
+promising BLEU. Compared to Hu et al. (2019)
+(VDBA), this paper’s contributions include online
+alignments and their use in more ﬂuent constraint
+placement and efﬁcient allocation of beams.
+Contributions
+•A truly online posterior alignment method that
+integrates into existing NMT sytems via a train-
+able light-weight module.
+•Higher online alignment accuracy on ﬁve lan-
+guage pairs including two distant language pairs
+where we improve over the best existing method
+in seven out of ten translation tasks.
+•Principled method of modifying VDBA to in-
+corporate posterior alignment probabilities in
+lexically-constrained decoding. VDBA enforces
+constraints ignoring source alignments; our
+change (Align-VDBA) leads to more ﬂuent con-
+straint placement and signiﬁcant BLEU increase
+particularly for smaller beams.
+•Establishing that VDBA-based pro-active
+constrained inference should be preferred
+over prevailing greedy alignment-guided
+inference (Chen et al., 2021; Song et al., 2020).
+Further, VDBA and our Align-VDBA inference
+with beam size 10 provide 1.2 BLEU increase
+over these methods with the same beam size.
+2 Posterior Online Alignment
+Given a sentence x=x;:::;xin the source lan-
+guage and a sentence y=y;:::;yin the target
+language, an alignment Abetween the word strings
+is a subset of the Cartesian product of the word po-
+sitions (Brown et al., 1993; Och and Ney, 2003):
+Af (s;t) :s= 1;:::;S ;t= 1;:::;Tgsuch
+that the aligned words can be considered transla-
+tions of each other. An online alignment at time-
+steptcommits on alignment of the toutput token
+conditioned only on xandy=y;y;:::y.
+Additionally, if token yis also available we call
+it a posterior online alignment. We seek to embed
+online alignment with existing NMT systems. We
+will ﬁrst brieﬂy describe the architecture of stateof the art NMT systems. We will then elaborate
+on how alignments are computed from attention
+distributions in prior work and highlight some limi-
+tations, before describing our proposed approach.
+2.1 Background
+Transformers (Vaswani et al., 2017) adopt the pop-
+ular encoder-decoder paradigm used for sequence-
+to-sequence modeling (Cho et al., 2014; Sutskever
+et al., 2014; Bahdanau et al., 2015). The en-
+coder and decoder are both multi-layered networks
+with each layer consisting of a multi-headed self-
+attention and a feedforward module. The decoder
+layers additionally use multi-headed attention to
+encoder states. We elaborate on this mechanism
+next since it plays an important role in alignments.
+2.1.1 Decoder-Encoder Attention in NMTs
+The encoder transforms the Sinput tokens into
+a sequence of token representations H2R.
+Each decoder layer (indexed by `2f1;:::;Lg)
+computes multi-head attention over Hby aggregat-
+ing outputs from a set of independent attention
+heads. The attention output from a single head
+n2 f1;:::;gin decoder layer `is computed
+as follows. Let the output of the self-attention
+sub-layer in decoder layer `at thettarget to-
+ken be denoted as g. Using three projection ma-
+trices W,W,W2R, the query
+vector q2Rand key and value matrices,
+K2RandV2R, are computed
+using the following projections: q=gW,
+K=HW, andV=HW.These are
+used to calculate the attention output from head n,
+Z=P(ajx;y)V, where:
+P(ajx;y) = softmax 
+q(K)
+p
+d!
+(1)
+For brevity, the conditioning on x;yis dropped
+andP(a)is used to refer to P(ajx;y)in
+the following sections.
+Finally, the multi-head attention output is given
+by[Z;:::;Z]Wwhere [ ]denotes the
+column-wise concatenation of matrices and W2
+Ris an output projection matrix.
+2.1.2 Alignments from Attention
+Several prior work have proposed to extract
+word alignments from the above attention prob-6676abilities. For example Garg et al. (2019) pro-
+pose a simple method called N ATT that
+aligns a source word to the ttarget token using
+argmax1
+XP(ajx;y)wherejindexes
+the source tokens. In N ATT , we note that the
+attention probabilities P(ajx;y)at decoding
+steptare not conditioned on the current output to-
+keny. Alignment quality would beneﬁt from con-
+ditioning on yas well. This observation prompted
+Chen et al. (2020) to extract alignment of token y
+using attention P(ajx;y)computed at time
+stept+ 1. The asynchronicity inherent to this shift-
+by-one approach ( S ATT ) makes it difﬁcult
+and more computationally expensive to incorporate
+lexical constraints during beam decoding.
+2.2 Our Proposed Method: PA
+We propose PAthat produces posterior
+alignments synchronously with the output tokens,
+while being more computationally efﬁcient com-
+pared to previous approaches like S ATT . We
+incorporate a lightweight alignment module to con-
+vert prior attention to posterior alignments in the
+same decoding step as the output. Figure 1 illus-
+trates how this alignment module ﬁts within the
+standard Transformer architecture.
+The alignment module is placed at the penulti-
+mate decoder layer `=L 1and takes as input
+(1) the encoder output H, (2) the output of the
+self-attention sub-layer of decoder layer `,gand,
+(3) the embedding of the decoded token e(y). Like
+in standard attention it projects Hto obtain a key
+matrix, but to obtain the query matrix it uses both
+decoder state g(that summarizes y) ande(y)
+to compute the posterior alignment P(a)as:
+P(a) =1
+Xsoftmaxq(K)
+p
+d
+;
+q= [g;e(y)]W;K=HW
+HereW2RandW2R.
+This computation is synchronous with produc-
+ing the target token y, thus making it compatible
+with beam search decoding (as elaborated further
+in Section 3). It also accrues minimal computa-
+tional overhead since P(a)is deﬁned using H
+andg, that are both already cached during a
+standard decoding pass. Note that if the query vec-
+torqis computed using only g, without
+concatenating e(y), then we get prior alignments
+that we refer to as P ATT . In our experiments,
+we explicitly compare P ATT with PA
+to show the beneﬁts of using yin deriving align-
+ments while keeping the rest of the architecture
+intact.
+Training Our posterior alignment sub-layer is
+trained using alignment supervision, while freez-
+ing the rest of the translation model parameters.
+Speciﬁcally, we train a total of 3dadditional pa-
+rameters across the matrices WandW.
+Since gold alignments are very tedious and expen-
+sive to create for large training datasets, alignment
+labels are typically obtained using existing tech-
+niques. We use bidirectional symmetrized S-ATT alignments, denoted by Sthat refers to an
+alignment between the itarget word and the j
+source word, as reference labels to train our align-
+ment sub-layer. Then the objective (following Garg
+et al. (2019)) can be deﬁned as:
+max1
+TXXSlog(P(ajx;y))
+Next, we demonstrate the role of posterior online
+alignments on an important downstream task.66773 Lexicon Constrained Translation
+In the lexicon constrained translation task, for
+each to-be-translated sentence x, we are given a
+set of source text spans and the corresponding
+target tokens in the translation. A constraint C
+comprises a pair (C;C)whereC= (p;p+
+1:::;p+`)indicates input token positions, and
+C= (y;y:::;y)denote target tokens that
+are translations of the input tokens x:::x.
+For the output tokens we do not know their po-
+sitions in the target sentence. The different con-
+straints are non-overlapping and each is expected
+to be used exactly once. The goal is to translate the
+given sentence xand satisfy as many constraints
+inC=SCas possible while ensuring ﬂuent
+and correct translations. Since the constraints do
+not specify target token position, it is natural to
+use online alignments to guide when a particular
+constraint is to be enforced.
+3.1 Background: Constrained Decoding
+Existing inference algorithms for incorporating lex-
+icon constraints differ in how pro-actively they en-
+force the constraints. A passive method is used in
+Song et al. (2020) where constraints are enforced
+only when the prior alignment is at a constrained
+source span. Speciﬁcally, if at decoding step t,
+i= argmaxP(a)is present in some constraint
+C, the output token is ﬁxed to the ﬁrst token y
+fromC. Otherwise, the decoding proceeds as
+usual. Also, if the translation of a constraint Chas
+started, the same is completed ( ythroughy) for
+the nextm 1decoding steps before resuming
+unconstrained beam search. The pseudocode for
+this method is provided in Appendix G.
+For the posterior alignment methods of Chen
+et al. (2020) this leads to a rather cumbersome in-
+ference (Chen et al., 2021). First, at step tthey pre-
+dict a token ^y, then start decoding step t+ 1with
+^yas input to compute the posterior alignment from
+attention at step t+ 1. If the maximum alignment
+is to the constrained source span Cthey revise the
+output token to be yfromC, but the output score
+for further beam-search continues to be of ^y. In
+this process both the posterior alignment and token
+probabilities are misrepresented since they are both
+based on ^yinstead of the ﬁnally output token y.
+The decoding step at t+ 1needs to be restarted
+after the revision. The overall algorithm continues
+to be normal beam-search, which implies that the
+constraints are not enforced pro-actively.Many prior methods have proposed more pro-
+active methods of enforcing constraints, including
+the Grid Beam Search (GBA, Hokamp and Liu
+(2017)), Dynamic Beam Allocation (DBA, Post
+and Vilar (2018)) and Vectorized Dynamic Beam
+Allocation (VDBA, Hu et al. (2019)). The latest
+of these, VDBA, is efﬁcient and available in pub-
+lic NMT systems (Ott et al., 2019; Hieber et al.,
+2020). Here multiple banks , each corresponding to
+a particular number of completed constraints, are
+maintained. At each decoding step, a hypothesis
+can either start a new constraint and move to a new
+bank or continue in the same bank (either by not
+starting a constraint or progressing on a constraint
+mid-completion). This allows them to achieve near
+100% enforcement. However, VDBA enforces the
+constraints by considering only the target tokens
+of the lexicon and totally ignores the alignment of
+these tokens to the source span. This could lead
+to constraints being placed at unnatural locations
+leading to loss of ﬂuency. Examples appear in Ta-
+ble 4 where we ﬁnd that VDBA just attaches the
+constrained tokens at the end of the sentence.
+3.2 Our Proposal: Align-VDBA
+We modify VDBA with alignment probabilities to
+better guide constraint placement. The score of a
+constrained token is now the joint probability of
+the token, and the probability of the token being
+aligned with the corresponding constrained source
+span. Formally, if the current token yis a part of
+thejconstraint i.e.y2C, the generation prob-
+ability ofy,P(yjx;y)is scaled by multiplying
+with the alignment probabilities of ywithC, the
+source span for constraint i. Thus, the updated
+probability is given by:
+P(y;Cjx;y)denotes the joint probability of
+outputting the constrained token and the align-
+ment being on the corresponding source span.
+Since the supervision for the alignment proba-
+bilities was noisy, we found it useful to recali-
+brate the alignment distribution using a temper-
+ature scaleT, so that the recalibrated probability is
+/Pr(ajx;y). We usedT= 2i.e., square-
+root of the alignment probability.
+Align-VDBA also uses posterior alignment prob-
+abilities to also improve the efﬁciency of VDBA.6678Algorithm 1 Align-VDBA: Modiﬁcations to DBA shown in blue. (Adapted from Post and Vilar (2018))
+Currently, VDBA attempts beam allocation for
+each unmet constraint since it has no way to dis-
+criminate. In Align-VDBA we allocate only when
+the alignment probability is greater than a thresh-
+old. When the beam size is small (say 5) this yields
+higher accuracy due to more efﬁcient beam utiliza-
+tion. We used a threshold of 0.1 for all language
+pairs other than ro !en for which a threshold of
+0.3 was used. Further, the thresholds were used for
+the smaller beam size of 5 and not for larger beam
+sizes of 10 and 20.
+We present the pseudocode of our modiﬁcation
+(steps 5, 6 and 7, in blue) to DBA in Algorithm 1.
+Other details of the algorithm including the han-
+dling of constraints and the allocation steps (step
+11) are involved and we refer the reader to Post
+and Vilar (2018) and Hu et al. (2019) to understand
+these details. The point of this code is to show that
+our proposed posterior alignment method can be
+easily incorporated into these algorithms so as to
+provide a more principled scoring of constrained
+hypothesis in a beam than the ad hoc revision-based
+method of Chen et al. (2021). Additionally, pos-
+terior alignments lead to better placement of con-
+straints than in the original VDBA algorithm.
+4 Experiments
+We ﬁrst compare our proposed posterior online
+alignment method on quality of alignment against
+existing methods in Section 4.2, and in Section 4.3,
+we demonstrate the impact of the improved align-
+ment on the lexicon-constrained translation task.
+4.1 Setup
+We deploy the fairseq toolkit (Ott et al., 2019)
+and use transformer_iwslt_de_en pre-
+conﬁgured model for all our experiments. Other
+conﬁguration parameters include: Adam optimizer
+with= 0:9; = 0:98, a learning rate of 5e 4
+with 4000 warm-up steps, an inverse square root
+schedule, weight decay of 1e 4, label smoothing
+of0:1,0:3probability dropout and a batch size of
+4500 tokens. The transformer models are trained
+for 50,000 iterations. Then, the alignment module
+is trained for 10,000 iterations, keeping the other
+model parameters ﬁxed. A joint byte pair encoding
+(BPE) is learned for the source and the target lan-
+guages with 10k merge operation (Sennrich et al.,
+2016) using subword-nmt .
+All experiments were done on a single 11GB
+Nvidia GeForce RTX 2080 Ti GPU on a machine
+with 64 core Intel Xeon CPU and 755 GB memory.
+The vanilla Transformer models take between 15
+to 20 hours to train for different datasets. Starting
+from the alignments extracted from these models,
+thePAalignment module trains in about 3
+to 6 hours depending on the dataset.
+4.2 Alignment Task
+We evaluate online alignments on ten translation
+tasks spanning ﬁve language pairs. Three of these
+are popular in alignment papers (Zenkel et al.,
+2019): German-English (de-en), English-French
+(en-fr), Romanian-English (ro-en). These are all
+European languages that follow the same subject-
+verb-object (SVO) ordering. We also present re-
+sults on two distant language pairs, English-Hindi
+(en-hi) and English-Japanese (ja-en), that follow a
+SOV word order which is different from the SVO6679
+word order of English. Data statistics are shown in
+Table 1 and details are in Appendix C.
+Evaluation Method: For evaluating alignment
+performance, it is necessary that the target sentence
+is exactly the same as for which the gold alignments
+are provided. Thus, for the alignment experiments,
+we force the output token to be from the gold tar-
+get and only infer the alignment. We then report
+the Alignment Error Rate (AER) (Och and Ney,
+2000) between the gold alignments and the pre-
+dicted alignments for different methods. Though
+our focus is online alignment, for comparison to
+previous works, we also report results on bidirec-
+tional symmetrized alignments in Appendix D.
+Methods compared : We compare our method
+with both existing statistical alignment models,
+namely GIZA++ (Och and Ney, 2003) and FastAl-
+ign (Dyer et al., 2013), and recent Transformer-
+based alignment methods of Garg et al. (2019)
+(N ATT ) and Chen et al. (2020) ( S ATT
+andSAET ). Chen et al. (2020) also propose a
+variant of SATT called SAET that delays
+computations by one time-step as in S ATT ,
+and additionally includes a learned attention sub-
+layer to compute alignment probabilities. We also
+present results on P ATT which is similar to
+PAbut does not use y.
+Results: The alignment results are shown in Ta-
+ble 2. First, AERs using statistical methods FastAl-
+ign and GIZA++ are shown. Here, for fair compar-
+ison, the IBM models used by GIZA++ are trained
+on the same sub-word units as the Transformer
+models and sub-word alignments are converted
+to word level alignments for AER calculations.
+(GIZA++ has remained a state-of-the-art alignment
+technique and continues to be compared against.)
+Next, we present alignment results for two vanillaTransformer models - N ATT andS ATT
+- that do not train a separate alignment module. The
+high AER of N ATT shows that attention-as-is
+is very distant from alignment but posterior atten-
+tion is closer to alignments than prior. Next we look
+at methods that train alignment-speciﬁc parameters:
+P ATT , a prior attention method; S AET
+andPA, both posterior alignment methods.
+We observe that with training even P ATT
+has surpassed non-trained posterior. The posterior
+attention methods outperform the prior attention
+methods by a large margin, with an improvement
+of 4.0 to 8.0 points. Within each group, the meth-
+ods with a trained alignment module outperform
+the ones without by a huge margin. PAper-
+forms better or matches the performance of S-AET (achieving the lowest AER in nine out of
+ten cases in Table 2) while avoiding the one-step
+delay in alignment generation. Even on the distant
+languages, PAachieves signiﬁcant reduc-
+tions in error. For ja !en, we achieve a 1.3 AER
+reduction compared to S AET which is not
+a truly online method. Figure 2 shows examples
+to illustrate the superior alignments of PA
+compared to N ATT and P ATT.
+4.3 Impact of PAon
+Lexicon-Constrained Translation
+We next depict the impact of improved AERs from
+our posterior alignment method on a downstream
+lexicon-constrained translation task. Following pre-
+vious work (Hokamp and Liu, 2017; Post and Vilar,
+2018; Song et al., 2020; Chen et al., 2020, 2021),
+we extract constraints using the gold alignments
+and gold translations. Up to three constraints of
+up to three words each are used for each sentence.
+Spans correctly translated by a greedy decoding6680
+are not selected as constraints.
+Metrics: Following prior work (Song et al., 2020),
+we report BLEU (Papineni et al., 2002), time to
+translate all test sentences, and Constraint Satisfac-
+tion Rate (CSR). However, since it is trivial to get
+100% CSR by always copying, we report another
+metric to evaluate the appropriateness of constraint
+placement: We call this measure BLEU-C and com-
+pute it as the BLEU of the constraint (when satis-
+ﬁed) and a window of three words around it. All
+numbers are averages over ﬁve different sets of ran-
+domly sampled constraint sets. The beam size is
+set to ten by default; results for other beam sizes
+appear in Appendix E.
+Methods Compared: First we compare all the
+alignment methods presented in Section 4.2 on the
+constrained translation task using the alignment
+based token-replacement algorithm of Song et al.(2020) described in Section 3.1. Next, we present a
+comparison between VBDA (Hu et al., 2019) and
+our modiﬁcation Align-VDBA.
+Results: Table 3 shows that VDBA and our Align-
+VDBA that pro-actively enforce constraints have a
+much higher CSR and BLEU-C compared to the
+other lazy constraint enforcement methods. For ex-
+ample, for ja!en greedy methods can only achieve
+a CSR of 76% compared to 96% of the VDBA-
+based methods. In terms of overall BLEU too, these
+methods provide an average increase in BLEU of
+1.2 and an average increase in BLEU-C of 5 points.
+On average, Align-VDBA has a 0.7 point greater
+BLEU-C compared to VDBA. It also has a greater
+BLEU than VDBA on all the ﬁve datasets. In Ta-
+ble 9 of Appendix we show that for smaller beam-
+size of 5, the gap between Align-VDBA and VDBA
+is even larger (2.1 points greater BLEU-C and 0.46681
+points greater BLEU). Table 4 lists some example
+translations by VDBA vs. Align-VDBA. We ob-
+serve that VDBA places constraints at the end of
+the translated sentence (e.g., “pusher", “develop-
+ment") unlike Align-VDBA. In some cases where
+constraints contain frequent words (like of, the,
+etc.), VDBA picks the token in the wrong posi-
+tion to tack on the constraint (e.g., “strong backing
+of", “of qualiﬁed") while Align-VDBA places the
+constraint correctly.
+Real World Constraints: We also evaluate our
+method using real world constraints extracted from
+IATE and Wiktionary datasets by Dinu et al. (2019).
+Table 5 compares Align-VDBA with the soft-
+constraints method of Dinu et al. (2019) that re-
+quires special retraining to teach the model to copy
+constraints. We reproduced the numbers from their
+paper in the ﬁrst three rows. Their baseline is al-
+most 4 BLEU points worse than ours since they
+used a smaller transformer NMT model, thus mak-
+ing running times incomparable. When we com-
+pare the increment in BLEU over the respective
+baselines, Align-VDBA shows much greater gains
+of +1.2 vs. their +0.5. Also, Align-VDBA providesa larger CSR of 99.6 compared to their 92. Results
+for other beam sizes and other methods and metrics
+appear in Appendix F.
+5 Related Work
+Online Prior Alignment from NMTs : Zenkel
+et al. (2019) ﬁnd alignments using a single-head
+attention submodule, optimized to predict the next
+token. Garg et al. (2019) and Song et al. (2020)
+supervise a single alignment head from the penul-
+timate multi-head attention with prior alignments
+from GIZA++ alignments or FastAlign. Bahar et al.
+(2020) and Shankar et al. (2018) treat alignment
+as a latent variable and impose a joint distribution
+over token and alignment while supervising on the
+token marginal of the joint distribution.
+Online Posterior Alignment from NMTs :
+Shankar and Sarawagi (2019) ﬁrst identify the role
+of posterior attention for more accurate alignment.
+However, their NMT was a single-headed RNN.
+Chen et al. (2020) implement posterior attention in
+a multi-headed Transformer but they incur a delay
+of one step between token output and alignment.
+We are not aware of any prior work that extracts
+truly online posterior alignment in modern NMTs.
+Ofﬂine Alignment Systems : Several recent meth-
+ods apply only in the ofﬂine setting: Zenkel et al.
+(2020) extend an NMT with an alignment module;
+Nagata et al. (2020) frame alignment as a question
+answering task; and Jalili Sabet et al. (2020); Dou
+and Neubig (2021) leverage similarity between con-
+textual embeddings from pretrained multilingual
+models (Devlin et al., 2019).
+Lexicon Constrained Translation : Hokamp and
+Liu (2017) and Post and Vilar (2018); Hu et al.6682(2019) modify beam search to ensure that tar-
+get phrases from a given constrained lexicon are
+present in the translation. These methods ignore
+alignment with the source but ensure high success
+rate for appearance of the target phrases in the con-
+straint. Song et al. (2020) and Chen et al. (2021)
+do consider source alignment but they do not en-
+force constraints leading to lower CSR. Dinu et al.
+(2019) and Lee et al. (2021) propose alternative
+training strategies for constraints, whereas we fo-
+cus on working with existing models. Recently,
+non autoregressive methods have been proposed
+for enforcing target constraints but they require that
+the constraints are given in the order they appear in
+the target translation (Susanto et al., 2020).
+6 Conclusion
+In this paper we proposed a simple architectural
+modiﬁcation to modern NMT systems to obtain ac-
+curate online alignments. The key idea that led to
+high alignment accuracy was conditioning on the
+output token. Further, our designed alignment mod-
+ule enables such conditioning to be performed syn-
+chronously with token generation. This property
+led us to Align-VDBA, a principled decoding algo-
+rithm for lexically constrained translation based on
+joint distribution of target token and source align-
+ments. Future work includes increase efﬁciency
+of constrained inference and harnessing such joint
+distributions for other forms of constraints, for ex-
+ample, nested constraints.
+Limitations: All existing methods for hard con-
+strained inference, including ours, come with con-
+siderable runtime overheads. Soft constrained
+methods are not accurate enough.
+Acknowledgements
+We are grateful to the reviewers for their detailed
+analysis, thoughtful comments and insightful ques-
+tions which have helped us improve the paper. We
+are grateful to Priyesh Jain for providing alignment
+annotations for 50 English-Hindi sentences.
+References668366846685A Alignment Error Rate
+Given gold alignments consisting of sure align-
+mentsSand possible alignments P, and the pre-
+dicted alignments A, the Alignment Error Rate
+(AER) is deﬁned as (Och and Ney, 2000):
+AER = 1 jA\Pj +jA\Sj
+jAj+jSj
+Note that hereSP . Also note that since our
+models are trained on sub-word units but gold align-
+ments are over words, we need to convert align-
+ments between word pieces to alignments between
+words. A source word and a target word are said to
+be aligned if there exists an alignment link between
+any of their respective word pieces.
+B BLEU-C
+Given a reference sentence, a predicted translation
+and a set of constraints, for each constraints, a seg-
+ment of the sentence is chosen which contains the
+constraint and window size words (if available) sur-
+rounding the constraint words on either side. Such
+segments, called spans, are collected for the ref-
+erence and predicted sentences in the test set and
+BLEU is computed over these spans. If a constraint
+is not satisﬁed in the prediction, the corresponding
+span is considered to be the empty string. An ex-
+ample is shown in Table 6. Table 7 shows how
+BLEU-C varies as a function of varying window
+size for a ﬁxed English-French constraint set with
+beam size set to 10.
+C Description of the Datasets
+The European languages consist of parallel sen-
+tences for three language pairs from the Europarl
+Corpus and alignments from Mihalcea and Peder-
+sen (2003), Och and Ney (2000), Vilar et al. (2006).
+Following previous works (Ding et al., 2019; Chen
+et al., 2020), the last 1000 sentences of the training
+data are used as validation data.
+For English-Hindi, we use the dataset from Mar-
+tin et al. (2005) consisting of 3440 training sentencepairs, 25 validation and 90 test sentences with gold
+alignments. Since training Transformers requires
+much larger datasets, we augment the training set
+with 1.6 million sentences from the IIT Bombay
+Parallel Corpus (Kunchukuttan et al., 2018). We
+also add the ﬁrst 50 sentences from the dev set of
+IIT Bombay Parallel Corpus with manually anno-
+tated alignments to the test set giving a total of 140
+test sentences.
+For Japanese-English, we use The Kyoto Free
+Translation Task (Neubig, 2011). It comprises
+roughly 330K training, 1166 validation and 1235
+test sentences. As with other datasets, gold align-
+ments are available only for the test sentences. The
+Japanese text is already segmented and we use it
+without additional changes.
+The real world constraints datasets of Dinu et al.
+(2019) are extracted from the German-English
+WMT newstest 2017 task with the IATE dataset
+consisting of 414 sentences (451 constraints) and
+the Wiktionary 727 sentences (879 constraints).
+The constraints come from the IATE and Wik-
+tionary termninology databases.
+All datasets were processed using the scripts
+provided by Zenkel et al. (2019) at https://
+github.com/lilt/alignment-scripts .
+Computation of BLEU and BLEU-C,
+and the paired test were performed using
+sacrebleu (Post, 2018).
+D Bidirectional Symmetrized Alignment
+We report AERs using bidirectional symmetrized
+alignments in Table 8 in order to provide fair com-
+parisons to results in prior literature. The sym-
+metrization is done using the grow-diagonal heuris-
+tic (Koehn et al., 2005; Och and Ney, 2000). Since
+bidirectional alignments need the entire text in both
+languages, these are not online alignments.6686
+E Additional Lexicon-Constrained
+Translation Results
+Constrained translation results for beam sizes 5 and
+10 are shown in Table 9. We also present results
+for Align-VDBA without the alignment probability
+based beam allocation as Align-VDBA* in Table 9.
+We can see that our beam allocation technique re-
+sults in better beam utilization as evidenced by im-
+provements in BLEU and BLEU-C, and reduction
+total decoding time.
+Paired bootstrap resampling test (Koehn, 2004)
+results with respect to Align-VDBA for beam size
+10 are shown in Table 10.
+F Additional Real World Constrained
+Translation Results
+Results on the real world constrained translation
+datasets of Dinu et al. (2019) for all the methods
+in Table 3 with beam sizes 5, 10 and 20 are pre-
+sented in Table 11. Paired bootstrap resampling
+test (Koehn, 2004) results with respect to Align-
+VDBA for beam size 5 are shown in Table 12
+G Alignment-based Token Replacement
+Algorithm
+The pseudocode for the algorithm used in Song
+et al. (2020); Chen et al. (2021) and our non-VDBA
+based methods in Section 4.3 is presented in Al-
+gorithm 2. As described in Section 3.1, at each
+decoding step, if the source token having the max-
+imum alignment at the current step lies in some
+constraint span, the constraint in question is de-
+coded until completion before resuming normal
+decoding.
+Though different alignment methods are rep-
+resented using a call to the same A
+function in Algorithm 2, these methods incur
+varying computational overheads. For instance,
+N ATT incurs little additional cost, P-ATT andPAinvolve a multi-head atten-
+tion computation. For S ATT andS AET ,an entire decoder pass is done when A is
+called, thereby incurring a huge overhead as shown
+in Table 3.
+H Layer Selection for Alignment
+Supervision of Distant Language Pairs
+For the alignment supervision, we used align-
+ments extracted from vanilla Transformers using
+theS ATT method. To do so, however, we
+need to choose the decoder layers from which to
+extract the alignments. The validation AERs can
+be used for this purpose but since gold validation
+alignments are not available, Chen et al. (2020) sug-
+gest selecting the layers which have the best con-
+sistency between the alignment predictions from
+the two translation directions.
+For the European language pairs, this turns out to
+be layer 3 as suggested by Chen et al. (2020). How-
+ever, for the distant language pairs Hindi-English
+and Japanese-English, this is not the case and layer
+selection needs to be done. The AER between the
+two translation directions on the validation set, with
+alignments obtained from different decoder layers,
+are shown in Tables 13 and 14.6687
+1 2 3 4 5 6
+165.5 55.8 56.1 95.2 94.6 96.6
+259.2 47.5 44.5 95.1 91.9 95.8
+362.6 52.1 48.3 93.7 91.4 95.2
+488.6 83.3 82.1 89.9 88.0 90.3
+591.6 87.7 88.5 91.4 88.8 90.2
+693.5 91.1 92.5 92.5 90.5 90.71 2 3 4 5 6
+193.5 90.0 94.4 92.2 95.1 95.1
+286.5 58.7 86.9 69.4 87.2 86.2
+387.4 59.4 87.1 69.1 87.1 86.2
+489.1 69.1 85.9 74.2 84.9 85.4
+593.4 88.5 89.1 87.1 86.8 88.1
+693.5 89.4 90.0 88.1 87.7 88.76688Algorithm 2 k-best extraction with argmax replacement decoding.
+Inputs: AkjVjmatrix of scores (for all tokens up to the currently decoded ones). kbeam states.function S _S(beam, scores) next_toks, next_scores   _(scores, k=2, dim=1) .Best 2 tokens for each beam candidates [] for0h<2kdo candidate beam[h//2] candidate.tokens.append(next_toks[h//2, h%2]) candidate.scores next_scores[h//2, h%2] candidates.append(candidate) attention  (candidates) aligned_x  (attention, dim=1) for0h<2kdo ifaligned_x[h]2Cfor someiand not candidates[h].inprogress then.Start constraint candidates[h].inprogress  True candidates[h].constraintNum  i candidates[h].tokenNum  0 ifcandidates[h].inprogress then .Replace token with constraint tokens consNum candidates[h].constraintNum candidates[h].tokens[-1]  constraints[consNum][candidates[h].tokenNum] candidates[h].tokenNum  candidates[h].tokenNum + 1 ifconstraints[consNum].length == candidates[h].tokenNum then candidates[h].inprogress  False .Finish current constraint candidates  _ (candidates) newBeam _(candidates) return newBeam6689

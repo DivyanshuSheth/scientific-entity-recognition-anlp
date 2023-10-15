@@ -1,1 +1,949 @@
-7822 Proceedings of the 61st Annual Meeting of the Association for Computational Linguistics Volume 1 : Long Papers , pages 7822–7839 July 9 - 14 , 2023 © 2023 Association for Computational Linguistics 7823 7824 7825 7826 7827 7828 7829 7830 7831 7832 7833 7834 7835 7836 7837 7838 7839 
+
+Wen Zheng, Natasa Milic-Frayling, Ke ZhouUniversity of Nottingham,Qatar Computing Research Institute,Nokia Bell Labs
+{wen.zheng, natasa.milic-frayling, ke.zhou}@nottingham.ac.uk
+Abstract
+Incorporating conversational context and
+knowledge into dialogue generation models has
+been essential for improving the quality of the
+generated responses. The context, comprising
+utterances from previous dialogue exchanges,
+is used as a source of content for response gen-
+eration and as a means of selecting external
+knowledge. However, to avoid introducing ir-
+relevant content, it is key to enable fine-grained
+scoring of context and knowledge. In this pa-
+per, we present a novel approach to context
+and knowledge weighting as an integral part
+of model training. We guide the model train-
+ing through a Contextual Knowledge Learn-
+ing (CKL) process which involves Latent Vec-
+tors for context and knowledge, respectively.
+CKL Latent Vectors capture the relationship
+between context, knowledge, and responses
+through weak supervision and enable differen-
+tial weighting of context utterances and knowl-
+edge sentences during the training process. Ex-
+periments with two standard datasets and hu-
+man evaluation demonstrate that CKL leads to
+a significant improvement compared with the
+performance of six strong baseline models and
+shows robustness with regard to reduced sizes
+of training sets.
+1 Introduction
+Dialogue generation is concerned with conversa-
+tional settings where participants take turns and
+the task is to generate a response to previous ut-
+terances. In order to generate relevant responses,
+prior research explored the use of the conversa-
+tional history, i.e., the utterances already exchanged
+between the participants, as a context for the new
+response. It also investigated the use of external
+knowledge that may be a good source of content
+and not necessarily present in the conversational
+history (Ghazvininejad et al., 2018; Zheng and
+Zhou, 2019; Liu et al., 2021a,b; Prabhumoye et al.,Figure 1: Example showing utterances of participants
+A and B, the scored knowledge, and the target response.
+The knowledge sentence (1) is deemed the best knowl-
+edge for response generation by our proposed CKL
+model. The best context segments for retrieving the
+best knowledge are colored Brown; the best context seg-
+ments for generating response are colored Blue and the
+best knowledge segments for the response are Purple.
+2021a). However, it has been shown that adding
+knowledge indiscriminately, can hurt performance.
+Thus, the context has been used to select the best
+knowledge for the response generation.
+Since the context itself consists of multiple utter-
+ances, the same concern applies: not all the prior
+utterances are equally useful for generating the
+response. Therefore, the context needs to be eval-
+uated for its importance in relation to generating
+the response and identifying the relevant knowl-
+edge, separately. In Figure 1, we show an example
+from the Wizard of Wikipedia (test seen) dataset,
+illustrating that the best context segments for re-
+sponse generation may not necessarily be the best
+context segments for retrieving the best knowledge.
+Furthermore, both the context and the contextual
+knowledge contribute to the coverage of the tar-
+get response (blue and purple words). Thus, it is
+important to devise effective learning methods to
+identify the best context for response generation7822and for knowledge selection. Once the knowledge
+is selected, there is still a question of whether and
+how to refine its selection for optimal use.
+Recent studies differentiated between the two
+context roles by adopting a pipeline approach and
+training different models for each of them. Zheng
+et al. (2020) proposed a knowledge retrieval model
+TPPA that re-orders retrieved knowledge guided by
+its relevance to the response and investigated the
+effects of the resulting knowledge sets in combina-
+tion with generative models such as TED (Zheng
+and Zhou, 2019) and WSeq (Tian et al., 2017).
+Paranjape et al. (2021) introduced a posterior-
+guided training to guide the retrieval of the relevant
+knowledge. A BART-based generative model (a
+generator) is used to generate responses but the re-
+triever and the generator are trained independently.
+Similarly, Glass et al. (2022) developed a ReG
+model which comprises a retriever, a re-ranker, and
+a generator. The re-ranker can take as input the
+outputs of multiple retrieval systems, e.g., ANN-
+based retrieval and BM25 method and the content
+retrieval training is an integral part of the content
+generation. This approach can differentiate the con-
+text roles from knowledge selection and response
+generation tasks. However, it requires additional
+training stages, which may incur and accumulate
+additional errors, and cannot separate the context
+information used for knowledge selection and re-
+sponse generation within the unified model.
+In our work we hypothesize that the integrated
+approach to model training and selection of con-
+text and knowledge can be improved through a
+parallel learning architecture where specific con-
+tent selection roles (context and knowledge) are
+clearly differentiated and each learning facet is su-
+pervised, controlling for model training. Guided
+by the hypothesis, we propose a Contextual Knowl-
+edge Learning ( CKL ) model in which we introduce
+Latent Vectors to capture context roles and knowl-
+edge characteristics: the Context Latent Vector for
+the relationship of context to the responses and to
+the ‘best’ knowledge, and the Knowledge Latent
+Vector for the knowledge to capture the importance
+of knowledge to the responses. Latent Weights are
+then derived from the Latent Vectors to indicate the
+importance of context utterances and knowledge
+sentences.
+We also extend the notion of the Attention op-
+eration, where tokens’ attention scores are entirely
+decided by the scaled dot product between two rep-resentations, and devise a Latent Weight Enhanced
+Attention . The attention operation is augmented
+with the multiplication by the tokens’ attention
+scores and the Latent Weights (i.e., the context ut-
+terance’s weight and knowledge sentence weight).
+By adopting the weak supervision technique, the
+Latent Weights for context and knowledge are su-
+pervised by the (noisy) pseudo ground truth, re-
+moving the need for human annotations. Com-
+bined with the Negative Log Likelihood loss, the
+CKL is trained in a unified way, differentiating the
+context utterances for the knowledge selection and
+response generation tasks.
+The performance that our CKL model is supe-
+rior to six strong baseline approaches, including
+Transformer-based and pre-trained model-based
+methods, on two publicly available datasets Wiz-
+ard of Wikipedia and CM-DoG. By experimenting
+with a 50% smaller training set, our approach still
+outperforms the baseline methods. Figure 1 shows
+the effectiveness of recognizing relevant context
+utterances for both the knowledge selection task
+and dialogue generation task using the CKL model.
+In summary, the key contributions of our re-
+search are through the novel design and clear ad-
+vantages of the CKL method:
+•Differentiated functionality of the context ut-
+terances for the knowledge selection task and
+response generation task, achieved through
+the technique of training latent vector;
+•Latent Weight Enhanced Attention module
+that incorporates the latent weights into the
+generation process;
+•Effective weak supervision of latent weights
+training by defining the pseudo ground truths
+for the context latent weights and knowledge
+latent weights;
+•Robustness of CKL, retaining its effectiveness
+with reduced amounts of data.
+2 Related Work
+Knowledge-Grounded Dialogue Generation. Re-
+search on knowledge injection into dialogue gener-
+ation can be traced to Ghazvininejad et al. (2018)
+who demonstrated that injecting knowledge into
+the generative model benefits the performance due
+to additional information available in knowledge7823sentences. This led to a range of methods for knowl-
+edge injection (Zheng and Zhou, 2019; Zhao et al.,
+2020b; Li et al., 2019). Recently, pre-trained mod-
+els were also adopted. Liu et al. (2021b) use BART
+(Lewis et al., 2020a) as the backbone to fine-tune
+the model with few-resource datasets. Prabhumoye
+et al. (2021a) also chose BART as the basic pre-
+trained framework to project context and knowl-
+edge in a unified model. However, it has been
+shown that not all the knowledge is useful, and
+therefore knowledge has to be carefully selected
+(Kim et al., 2020; Lian et al., 2019). Lewis et al.
+(2020b) propose a RAG model by leveraging re-
+trieval techniques to obtain relevant knowledge for
+enhancing dialogue generation. Built on top of the
+RAG, Shuster et al. (2021) study various types of
+architectures with multiple components, including
+retrievers, rankers, and encoder-decoders. All pre-
+viously mentioned approaches take the same con-
+text information for both the knowledge selection
+task and the dialogue generation task. To differ-
+entiate the functionality of the context for the two
+tasks, Glass et al. (2022); Paranjape et al. (2021);
+Zheng et al. (2020) introduce pipelines to achieve
+multi-stage generative models. Commonly, they
+devise a retriever that takes responsibility of retriev-
+ing knowledge units given the context information
+and follow by a generator that generates the final
+responses. The limitation is that this multi-stage
+training may cause error accumulation. Motivated
+by this, we train our CKL model in an end-to-end
+way by differentiating the context inside the model.
+Weak Supervision for Dialogue Generation. For
+the dialogue generation task, even though the re-
+sponses are naturally the ground truth for the model
+training, previous studies showed that several aux-
+iliary tasks with weak supervision can help to im-
+prove the generation performance (Chang et al.,
+2021). Zhao et al. (2020b) uses BERT encoders
+(Kenton and Toutanova, 2019) and a GPT-2 de-
+coder (Radford et al., 2019) for knowledge pro-
+jection and prediction. They built pseudo ground
+truth documents by leveraging the similarity be-
+tween each document and the response to weakly
+supervise document selection. Zheng et al. (2021)
+propose a de-noising mechanism for the knowledge
+tokens to be injected in a weak supervision manner.
+Wang et al. (2019) design a weak supervision-based
+discriminator to capture the relations between the
+answer and the corresponding passage and even-
+tually generate the questions. Informed by thesestudies, in our work we introduce a weak supervi-
+sion to complement the generation model training.
+Our proposed CKL model combines context dif-
+ferentiation and weak supervision for response gen-
+eration purposes. The CKL model differs from
+prior studies by (1) devising latent vectors for both
+context and knowledge to derive the context latent
+weights and knowledge latent weights for knowl-
+edge selection and response generation tasks, and
+(2) designing a latent weight enhanced attention
+operation, combined with a weak supervision tech-
+nique to provide more effective use of context and
+knowledge for response generation.
+3 Method
+Problem and Definitions. Considering a con-
+versational history that comprises context C=
+{c, c, . . . , c}, our goal is to generate a response
+R={r, r, . . . , r}by leveraging knowledge
+K={k, k, . . . , k}that is relevant to the con-
+textC. Among the notations, ris each word of the
+response, cmeans the context utterance, and kde-
+notes the knowledge sentence. Lis the maximum
+token number of the response; mis the number
+of context utterances and lis the number of back-
+ground knowledge sentences.
+We aim to (1) calculate latent weights of con-
+text utterances and knowledge sentences (Sec. 3.2
+and 3.3); (2) generate the final response given con-
+text, knowledge, and their latent weights (Sec. 3.4).
+In our approach, we do not integrate latent vec-
+tors into the content representation. Instead, we
+transform vectors into scalar values, referred to as
+latent weights . The Context Latent Weights for
+Response and Knowledge, ( CLWR ) and ( CLWK ),
+respectively, are used in the loss function and by
+the decoder to score content utterances. The Con-
+textual Knowledge Latent Weights ( KLW ) are sim-
+ilarly used in the loss function and the decoder to
+score knowledge sentences.
+Contextual Knowledge Learning (CKL) Archi-
+tecture. Our proposed CKL method consists of
+four components: an encoder, a Context Latent
+Weight generator ( CLW Generator in Figure 2), a
+Knowledge Latent Weight generator ( KLW Gener-
+ator), and a decoder. We use the state-of-the-art
+Transformer-based encoder-decoder model BART
+(Lewis et al., 2020a) as the backbone of our En-
+coder and Decoder. The CLW generator takes re-
+sponsibility for producing two sets of context latent
+weights, one set for response generation ( CLWR )7824
+and another set for knowledge latent weight gener-
+ation ( CLWK ). Similar to the CLW generator, the
+KLW generator is used to generate knowledge la-
+tent weights ( KLW ) which are conditioned on the
+context and knowledge. Finally, the decoder is a
+normal BART decoder but equipped with the latent
+weight enhanced attention mechanism.
+3.1 Encoder
+Leveraging the pre-trained model BART, we di-
+rectly use the BART encoder to get the context and
+knowledge representations. The proposed CKL
+model needs context utterances’ and knowledge
+sentences’ representations, so they are expected
+to be passed through the BART encoder sequence
+by sequence. However, that would destroy the in-
+ner dependency between words from sequences,
+i.e., this means discarding the long dependency be-
+tween context and knowledge. To tackle this, we
+first inject the concatenation of the context and
+knowledge to get a whole sequence representa-
+tion, i.e., ‘Context & Knowledge Representation’
+in Figure 2. Then by recognizing the context utter-
+ances’ lengths and knowledge sentences’ lengths,
+we split the whole representation into several sub-sequences, obtaining representations that take word
+long-dependency into account.
+3.2 Context Latent Weight Generator
+As shown in Figure 2, CLW Generator is designed
+to generate two sets of context latent weights: Con-
+text Latent Weight for Response ( CLWR ) and Con-
+text Latent Weight for Knowledge ( CLWK ).
+Context Latent Vector. TheCLW generator starts
+from a Context Latent Vector which is a trainable
+vector. Practically, it is a word embedding indexed
+by a fixed word index of 1.
+Context Latent Vector Interaction with Con-
+text Representations. Here in the CLW generator,
+like the Transformer architecture, a standard cross-
+attention, feed-forward, and residual network are
+used. We introduce the cross-attention operation in
+detail because it will be used in the next sections.
+For the rest of the Transformer modules, e.g., feed-
+forward layer and residual network, please refer to
+Vaswani et al. (2017). Formally, the attention is
+calculated as:7825in which Q, K, and V are matrices and dis the
+representation dimension. Through the softmax
+function, the attention weights, i.e., QK, are nor-
+malized. Multiplying with V , the Q’s representation
+is updated by K and V . In the CLW generator, Q
+is the context latent vector, while K and V are the
+context representation.
+Latent Weight Head. The Latent Weight Head
+module contains a linear layer and a Sigmoid func-
+tion. The purpose is to transfer the ddimensional
+context latent vector to scalar values. By doing so,
+each context utterance will have a latent score. To
+be specific, we define the Latent Weight Head as
+follows:
+where CLWR ∈ RandCLWK ∈ Rare
+the context latent weight scores for the response
+and knowledge respectively. W,W∈ Rand
+b, b∈ Rare trainable parameters. x∈
+Rdenotes the vector converted from the Con-
+text Latent Vector. It is important to note that
+CLWR andCLWK have the same Latent Weight
+Head architecture, but do not share parameters.
+CLWR is used to identify the importance of a
+context utterance when generating responses and
+CLWK is used when producing knowledge latent
+weights, i.e., knowledge sentences’ importance.
+Weak Supervision on CLWR andCLWK .As illus-
+trated, when predicting the response and producing
+the knowledge latent weight, the role of the con-
+text utterances should not be treated as the same:
+CLWR andCLWK reflect the difference. We devise
+two loss functions to weakly supervise them. The
+latent weight scores are expected to be a continu-
+ous value thus we consider this task as a regression
+task rather than a classification task. Mean Squared
+Error (MSE) is adopted as the loss function. To
+obtain the pseudo ground truth, we use the F1 score
+to measure the closeness between a context utter-
+ance and the response on the word level. As for its
+values, for CLWR , the context utterance with the
+maximum F1 score is tagged as 1 and the rest of
+the utterances to be 0. It is worth noting that the
+last utterance, i.e., the post, is always 1 because
+it has been proven crucial for response generation
+(Sankar et al., 2019).
+For training CLWK , we use the same method for
+constructing the pseudo ground truth. The only dif-
+ference is that CLWK is built for the knowledgelatent weight, so we produce the most relevant
+knowledge for the F1 score calculation. First of
+all, we use the TF-IDF approach to retrieve from
+the knowledge sentences by taking the response as
+the query, i.e., ranking the knowledge sentence by
+TF-IDF (knowledge sentence, response).The top-
+1 ranked sentence based on the TF-IDF is treated
+as the most important knowledge sentence, being
+tagged as Top1-RK . Secondly, similar to CLWR , the
+context utterance with the maximum F1(Context
+Utterance, Top1-RK ) is used to supervise CLWK .
+Formally,(4)(5)
+in which cmeans each context utterance. Then,
+we define the loss function to be:
+where GT andGT are the pseudo ground-
+truth context utterance scores for response genera-
+tion and knowledge selection tasks respectively.
+3.3 Knowledge Latent Weight Generator
+The knowledge Latent Weight generator is de-
+signed to generate a knowledge latent weight
+(KLW). It begins with a knowledge latent vector,
+which is a word embedding indexed by a fixed
+index of 1. Note that the knowledge latent word
+embedding is different from the context latent em-
+bedding.
+Latent Weight Enhanced Attention. Latent
+Weight Enhanced Attention (LWE Attention) is
+built on top of the standard attention by consider-
+ing the latent weights. Originally, the attention is
+calculated between two sequence representations
+from the word level (shown in Eq. 1). The LWE
+Attention takes sentence-level scores, i.e., the latent
+weights, into consideration. By this, the Eq. 1 is
+then changed to be:7826where LWstands for latent weights. LWwill be
+different when predicting responses and generat-
+ing knowledge latent weight. Namely, in the KLW
+generator, the LWis replaced with CLWK . In the
+Decoder, it is changed to CLWR andKLW , which
+will be introduced in Sec. 3.4.
+Context & Knowledge Dependency (CK-Dep for
+short). Prior studies (Prabhumoye et al., 2021b; Liu
+et al., 2021c) consider the context and knowledge
+dependency by stacking a context cross-attention
+and a knowledge cross-attention from word level.
+We also leverage the stacked architecture and con-
+sider the context sentence-level weights (through
+LWE Attention), i.e., the context LWE cross-
+attention module and the knowledge cross-attention
+module in KLW generator.
+Weak Supervision on KLW .After going through
+the CK-Dep operation, the Latent Vector is pro-
+cessed by the Latent Weight Head module to get
+theKLW . The knowledge generally contains richer
+information than the context (Zheng and Zhou,
+2019; Kim et al., 2020). For context we take
+the top-1 ranked utterance as the pseudo ground
+truth GT . However, for knowledge, we set a
+hyper-parameter Nto get the pseudo ground truth
+knowledge sentences GT. Namely, the top N
+ranked knowledge sentences are considered to be
+the ground truth for supervising KLW .
+where, kis each knowledge sentence. With
+different Extrema and Greedy scores of the
+ZRKGC model are lower than the CKL. This
+means although the generated re- sponses of the
+ZRKGC model are closer to the ground truth
+response on average, it can not seman- tically
+capture the most important words. Third, in
+terms of the diversity scores, the pro- posed
+CKL does not improve over other models but
+we expect that the method can be improved
+by re- fining the use of latent weights which
+are currently normalized between 0 and 1 and
+multiplied by the word attention scores. Despite
+of CKL model’s gen- erated responses being not
+the most diverse among all compared models,
+our human evaluation results reveal that CKL
+is preferred by the 5 annotators with moderate
+agreement, in terms of relevance, coherence,
+informativeness, and overall preference (Appendix
+B.2). 3https://github.com/ellenmellon/DIALKI4https://github.com/neukg/KAT-TSLF
+5https://github.com/shrimai/ Focused-Attention-
+Improves-Document-Grounded-GenerationN for
+the individual dataset, the performance could vary.
+We discuss the effect of top-N in Appendix B.4.
+Similar to the CLWR andCLWK , we also consider
+theKLW generation as a regression task, and the
+loss function is:
+3.4 Decoder and Training
+The Decoder is a BART decoder but equipped with
+LWE Attention. In the ‘Context & Knowledge
+LWE Cross-Attention’ module in Figure 2, the con-
+text and knowledge representations are multiplied
+by the corresponding latent weights. Namely, the
+LWin Eq. 8 will be replaced by CLWR andKLW
+when dealing with context and knowledge in the
+Decoder. Formally, the Eq. 8 is instantiated to be:
+where, KandVmeans i-th context utterance. K
+andVdenote j-th knowledge sentence. CLWR∈
+RandKLW∈ Rstand for the corresponding
+context and knowledge latent weights. The loss
+function for response generation is a Negative Log
+Likelihood loss (NLL).
+in which, Lis the maximum length of the response,
+tis the t-th token to be generated and Rdenotes
+the generation steps prior to t.
+Aggregation of Loss Functions. In this paper, we
+have four different loss functions, including Eq. 6,
+Eq. 7, Eq. 10 and Eq. 12. Previous studies simply
+aggregate different loss functions by either an addi-
+tion operation (Li et al., 2019; Zheng et al., 2021)
+or setting hyper-parameters to do a weighted sum
+(Wu et al., 2021), which are sub-optimal. Kendall
+et al. (2018) propose a principled approach to multi-
+task learning which weighs multiple loss functions
+by considering the homoscedastic uncertainty of
+each task. This Automatic Weighted Loss (AWL)
+allows the model to simultaneously learn various
+quantities with different units or scales in various7827settings. Adopting this strategy, we define our final
+loss as follows:
+The final goal is to minimize the objective with
+respect to δ, δ, δandδas learning the relative
+weight of the four different losses.
+4 Experiment
+4.1 Datasets, Settings, and Metrics
+Datasets. Following previous research practices
+(Prabhumoye et al., 2021a; Liu et al., 2021b;
+Li et al., 2019; Zhao et al., 2020b; Liu et al.,
+2021c), we use two public datasets: Wizard of
+Wikipedia (WoW for short. Dinan et al. (2019))
+and CMU-DoG (Zhou et al., 2018) to conduct our
+experiments. We introduce them in detail in Ap-
+pendix A.1.
+Experimental Settings. All of the experiments are
+conducted with the same hyper-parameter settings
+as described in Appendix A.2.
+Metrics. As used in previous works (Ghazvinine-
+jad et al., 2018; Zhao et al., 2020a; Li et al., 2019;
+Zheng et al., 2021), we employ BLEU (Papineni
+et al., 2002), Rouge (Lin, 2004), Diversity (Li et al.,
+2015) and embedding-based metric, BOW Embed-
+ding (Liu et al., 2016a) as the metrics. Among
+them, BLEU calculates N-grams co-occurrence be-
+tween two sequences. Rouge measures the number
+of overlapping units such as word sequences, and
+word pairs between the generated sequence and
+the ground truth sequence. Diversity score counts
+distinct N-grams number divided by the total num-
+ber of the generated corpus. BOW Embedding
+metric leverages the pre-trained word vector to cal-
+culate the similarity between sequences from the
+semantic space. Meanwhile, Liu et al. (2016b);
+Banerjee and Lavie (2005) suggest that compared
+with the other metrics, BLEU2, and embedding-
+based metrics have a better correlation with human
+assessment, and thus in this paper, we take BLEU2
+and embedding-based measurements as the main
+metrics for discussion.
+To have a better understanding of the proposed
+model, we also conducted a human evaluation (re-
+ported in Appendix B.2).
+4.2 Baseline Approaches
+We compare our CKL model with six baselines.ITDD (Li et al., 2019) proposes an incremental
+Transformer architecture to improve context coher-
+ence and knowledge correctness.
+DRD (Zhao et al., 2020a) proposes a disentangled
+response decoder to isolate parameters that depend
+on knowledge-grounded dialogues from the entire
+generation model.
+ZRKGC (Li et al., 2020) treats the knowledge
+as latent variables so that the model can estimate
+the knowledge representation distribution from the
+latent space.
+DIALKI (Wu et al., 2021) proposes a knowl-
+edge identification model to provide dialogue-
+contextualized passage encodings and locate
+knowledge that is relevant to the conversation.
+KAT (Liu et al., 2021b) devises a three-stage ar-
+chitecture to get better context inner-relationship,
+knowledge representation, and interaction between
+context and knowledge.
+DoHA (Prabhumoye et al., 2021a) focuses on build-
+ing a context-driven representation of the document
+and enabling specific attention to the information
+in the document.
+4.3 Experiment Results
+Main Results. The experimental results are shown
+in Table 1. Because of the page limitation, we re-
+port the results of the WoW test unseen set (with
+similar trends) in Appendix B.1. First, based on
+BLEU and Rouge-L scores, the proposed CKL
+models perform consistently better than the base-
+line approaches. This reflects that the results from
+the CKL share more consecutive tokens with the
+ground truth responses. Looking closely at the
+BLEU-2 scores, the CKL’s results are improved
+by large margins compared to the best results of
+the baseline approaches (DIALKI); they are around
+15% better for the WoW test seen (improving from
+13.72% to 15.80%) and around 14% better for the
+CMU-DoG dataset.
+Second, for the embedding-based metrics, the
+CKL is better than most of the baseline models
+except for the ZRKGC model on the Embedding
+Average measurement. However, the Extrema and
+Greedy scores of the ZRKGC model are lower than
+the CKL. This means although the generated re-
+sponses of the ZRKGC model are closer to the7828
+ground truth response on average, it can not seman-
+tically capture the most important words.
+Third, in terms of the diversity scores, the pro-
+posed CKL does not improve over other models but
+we expect that the method can be improved by re-
+fining the use of latent weights which are currently
+normalized between 0 and 1 and multiplied by the
+word attention scores. Despite of CKL model’s gen-
+erated responses being not the most diverse among
+all compared models, our human evaluation results
+reveal that CKL is preferred by the 5 annotators
+with moderate agreement, in terms of relevance,
+coherence, informativeness, and overall preference
+(Appendix B.2).
+Ablation Study. Four downgraded versions of
+CKL are provided. (1) w/o Loss, i.e., removing
+the knowledge latent weight loss function; (2) w/o
+Loss (deleting the context latent weight super-
+vision for response generation); (3) w/o Loss
+(deleting the context latent weight supervision for
+knowledge prediction); and (4) w/o CK-Dep re-
+moves the context-knowledge dependency when
+generating KLW , i.e., removing the Context LWE
+Cross-Attention module from the KLW Generator
+in Figure 2. From Table 1 we can see that all of
+the BLEU-2 scores decrease. For the WoW dataset,when removing LossandLoss , the BLEU-
+2 gets the lowest score among all of the ablation ex-
+periments, indicating the importance of knowledge
+latent weights generation. In terms of the CMU-
+DoG dataset, which has patterns different from the
+WoW test seen, w/o Loss decreases the most.
+Thus, correctly identifying context seems more cru-
+cial than knowledge selection for the CMU-DoG
+dataset. We presume that CMU-DoG’s knowledge
+sentences are complementary, i.e., different knowl-
+edge sentences contain similar information, result-
+ing in the context recognition showing more im-
+portance. We further verify this assumption in Ap-
+pendix B.4. Other metrics decreased to varying
+degrees but most remain better than the baseline
+approaches. On the whole, the full version of the
+CKL performs the best.
+Low-Resource Experiments. In order to test the
+CKL’s robustness, we also conduct experiments on
+low-resources scenarios. From Table 1, the BLEU-
+2 scores of the CKL model with half of the training
+data are respectively 13.81% and 7.25% on WoW
+test seen and CMU-DoG datasets, outperforming
+the best baseline models (DIALKI with 13.72%
+on WoW, and DoHA with 6.95% on CMU-DoG).
+Appendix B.3 further shows although as the scale7829
+of the training set decreases, the performance drops
+gradually, our proposed CKL model still performs
+reasonably well with limited training data.
+Latent Weight Analysis. To illustrate the effec-
+tiveness of the proposed CKL model, we demon-
+strate (1) knowledge re-ranking by the knowledge
+latent weights and (2) Spearman’s Correlation be-
+tween the knowledge latent weights and the pseudo
+ground truth scores. We use the WoW test seen set
+for illustration. The same patterns are found for
+WoW test unseen and CMU-DoG datasets.
+WoW and CMU-DoG datasets provide a set of
+initial knowledge, designated by K. The predicted
+knowledge latent weights by CKL are scores for
+each knowledge sentence that can be used to rank
+knowledge and obtain re-ranked knowledge set K.
+We construct pseudo ground truth knowledge order
+by using the response as the query to retrieve from
+the knowledge named K. At this point, the top
+1 ranked knowledge sentence in Kis the most
+relevant to the response, Top1Klg . We use P@N as
+the metric to evaluate the precision. For a sample,
+we calculate the percentage of Top1Klg included
+within the top N-ranked knowledge sentences.
+Figure 3 shows the results: for the original
+knowledge order K,P@1 is about 17.5%; for K’
+P@1 score is around 30%. For each N, the P@N
+forK’ is higher than for K. That confirms that the
+latent weight modules can improve the relevance
+scoring of knowledge sentences. In Appendix C
+we also provide a qualitative case study of the rank-
+ings.
+To further analyze the effectiveness of the la-
+tent weights CLWR ,CLWK andKLW , we calculate
+Spearman’s Correlation between each weight group
+and the corresponding pseudo ground truths which
+have been elaborated on in Sec. 3 (e.g., for CLWR
+we calculate the Spearman’s Correlation between
+CLWR andGT ). We use the ZRKGC model to
+provide weights for knowledge sentences without
+context weight (ZRKGC does not provide it) and
+obtain Spearman’s Correlation with the pseudo-
+ground truth GT. We compare the resulting
+Spearman’s Correlation coefficients with those of
+the CKL and CKL’s ablated models. The results
+are shown in Table 2. For KLW , the coefficients
+are higher than for ZRKGC by a large margin. For
+CKL’s ablated models, the coefficients are lower
+than for the full CKL model. For instance, KLW
+correlation score 0.0966 for ‘w/o Loss’ is much
+lower than the score 0.37 for CKL. This further
+demonstrates all supervised modules are helpful to
+the entire model.
+5 Conclusion
+Past studies on capturing context and knowledge
+relationships to boost the quality of response gen-
+eration models were restricted to coarse-grain
+characterization through context-knowledge cross-
+attention. In this paper, we describe the Contextual
+Knowledge Learning (CKL) method for response
+generation. We propose our CKL model by using
+two latent vectors which are trained to capture the
+relationship between context, responses, and the
+‘best knowledge’ (identified through a pre-defined
+default retrieval process by taking the response as
+the query) as well as the relationship between con-
+textual knowledge and responses. The trained la-
+tent vectors are used to generate latent weights that
+enhance the traditional attention operation by mul-
+tiplying them with the token-level attention scores.
+Furthermore, we leverage the weak supervision
+technique to jointly train the latent weights produc-
+tion as well as the response generation. With these
+two mechanisms, the CKL has the flexibility of
+influencing the learning process and has demon-
+strated superior performance against six strong
+baselines. Future work will explore more diverse
+use of latent vectors and latent weights as part of
+the learning process.78306 Limitations
+The proposed CKL can automatically produce the
+scores for each utterance in the context and each
+sentence in the knowledge. However, it is con-
+strained by the total length of the input sequence.
+CKL takes BART as its foundation, thus the bot-
+tleneck of BART limits the upper ability of CKL.
+BART requests the input length to be 1,024, which
+means the CKL can receive at most 1,024 tokens
+at a time. For some samples, the concatenation
+of the context and knowledge contains far more
+than 1,024 but is truncated to fit with the length
+requirement. In those cases, the CKL cannot get
+enough information, resulting in the sub-optimal
+performance of the CKL.
+7 Ethical Statement
+We are aware of how personal identities, expecta-
+tions, norms, and values may influence our study.
+Our datasets were released by previous studies and
+are publicly available sources. Since researchers
+had no interactions with human subjects in this
+case, our ethics review board did not consider this
+part of our research as human subjects research.
+The only part of the study that involved human sub-
+jects was a crowd-sourcing human evaluation study
+(Appendix B.2), where participants were paid at
+least the minimum wage. All of our analysis were
+based on aggregated data without tracking down to
+individuals.
+Acknowledgments
+We would like to thank Benjamin Towle for his gen-
+erous assistance in providing valuable suggestions
+and proofreading support. This work is partly sup-
+ported by Engineering and Physical Sciences Re-
+search Council (EPSRC Grant No. EP/S515528/1,
+2102871). The Titan V used for this research was
+donated by the NVIDIA Corporation. All content
+represents the opinion of the authors, which is not
+necessarily shared or endorsed by their respective
+employers and/or sponsors.
+References78317832
+A Experimental Setup
+To enable the reproduction of results, we make our
+code publicly available at https://github.com/
+tonywenuon/acl2023-ckl .A.1 Datasets
+Wizard of Wikipedia Dataset . The dataset (Di-
+nan et al., 2019) includes knowledge annotated
+by workers from the Amazon Mechanical Turk
+(AMT) platform. Each worker was given a set of
+background knowledge retrieved based on the di-
+alogue history from Wikipedia articles to assess.
+The dataset is split into train/validation/test sets.
+For the validation and test sets, based on the topic
+existence in the train set, there are two versions:
+seen set (the topics exist in the train set) and the
+unseen set (some new topics are not contained in
+the train set). The original dataset can be obtained
+at http://parl.ai. The train/seen validation/seen test
+sets’ sizes are 74,092/3,939/3,865. For the seen
+validation/seen test sets, the sizes are 3,927/3,924.
+CMU-DoG Dataset . This dataset is proposed by
+Zhou et al. (2018). It also employs workers from
+the AMT and its conversations are mainly about
+movies. They are required to exchange ideas about
+movies. The original dataset can be obtained from
+the published paper. Li et al. (2019) also released
+a CMU-DoG dataset, which has tokenization to
+all of the source and target sequences. In our paper,
+we use the ITDD version. The train/validation/test
+sets consist of 66,332/3,269/10,502 samples.
+A.2 Experiment Settings
+In our experiment, the BART-base modelis used.
+The maximum source length is 1024 tokens and
+64 tokens for the target length. For the number
+of context utterances, we use the latest 10 utter-
+ances. In terms of knowledge, we use the max-
+imum source length rather than the number of
+knowledge sentences to determine how many to
+incorporate. The learning rate is set to be 5e-5. All
+of the experiments are trained for 10 epochs on a
+single TITAN V GPU. The proposed CKL model
+needs about 20 hours for training on the Wizard of
+Wikipedia dataset and about 8 hours on the CMU-
+DoG dataset.
+B Complementary Experimental Results
+B.1 Results on WoW Test Unseen Set
+From Table 3, it is clear that the CKL performs
+best among all of the experiments in terms of the
+BLEU and Rouge scores. Like the results of the7833
+Wizard of Wikipedia (WoW) test seen set, the di-
+versity scores and the Embedding-Average score
+are slightly worse than KAT and ZRKGC respec-
+tively. Remarkably, the BLEU-2 score improves
+from 13.96% to 16.05%, which is even higher than
+that of the WoW test seen set, which indicates the
+effectiveness of the CKL model.
+B.2 Human Evaluation
+We also conducted human evaluation by deploying
+users through the crowd-sourcing Amazon MTurk
+platform. 5 AMT workers were employed to as-
+sess samples from 4 perspectives, i.e., Relevance,
+Coherence, Informativeness, and Overall Prefer-
+ence. Following Ling et al. (2021), the four criteria
+are referred to as: Relevance - whether the gen-
+erated response is relevant to the given context.
+Coherence - whether the generated response is a
+coherent and meaningful continuation of the di-
+alogue. Informativeness - how many new and
+diverse expressions do the generated responses in-
+troduce. Overall Preference - personal preference
+between two responses.
+To do the human evaluation, we randomly se-
+lect 100 samples from the outputs of the proposed
+CKL and DIALKI (the best-performing baseline
+model) for the Wizard of Wikipedia and CMU-
+DoG datasets respectively. Then we use the Ama-
+zon Mechanical Turk platform for assessment. The
+assessors are asked to select a response that they
+preferred from two models on different perspec-
+tives (relevance, coherence informativeness, and
+overall), and they are also allowed to consider both
+responses are equal to the given context, i.e., ‘Tie’
+in Table 4.
+The results are shown in Table 4, from which we
+can see that for all of the four criteria, the proposed
+CKL is better than the DIALKI. This indicates that
+the CKL model improves in terms of relevance, co-
+herence, and informativeness. We calculate Fleiss’
+Kappa (Fleiss and Cohen, 1973) for each criteria.
+The resulting Kappa scores are around 0.4, which
+indicates a moderate agreement among the asses-
+sors. From Table 4, we can observe that our pro-
+posed CKL model outperforms the best baseline
+DIALKI model from all perspectives.
+B.3 Low-Resource Complementary
+Experiments
+Table 5 shows the results of the complementary ex-
+periments for low-resource training. We can clearly
+see the effectiveness of the proposed CKL. As the
+scale of the training set decreases, the performance
+drops gradually. However, when the scale of the
+training data goes down to less than 1/4 of the orig-
+inal training data, the performance decreases more
+dramatically. Our proposed CKL model performs
+reasonably well with limited training data, but mod-
+els with sufficient amount of training data are still
+preferred.78347835B.4 Effect of Top-N Retrieved Knowledge
+In Sec. 3.3, we set top Nretrieved knowledge sen-
+tences as the ground truth for obtaining GT.
+We will discuss how different Naffects the perfor-
+mance. As can be seen in Figure 4, we investigate
+from the top 1 to top 10 retrieved knowledge sen-
+tences. It is clear that for the WoW dataset, using
+the first retrieved knowledge gets the best results,
+while for the CMU-DoG dataset, the top-5 group
+peaks. That indicates that in the WoW dataset, the
+knowledge other than the top 1 retrieved sentence
+contains limited useful information. However, the
+knowledge in the CMU-DoG dataset complements
+each other. This also explains why when removing
+Loss , the BLEU-2 decreases most for CMU-
+DoG (see ablation study in Sec 4.3).
+C Case Study
+In order to qualitatively demonstrate the results
+generated by the CKL and the baseline models,
+we report a good case and a bad case which are
+generated by the CKL model. The good case is se-
+lected by this criterion for a sample: if a knowledge
+weight is the highest among all of the knowledge
+sentences and it is also the ground truth knowledge
+(see latent weight analysis in Sec.4.3), it is viewed
+as good. On the contrary, if the knowledge sen-
+tence is the ground truth knowledge but predicted
+to have the lowest latent score, it is a bad case.
+From Table 6, we can see that in the good case,
+if the knowledge is predicted correctly, the CKL-
+generated response is very close to the ground truth
+target. The other responses produced by the base-
+line approaches tend to be generic. In terms of the
+bad case, due to the lack of important information
+used in the target, the CKL response does not share
+keywords with the ground truth target even though
+it is a proper answer for the given context. This
+comes to the one-to-many problem which describes
+that many responses are reasonable for a certain
+dialogue scenario by the natural language. This
+problem is out of this paper’s scope.78367837ACL 2023 Responsible NLP Checklist
+A For every submission:
+/squareA1. Did you describe the limitations of your work?
+6
+/squareA2. Did you discuss any potential risks of your work?
+6
+/squareA3. Do the abstract and introduction summarize the paper’s main claims?
+1
+/squareA4. Have you used AI writing assistants when working on this paper?
+Left blank.
+B/squareDid you use or create scientiﬁc artifacts?
+4
+/squareB1. Did you cite the creators of artifacts you used?
+4
+/squareB2. Did you discuss the license or terms for use and / or distribution of any artifacts?
+4
+/squareB3. Did you discuss if your use of existing artifact(s) was consistent with their intended use, provided
+that it was speciﬁed? For the artifacts you create, do you specify intended use and whether that is
+compatible with the original access conditions (in particular, derivatives of data accessed for research
+purposes should not be used outside of research contexts)?
+4
+/squareB4. Did you discuss the steps taken to check whether the data that was collected / used contains any
+information that names or uniquely identiﬁes individual people or offensive content, and the steps
+taken to protect / anonymize it?
+7
+/squareB5. Did you provide documentation of the artifacts, e.g., coverage of domains, languages, and
+linguistic phenomena, demographic groups represented, etc.?
+4
+/squareB6. Did you report relevant statistics like the number of examples, details of train / test / dev splits,
+etc. for the data that you used / created? Even for commonly-used benchmark datasets, include the
+number of examples in train / validation / test splits, as these provide necessary context for a reader
+to understand experimental results. For example, small differences in accuracy on large test sets may
+be signiﬁcant, while on small test sets they may not be.
+4
+C/squareDid you run computational experiments?
+4.1
+/squareC1. Did you report the number of parameters in the models used, the total computational budget
+(e.g., GPU hours), and computing infrastructure used?
+No response.7838/squareC2. Did you discuss the experimental setup, including hyperparameter search and best-found
+hyperparameter values?
+No response.
+/squareC3. Did you report descriptive statistics about your results (e.g., error bars around results, summary
+statistics from sets of experiments), and is it transparent whether you are reporting the max, mean,
+etc. or just a single run?
+No response.
+/squareC4. If you used existing packages (e.g., for preprocessing, for normalization, or for evaluation), did
+you report the implementation, model, and parameter settings used (e.g., NLTK, Spacy, ROUGE,
+etc.)?
+4
+D/squareDid you use human annotators (e.g., crowdworkers) or research with human participants?
+Appendix B.2
+/squareD1. Did you report the full text of instructions given to participants, including e.g., screenshots,
+disclaimers of any risks to participants or annotators, etc.?
+We design an annotation task containing detailed instructions for the annotators, asking the annota-
+tors to assess which generated response is preferred. The design of the instruction is not this paper’s
+focus, so we don’t report it.
+/squareD2. Did you report information about how you recruited (e.g., crowdsourcing platform, students)
+and paid participants, and discuss if such payment is adequate given the participants’ demographic
+(e.g., country of residence)?
+Appendix B.2
+/squareD3. Did you discuss whether and how consent was obtained from people whose data you’re
+using/curating? For example, if you collected data via crowdsourcing, did your instructions to
+crowdworkers explain how the data would be used?
+Appendix B.2
+/squareD4. Was the data collection protocol approved (or determined exempt) by an ethics review board?
+Our human evaluation just collects the opinions from the annotators. For example, given two
+responses, they need to assess which is perferred. The whole process is fully anonymous.
+/squareD5. Did you report the basic demographic and geographic characteristics of the annotator population
+that is the source of the data?
+The annotators are anonymous on Amazon MTurk platform. We can’t trace the demographic and
+geographic characteristics.7839

@@ -1,1 +1,1102 @@
-7439 Proceedings of the 60th Annual Meeting of the Association for Computational Linguistics Volume 1 : Long Papers , pages 7439 7468 May 22 - 27 , 2022 c(cid:13)2022 Association for Computational Linguistics 7440 7441 7442 7443 7444 7445 7446 7447 7448 7449 7450 7451 7452 7453 7454 7455 7456 7457 7458 7459 7460 7461 7462 7463 7464 7465 7466 7467 7468 
+
+Kalpesh KrishnaDeepak NathaniXavier Garcia
+Bidisha SamantaPartha TalukdarUniversity of Massachusetts Amherst,Google Research
+kalpesh@cs.umass.edu
+{xgarcia, dnathani, bidishasamanta, partha}@google.com
+Abstract
+Style transfer is the task of rewriting a sen-
+tence into a target style while approximately
+preserving content. While most prior litera-
+ture assumes access to a large style-labelled
+corpus, recent work (Riley et al., 2021) has at-
+tempted “few-shot” style transfer using just 3-
+10 sentences at inference for style extraction.
+In this work, we study a relevant low-resource
+setting: style transfer for languages where no
+style-labelled corpora are available. We notice
+that existing few-shot methods perform this
+task poorly, often copying inputs verbatim .
+We push the state-of-the-art for few-shot
+style transfer with a new method modeling
+the stylistic difference between paraphrases.
+When compared to prior work, our model
+achieves 2-3x better performance in formal-
+ity transfer and code-mixing addition across
+seven languages. Moreover, our method is bet-
+ter at controlling the style transfer magnitude
+using an input scalar knob. We report promis-
+ing qualitative results for several attribute
+transfer tasks (sentiment transfer, simpliﬁca-
+tion, gender neutralization, text anonymiza-
+tion) all without retraining the model . Finally,
+we ﬁnd model evaluation to be difﬁcult due
+to the lack of datasets and metrics for many
+languages. To facilitate future research we
+crowdsource formality annotations for 4000
+sentence pairs in four Indic languages, and use
+this data to design our automatic evaluations.
+1 Introduction
+Style transfer is a natural language generation task
+in which input sentences need to be re-written into
+a target style, while preserving semantics. It has
+many applications such as writing assistance (Hei-
+dorn, 2000), controlling generation for attributesFigure 1: An illustration of our few-shot style trans-
+fer system during inference. Our model extracts style
+vectors from exemplar English sentences as input (in
+this case formal/informal sentences) and uses their vec-
+tor difference to guide style transfer in other languages
+(Hindi).is used to control the magnitude of transfer:
+in this example our model produces more high Sanskrit
+words & honoriﬁcs (more formal) with higher .
+like simplicity, formality or persuasion (Xu et al.,
+2015; Smith et al., 2020; Niu and Carpuat, 2020),
+data augmentation (Xie et al., 2020; Lee et al.,
+2021), and author obfuscation (Shetty et al., 2018).
+Most prior work either assumes access to su-
+pervised data with parallel sentences between the
+two styles (Jhamtani et al., 2017), or access to a
+large corpus of unpaired sentences with style la-
+bels (Prabhumoye et al., 2018; Subramanian et al.,
+2019). Models built are style-speciﬁc and cannot
+generalize to new styles during inference, which
+is needed for applications like real-time adaptation
+to a user’s style in a dialog or writing application.
+Moreover, access to a large unpaired corpus with
+style labels is a strong assumption. Most standard
+“unpaired” style transfer datasets have been care-
+fully curated (Shen et al., 2017) or were originally
+parallel (Xu et al., 2012; Rao and Tetreault, 2018).
+This is especially relevant in settings outside En-7439glish, where NLP tools and labelled datasets are
+largely underdeveloped (Joshi et al., 2020). In this
+work, we take the ﬁrst steps studying style transfer
+in seven languageswith nearly 1.5 billion speakers
+in total. Since no training data exists for these lan-
+guages, we analyzed the current state-of-the-art in
+few-shot multilingual style transfer, the Universal
+Rewriter () from Garcia et al. (2021). Unfortu-
+nately, we ﬁnd it often copies the inputs verbatim
+(Section 3.1), without changing their style .
+We propose a simple inference-time trick of
+style-controlled translation through English, which
+improves theoutput diversity (Section 4.1). To
+further boost performance we propose ,a
+novel algorithm using the recent ﬁnding that para-
+phrasing leads to stylistic changes (Krishna et al.,
+2020). extracts edit vectors from para-
+phrase pairs, which are used to condition and train
+the model (Figure 2). On formality transfer and
+code-mixing addition, our best performing- variant signiﬁcantly outperformsacross
+all languages (by 2-3x) using automatic & human
+evaluation. Besides better rewriting, our system is
+better able to control the style transfer magnitude
+(Figure 1). A scalar knob ( ) can be adjusted to
+make the output text reﬂect the target style (pro-
+vided by exemplars) more or less. We also observe
+promising qualitative results in several attribute
+transfer directions (Section 6.2) including senti-
+ment transfer, simpliﬁcation, gender neutralization
+and text anonymization, all without retraining the
+model and using just 3-10 examples at inference.
+Finally, we found it hard to precisely evaluate
+models due to the lack of evaluation datasets and
+style classiﬁers (often used as metrics) for many
+languages. To facilitate further research in Indic
+formality transfer, we crowdsource formality an-
+notations for 4000 sentence pairs in four Indic lan-
+guages (Section 5.1), and use this dataset to design
+the automatic evaluation suite (Section 5).
+In summary, our contributions provide an end-to-
+end recipe for developing and evaluating style trans-
+fer models and evaluation in a low-resource setting.
+2 Related Work
+Few-shot methods are a recent development in
+English style transfer, with prior work using varia-
+tional autoencoders (Xu et al., 2020), or prompting
+large pretrained language models at inference (Reifet al., 2021). Most related is the state-of-the-art
+TextSETTR model from Riley et al. (2021), who
+use a neural style encoder to map exemplar sen-
+tences to a vector used to guide generation. To train
+this encoder, they use the idea that adjacent sen-
+tences in a document have a similar style. Recently,
+theUniversal Rewriter (Garcia et al., 2021) ex-
+tended TextSETTR to 101 languages, developing a
+joint model for translation, few-shot style transfer
+and stylized translation. This model is the only
+prior few-shot system we found outside English,
+and our main baseline. We discuss its shortcomings
+in Section 3.1, and propose ﬁxes in Section 4.
+Multilingual style transfer is mostly unexplored
+in prior work: a 35 paper survey by Briakou et al.
+(2021b) found only one work in Chinese, Russian,
+Latvian, Estonian, French. They further introduced
+XFORMAL, the ﬁrst formality transfer evaluation
+dataset in French, Brazilian Portugese and Italian.
+To the best of our knowledge, we are the ﬁrst to
+study style transfer for the languages we consider.
+More related work from Hindi linguistics and on
+style transfer control is provided in Appendix B.
+3 The Universal Rewriter () model
+We will start by discussing the Universal Rewriter
+() model from Garcia et al. (2021), upon which
+our proposed model is built. At a high level,
+themodel extracts a style vector sfrom an ex-
+emplar sentence e, which reﬂects the desired target
+style. This style vector is used to style transfer an
+input sentence x. Concretely, consider f;f
+to be encoder & decoder Transformers initialized
+with mT5 (Xue et al., 2021b), which are composed
+to form the model f. Themodel extracts the
+style vector using the encoder representation of a
+special [CLS] token prepended to e, and adds it
+to the inputxrepresentations for style transfer,
+f(e) =s=f([CLS]e)[0]
+f(x;s) =f(f(x) +s)
+whereis string concatenation, +vector addition.
+fis trained using the following objectives,
+Learning Style Transfer by Exemplar-driven
+Denoising : To learn a style extractor, the Univer-
+sal Rewriter uses the idea that two non-overlapping
+spans of text in the same document are likely to
+have the same style. Concretely, let xandxbe7440two non-overlapping spans. Style extracted from
+one span (x) is used to denoise the other ( x),
+x=f(noise (x);f(x))
+L =L(x;x)
+whereLis the standard next-word predic-
+tion cross entropy loss function and noise( ) refers
+to 20-60% random token dropping and token re-
+placement. This objective is used on the mC4
+dataset (Xue et al., 2021b) with 101 languages.
+To build a general-purpose rewriter which can do
+translation as well as style transfer, the model is
+additionally trained on two objectives : (1) su-
+pervised machine translation using the OPUS-100
+parallel dataset (Zhang et al., 2020), and (2) a
+self-supervised objective to learn effective style-
+controlled translation; more details in Appendix C.
+During inference (Figure 1), consider an input sen-
+tencexand a transformation from style AtoB
+(say informal toformal ). LetS;Sto be exem-
+plar sentences in each of the styles (typically 3-10
+sentences). The output yis computed as,
+s=1
+jSjXf(y)
+s=1
+jSjXf(y)
+y=f(x;(s s))
+whereacts as a control knob to determine the
+magnitude of style transfer, and the vector subtrac-
+tion helps remove confounding style information.
+3.1 Shortcomings of the Universal Rewriter
+We experimented with themodel on Hindi for-
+mality transfer, and noticed poor performance. We
+noticed thathas a strong tendency to copy
+sentences verbatim — 45.5% outputs were copied
+exactly from the input (and hence not style trans-
+ferred) for the best performing value of . The
+copying increase for smaller , making magnitude
+control harder. We identify the following issues:
+1.Random token noise leads to unnatural in-
+puts & transformations: The Universal Rewriter
+uses 20-60% uniformly random token dropping
+or replacement to noise inputs, which leads to un-
+grammatical inputs during training. We hypothe-
+size models tend to learn grammatical error correc-
+tion, which encourages verbatim copying duringinference where ﬂuent inputs are used and no error
+correction is needed. Moreover, token-level noise
+does not differentiate between content or function
+words, and cannot do syntactic changes like content
+reordering (Goyal and Durrett, 2020). Too much
+noise could distort semantics and encourage hallu-
+cination, whereas too little will encourage copying.
+2.Style vectors may not capture the precise
+style transformation: The Universal Rewriter ex-
+tracts the style vector from a single sentence dur-
+ing training, which is a mismatch from the infer-
+ence where a difference between vectors is taken.
+Without taking vector differences at inference, we
+observe semantic preservation and overall perfor-
+mance of themodel is much lower.
+3.mC4 is noisy : On reading training data samples,
+we noticed noisy samples with severe language
+identiﬁcation errors in the Hindi subset of mC4.
+This has also been observed recently in Kreutzer
+et al. (2022), who audit 100 sentences in each lan-
+guage, and report 50% sentences in Marathi and
+20% sentences in Hindi have the wrong language.
+4.No translation data for several languages:
+We notice worse performance for languages which
+did not get parallel translation data (for the trans-
+lation objective in Section 3). In Table 1 we seegets a scoreof 30.4 for Hindi and Bengali,
+languages for which it got translation data. How-
+ever, the scores are lower for Kannada, Telugu &
+Gujarati (25.5, 22.8, 23.7), for which no translation
+data was used. We hypothesize translation data en-
+courages learning language-agnostic semantic rep-
+resentations needed for translation from the given
+language, which in-turn improves style transfer.
+4 Our Models
+4.1 Style-Controlled Backtranslation (+)
+While the Universal Rewriter model has a strong
+tendency to exactly copy input sentences while
+rewriting sentences in the same language (Sec-
+tion 3.1), we found it is an effective style-controlled
+translation system. This motivates a simple
+inference-time trick to improve model outputs and
+reduce copying — translate sentences to English
+(en) in a style-agnostic manner with a zero style7441
+vector 0, and translate back into the source lan-
+guage ( lx) with stylistic control.
+x=f(enx;0)
+x=f(lxx;(s s))
+wherexis the input sentence, s;sare the
+styles vectors we want to transfer between, en,
+lxare language codes prepended to indicate the
+output language (Appendix C). Prior work has
+shown that backtranslation is effective for para-
+phrasing (Wieting and Gimpel, 2018; Iyyer et al.,
+2018) and style transfer (Prabhumoye et al., 2018).
+4.2 Using Paraphrase Vector Differences for
+Style Transfer ( )
+While style-controlled backtranslation is an effec-
+tive strategy, it needs two translation steps. This
+is 2x slower than, and semantic errors increase
+with successive translations. To learn effective
+style transfer systems needing only a single genera-
+tion step we develop , a new few-shot style
+transfer training objective (overview in Figure 2). tackles the issues discussed in Section 3.1
+using paraphrases and style vector differences.
+Paraphrases as a “noise” function : Instead of
+using random token-level noise (Issue #1 in Sec-
+tion 3.1), we paraphrase sentences to “noise” them
+during training. Paraphrasing modiﬁes the lexical
+& syntactic properties of sentences, while preserv-
+ing ﬂuency and input semantics. Prior work (Kr-
+ishna et al., 2020) has shown that paraphrasing
+leads to stylistic changes, and denoising can be
+considered a style re-insertion process.To create paraphrases, we backtranslate sen-
+tences from themodelwith no style control
+(zero vectors used as style vectors). To increase
+diversity, we use random sampling in both trans-
+lation steps, pooling generations obtained using
+temperature values [0:4;0:6;0:8;1:0]. Finally, we
+discard paraphrase pairs from the training data
+where the semantic similarity scoreis outside the
+range [0:7;0:98]. This removes backtransation er-
+rors (score < 0.7), and exact copies (score > 0.98).
+In Appendix K we conﬁrm that our backtranslated
+paraphrases are lexically diverse from the input.
+Using style vector differences for control : To ﬁx
+the training / inference mismatch for style extrac-
+tion (Issue #2 in Section 3.1), we propose using
+style vector differences between the output and in-
+put as the stylistic control. Concretely, let xbe an
+input sentence and xits paraphrase.
+s=f(x) f(x)
+x=f(x;stop-grad (s))
+L=L(x;x)
+where stop-grad() stops gradient ﬂow through
+s, preventing the model from learning to copy x
+exactly. To ensure fextracts meaningful style
+representations, we ﬁne-tune a trainedmodel.
+Vector differences have many advantages,
+1.Subtracting style vectors between a sentence7442and its paraphrase removes confounding fea-
+tures (like semantics) present in the vectors.
+2.The vector difference focuses on the precise
+transformation that is needed to reconstruct
+the input from its paraphrase.
+3.The length of sacts as a proxy for the
+amount of style transfer, which is controlled
+usingduring inference (Section 3). is related to neural editor models (Guu
+et al., 2018; He et al., 2020), where language mod-
+els are decomposed into a probabilistic space of
+edit vectors over prototype sentences. We justify
+the design with ablations in Appendix G.1.
+4.3 Indic Models (- , - )
+To address the issue of no translation data (Issue
+#4 in Section 3.1), we train Indic variants of our
+models. We replace the OPUS translation data used
+for training the Universal Rewriter (Section 3) with
+Samanantar (Ramesh et al., 2021), which is the
+largest publicly available parallel translation cor-
+pus for 11 Indic languages. We call these variants- and - . This process signif-
+icantly up-samples the parallel data seen between
+English / Indic languages, and gives us better per-
+formance (Table 1) and lower copy rates, especially
+for languages with no OPUS translation data.
+4.4 Multitask Learning ( -)
+One issue with our - setup is usage
+of a stop-grad() to avoid verbatim copying from
+the input. This prevents gradient ﬂow into the style
+extractorf, and as we see in Appendix H, a
+degradation of the style vector space. To prevent
+this we simply multi-task between the exemplar-
+driven denoisingobjective (Section 3) and the objective. We initialize the model with the- checkpoint, and ﬁne-tune it on these two
+losses together, giving each loss equal weight.
+5 Evaluation
+Automatic evaluation of style transfer is challeng-
+ing (Pang, 2019; Mir et al., 2019; Tikhonov et al.,
+2019), and the lack of resources (such as evalu-
+ation datasets, style classiﬁers) make evaluation
+trickier for Indic languages. To tackle this issue,
+we ﬁrst collect a small dataset of formality and
+semantic similarity annotations in four Indic lan-
+guages (Section 5.1). We use this dataset to guide
+the design of an evaluation suite (Section 5.2-5.6).Since automatic metrics in generation are imper-
+fect (Celikyilmaz et al., 2020), we complement our
+results with human evaluation (Section 5.7).
+5.1 Indic Formality Transfer Dataset
+Since no public datasets exist for formality transfer
+in Indic languages, it is hard to measure the extent
+to which automatic metrics (such as style classi-
+ﬁers) are effective. To tackle this issue, we build
+a dataset of 1000 sentence pairs in each of four
+Indic languages (Hindi, Bengali, Kannada, Tel-
+ugu) with formality and semantic similarity anno-
+tations. We ﬁrst style transfer held-out Samanantar
+sentences using our- +model (Sec-
+tion 4.1, 4.3) to create sentence pairs with different
+formality. We then asked three crowdworkers to 1)
+label the more formal sentence in each pair; 2) rate
+semantic similarity on a 3-point scale.
+Our crowdsourcing is conducted on Task Mate,
+where we hired native speakers from India with at
+least a high school education and 90% approval
+rating on the platform. To ensure crowdworkers
+understood “formality”, we provided instructions
+following advice from professional Indian linguists,
+and asked two qualiﬁcation questions in their native
+language. More details (agreement, compensation,
+instructions) are provided in Appendix E.4.
+5.2 Transfer Accuracy (r-, a-)
+Our ﬁrst metric checks whether the output sen-
+tence reﬂects the target style. This is measured by
+an external classiﬁer’s predictions on system out-
+puts. We use two variants of transfer accuracy: (1)
+Relative Accuracy (r-): does the target style
+classiﬁer score the output sentence higher than the
+input sentence? (2) Absolute Accuracy (a-):
+does the classiﬁer score the output higher than 0.5?
+Building multilingual classiﬁers : Unfortunately,
+no large style classiﬁcation datasets exist for most
+languages, preventing us from building classiﬁers
+from scratch. We resort to zero-shot cross lingual
+transfer techniques (Conneau and Lample, 2019),
+where large multilingual pretrained models are ﬁrst
+ﬁne-tuned on English classiﬁcation data, and then
+applied to other languages at inference. We experi-
+ment with three such techniques, and ﬁnd MAD-X
+classiﬁers with language adapters (Pfeiffer et al.,
+2020b) have the highest accuracy of 81% on our
+Hindi data from Section 5.1. However, MAD-X
+classiﬁers were only available for Hindi, so we use7443the next best XLM RoBERTa-base (Conneau et al.,
+2020) for other languages, which has 75%-82% ac-
+curacy on annotated data; details in Appendix E.1.
+5.3 Semantic Similarity ()
+Our second evaluation criteria is semantic similar-
+ity between the input and output. Following re-
+cent recommendations (Marie et al., 2021; Krishna
+et al., 2020), we avoid n-gram overlap metrics like
+BLEU (Papineni et al., 2002). Instead, we use
+LaBSE (Feng et al., 2020), a language-agnostic
+semantic similarity model based on multilingual
+BERT (Devlin et al., 2019). LaBSE supports 109
+languages, and is the only similarity model we
+found supporting all the Indic languages in this
+work. We also observed LaBSE had greater corre-
+lation with our annotated data (Section 5.1) com-
+pared to alternatives; details in Appendix E.2.
+Qualitatively, we found that sentence pairs with
+LaBSE scores lower than 0.6 were almost never
+paraphrases. To avoid rewarding partial credit for
+low LaBSE scores, we use a hard threshold(L=
+0:75) to determine whether pairs are paraphrases,(x;y) = 1 if
+LaBSE (x;y)>L	
+else0
+5.4 Other Metrics ( , , 1-g)
+Additionally, we measure whether the input and
+output sentences are in the same language ( ),
+the fraction of outputs copied verbatim from the in-
+put ( ), and the 1-gram overlap between input /
+output (1-g). High and low / 1-g (more
+diversity) is better; details in Appendix E.6.
+5.5 Aggregated Score (r- , a- )
+To get a sense of overall system performance, we
+combine individual metrics into one score. Similar
+to Krishna et al. (2020) we aggregate metrics as,(x;y) =(x;y)(x;y) (y)(D) =1
+jDjX(x;y)
+Where (x;y)are input-output pairs, and Dis the
+test corpus. Since each of our individual metrics
+can only take values 0 or 1 at an instance level, our
+aggregation acts like a Boolean AND operation.
+In other words, we are measuring the fraction of
+outputs which simultaneously transfer style, havea semantic similarity of at least L(our threshold
+in Section 5.3), and have the same language as the
+input. Depending on the variant of (relative /
+absolute), we can derive r- / a-.
+5.6 Evaluating Control ( )
+An ideal system should not only be able to style
+transfer sentences, but also control the magnitude
+of style transfer using the scalar input . To evalu-
+ate this, for every system we ﬁrst determine a 
+value and let [0;]be the range of control val-
+ues. While in our setup is an unbounded scalar,
+we noticed high values of signiﬁcantly perturb
+semantics (also noted in Garcia et al., 2021), with
+systems outputting style-speciﬁc n-grams unfaith-
+ful to the output. We choose to be the largest
+from the list [0:5;1:0;1:5;2:0;2:5;3:0]whose
+outputs have an average semantic similarity score
+(, Section 5.3) of at least 0.75with the vali-
+dation set inputs. For each system we take three
+evenly spaced values in its control range, denoted
+as = [,,]. We then compute
+thestyle calibration to ( ), or how often
+does increasing lead to a style score increase?
+We measure this with a statistic similar to Kendall’s
+(Kendall, 1938), counting concordant pairs in , (x) =1
+nXfstyle(y)>style(y)g
+wherexis input, (x) is the average over
+all possiblen(= 3) pairs ofvalues (;)in.
+5.7 Human Evaluation
+Automatic metrics are usually insufﬁcient for style
+transfer evaluation — according to Briakou et al.
+(2021a), 69 / 97 surveyed style transfer papers used
+human evaluation. We adopt the crowd-sourcing
+setup from Section 5.1, which was used to build
+our formality evaluation datasets. We presented
+200 generations from each model and the corre-
+sponding inputs in a random order, and asked three
+crowdworkers two questions about each pair of
+sentences: (1) which sentence is more formal/code-
+mixed? (2) how similar are the two sentences in
+meaning? This lets us evaluate r-,, r-, with respect to human annotations instead
+of classiﬁer predictions. More experiment details
+(inter-annotator agreement, compensation, instruc-
+tions) are provided in Appendix E.4.7444
+6 Main Experiments
+6.1 Experimental Setup
+In our experiments, we compare the following mod-
+els (training details are provided Appendix A):
+: the Universal Rewriter (Garcia et al.,
+2021), which is our main baseline (Section 3);
+ : our model with paraphrase vector
+differences (Section 4.2);
+- , - : Indic variants ofand models (Section 4.3);
+ -: Multitask training between- and - (Section 4.4);
++: models with style-controlled backtrans-
+lation at inference time (Section 4.1).
+Our models are evaluated on (1) formality trans-
+fer (Rao and Tetreault, 2018); (2) code-mixing ad-
+dition, a task where systems attempt to use English
+words in non-English sentences, while preserving
+the original script.Since we do not have access to
+any formality evaluation dataset,we hold out 22K
+sentences from Samanantar in each Indic languagefor validation / testing. For Swahili / Spanish, we
+use mC4 / WMT2018 sentences. These sets have
+similar number of formal / informal sentences, as
+marked by our formality classiﬁers (Section 5.2),
+and are transferred to the opposite formality. We
+re-use the hi/bn formality transfer splits for code-
+mixing addition, evaluating unidirectional transfer.
+Seven languages with varying scripts and mor-
+phological richness are used for evaluation
+(hi,es,sw,bn,kn,te,gu ). Themodel
+only saw translation data for hi,es,bn , whereas- sees translation data for all Indic lan-
+guages (Section 4.3). To test the generaliza-
+tion capability of the , no Gujarati para-
+phrase training data for is used. Note that no
+paired/unpaired data with style labels is used dur-
+ing training : models determine the target style at
+inference using 3-10 exemplars sentences. For
+few-shot formality transfer, we use the English
+exemplars from Garcia et al. (2021). We follow
+their setup and use English exemplars to guide non-
+English transfer zero-shot. For code-mixing addi-
+tion, we use Hindi/English code-mixed exemplars
+in Devanagari (shown in Appendix D).
+6.2 Main Results
+Each proposed method improves over prior
+work, - works best . We present our7445
+automatic evaluation results for formality transfer
+across languages in Table 1, Table 3. Overall we
+ﬁnd that each of our proposed methods ( ,
+*- , +) helps improve performance over
+the baselinemodel (71.1, 58.3, 54.2 vs 30.4
+r- on Hindi). Combining these ideas with
+multitask learning ( -) gives us the best
+performance across all languages (78.1 on Hindi).
+On Gujarati, the - fails to get good
+performance (36.0 r-) since it did not see Gu-
+jarati paraphrase data, but this performance is re-
+covered using - (75.0). In Table 4 we
+see human evaluations support our automatic eval-
+uation for formality transfer. In Table 5 we per-
+form human evaluation on a subset of models for
+code-mixing addition and see similar trends, with - signiﬁcantly outperforming,- (41.5 vs 3.6, 15.3 on Hindi). - and - are best at
+controlling magnitude of style transfer : In Ta-
+ble 6, we compare the extent to which models can
+control the amount of style transfer using . We
+ﬁnd that all our proposed methods outperform themodel, which gets only 29.2 .+mod-
+els are not as effective at control (43.4 ),
+while - and - perform
+best (69.6, 69.0 ). This is graphically il-
+lustrated in Figure 3. - performs con-
+sistently well across different values (left plot),
+and gives a high style change without much drop in
+content similarity to the input as is varied (right
+plot); more control experiments in Appendix F.
+In Table 2 we provide a breakdown by individ-
+ual metrics . In the baseline Hindimodel, we
+notice high rates (45.4%), resulting in lower7446 scores. reduces in our proposed mod-
+els (4.4% for -), which boosts overall
+performance. We ﬁnd the lowest (and lowest
+1-g) for models with +(1%), which is due to two
+translation steps. However, this lowers semantic
+similarity (also seen in Table 4) lowering the over-
+all score (60.0 vs 78.1) compared to -.
+In Appendix G we show ablations studies jus-
+tifying the design, decoding scheme, etc.
+In Appendix I we show a breakdown by individual
+metrics for other languages and plot variations with
+. We also analyze the style encoder fin Ap-
+pendix H, ﬁnding it is an effective style classiﬁer.
+Weanalyze several qualitative outputs from - in Figure 4. Besides formality trans-
+fer and code-mixing addition, we transfer severalother attributes: sentiment (Li et al., 2018), simplic-
+ity (Xu et al., 2015), anonymity (Anandan et al.,
+2012) and gender neutrality (Reddy and Knight,
+2016). More outputs are provided in Appendix J.
+7 Conclusion
+We present a recipe for building & evaluating con-
+trollable few-shot style transfer systems needing
+only 3-10 style examples at inference, useful in
+low-resource settings. Our methods outperform
+prior work in formality transfer & code-mixing for
+7 languages, with promising qualitative results for
+several other attribute transfer tasks. Future work
+includes further improving systems for some at-
+tributes, and studying style transfer for languages
+where little / no translation data is available.7447Acknowledgements
+We are very grateful to the Task Mate team (es-
+pecially Auric Bonifacio Quintana) for their sup-
+port and helping us crowdsource data and evaluate
+models on their platform. We thank John Wieting,
+Timothy Dozat, Manish Gupta, Rajesh Bhatt, Esha
+Banerjee, Yixiao Song, Marzena Karpinska, Ar-
+avindan Raghuveer, Noah Constant, Parker Riley,
+Andrea Schioppa, Artem Sokolov, Mohit Iyyer and
+Slav Petrov for several useful discussions during
+the course of this project. We are also grateful to
+Rajiv Teja Nagipogu, Shachi Dave, Bhuthesh R,
+Parth Kothari, Bhanu Teja Gullapalli and Simran
+Khanuja for helping us annotate model outputs in
+several Indian languages during pilot experiments.
+This work was mostly done during Kalpesh Krishna
+(KK)’s internship at Google Research India, hosted
+by Bidisha Samanta and Partha Talukdar. KK was
+partly supported by a Google PhD Fellowship.
+Ethical Considerations
+Recent work has highlighted issues of stylistic bias
+in text generation systems, speciﬁcally machine
+translation systems (Hovy et al., 2020). We ac-
+knowledge these issues, and consider style transfer
+and style-controlled generation technology as an
+opportunity to work towards ﬁxing them (for in-
+stance, gender neutralization as presented in Sec-
+tion 6.2). Note that it is important to tread down
+this path carefully — In Chapter 9, Blodgett (2021)
+argue that style is inseparable from social meaning
+(as originally noted by Eckert, 2008), and humans
+may perceive automatically generated text very dif-
+ferently compared to automatic style classiﬁers.
+Our models were trained on 32 Google Cloud
+TPUs. As discussed in Appendix A, the&- model take roughly 18 hours to train.
+The -* and - models are much
+cheaper to train (2 hours) since we ﬁnetune the
+pretrained-* models. The Google 2020 en-
+vironment report mentions,“TPUs are highly
+efﬁcient chips which have been speciﬁcally de-
+signed for machine learning applications”. These
+accelerators run on Google Cloud, which is car-
+bon neutral today, and is aiming to “run on
+carbon-free energy, 24/7, at all of Google’s data
+centers by 2030” ( https://cloud.google.
+com/sustainability ).References7448744974507451Appendices for “Few-shot Controllable
+Style Transfer for Low-Resource
+Multilingual Settings”
+A Model training details
+Totrain the- model, we use mC4 (Xue
+et al., 2021b) for the self-supervised objectives
+and Samanantar (Ramesh et al., 2021) for the su-
+pervised translation. For creating paraphrase data
+for training our models (Section 4.2), we
+again leverage Indic language side of Samanan-
+tar sentence pairs. Our models are implemented
+in JAX (Bradbury et al., 2018) using the T5X li-
+brary.We re-use thecheckpoint from Garcia
+et al. (2021). To train the- model, we fol-
+low the setup in Garcia et al. (2021) and initialize
+the model with mT5-XL (Xue et al., 2021b), which
+has 3.7B parameters. We ﬁne-tune the model for
+25K steps with a batch size of 512 inputs and a
+learning rate of 1e-3, using the objectives in Sec-
+tion 3. Training was done on 32 Google Cloud
+TPUs which took a total of 17.5 hours. To train the and - models, we further ﬁne-
+tuneand- for a total of 4K steps using
+the objective from Section 4.2, taking 2 hours.
+B More Related Work
+Multilingual style transfer is mostly unexplored
+in prior work: a 35 paper survey by Briakou et al.
+(2021b) found only one work in Chinese, Rus-
+sian, Latvian, Estonian, French (Shang et al., 2019;
+Tikhonov and Yamshchikov, 2018; Korotkova et al.,
+2019; Niu et al., 2018). Briakou et al. (2021b)
+further introduced XFORMAL, the ﬁrst formality
+transfer evaluation dataset in French, Brazilian Por-
+tugese and Italian.Hindi formality has been stud-
+ied in linguistics, focusing on politeness (Kachru,
+2006; Agnihotri, 2013; Kumar, 2014) and code-
+mixing (Bali et al., 2014). Due to its prevalence in
+India, English-Hindi code-mixing has seen work in
+language modeling (Pratapa et al., 2018; Samanta
+et al., 2019) and core NLP tasks (Khanuja et al.,
+2020). To the best of our knowledge, we are the
+ﬁrst to study style transfer for Indic languages.
+A few prior works build models which can con-
+trol the degree of style transfer using a scalar
+input (Wang et al., 2019; Samanta et al., 2021).However, these models are style-speciﬁc and re-
+quire large unpaired style corpora during training.
+We adopt the inference-time control method used
+by Garcia et al. (2021) and notice much better con-
+trollability after our proposed ﬁxes in Section 4.2.
+C More details on the translation-speciﬁc
+Universal Rewriter objectives
+In this section we describe the details of the super-
+vised translation objective and the style-controlled
+translation objective used in the Universal Rewriter
+model. See Section 3 for details on the exemplar-
+based denoising objective.
+Learning translation via direct supervision :
+This objective is the standard supervised transla-
+tion setup, using zero vectors for style. The output
+language code is prepended to the input. Consider
+a pair of parallel sentences (x;y)in languages with
+codes lx,ly(prepended to the input string),
+y=f(lyx;0)
+L =L(y;y)
+The Universal Rewriter is trained on English-
+centric translation data from the high-resource
+languages in OPUS-100 (Zhang et al., 2020).
+Learning style-controlled translation : This ob-
+jective emulates "style-controlled translation" in
+a self-supervised manner, via backtranslation
+through English. Consider xandxto be two
+non-overlapping spans in mC4 in language lx,
+x=f(enx; f(x))
+x=f(lxx;f(x))
+L=L(x;x)
+D Choice of Exemplars
+Formal exemplars
+1. This was a remarkably thought-provoking read.
+2. It is certainly amongst my favorites.
+3. We humbly request your presence at our gala in
+the coming week.
+Informal exemplars
+1. reading this rly makes u think
+2. Its def one of my favs
+3. come swing by our bbq next week if ya can
+make it
+Complex exemplars7452
+1. The static charges remain on an object until they
+either bleed off to ground or are quickly neutralized
+by a discharge.
+2. It is particularly famous for the cultivation of
+kiwifruit.
+3. Notably absent from the city are fortiﬁcations
+and military structures.
+Simple exemplars
+1. Static charges last until they are grounded or
+discharged.
+2. This area is known for growing kiwifruit.
+3. Some things important missing from the city are
+protective buildings and military buildings.
+Positive sentiment exemplars
+1. The most comfortable bed I’ve ever slept on, I
+highly recommend it.
+2. I loved it.
+3. The movie was fantastic.
+Negative sentiment exemplars
+1. The most uncomfortable bed I’ve ever slept on,
+I would never recommend it.
+2. I hated it.
+3. The movie was awful.
+E Evaluation Appendix
+E.1 Multilingual Classiﬁer Selection
+Due to the absence of a style classiﬁcation dataset
+in Indic languages, we built our multilingual
+classiﬁer drawing inspiration from recent research
+in zero-shot cross-lingual transfer (Conneau et al.,
+2018; Conneau and Lample, 2019; Pfeiffer et al.,
+2020b). We experimented with three zero-shot
+transfer techniques while selecting our classiﬁers
+for evaluating multilingual style transfer. : The ﬁrst technique uses the
+hypothesis that style is preserved across translation.7453We classify the style of English sentences in the
+Samanantar translation dataset (Ramesh et al.,
+2021) using a style classiﬁer trained on English
+formality data from Krishna et al. (2020). We use
+the human translated Indic languages sentences as
+training data. This training data is used to ﬁne-tune
+a large-scale multilingual language model. - : The second technique ﬁne-tunes
+large-scale multilingual language models on
+a English style transfer dataset, and applies it
+zero-shot on multilingual data during inference. -: Introduced by Pfeiffer et al. (2020b), this
+technique is similar to - but additionally
+uses language-speciﬁc parameters (“adapters”)
+during inference. These language-speciﬁc adapters
+have been originally trained using masked lan-
+guage modeling on the desired language data.
+Dataset for evaluating classiﬁers : We conduct
+our experiments on Hindi formality classiﬁcation,
+leveraging our evaluation datasets from Section 5.1.
+We removed pairs which did not have full
+agreement across the three annotators and those
+pairs which had the consensus rating of “Equal”
+formality. This ﬁltering process leaves us with
+316 pairs in Hindi (out of 1000). In our exper-
+iments, we check whether the classiﬁers give a
+higher score to the more formal sentence in the pair.
+Models : We leverage the multilingual classiﬁers
+open-sourcedby Krishna et al. (2020). These
+models have been trained on the English GYAFC
+formality classiﬁcation dataset (Rao and Tetreault,
+2018), and have been shown to be effective on
+the XFORMAL dataset (Briakou et al., 2021b)
+for formality classiﬁcation in Italian, French
+and Brazilian Portuguese.These classiﬁers
+were trained on preprocessed data which had
+trailing punctuation stripped and English sentences
+lower-cased, encouraging the models to focus on
+lexical and syntactic choices. As base multilingual
+language models, we use (1) mBERT-base
+from Devlin et al. (2019); (2) XLM-RoBERTa-
+base from Conneau et al. (2020).
+Results : Our results on Hindi are presented in Ta-ble 7 and other languages in Table 8. Consistent
+with Pfeiffer et al. (2020b), we ﬁnd -to be
+a superior zero-shot cross lingual transfer method
+compared to baselines. We also ﬁnd XLM-R has
+better multilingual representations than mBERT.
+Unfortunately, AdapterHub (Pfeiffer et al., 2020a)
+has XLM-R language adapters available only for
+Hindi & Tamil (among Indic languages). For other
+languages we use the - technique on
+XLM-R, consistent with the recommendations
+provided by Krishna et al. (2020) based on their ex-
+periments on XFORMAL (Briakou et al., 2021b).
+Method Model Accuracy ( ") mBERT 66% - mBERT 72%
+XLM-R 76% - XLM-R 81%
+Language mBERT XLM-R
+bn 65.3% 82.2%
+kn 76.3% 76.9%
+te 72.6% 74.6%
+E.2 Semantic Similarity Model Selection
+We considered three models for evaluating
+semantic similarity between the input and output:
+(1) LaBSE (Feng et al., 2020);
+(2) m-USE (Yang et al., 2020);
+(3) multilingual Sentence-BERT (Reimers and
+Gurevych, 2020), the knowledge-distilled variant
+paraphrase-xlm-r-multilingual-v1
+Among these models, only LaBSE has support
+for all the Indic languages we were interested in.
+No Indic language is supported by m-USE, and7454multilingual Sentence-BERT has been trained on
+parallel data only for Hindi, Gujarati and Marathi
+among our Indic languages. However, in terms
+of Semantic Textual Similarity (STS) bench-
+marks (Cer et al., 2017) for English, Arabic &
+Spanish, m-USE and Sentence-BERT outperform
+LaBSE (Table 1 in Reimers and Gurevych, 2020).
+LaBSE correlates better than Sentence-BERT
+with our human-annotated formality dataset :
+We measured the Spearman’s rank correlation be-
+tween the semantic similarity annotations on our
+human-annotated formality datasets (Section 5.1).
+We discarded 10% sentence pairs which had no
+agreement among three annotators and took the
+majority vote for the other sentence pairs. We as-
+signed “Different Meaning” a score of 0, “Slight
+Difference in Meaning” a score of 1 and “Approx-
+imately Same Meaning” a score of 2 before mea-
+suring Spearman’s rank correlation. In Table 9
+we see a stronger correlation of human annota-
+tions with LaBSE compared to Sentence-BERT,
+especially for languages like Bengali, Kannada for
+which Sentence-BERT did not see parallel data.
+Model hi bn kn te
+LaBSE 0.34 0.49 0.39 0.25
+Sentence-BERT 0.33 0.36 0.29 0.18
+E.3 Evaluation with Different LaBSE
+thresholds
+In Section 6, we set our LaBSE threshold Lto 0.75.
+In this section, we present our evaluations with a
+more and less conservative value of L.
+In Table 18, we present results with L= 0:65,
+and in Table 19 we set L= 0:85. Compared
+to Table 1, trends are mostly similar, with models and variants outperforming
+counterparts. Note that the absolute values ofand metrics differ, with absolute values
+going down with the stricter threshold of L= 0:85,
+and up with the relaxed threshold of L= 0:65.
+Comparing chosen thresholds with human an-
+notations : To verify these three thresholds are rea-sonable choices, we measure the LaBSE similarity
+of the sentence pairs annotated by humans, and
+compare the LaBSE scores to human semantic sim-
+ilarity annotations. We pool the “Approximately
+Same Meaning” and “Slight Difference in Meaning”
+categories as “same”, and consider only sentence
+pairs with a majority rating of “same”. In Table 10
+we see that the chosen thresholds span the spec-
+trum of LaBSE values for the human annotated
+semantically similar pairs.
+% of sentence pairs > L
+ThresholdL hi bn kn te
+0.65 97.4 96.1 94.6 90.6
+0.75 83.9 76.1 68.4 62.6
+0.85 75.1 62.7 50.5 45.5
+E.4 More Crowdsourcing Details
+In Figure 17, we show screenshots of our crowd-
+sourcing interface along with all the instructions
+shown to crowdworkers. The instructions were
+written after consulting professional Indian lin-
+guists. Each crowdworker was allowed to annotate
+a maximum of 50 different sentence pairs per lan-
+guage, paying them $0.05 per pair. For formality
+classiﬁcation, we showed crowdworkers two sen-
+tences and asked them to choose which one is more
+formal. Crowdworkers were allowed to mark ties
+using an “ Equal ” option. For semantic similarity
+annotation, we showed crowdworkers the sentence
+pair and provided three options — “ approximately
+same meaning ”, “slight difference in meaning ”,
+“different meaning ”, to emulate a 3-point Likert
+scale. While performing our human evaluation
+(Section 5.7), we use a 0.5score for “ slight
+difference in meaning ” and a 1.0score for “ ap-
+proximately same meaning ” annotations. For every
+system considered, we analyzed the same set of 200
+input sentences for style transfer performance, and
+100 of those sentences for evaluating controllability.
+We removed sentences which were exact copies of
+the input (after removing trailing punctuation) or
+were in the wrong language to save annotator time
+and cost. When outputs were exact copies of the7455input, we assigned= 100, = 0, = 0.
+In Table 11 and Table 12 we show the inter-
+annotator agreement statistics. We measure Fleiss
+Kappa (Fleiss, 1971), Randolph Kappa (Randolph,
+2005; Warrens, 2010), the fraction of sentence pairs
+with total agreement between the three annotators
+and the fraction of sentence pairs with no agree-
+ment.In the table we can see all agreement statis-
+tics are well away from a uniform random annota-
+tion baseline, indicating good agreement.
+E.5 Fluency Evaluation
+Unlike some prior works, we avoid evaluation
+of output ﬂuency due to the following reasons:
+(1) lack of ﬂuency evaluation tools for Indic lan-
+guages;(2) ﬂuency evaluation often discrimi-
+nates against styles which are out-of-distribution
+for the ﬂuency classiﬁer, as discussed in Appendix
+A.8 of Krishna et al. (2020); (3) several prior
+works (Pang, 2019; Mir et al., 2019; Krishna et al.,
+2020) have recommended against using perplex-
+ity of style language models for ﬂuency evaluation
+since it is unbounded and favours unnatural sen-
+tences with common words; (4) large languagemodels are known to produce ﬂuent text as per-
+ceived by humans (Ippolito et al., 2020; Akoury
+et al., 2020), reducing the need for this evaluation.
+E.6 Details of other individual metrics
+Language Consistency ( ): Since our
+semantic similarity metric LaBSE is language-
+agnostic, it tends to ignore accidental translations,
+which are common errors in large multilingual
+transformers (Xue et al., 2021a,b), especially
+the Universal Rewriter (Section 3.1). Hence, we
+check whether the output sentence is in the same
+language as the input, using langdetect .
+Output Diversity ( , 1-g) : As discussed in
+Section 3.1, the Universal Rewriter has a strong
+tendency to copy the input verbatim. We build two
+metrics to measure output diversity compared to the
+input, which have been previously used for extrac-
+tive question answering evaluation (Rajpurkar et al.,
+2016). The ﬁrst metric measures the fraction
+of outputs which were copied verbatim from the
+input. This is done after removing trailing punctua-
+tion, to penalize models generations which solely
+modify punctuation. A second metric 1-g measures
+the unigram overlap F1 score between the input
+and output. A diverse style transfer system should
+minimize both and 1-g.
+F More Controllability Evaluations
+We follow the setup in Section 5.6 to ﬁrst compute
+aper system. We then compute the following,
+1.Style Transfer Performance (r-): An ideal
+system should have good overall performance (Sec-
+tion 5.5) across different values in the range .
+2.Average Style Score Increase ( ): As our
+control value increases, we want the classiﬁer’s tar-
+get style score (compared to the input) to increase.
+Additionally, we want the style score increase of
+to be as high as possible, indicating the sys-
+tem can span the range of classiﬁer scores.
+3.Style Calibration to ( ,-): As de-
+ﬁned in Section 5.6. We additionally also measure
+calibration by including the input sentence xin the (x) calculation, treating it as the output for
+= 0(no style transfer). Here, calibration is aver-
+aged over a total of n= 6 (;)pairs. We call
+this metric-.7456A detailed breakdown of performance by different
+metrics for every model is shown in Table 15.
+G Ablation Studies
+G.1 Ablation Study for design
+This section describes the ablation experiments
+conducted for the modeling choices in
+Section 4.2. We ablate a - model
+trained on Hindi paraphrase data only, and present
+results for Hindi formality transfer in Table 16.
+-no paraphrase : We replaced the paraphrase
+noise function with the random token dropping /
+replacing noise used in the denoising objective ofmodel (Section 3), and continued to use vector
+differences. As seen in Table 16, this signiﬁcantly
+increases the copy rate, which lowers the style
+transfer performance.
+-no paraphrase semantic ﬁltering : We keep
+a setup identical to Section 4.2, but avoid the
+LaBSE ﬁltering done (discarding pairs having a
+LaBSE score outside [0.7, 0.98]) to remove noisy
+paraphrases or exact copies. As seen in Table 16,
+this decreases the semantic similarity score of the
+generations, lowering the overall performance.
+-no vector differences : Instead of using vector
+differences for - , we simply set
+s=f(x), or the style of the target sentence.
+In Table 16, we see this signiﬁcantly decreases scores, and scores for= 2:0. We
+hypothesize that this training encourages the model
+to rely more heavily on the style vectors, ignoring
+the paraphrase input. This could happen since
+the style vectors are solely constructed from the
+output sentence itself, and semantic information
+/ confounding style is not subtracted out. In
+other words, the model is behaving more like an
+autoencoder (through the style vector) instead of a
+denoising autoencoder with stylistic supervision.
+-mC4 instead of Samanantar : Instead of creating
+pseudo-parallel data with Samanantar, we leverage
+the mC4 dataset itself which was used to train themodel. We backtranslate spans of text from the
+Hindi split of mC4 on-the-ﬂy using thetrans-
+lation capabilities, and use it as the “paraphrase
+noise function”. To ensure translation performance
+does not deteriorate during training, 50% mini-
+batches are supervised translation between Hindiand English. In Table 16, we see decent overall
+performance, but the score is 6% lower than - . Qualitatively we found that the
+model often translates a few Hindi words to En-
+glish while making text informal. Due to sparsity
+of English tokens, it often escapes penalization
+from .
+-mC4 + exemplar instead of target : This setting
+is similar to the previous one, but in addition to
+the mC4 dataset we utilize the vector difference be-
+tween the style vector of the exemplar span (instead
+of target span), and the “paraphrase noised” input.
+Results in Table 16 show this method is not effec-
+tive, and it’s important for the vector difference to
+model the precise transformation needed.
+G.2 Choice of Decoding Scheme
+We experiment with ﬁve decoding schemes on the
+Hindi formality validation set — beam search with
+beam size 1, 4 and top- psampling (Holtzman et al.,
+2020) withp= 0:6;0:75;0:9.
+In Table 17, we present results at a constant style
+transfer magnitude ( = 3:0). Consistent with Kr-
+ishna et al. (2020), we ﬁnd that top- pdecoding
+usually gets higher style accuracy (r-, a-)
+and output diversity (1-g, ) scores, but lower
+semantic similarity () scores. Overall beam
+search triumphs since the loss in semantic simi-
+larity leads to a worse performing model. In Fig-
+ure 10, we see a consistent trend across different
+magnitudes of style transfer ( ). In all our main
+experiments, we use beam search with beam size 4
+to obtain our generations.
+G.3 Number of Training Steps
+In Figure 11, we present the variation in style trans-
+fer performance with number of training steps for
+our best model, the - model. We ﬁnd
+that with more training steps performance gener-
+ally improves, but improvements saturate after 8k
+steps. We also see the peak of the graphs (best style
+transfer performance) shift rightwards, indicating a
+preference for higher values.
+H Analysis Experiments
+H.1 Style vectors from fas style
+classiﬁers
+The Universal Rewriter models succeed in learning
+an effective style space, useful for few-shot style
+transfer. But can this metric space also act as a7457Model hi bn kn te 79.1 69.7 66.2 67.1- 80.7 74.3 68.2 72.2 - 68.0 73.8 67.0 70.4 - 75.0 81.7 79.8 79.0
+style classiﬁer? To explore this, we measure the co-
+sine distance between the mean style vector of our
+informal exemplars,and the style vectors derived
+by passing human-annotated formal/informal pairs
+(from our dataset of Section 5.1) through f. We
+only consider pairs which had complete agreement
+among annotators. In Table 13 we see good agree-
+ment (68.2%-80.7%) between human annotations
+and the classiﬁer derived from the metric space of
+the- model. Agreement is lower (67.0%-
+74.3%) for the - model, likely due
+to the stop gradient used in Section 4.2. With -, agreement jumps back up to 75%-
+81.7% since gradients ﬂow into the style extractor
+as well.
+H.2 Style Vector Analysis with Formal
+Exemplars Vectors
+In Appendix H.1, we saw that the metric vector
+space derived from the style encoder fof var-
+ious models is an effective style classiﬁer, using
+theinformal exemplar vectors. In Table 14, we
+present a corresponding analysis using formal ex-
+emplar vectors. Most accuracy scores are close to
+50%, implying this setup is not a very effective
+style classiﬁer.
+Model hi bn kn te 56.6 60.0 61.6 57.6- 59.5 60.6 52.6 44.8 - 58.5 58.3 59.5 49.7 - 64.9 52.3 47.1 41.8I Full Breakdown of Results
+A full breakdown of results by individual metrics,
+along with plots showing variation with change in
+, is provided for — Hindi (Table 20, Figure 12),
+Bengali (Table 21, Figure 13), Kannada (Table 22,
+Figure 14), Telugu (Table 23, Figure 15), Gujarati
+(Table 24, Figure 16).
+J More Model Outputs
+Please refer to Figure 8. In the main body, Figure 4
+has a few examples as well with detailed analysis.
+K Paraphrase Diversity
+In Figure 9 we measure the lexical overlap between
+paraphrases used in our training strategy
+for six different languages (Hindi, Bengali, Kan-
+nada, Telugu, Swahili and Spanish). The lexical
+overlap is measured using the unigram F1 score,
+using the implementation from the SQuAD evalua-
+tion script (Rajpurkar et al., 2016). The wide spread
+of the histogram and sufﬁcient percentage of low
+overlap pairs conﬁrm the lexical diversity of the
+paraphrases used. As shown in prior work (Krishna
+et al., 2020), high lexical diversity of paraphrases
+is helpful for changing the input style.745874597460
+Ablation (#) r- a- r- a- - (hindi only) 2.0 97.0 78.4 89.8 39.7 67.3 24.6
+- no paraphrase** 21.0 98.3 92.2 60.0 15.7 51.9 10.7
+- no paraphrase ( p;= 0:6;3) 14.2 98.7 81.0 70.9 28.1 51.6 12.5
+- no paraphrase semantic ﬁltering 2.2 97.2 72.2 89.1 38.6 60.7 19.6
+- no vector differences** 0.0 54.3 3.2 99.0 90.0 2.4 1.0
+- no vector differences ( = 0:5) 0.9 97.4 66.8 86.4 36.5 53.5 17.3
+- mC4 instead of Samanantar 1.5 91.4 82.0 89.3 39.0 67.7 24.2
+- mC4 + exemplar instead of target 5.5 23.8 82.3 77.2 32.3 13.8 3.2
+Decoding (#)1-g(#) r- a- r- a-
+beam 4 1.8 52.7 95.8 73.3 94.7 51.6 66.2 32.3
+beam 1 1.2 47.4 92.3 61.7 95.7 62.5 55.8 31.4
+top-p0.6 1.0 45.3 91.5 56.6 96.2 65.9 51.3 29.9
+top-p0.75 0.9 43.1 90.3 52.4 96.3 69.0 47.3 28.2
+top-p0.9 0.7 40.4 89.4 46.8 96.6 71.7 42.4 26.574617462746374647465746674677468

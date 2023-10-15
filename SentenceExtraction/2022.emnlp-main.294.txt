@@ -1,1 +1,740 @@
-4364 Proceedings of the 2022 Conference on Empirical Methods in Natural Language Processing , pages 4364 4377 December 7 - 11 , 2022 © 2022 Association for Computational Linguistics 4365 4366 4367 4368 4369 4370 4371 4372 4373 4374 4375 4376 4377 
+
+Wenhao Yu, Chenguang Zhu, Zhihan Zhang, Shuohang Wang,
+Zhuosheng Zhang, Yuwei Fang, Meng JiangUniversity of Notre Dame, Indiana, USAMicrosoft Cognitive Services Research, Washington, USAShanghai Jiaotong University, Shanghai, China{wyu1, zzhang23, mjiang2}@nd.edu ;{chezhu, shuow, yuwfan}@microsoft.com ;zhangzs@sjtu.edu.cn
+Abstract
+A common thread of retrieval-augmented meth-
+ods in the existing literature focuses on re-
+trieving encyclopedic knowledge, such as
+Wikipedia, which facilitates well-defined en-
+tity and relation spaces that can be modeled.
+However, applying such methods to common-
+sense reasoning tasks faces two unique chal-
+lenges, i.e., the lack of a general large-scale
+corpus for retrieval and a corresponding ef-
+fective commonsense retriever. In this paper,
+we systematically investigate how to leverage
+commonsense knowledge retrieval to improve
+commonsense reasoning tasks. We proposed
+a unified framework of Retrieval- Augmented
+Commonsense reasoning (called RAC), in-
+cluding a newly constructed commonsense cor-
+pus with over 20 million documents and novel
+strategies for training a commonsense retriever.
+We conducted experiments on four different
+commonsense reasoning tasks. Extensive eval-
+uation results showed that our proposed RAC
+can significantly outperform other knowledge-
+enhanced method counterparts, achieving new
+SoTA performance on the CommonGenand
+CREAKleaderboards. Our code is available
+at .
+1 Introduction
+Recent work has shown that scaling language mod-
+els with considerably more data and parameters,
+such as GPT3-175B (Brown et al., 2020), could
+drive significant advances in commonsense reason-
+ing tasks. Nevertheless, such models make predic-
+tions by only “looking up information” stored in
+their parameters, making it difficult to determine
+what knowledge is stored or has been already for-
+gotten by the neural network (Guu et al., 2020).
+Besides, storage space is limited by the size of the
+neural network. In order to memorize more worldknowledge, one must train ever-larger networks,
+which can be prohibitively expensive and slow.
+The solution that may seem obvious at first
+glance is to grant language models free access to
+open-world sources of commonsense knowledge
+in a plug-and-play manner, instead of memorizing
+all world knowledge. To achieve this capability,
+language models must be able to retrieve relevant
+commonsense knowledge from an unbounded set
+of situations. Then, the language models can lever-
+age the input text, as well as the retrieved informa-
+tion to produce the desired output.
+Compared with the large-scale language model
+counterparts, e.g., U (Lourie et al., 2021),
+retrieval-augmented methods have three remark-
+able advantages: first, the knowledge is not stored
+implicitly in the model parameters, but is explic-
+itly acquired in a plug-and-play manner, leading
+to great scalability; second, the paradigm gen-
+erates text based on some retrieved references,
+which alleviates the difficulty of generating from
+scratch (Li et al., 2022); third, knowledge corpus
+can be constantly edited and updated by experts,
+making the model aware of the latest information.
+Besides, compared with knowledge graph infer-
+ence model counterparts, e.g., QA-GNN (Yasunaga
+et al., 2021), retrieval-augmented methods allow
+more flexibility in accessing and using knowledge
+from different sources, because of the nature of
+commonsense knowledge, which cannot all be con-
+tained in a single knowledge graph defined by a
+certain schema (Yu et al., 2022b).
+A common thread of retrieval-augmented meth-
+ods in the existing literature focuses on retriev-
+ing encyclopedic knowledge such as Wikipedia,
+which lends itself to a well-defined space of enti-
+ties and relations that can be modeled (Karpukhin
+et al., 2020; Lewis et al., 2020b; Yu et al., 2022a).
+However, retrieval-augmented methods for com-
+monsense reasoning have been rarely studied in the
+literature. In this paper, we propose a unified frame-4364
+work of Retrieval- Augmented Commonsense rea-
+soning ( RAC) to solve various commonsense
+tasks. RACfirst retrieves relevant commonsense
+documents from a large-scale corpus, then com-
+bines the input text with the retrieved documents
+to produce the desired output. However, there are
+two main challenges in training a RACmodel.
+The first challenge to address is what common-
+sense knowledge to retrieve. Different from en-
+cyclopedic knowledge used in open-domain QA
+tasks, commonsense knowledge is very diverse,
+containing everyday events and their effects, facts
+about beliefs and desires, and properties of objects
+in human’s daily life. Since commonsense involves
+various aspects including human interaction and ob-
+ject properties in everyday life, we collected a over
+20 million commonsense documents collection
+from both open-domain knowledge sources (e.g.,
+OMCS) that cover multiple domains of common-
+sense, and domain-specific sources (e.g., ATOMIC)
+that focus on particular commonsense types.
+The second challenge is to address how to re-
+trieve relevant commonsense knowledge from the
+corpus. Different from training a dense retriever on
+Wikipedia (Karpukhin et al., 2020), the heuristic
+of taking “documents containing correct answers”
+as positive candidates cannot be used because the
+output answer in commonsense reasoning tasks is
+usually not a substring of retrieved documents. For
+example, in binary question answering, the answer
+isTrue orFalse but it does not appear in the re-
+trieved documents. Therefore, we propose novel
+strategies to construct question-document pairs for
+commonsense dense retriever training.
+Overall, our main contributions in this work can
+be summarized as follows:
+1.We collected and publicized a collection of
+over 20 million documents from three knowledge
+sources for commonsense knowledge retrieval.
+2.We presented a unified framework of Retrieval-
+Augmented Commonsense reasoning ( RAC),
+and proposed novel strategies for training a strong
+commonsense knowledge retriever.3.We evaluated our RACon four types of
+commonsense reasoning tasks. Our experiments
+showed RACcan significantly outperform other
+knowledge-enhanced counterparts, achieving new
+SoTA on CommonGen and CREAK leaderboards.
+2 Related Work
+Though large-scale language models yield state-of-
+the-art performance on many commonsense rea-
+soning tasks, their pre-training objectives do not
+explicitly guide the models to reason with common-
+sense knowledge such as the relation and compo-
+sition of daily concepts in our lives (Zhou et al.,
+2021), leading to unsatisfactory performance in
+many real-world scenarios (Talmor et al., 2021;
+Zhu et al., 2022). Existing work has mainly ex-
+plored two directions to improve their common-
+sense reasoning ability. The first is to pre-train
+or post-train a language model on commonsense
+corpora (Bosselut et al., 2019; Lourie et al., 2021;
+Zhou et al., 2021). When the commonsense ma-
+terials are appropriately selected, this simple strat-
+egy could demonstrate significantly superior per-
+formance than vanilla pre-trained language mod-
+els (Zhou et al., 2021). Notable methods include
+COMET (Bosselut et al., 2019), CALM (Zhou
+et al., 2021), U (Lourie et al., 2021), etc.
+Nonetheless, these methods still suffer from the
+same drawbacks as the pre-trained language mod-
+els introduced in §1. The second is to explicitly
+introduce external knowledge from commonsense
+knowledge graphs to augment the limited textual
+information. (Lin et al., 2019; Ji et al., 2020). A
+KG often provides comprehensive and rich entity
+features and relations so models can easily traverse
+links to discover how entities are interconnected to
+express certain commonsense knowledge. Notable
+methods include KagNet (Lin et al., 2019), GRF (Ji
+et al., 2020), QA-GNN (Yasunaga et al., 2021),
+GreaseLM (Zhang et al., 2022), etc. However,
+commonsense knowledge lies at an unbounded set
+of facts and situations that usually cannot be cov-
+ered by a single knowledge graph defined by a cer-4365tain schema. Reasoning over multiple knowledge
+graphs is a challenging task.
+Retrieval-augmented method is a new learn-
+ing paradigm that fuses pre-trained language
+models and traditional information retrieval tech-
+niques (Lewis et al., 2020b). A few recent methods
+have explored retrieving in-domain commonsense
+documents from a task-relevant corpus to improve
+commonsense reasoning performance (Mihaylov
+et al., 2018; Wang et al., 2021; Li et al., 2021). We
+provide a detailed comparison in Table 1. Differ-
+ent from existing methods that focus on retrieving
+knowledge from in-domain corpus, our proposed
+RACleverages a much larger and general com-
+monsense corpus collected from multiple sources
+that provide supportive evidences for various com-
+monsense reasoning tasks. Meanwhile, we pro-
+posed several novel strategies for training a com-
+monsense retriever that can be generalized to dif-
+ferent commonsense reasoning tasks.
+3 Proposed Method
+In this section, we elaborate on how to leverage
+commonsense knowledge retrieval from a large-
+scale corpus to improve various commonsense rea-
+soning tasks, including commonsense corpus con-
+struction ( §3.1), commonsense document retriever
+(§3.2) and commonsense document reader ( §3.3).
+The architecture of RACis shown in Figure 1.
+3.1 Commonsense Corpus Construction
+Commonsense knowledge includes the basic facts
+about situations in everyday life, which is shared by
+most people and implicitly assumed in communi-
+cations (Li et al., 2022). Commonsense knowledge
+has two important properties: large anddiverse .
+Regarding the scale of knowledge, many com-
+monsense corpus contains millions of statements.
+For example, Wiktionary has more than one million
+word definitions and descriptions in English. Mean-
+while, the commonsense knowledge is diverse, in-
+volving various aspects including human interac-
+tion and object properties. For example, OMCS
+covers multiple domains of commonsense such as
+everyday events and their effects (e.g., mop up
+the floor if we split food over it), facts about be-
+liefs and desires (e.g., study hard to win scholar-
+ship), and properties of objects (e.g., goat has four
+legs). The diversity of knowledge is beneficial for
+retrieval-augmented methods because it enables
+relevance comparison across different sources, and
+offers textual knowledge to easily augment the in-
+put of generation models by concatenation. To
+build a large-scale commonsense corpus covering
+diverse sources, we collected commonsense doc-
+uments from the following three aspects: (i) hu-
+man annotated facts; (ii) commonsense benchmark
+datasets; (iii) commonsense relevant web corpus.
+The statistics can be found in Table 2.
+Human annotated facts (HAF). It contains fac-
+tual commonsense either annotated by human an-
+notators or written by domain experts, including
+OMCS (Havasi et al., 2010), ATOMIC (Sap et al.,
+2019a), Wiktionary (Meyer and Gurevych, 2012).
+Commonsense benchmark datasets (CBD). It in-
+cludes training data from 19 commonsense bench-
+mark datasets, such as α-NLI (Bhagavatula et al.,
+2020). See Appendix A.1 for more details.
+Commonsense relevant corpus (CRC). It con-
+sists of raw statements about commonsense from
+the web, usually after some simple filtering. We4366obtained a filtered version from AI2 commonsense
+corpus, which is a merged corpus collected from
+ARC (Clark et al., 2018), QASC (Khot et al., 2020)
+and GenericsKB (Bhakthavatsalam et al., 2020).
+3.2 Commonsense Document Retrieval
+Given a collection of Mcommonsense documents,
+the goal of our retriever is to map all the docu-
+ments in a low-dimensional vector, such that it can
+efficiently retrieve the top- kdocuments relevant to
+the input text. Note that Mcan be very large (e.g.,
+over 20 million in our experiments) and kis usually
+small (e.g., 10 or 20 in our experiments).
+In this work, we follow the neural document re-
+triever DPR (Karpukhin et al., 2020) to employ
+two independent BERT (Devlin et al., 2019) mod-
+els to encode the query and the document sepa-
+rately, and estimate their relevance by computing
+a single similarity score between their [CLS] to-
+ken representations. Specifically, the document
+encoder E(·)which maps any text document to a
+low-dimensional real-valued vectors and builds an
+index for all the Mdocuments used for retrieval.
+At runtime, it applies a different query encoder
+E(·)that maps the input question to a vector of
+the same dimension as the document vector, and
+retrieves top- kdocuments of which vectors are the
+closest to the question vector. The similarity be-
+tween the question and the document is calculated
+by the dot product of their vectors.
+sim(q, d) =E(q)E(d). (1)
+Recent efforts have shown that DPR transfer
+poorly to other domains (Li and Lin, 2021; Kul-
+shreshtha et al., 2021). Thus, the primary challenge
+of training a strong commonsense retriever is to
+appropriately construct positive pairs and hard neg-
+ative pairs (Karpukhin et al., 2020; Xiong et al.,
+2021). To do this, we propose novel strategies to
+construct question-document pairs that can be used
+for training a strong commonsense retriever.
+3.2.1 Positive Training Pairs
+In open-domain document retrieval, it is often the
+case that positive training pairs are available explic-
+itly. For example, DPR treated Wikipedia docu-
+ments that contain the correct answer as positive
+documents (Karpukhin et al., 2020). However, such
+training pairs might not be applicable on common-
+sense reasoning tasks because the output (e.g., True
+/ False in a binary question answering) is not sup-
+posed to be a sub-string of retrieved documents.In order to train a strong commonsense dense
+retriever, we propose two novel strategies to con-
+struct positive training pairs, as described below.
+Explanation as positive document. The first
+method for constructing positive training pairs is
+to take human annotated explanations as positive
+documents. For examples, taking the question
+“Where do people go to pray? (A) church” from
+CommonsenseQA1.0 as input, the explanation an-
+notated in Aggarwal et al. (2021) is “People go
+to a church to pray” ; similarly, a positive docu-
+ment for the question “When food is reduced in
+the stomach, nutrients are being deconstructed” in
+OpenBookQA (Mihaylov et al., 2018) could be
+“Digestion is when stomach acid breaks down food” .
+The explanations have two important properties.
+First, they contain commonsense knowledge, such
+aspeople praying in church , in the form of natural
+language. Second, they can be used to help select
+the correct choice in commonsense reasoning tasks.
+So, we take advantage of the high correlation of
+natural language explanations with the input query,
+defining the input query as qand the corresponding
+generated explanation as dto train the retriever.
+Ground truth output as positive document. The
+second method for constructing positive training
+pairs is to directly use ground truth outputs in gen-
+eration tasks as positive documents. The ground
+truth output can be seen as a natural positive docu-
+ment that the retriever should retrieve. For example,
+in the CommonGen (Lin et al., 2020) dataset, the
+ground truth output for an input concept set {dance,
+kid, room} is“a group of kids are dancing around
+a living room” . We define the input sequence in a
+generation task as qand its corresponding ground
+truth output as dto train the retriever. During train-
+ing, the vector distance between them are mini-
+mized. During inference, though the ground truth
+documents are no longer in the commonsense cor-
+pus, the retriever can still fetch relevant documents
+similar to the ground truth output such as “a cou-
+ple of kids are dancing on the floor (ARC corpus)” ,
+which provides relevant contexts describing the
+potential reaction between the input concepts “kid”
+and“dance” , hence helps generate desired outputs.
+3.2.2 Negative Training Pairs
+For negative pairs, we adopt the trick of in-batch
+negatives, which has been shown as an effective
+strategy for learning a dual-encoder model and used
+in the many recent dense retrieval models (Lee4367et al., 2019; Karpukhin et al., 2020).
+3.3 Commonsense Document Reader
+After retrieving commonsense documents, the
+reader takes the input text along with the retrieved
+documents to produce the desired output. Sequence
+classification tasks are considered as a target se-
+quence of length one. In our work, we use the
+fusion-in-decoder (FiD) (Izacard and Grave, 2021)
+model as the reader. Specifically, each retrieved
+document is concatenated with the input text, then
+independently encoded by the T5 (Raffel et al.,
+2020) encoder. Then, the T5 decoder performs
+cross-attention over the concatenation of the result-
+ing representations of all the retrieved documents.
+4 Experiments
+4.1 Tasks and Datasets
+Multi-choice question answering. Give a ques-
+tion, an intelligent system is asked to select one
+correct answer from the choices offered as a
+list. We conducted experiments on Common-
+senseQA1.0 (Talmor et al., 2019) and Open-
+BookQA (Clark et al., 2018). CommonsenseQA1.0
+(CSQA1.0) contains 12,102 questions with one cor-
+rect answer and four distractor answers. Open-
+BookQA (OBQA) consists of 5,957 elementary-
+level questions with one correct answer and three
+distractor answers. For evaluation, the primary
+metric on these two tasks is accuracy (ACC.).
+Commonsense fact verification. Given a com-
+monsense claim, an intelligent system is expected
+to verify the statement in natural text against facts.
+For example, the statement "A pound of cotton has
+the same weight as a pound of steel" in the Com-
+monsenseQA2.0 (Talmor et al., 2021) should be
+identified as true. We conducted experiments on
+two commonsense fact verification datasets, includ-
+ing CommonsenseQA2.0 (Talmor et al., 2021) and
+CREAK (Onoe et al., 2021). CommonsenseQA2.0
+was collected via gamification, which includes
+14,343 assertions about everyday commonsense
+knowledge. CREAK is designed for commonsense
+reasoning about entity knowledge, which consists
+of 13,000 assertions about entities. For evaluation,
+the primary metric is accuracy (ACC.).
+Constrained commonsense generation. Given
+a set of concepts such as “dog, frisbee, catch,
+throw” , the task is to generate a coherent sentence
+describing an everyday scenario such as “a manthrows a frisbee and his dog catches it” . Our
+experiments were conducted on the benchmark
+dataset Commongen (Lin et al., 2020). It consists
+of 79,000 commonsense descriptions over 35,000
+unique concept-sets. The average input / output
+length is 3.4 / 10.5 words. All examples in the
+dataset have 4-6 references. The task is evalu-
+ated by SPICE (Anderson et al., 2016), BLEU-
+4 (Papineni et al., 2002), ROUGE-L (Lin, 2004),
+CIDEr (Vedantam et al., 2015), in which SPICE is
+the primary metric for leaderboard ranking.
+Counterfactual explanation generation. Given
+a counterfactual statement, the task is to generate
+reasons why the statement does not make sense.
+Our experiments were conducted on the benchmark
+dataset ComVE from SemEval-2020 Task 4 (Wang
+et al., 2020). It contains 11,997 examples. The
+average input/output length is 7.7 / 9.0 words. All
+ground truth have 3 references. The task is eval-
+uated by SPICE (Anderson et al., 2016), BLEU-
+4 (Papineni et al., 2002), ROUGE-L (Lin, 2004),
+CIDEr (Vedantam et al., 2015), in which BLEU-4
+is the primary metric for leaderboard ranking.
+4.2 Baseline Methods
+We compared our RACwith various kinds of
+baseline methods. In addition of comparing with
+pre-trained language models, such as BART (Lewis
+et al., 2020a) and T5 (Raffel et al., 2020), we also
+compared with three kinds of commonsense knowl-
+edge augmented methods as introduced below.
+Commonsense-aware language models (CLM).
+They are trained with external commonsense cor-
+pus or datasets, in order to embed commonsense
+knowledge into their parameters. During fine-
+tuning, the language models make predictions with-
+out accessing to any external corpus. In the experi-
+ments, we compared our model with CALM (Zhou
+et al., 2021) and U (Lourie et al., 2021).
+Knowledge graph reasoning models (KGM).
+KGs are incorporated into models for augmenting
+the limited information in the input texts. We com-
+pared our model with KagNet (Lin et al., 2019),
+GRF (Ji et al., 2020), KG-BART (Liu et al., 2021),
+QA-GNN (Yasunaga et al., 2021), MoKGE (Yu
+et al., 2022c) and GreaseLM (Zhang et al., 2022).
+Retrieval augmented models (RAM). We com-
+pared with a recent retrieval-augmented method
+named KFCNet (Li et al., 2021) for constraint com-
+monsense generation. In addition, we also com-
+pared with using sparse retriever such as BM254368
+to retrieve knowledge from our constructed com-
+monsense corpus and use FiD (Izacard and Grave,
+2021) as generator to produce outputs.
+4.3 Automatic Evaluation
+4.3.1 RACv.s. Baseline Methods
+Comparison with non-retrieval methods. To ob-
+serve the effectiveness of retrieval on commonsense
+reasoning tasks, we first compared model perfor-
+mance with and without commonsense retrieval.
+As shown in Table 3-5, compared with BART and
+T5 that directly encode the input query and pro-
+duce output without using external knowledge, our
+proposed RACcan improve the commonsense
+reasoning performance by a large margin. Specifi-
+cally, RACimproved BLEU-4 by +8.44% on the
+commonsense generation tasks, improved accuracy
+by +5.43% on the multiple choice question answer-
+ing tasks, and improved accuracy by +6.15% on
+the commonsense verification tasks. Therefore, we
+concluded that RACcan leverage the retrieval
+of relevant references from commonsense corpora
+to help language models produce better outputs in
+various commonsense reasoning tasks.
+Comparison with other knowledge-enhanced
+methods. As mentioned in the §4.2, the common-
+sense reasoning ability of a language model can be
+enhanced by fine-tuning on commonsense corpora
+or reasoning over multi-hop relations on knowl-
+edge graphs. As indicated by Table 3-5, compared
+with commonsense-aware language models (CLM),
+retrieval augmented model explicitly leverage rele-
+vant commonsense knowledge, demonstrating su-
+perior performance on all datasets. Compared with
+knowledge graph reasoning methods (KGR), it can
+achieve better performance on all six datasets.4369
+4.3.2 Effects on Commonsense Retriever
+To evaluate the effectiveness of commonsense re-
+trieval, we compare the performance of different re-
+triever training settings, including BM25, DPR,
+and DPR . Specifically, DPRdirectly uses
+the DPR trained on Wikipedia for commonsense
+retrieval without any fine-tuning process. DPR
+trains the commonsense dense retrieval using our
+our proposed training pairs construction strategy.
+As shown in Table 6, we can observe DPRper-
+forms the worst among all retrievers. Our proposed
+DPR can significantly improve the retrieval
+performance, compared to BM25. It is important
+to note that the performance of retrieval is not nec-
+essarily linearly related to the performance of final
+output. However, in general, the more relevant the
+retrieved content, the more helpful it is to produce
+better outputs during the reading step. The obser-
+vation can also be drawn from the comparison of
+BM25+FiD and RACin Tables 3-5.
+4.3.3 Effects on Multi-dataset Training
+As shown in Table 7, we compare the model
+performance of retrievers trained by different set
+of question-document pairs. For example, the
+first line represents the retriever is trained with
+only question-document pairs (5,000 in total) from
+the OBQA dataset. The last line represents us-
+ing question-document pairs from all six datasets.From the table, we can observe when the retriever
+is trained on only one dataset, it might not work
+well on other datasets because of differences in
+data distribution. Instead, training with multiple
+datasets demonstrates better generalizability.
+4.3.4 Effects on Commonsense Corpus
+To validate the effect of the number and content
+of corpora on our proposed method, we test the
+corresponding model performance under different
+corpora, including choosing a corpus, or any combi-
+nation of multiple corpora. In Table 8, we show the
+performance of CSQA2.0 and CREAK on different
+commonsense corpora. It is worth noting that com-
+pared with other data, CSQA2.0 and CREAK can
+more realistically reflect the impact of different cor-
+pora on model performance, mainly because these
+two datasets are notbased on any commonsense
+knowledge source during the collection process, so
+the coverage of the problem is much wider than
+other four datasets that are collects from a certain
+knowledge source. For example, CSQA1.0 and
+CommonGen are collected based on ConceptNet.
+4.3.5 Effects on Number of Documents
+We also compared model performance with differ-
+ent numbers of retrieved documents. As shown
+in Figure 2, as the number of retrieved documents
+increases, the model performance of RACO on the
+CommonGen dataset first increases and then re-
+mains unchanged on BLEU-4 or even decreases
+on SPICE (the primary metric on the CommonGen
+leaderboard), but the GPU memory consumption in-
+creases significantly. This is mainly because when
+the number of retrieved documents increases, more
+noisy information might be included in the model,
+which could hurt the performance of the model.
+Thus, with reasonable computational overhead, we
+only use 10 documents in our experiments.
+4.4 Human Evaluation
+We randomly sample 50 generated outputs from
+the CommonGen dev set (as the test set is not pub-4370
+lic) and 50 generated outputs from the ComVE
+test set. All evaluations were conducted on Ama-
+zon Mechanical Turk (AMT), and each evaluation
+form was answered by three AMT workers. The
+generated outputs are evaluated by fluency andac-
+curacy . Fluency is assessed on the grammatical
+correctness and readability of the generated out-
+puts disregarding the input text. Besides, accuracy
+evaluates whether the output generated is correct
+and reasonable given the input text of each task.
+As shown in Table 9, our model significantly
+outperforms baseline methods in terms of accuracy
+and fluency on both datasets. In particular, the ac-
+curacy of the generated output is greatly improved
+due to the incorporation of the retrieved common-
+sense knowledge. Furthermore, since all baseline
+models are pre-trained on large-scale corpora, they
+all produce outputs with great fluency. However,
+compared with baseline methods, the outputs gen-
+erated by our model on the CommonGen dataset
+still have better fluency. This is mainly because
+the retrieved references are semantically complete
+sentences with good fluency, which might mitigate
+grammatical errors during the generation process.
+4.5 Case Study
+Table 10 shows two examples with predictions from
+different models. We demonstrate a “comparison”
+statement from CSQA2.0 as the first example. As
+shown in the table, both T5 and U make
+wrong predictions, demonstrating a lack of com-
+monsense knowledge. By leveraging the retrieved
+evidence from commonsense corpus, our proposed
+RACcan tell the statement “private college is
+usually smaller than a public university in atten-
+dance” is true. In addition, we show an example
+from counterfactual explanation generation task
+as the second example. Among the three outputs
+shown, the explanation generated by T5 is less as-
+sociated with the input statement. Compared with
+the generated outputs from U , our model
+can generate a semantically richer and more rea-
+sonable explanation. This is mainly because the
+references retrieved provide strong evidence from
+the perspective of the sun dries things out.
+5 Epilogue
+Conclusions. Retrieval-augmented methods have
+been widely used in many NLP tasks such as open-4371domain question answering. However, applying
+this approach to commonsense reasoning has been
+neglected in the existing literature. In this paper,
+we systematically investigate how to leverage com-
+monsense knowledge retrieval to improve common-
+sense reasoning tasks. We collected a common-
+sense corpus containing over 20 million documents,
+and proposed novel strategies for training a com-
+monsense retriever. Extensive experiments demon-
+strate our method can effectively improve the per-
+formance of various commonsense reasoning tasks,
+achieving new state-of-the-art performance on the
+CommonGen and CREAK leaderboards.
+Future work. A natural extension of this work is
+to leverage heterogeneous knowledge to improve
+commonsense reasoning tasks, such as combining
+structured (i.e., knowledge graph) and unstructured
+(i.e., retrieved text) knowledge. Such a model will
+require building a graph reasoning module and a
+textual reasoning module, and merging the knowl-
+edge learned from both, which is a challenging task.
+The second future direction is to learn a common-
+sense dense retriever without question-document
+pairs. For example, in binary question answering,
+the labels are True /False that cannot be used to
+train a commonsense retriever.
+Limitations. There are two main limitations. First,
+RACretrieves documents from a large-scale cor-
+pus, then leverage the retrieved documents to make
+predictions. So, compared with baseline methods
+such as T5 and U ,RACconsumes more
+time and computing resources. Second, due to the
+diversity and multi-source nature of commonsense
+knowledge, the retrieved evidence might contain
+noisy information that can even hurt model per-
+formance. A fine-grained filtering or re-ranking
+module could be a future work.
+Acknowledgement
+This work was supported in part by NSF IIS-
+1849816, IIS-2119531, IIS-2137396, IIS-2142827,
+CCF-1901059, and ONR N00014-22-1-2507.
+References4372437343744375A Appendix
+A.1 Commonsense Retrieval Corpus
+We use a combination of 19 commonsense datasets
+for our largest scale training data retrieval. The
+datasets include α-NLI (Bhagavatula et al., 2020),
+SWAG (Zellers et al., 2018), RACE (Lai et al.,
+2017), CODAH (Chen et al., 2019), Common-
+senseQA1.0 (Talmor et al., 2019), Common-
+senseQA2.0 (Talmor et al., 2021), WinoGrade (Sak-
+aguchi et al., 2021), ARC (Clark et al., 2018),
+CREAK (Onoe et al., 2021), OBQA (Mihaylov
+et al., 2018), PhysicalIQA (Bisk et al., 2020),
+QASC (Khot et al., 2020), SocialIQA (Sap
+et al., 2019b), CosmosQA (Huang et al., 2019),
+MNLI (Williams et al., 2018), V ATEX (Wang et al.,
+2019), Activity (Krishna et al., 2017), SNLI (Bow-
+man et al., 2015) STSB (Cer et al., 2017).
+A.2 Implementation Details
+Retriever. We employed two independent pre-
+trained BERT-base models with 110M parame-
+ters (Devlin et al., 2019) as query and document
+encoders. BERT-base consists of 12 Transformer
+layers. For each layer, the hidden size is set to 768
+and the number of attention head is set to 12. All
+dense retrievers were trained for 40 epochs with a
+learning rate of 1e-5. We used Adam (Kingma and
+Ba, 2015) as the optimizer, and set its hyperparame-
+terϵto1e-8and(β, β)to(0.9,0.999) . The batch
+size is set as 32 on 8x32GB Tesla V100 GPUs.
+Reader. We employed the FiD (Izacard and Grave,
+2021) model that is built up on T5-large (Raf-
+fel et al., 2020). For model training, we used
+AdamW (Loshchilov and Hutter, 2019) with batch
+size 32 on 8x32GB Tesla V100 or A100 GPUs.
+We experimented with learning rates of 1e-5/3e-
+5/6e-5/1e-4 and we found that in general the model
+performed best when set to 3e-5. All reader models
+were trained with 20,000 steps in total where the
+learning rate was warmed up over the first 2,000
+steps, and linear decay of learning rate.
+A.3 Additional Related Work
+Pre-training a language model on commonsense
+corpora is the most straightforward way to learn
+commonsense knowledge. Meanwhile, it also
+helps avoid overfitting when fine-tuned on down-
+stream tasks. When the commonsense materi-
+als are appropriately selected, this simple strat-
+egy could demonstrate significantly superior per-
+formance than vanilla pre-trained language mod-els (Zhou et al., 2021). Notable methods include
+COMET (Bosselut et al., 2019), CALM (Zhou
+et al., 2021), Unicorn (Lourie et al., 2021) and
+etc. For example, COMET initialized its parame-
+ters from GPT-2 and post-trained on ATOMIC to
+adapt its learned representations to knowledge gen-
+eration, and produces novel knowledge tuples that
+are high quality (Bosselut et al., 2019). Unicorn
+initialized its parameters from T5 and performed a
+multi-task training on six commonsense question
+answering datasets (Lourie et al., 2021). While this
+development is exhilarating, such commonsense-
+aware language models still suffer from the fol-
+lowing drawbacks: first, they are usually trained
+offline, rendering the model agnostic to the latest
+information, e.g., Covid-19 is a disease caused by
+a coronavirus discovered in 2019. Second, they
+make predictions by only “looking up information”
+stored in its parameters, leading to inferior inter-
+pretability (Shuster et al., 2021).
+Incorporating knowledge graph (KG) is essential
+for many commonsense reasoning tasks to augment
+the limited textual information. A KG often pro-
+vides comprehensive and rich entity features and
+relations so models can easily traverse links to dis-
+cover how entities are interconnected to express cer-
+tain commonsense knowledge. Some recent work
+explored using graph neural networks (GNN) to
+reason over multi-hop relational KG paths, yielding
+remarkable performance on many commonsense
+reasoning tasks, such as commonsense question
+answering (Lin et al., 2019; Yasunaga et al., 2021;
+Zhang et al., 2022), abductive reasoning (Ji et al.,
+2020; Yu et al., 2022c), and chit-chat dialogue sys-
+tems (Zhou et al., 2018; Zhang et al., 2020). The
+most frequently used KG is ConceptNet. For ex-
+ample, Ji et al. (2020) enriched concept representa-
+tions in the input text with neighbouring concepts
+on ConceptNet and performed dynamic multi-hop
+reasoning on multi-relational paths so the knowl-
+edge can be embedded into the hidden represen-
+tations. Nevertheless, the type of commonsense
+knowledge is restricted by the relations defined in
+a knowledge graph schema. Meanwhile, common-
+sense knowledge lies at an unbounded set of facts
+and situations that usually cannot be covered by a
+single knowledge graph. Reasoning over multiple
+knowledge graph is a challenging task.
+A.4 Case Study on CSQA2.0
+Figure 3 demonstrates the accuracy of T5 and
+ourRACfor different statement types on the4376
+CSQA2.0 dataset. First, compared to T5, our
+model can improve by 8.3% accuracy on all dev
+data (shown in the first column). However, on
+different statement types, the model performance
+is different. For example, from the predicted re-
+sults of T5, the performance on "comparison" state-ments and "condition" statements is below-average.
+By introducing the retrieved commonsense knowl-
+edge, RACdemonstrated significantly better per-
+formance on these two sub-categories, achieving
+15.3% and 18.5% improvement, which is signifi-
+cantly higher than the average 8.3% improvement.
+Nevertheless, we also observe the retrieved evi-
+dence might provide noisy information, resulting
+in performance degradation, such as “reason” re-
+lated statements. We show an example in Table 10.
+Statements under these categories are often descrip-
+tions or comparisons of factual commonsense, the
+retrieved documents can thus well complement the
+necessary knowledge of a given statement. How-
+ever, some statements require the model to reason
+in a given scenario, so making correct predictions
+requires the model to use commonsense knowledge
+to understand the local contexts. In these state-
+ments, retrieved knowledge might even contradict
+the assumptions, hurting the model performance.4377

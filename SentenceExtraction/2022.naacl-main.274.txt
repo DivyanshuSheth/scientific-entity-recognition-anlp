@@ -1,1 +1,583 @@
-3742 Proceedings of the 2022 Conference of the North American Chapter of the Association for Computational Linguistics : Human Language Technologies , pages 3742 3753 July 10 - 15 , 2022 © 2022 Association for Computational Linguistics 3743 3744 3745 3746 3747 3748 3749 3750 3751 3752 3753 
+
+Nafise Sadat Moosavi, Quentin Delfosse, Kristian Kersting, Iryna GurevychDepartment of Computer Science, The University of SheffieldHessian Center for AI (hessian.AI)AI & Machine Learning Lab,Ubiquitous Knowledge Processing Lab (UKP Lab),
+Department of Computer Science, Technical University of Darmstadt
+https://www.ukp.tu-darmstadt.de
+Abstract
+State-of-the-art pretrained NLP models con-
+tain a hundred million to trillion parameters.
+Adapters provide a parameter-efficient alterna-
+tive for the full finetuning in which we can only
+finetune lightweight neural network layers on
+top of pretrained weights. Adapter layers are
+initialized randomly. However, existing work
+uses the same adapter architecture—i.e., the
+same adapter layer on top of each layer of the
+pretrained model—for every dataset, regardless
+of the properties of the dataset or the amount
+of available training data. In this work, we
+introduce adaptable adapters that contain (1)
+learning different activation functions for dif-
+ferent layers and different input data, and (2) a
+learnable switch to select and only use the ben-
+eficial adapter layers. We show that adaptable
+adapters achieve on-par performances with the
+standard adapter architecture while using a con-
+siderably smaller number of adapter layers. In
+addition, we show that the selected adapter ar-
+chitecture by adaptable adapters transfers well
+across different data settings and similar tasks.
+We propose to use adaptable adapters for de-
+signing efficient and effective adapter architec-
+tures. The resulting adapters (a) contain about
+50% of the learning parameters of the stan-
+dard adapter and are therefore more efficient
+at training and inference, and require less stor-
+age space, and (b) achieve considerably higher
+performances in low-data settings.
+1 Introduction
+Recent improvements in NLP are heavily skewed
+towards using larger pretrained models (Roberts
+et al., 2020) and given their considerably better
+performances, using them is becoming unavoid-
+able (Kaplan et al., 2020). Their improvements,
+however, come at the cost of significant computa-
+tional resources at training and inference times. Forinstance, the number of parameters in recent pre-
+trained models can vary from 110M in BERT-base
+(Devlin et al., 2019) to 11 billion in T0 (Sanh et al.,
+2022) to trillion parameters in Switch Transformers
+(Fedus et al., 2021). Using such models for each
+downstream application requires a vast amount of
+storage, training, and inference computation budget
+that is not accessible to every user.
+Instead of fine-tuning these massive numbers of
+parameters for each downstream task, we can use
+adapter architectures (Houlsby et al., 2019; Pfeiffer
+et al., 2020). Adapters are lightweight neural net-
+work layers that are added on top of each layer of
+the pretrained model. As opposed to the standard
+model fine-tuning, in which all layers are fine-tuned
+for the target task, adapter-based tuning freezes the
+transformer layers and only trains the newly added
+adapter layers. Since the majority of parameters—
+i.e., the layers of the large pretrained model—are
+shared between different downstream tasks, the use
+of adapters results in parameter-efficient transfer
+learning. In addition to their parameter-efficiency,
+He et al. (2021) show that training adapter-layers
+(a) outperforms fine-tuning the whole model on
+low-data and cross-lingual settings, and (b) is more
+robust to overfitting.
+Existing work suggests that (a) different layers
+of the pretrained models may capture different as-
+pects of the form, syntax, or meaning of the input
+text (Tenney et al., 2019; Clark et al., 2019), and
+(b) they may not be all needed for performing a
+given task (Houlsby et al., 2019; Fan et al., 2020;
+Rücklé et al., 2021). In addition, adapter layers are
+initialized randomly. Therefore, it is not necessary
+to use the same adapter architecture for different
+downstream tasks and given different amounts of
+annotated data. However, existing works use the
+same adapter architecture for all the different in-
+put data, i.e., (a) one adapter layer on top of all
+the pretrained layers while using all the layers may
+not be necessary, and (b) the same activation func-3742tion for all the layers and different tasks while the
+best activation function may vary for different tasks
+(Delfosse et al., 2021).
+In this paper, we propose a systematic approach
+for designing more adequate and flexible adapter
+architectures by introducing the adaptable adapter
+(AA). Adaptable adapters (1) use a learnable activa-
+tion function—called Rational activation (Molina
+et al., 2020)—instead of a constant activation in
+adapter layers allowing the adapter model to learn
+different activation functions at different adapter
+layers and for different tasks, and (2) consist of a
+learnable switch at each adapter layer to determine
+the beneficial adapter layers during training and to
+only use the selected layers during inference.
+We evaluate adaptable adapters on the GLUE
+benchmark (Wang et al., 2018) that consists of var-
+ious text classification tasks. We perform evalu-
+ations based on different data settings in which
+different amounts of annotated examples are avail-
+able for training. Our results show that adaptable
+adapters achieve on-par performances with the full
+adapter architecture while using considerably fewer
+adapter layers at the inference.
+We further propose to use adaptable adapters for
+designing efficient adapter architectures—i.e., to
+only add an adapter layer to the layers that are se-
+lected by the adaptable adapter. We show that while
+the selected adapter architecture by AA, called AA-
+focused , is considerably more efficient at both train-
+ing and inference times and requires less storage, it
+achieves on-par performances with the full adapter
+architecture when trained on all available training
+data and considerably outperforms it on low-data
+settings. In addition, we show that the selected
+adapter architecture by AAtransfers well across
+similar tasks and different data settings. Therefore,
+we can train AAusing a limited amount of training
+data, and for one of the tasks, and then use the re-
+sulting AA-focused architecture for different data
+settings and other similar tasks.
+Overall, the contributions of this paper are as
+follows:
+•We propose adaptable adapters that introduce
+flexibility in adapter architectures by (a) se-
+lecting the beneficial adapter layers to use, and
+(b) learning the suitable activation function for
+each layer and each task.
+•We propose to use adaptable adapters to de-
+sign efficient adapters that require less training
+time, inference time, and storage space.•We show that using fewer adapter layers with
+a learnable activation function considerably
+improves the performance on low-data set-
+tings.
+2 Related Work
+2.1 Rational Activation
+Rational activation functions, empirically intro-
+duced as Padé Activation Units (Molina et al.,
+2020), are learnable activation functions that can
+approximate common activation functions as well
+as learn new ones. The rational activation function
+R(x)of order m, n is defined as follows:
+R(x) =ax
+1 +|bx|(1)
+where aandbare learnable parameters. These ra-
+tional functions use an absolute value in the denom-
+inator to avoid potential poles, which will make the
+training unstable. Such rational activation func-
+tions provide stable training, as empirically shown
+in image classification and reinforcement learning
+(Molina et al., 2020; Delfosse et al., 2021). R(x)
+can be initialized to initially approximate any of the
+known activation functions or with constant func-
+tions. Molina et al. (2020) show that rationals out-
+perform other commonly used activation functions
+in common image classification tasks. Rational
+activation functions are also integrated in Gener-
+ative Adversarial Networks (Boullé et al., 2020).
+Delfosse et al. (2021) show that some of the layers
+in very deep pretrained Residual Networks tend
+to approximate activation functions’ behavior, and
+we can achieve on-par or better performances with
+the full network by replacing some of the complete
+layers with rational activation functions. Similar to
+this observation, as we show in § 5, using rational
+activation functions instead of a constant activation
+(ReLU) in adapters allows them to achieve high
+accuracy using a fewer number of adapter layers.
+2.2 Reducing Model’s Size for Efficiency
+Improving the efficiency of large pretrained models
+has received particular attention for the inference
+time. The argument is that the effect of training cost
+is limited, i.e., the model can be trained once but it
+will be used many times. However, the inference
+time has a wide impact on the everyday use of NLP
+models.
+Existing approaches for improving the inference-
+time efficiency belong to two different categories:3743(a) the distillation and pruning techniques that cre-
+ate a smaller model for inference but often require
+re-training or fine-tuning the smaller model (Tang
+et al., 2019; Sanh et al., 2019; V oita et al., 2019;
+Sun et al., 2020; Bai et al., 2021), and (b) on-
+demand network size reduction at the inference
+time.There are two different approaches in the
+second category, namely layer dropping and early
+exiting.
+Fan et al. (2020) use layer dropping during the
+training that randomly drops the model’s layers to
+make the model robust to the inference time layer
+selection. They show that it is possible to select
+sub-networks of any depth from large models at in-
+ference with limited impact on the performance and
+without the need for additional finetuning. Layer
+dropping was previously investigated by Huang
+et al. (2016) who propose to drop layers during
+training for regularizing the model and reducing
+the training time of deep convolutional networks.
+Rücklé et al. (2021) use layer dropping for adapter
+architectures. They show that by randomly drop-
+ping adapter layers during training, they can prune
+the adapter model on-demand at the inference time.
+Schwartz et al. (2020) propose to add an output
+layer to each transformer layer. At inference time,
+while the model calculates the layer-wise represen-
+tation, from the bottom layer to the top layer, it
+also makes the prediction using the associated clas-
+sification layer. They use the output labels’ scores
+of the classification layers as confidence scores to
+decide whether to exit early if the classifier is con-
+fident or to proceed to process the input with the
+next layers. This hierarchical architecture offers
+an inference time-accuracy tradeoff by setting the
+confidence threshold. The early exiting approach
+is similar to layer dropping in which the dropped
+layers are always from the last top layers.
+All these approaches select the number of lay-
+ers to drop and the dropped layers heuristically
+at the inference time with the goal of improving
+the inference time. Instead, the adaptable adapter
+is a systematic approach for selecting the useful
+adapter layers for the given task during training.
+Besides layer selection, an adaptable adapter al-
+lows for learning the desired activation function for
+different inputs. As we show, we can use adaptableadapters to design efficient adapter architectures
+with a considerably smaller number of training pa-
+rameters with on-par or considerably higher per-
+formances, especially with larger models and in
+low-data settings.
+3 Proposed Architecture
+3.1 Learnable Activation
+Empirical observations of performances have led
+experts in several fields to use different activation
+functions for different tasks. Functions from the
+ReLU family are usually used for neural network-
+based visual computing, Tanh has been used in
+PPO for reinforcement learning, while GeLU has
+progressively been adopted in transformers. With
+the growth of the models, and the complexity of
+the tasks they are applied to, choosing one fixed ac-
+tivation function to equip the complete architecture
+is suboptimal. By using rational (§ 2.1), we let the
+adapter layer learn the suitable activation function
+at each different adapter layer, task, and dataset.
+In adaptable adapters, we replace the constant acti-
+vation function of each adapter layer—i.e., ReLU
+in the default configuration used in AdapterHub
+(Pfeiffer et al., 2020)—with rational.
+Figure 1 shows a standard adapter layer as well
+as an adapter layer in adaptable adapters.
+3.2 Learnable Layer Selection
+Houlsby et al. (2019) examined various choices
+of adapter architectures. They report that using3744two feedforward linear layers—one down-project
+and one up-project layer—results in good perfor-
+mances while only introducing a few parameters.
+Assuming dis the dimensionality of the input—i.e.,
+the embedding size of the transformer layer—the
+down-project layer maps the input dimension to
+nwhere n < d , and the up-project layer maps
+the input dimension back to d.nis called the hid-
+den size of the adapter. Each adapter contains a
+skip-connection that lets an adapter layer approx-
+imate an identity function, i.e., to pass the input
+of a transformer layer unchanged to the next layer.
+The learnable switches in adaptable adapter explic-
+itly model the selection between the feedforward
+adapter layer and the identity function. By exam-
+ining the switch probabilities we can determine
+the adapter layers that are beneficial for the overall
+performance of the model.
+As mentioned in § 1, existing work shows that
+different layers of the pretrained models capture
+different aspects of the input data, and not all of
+them are necessary for performing various tasks.
+Therefore, for different input data, different layers
+may be of different importance. Adding a learn-
+able switch at each adapter layer provides a more
+systematic approach to determining the beneficial
+layers for each input task during training. We use
+the Gumbel Softmax ( GS) estimator as an end-to-
+end differentiable switch (hard attention) to make
+the network attend to an element of a set. Assuming
+πare the probabilities of selecting each element
+of the set, i.e., ∀π≥0,π= 1,GSestimates
+the hard attention yas follows:
+y=exp((log(π) +g)/τ)exp((log(π) +g)/τ)(2)
+where gare i.i.d. samples from a Gumbel distribu-
+tion, and τis a temperature parameter. Setting τto
+small values results in distributions that are similar
+to categorical ones.
+3.3 Adaptable Adapters
+The adaptable adapter ( AA) is the combination of
+the learnable layer selection and the learnable ac-
+tivation function. The learnable layer selection—
+i.e., a Gumbel Softmax estimator—selects between
+an adapter layer, with no skip connection, and an
+identity function with zero parameters that passes
+the input without any changes to the next layer.
+The adapter layers in adaptable adapters consist
+of two linear layers—i.e., down-project and up-
+project layers—, and the non-linearity function be-
+tween these two linear layers consists of a rational
+activation function. The adaptable adapter allows
+to learn different adapter architectures for different
+input data by (a) learning to use a subset of adapter
+layers, and (b) learning a potentially different ac-
+tivation function at each layer. Figure 3 shows the
+structure of an adapter layer in adaptable adapters.
+4 Experimental Setup
+4.1 Datasets
+We use the English text classification datasets from
+the GLUE benchmark (Wang et al., 2019) including
+MNLI (Williams et al., 2018), QQP, QNLI (Ra-
+jpurkar et al., 2016), SST-2 (Socher et al., 2013),
+CoLA (Warstadt et al., 2019), STS-B (Cer et al.,
+2017), MRPC (Dolan and Brockett, 2005), RTE
+(Dagan et al., 2006), and WNLI (Levesque et al.,
+2011). Table 1 shows the number of training exam-
+ples and the evaluation metric for each dataset.37454.2 Transformer Model
+As the base model, we use the BERT-large model
+(Devlin et al., 2019). BERT-large contains 24 lay-
+ers, an embedding size of 1024, and a total number
+of 340M parameters.
+4.3 Adapter Models
+Baseline As a baseline adapter, we use the
+adapter layers with the pfeiffer configuration from
+AdapterHub (Pfeiffer et al., 2020). The adapter
+layers with the pfeiffer configuration are similar to
+the one in Figure 1, in which learnable parameters
+include two feedforward layers. For BERT-base,
+each pfeiffer layer consists of 73.7k parameters
+resulting in a total number of 884.7K. For BERT-
+large, the number of parameters for each adapter
+layer is 131K, and the total number of parameters
+is 3.1M. We see that as the underlying model gets
+larger, the number of parameters in adapters also
+increases notably. Therefore, adapter architecture
+selection using AAis a potential solution to control
+this exponential increase to some extent.
+Adaptable Adapter (AA) For the rational ac-
+tivation, similar to Molina et al. (2020), we use
+order m= 5 andn= 4 for rational. Therefore,
+the rational activation function only consists of ten
+learnable parameters. The rational activation can
+be initialized to initially estimate an existing func-
+tion. Based on our preliminary experiments, using
+f(x) = 1 for initializing R(x)results in better
+performances on the GLUE benchmark.
+For the Gumble-Softmax switch, we set the tem-
+perature parameter τto 0.1, and we initialize πto
+0.5 for both inputs—i.e., the same initial probabil-
+ity for the rational adapter and the identity function.
+AA-focused We can use the selected architecture
+byAAfor designing a new adapter architecture, i.e.,
+to only include an adapter layer—with a rational
+function—at layers in which the switch has selected
+the adapter layer over the identity function. We call
+this architecture AA-focused . Note that compared
+toAA,AA-focused is more efficient both at training
+and inference time, as it includes a fewer number of
+layers and no switch functions. It also requires less
+storage space for saving the new adapter weights.Also, training AAincludes both the architecture se-
+lection and training of the adapter layers, which are
+initialized randomly, simultaneously. As a result,
+as we see in our evaluations, AA-focused achieves
+higher performances as its training is only focused
+on training the adapter layers.
+AdapterDrop (Rücklé et al., 2021) During train-
+ing, AdapterDrop randomly drops the first nlayers
+in which nvaries for different iterations. At infer-
+ence, ncan be set to any desired number of layers.
+In our experiments, we select nbased on the num-
+ber of dropped layers by AA, i.e., the number of
+layers that are not selected by the switch functions.
+4.4 Experiments
+We evaluate the models in different settings: (a)
+using full training data, and (b) low-data settings.
+For all the experiments, we consider 25% of the
+training data as the development set and use the
+official development sets as the test data. We per-
+form the low-data evaluations when 100, 300, and
+500 annotated examples are available.The test
+data is the same for all the evaluations. We run all
+the low-data experiments for 20 epochs and five
+different random seeds. We report the average
+and standard deviation over the five different runs.
+When training on full datasets, the experiments are
+computationally very expensive using BERT-large.
+Therefore, for this setting, we only report the re-
+sults using the first random seed. All experiments
+are done on one A100 NVIDIA GPU. All imple-
+mentations are based on AdapterHub (Pfeiffer et al.,
+2020).
+5 Evaluation
+Table 2 presents the results of Baseline ,Adapter-
+Drop ,AA, and AA-focused .AAselects different lay-
+ers for different tasks and different random seeds.
+We evaluate three configurations for AA-focused :
+•AA-focused: for each task, we design the
+corresponding AA-focused based on the se-
+lected architecture by AAfor that task given
+and the first random seed (42). For instance,
+theAA-focused architecture is the same for all37463747the experiments of RTE forLow-data-100 —
+i.e., over the five different random seeds—.
+However, it is different for the rest of the tasks
+and different data settings.
+•AA-focused: we design this adapter archi-
+tecture of all tasks and data settings based on
+a single random seed, single task, and a sin-
+gle data regime, i.e.— random seed 42, the
+QQP task, and low-data-100 . We choose low-
+data-100 because the architecture selection
+process—i.e., training AA—is very fast in this
+setting. We select the selected architecture by
+QQP because AAselects the smallest number
+of layers for QQP when the random seed is 42.
+The selected layers are {2, 6, 10, 12, 14, 15,
+16, 18, 19, 20, 21, 22, 23}, i.e., three layers
+from the first half of the original 24 layers, and
+ten layers from the second half. The results of
+AA-focusedcompared to AA-focused
+indicate whether the selected architecture by
+AAtransfers between similar tasks and differ-
+ent data settings.
+•AA-focused: we design a simplified
+adapter based on AAin which we only use the
+number of selected layers, instead of the layer
+numbers, in a single random seed, single task,
+and a single data setting. We use the num-
+ber of selected layers when the random seed
+is 42 for the QQP task and the low-data-100
+setting, i.e., 13. As investigated by Houlsby
+et al. (2019), the last adapter layers are in
+general more effective. As a result, we add
+adapter layers, with rational activation, to the
+last 13 transformer layers in AA-focused
+experiments. The results of AA-focused
+compared to AA-focusedshow whether
+only the number of selected layers by AAmat-
+ters or it is also important to specify at which
+layers to add the adapters.
+The number of inference layers for
+AdapterDropare equivalent to the num-
+ber of layers in AA-focusedexperiments for
+each task and data setting. The number of layers
+forAdapterDropis 13, which is the same as
+AA-focusedandAA-focused. Note that the
+number of layers for AA-focused experiments are
+the same both at training and inference while it is
+not the case for AdapterDrop .
+The|AA| rows in Table 2 show the average num-
+ber of selected layers for each task over the five dif-ferent random seeds. |AA-focused|rows report the
+number of added adapter layers in the correspond-
+ingAA-focusedexperiments. |AdapterDrop|
+rows report the number of included adapter layers
+for the corresponding AdapterDrop experiments at
+the inference time.
+We make the following observations from the
+results of Table 2:
+•AAachieves on-par performances with the
+Baseline , and on average it uses about 13-15
+layers out of 24 layers. We can use this insight
+for designing efficient adapter architectures.
+•AllAA-focused architectures considerably out-
+perform Baseline in all the the tasks in low-
+data settings while using considerably smaller
+number of parameters, and therefore, being
+considerably more efficient. For instance,
+while AA-focusedonly uses 13 layers out
+of 24 layers—i.e., reducing the number of
+training parameters from 3M to 1.7M—, it
+outperforms the Avgscore by 4.24, 5.57, and
+2.35 points in Low-data-100 ,Low-data-300 ,
+andLow-data-500 , respectively.
+•The high performances of AA-focused
+show that the selected architecture by AAfor
+one task and one data setting transfers well to
+other data regimes and similar tasks.There-
+fore, it is not necessary to design the adapter
+architecture separately for a different amount
+of available data and similar tasks.
+•AA-focusedandAdapterDropboth use
+the last 13 adapter layers during the inference
+while the results of AA-focusedare con-
+siderably higher for all data regimes. This
+indicates the importance of rational activation
+in adaptable adapters. We will further inves-
+tigate the impact on rational activation in the
+next section.
+•In average, AdapterDropcontains more in-
+ference layers compared to AdapterDrop.
+However, there is not a significant difference
+between their performances. They achieve
+on-par or lower results compared to Baseline .3748
+Evaluating the impact of AA on selecting the
+number of beneficial layers. In the results of
+Table 2, we select the number of layers in AA-
+focused, i.e., 13 , based on the minimum num-
+ber of selected layers by AAon the low-data-100
+setting and for random seed 42. AA-focusedis
+equivalent to an adapter architecture in which only
+the last 13 adapter layers are added to the model.
+To investigate whether the improvements of AA-
+focusedover the baseline are only due to using
+a fewer number of adapter layers, we report the
+results of an adapter architecture in which only the
+lastnadapter layers are added to the model, e.g.,
+forn= 13 the resulting architecture is the same
+asAA-focused. Table 3 shows the result of this
+experiment for n= 13,12,11. We observe that by
+decreasing the number of layers from 13 to 12, the
+overall performance drops notably from 63.61 to
+57.37.
+Evaluating the impact of rational activation.
+The results of AA-focused experiments vs. Baseline
+in Table 2 mostly emphasize the impact of layer
+selection by the learnable switches in AA. In this
+section, we investigate the impact of learnable acti-
+vation functions in more details in the evaluations
+of Table 4.
+First, we replace all rationals in AAwith ReLU.
+The results are reported in the Switch-Only row. Bycomparing the results of AAandSwitch-only we
+observe that the use of rational activation consid-
+erably improves the performance of AA, i.e., using
+rational is a key component to achieving higher
+performances with fewer layers.
+Second, we replace the activation functions in
+the standard adapter with rational. The results are
+reported in Rational-only rows. The results of Base-
+linecompared to Rational-only show that the im-
+pact of rational is prominent when the model con-
+tains fewer parameters and using rational with an
+overparameterized model is not very effective, i.e.,
+both layer selection and learnable activation play
+an important role.
+Third, we only add a standard adapter layer
+at the last 13 layers of BERT-large ( Baseline),
+which is the same number of adapter layers in
+AA-focused. The difference is the activation
+function that is used in these 13 adapter lay-
+ers is ReLU in Baselineand rational in AA-
+focused. The considerably higher performances
+ofAA-focusedshow that higher performances
+ofAA-focused are due to both layer selection as
+well as a learnable activation function.
+Learned rational activation functions. Figure 3
+shows the learned activation functions across differ-
+ent layers of the same trained adapter and different
+tasks. We see that the learned activation differs3749
+for different layers of the same task as well as for
+different tasks.
+6 Conclusion
+In this paper, we propose adaptable adapters. They
+consist of a learnable switch to select a subset of
+beneficial adapter layers and a learnable activation
+function to learn the suitable activation at each
+adapter layer and for each input data. The results
+of adaptable adapters show that we can achieve
+on-par performances with the full adapter archi-
+tecture by using a smaller subset of layers. We
+show that adaptable adapters are viable tools for
+designing efficient and effective adapter architec-
+tures that require less storage space, lower training
+and inference time with high performances.
+Acknowledgements
+The authors would like to thank Jorge Cardona for
+his valuable contribution to the implementation of
+adaptable adapters. We thank Michael Bugert, Ji-
+Ung Lee, and Soumya Sarkar for their constructive
+suggestions and feedback on this work. We would
+like to thank Jonas Pfeiffer and Clifton Poth for
+always being very helpful with all questions about
+adapters and AdapterHub. This research work has
+been funded by the German Federal Ministry of
+Education and Research and the Hessian Ministry
+of Higher Education, Research, Science and the
+Arts (HMWK) within their joint support of the Na-
+tional Research Center for Applied Cybersecurity
+ATHENE. It benefited from the HMWK cluster
+project “The Third Wave of AI”.References37503751
+A BERT-base Results37523753

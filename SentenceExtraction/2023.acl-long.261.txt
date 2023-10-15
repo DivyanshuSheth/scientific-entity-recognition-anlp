@@ -1,1 +1,756 @@
-4732 Proceedings of the 61st Annual Meeting of the Association for Computational Linguistics Volume 1 : Long Papers , pages 4732–4745 July 9 - 14 , 2023 © 2023 Association for Computational Linguistics 4733 4734 4735 4736 4737 4738 4739 4740 4741 4742 4743 4744 4745 
+
+Zhixue Zhao Nikolaos Aletras
+Department of Computer Science, University of Shefﬁeld
+United Kingdom
+{zhixue.zhao, n.aletras}@sheffield.ac.uk
+Abstract
+Feature attribution methods (FAs) are popu-
+lar approaches for providing insights into the
+model reasoning process of making predic-
+tions. The more faithful a FA is, the more
+accurately it reﬂects which parts of the input
+are more important for the prediction. Widely
+used faithfulness metrics, such as sufﬁciency
+and comprehensiveness use a hard erasure cri-
+terion, i.e. entirely removing or retaining the
+top most important tokens ranked by a given
+FA and observing the changes in predictive
+likelihood. However, this hard criterion ig-
+nores the importance of each individual token,
+treating them all equally for computing suf-
+ﬁciency and comprehensiveness. In this pa-
+per, we propose a simple yet effective soft
+erasure criterion. Instead of entirely remov-
+ing or retaining tokens from the input, we ran-
+domly mask parts of the token vector repre-
+sentations proportionately to their FA impor-
+tance. Extensive experiments across various
+natural language processing tasks and differ-
+ent FAs show that our soft-sufﬁciency and soft-
+comprehensiveness metrics consistently prefer
+more faithful explanations compared to hard
+sufﬁciency and comprehensiveness.
+1 Introduction
+Feature attribution methods (FAs) are popular post-
+hoc explanation methods that are applied after
+model training to assign an importance score to
+each token in the input (Kindermans et al., 2016;
+Sundararajan et al., 2017). These scores indicate
+how much each token contributes to the model pre-
+diction. Typically, the top-k ranked tokens are then
+selected to form an explanation, i.e. rationale (DeY-
+oung et al., 2020). However, it is an important
+challenge to choose a FA for a natural language
+processing (NLP) task at hand (Chalkidis et al.,
+2021; Fomicheva et al., 2022) since there is no sin-Figure 1: Hard and soft erasure criteria for comprehen-
+siveness and sufﬁciency for two toy feature attribution
+(FA) methods A and B.
+gle FA that is consistently more faithful (Atanasova
+et al., 2020).
+To assess whether a rationale extracted with a
+given FA is faithful, i.e. actually reﬂects the true
+model reasoning (Jacovi and Goldberg, 2020), vari-
+ous faithfulness metrics have been proposed (Arras
+et al., 2017; Serrano and Smith, 2019; Jain and
+Wallace, 2019; DeYoung et al., 2020). Sufﬁciency
+and comprehensiveness (DeYoung et al., 2020),
+also referred to as ﬁdelity metrics (Carton et al.,
+2020), are two widely used metrics which have
+been found to be effective in capturing rationale
+faithfulness (Chrysostomou and Aletras, 2021a;
+Chan et al., 2022). Both metrics use a hard era-
+sure criterion for perturbing the input by entirely
+removing (i.e. comprehensiveness) or retaining
+(i.e. sufﬁciency) the rationale to observe changes
+in predictive likelihood.
+However, the hard erasure criterion ignores the
+different importance of each individual token, treat-
+ing them all equally for computing sufﬁciency and
+comprehensiveness. Moreover, the hard-perturbed
+input is likely to fall out of the distribution the
+model is trained on, leading to inaccurate mea-
+surements of faithfulness (Bastings and Filippova,47322020; Yin et al., 2022; Chrysostomou and Aletras,
+2022a; Zhao et al., 2022). Figure 1 shows an exam-
+ple of two toy FAs, A and B, identifying the same
+top two tokens (“like”, “movie”) as a rationale for
+the prediction. Still, each of them assigns differ-
+ent importance scores to the two tokens resulting
+into different rankings. According to the hard era-
+sure criterion, comprehensiveness and sufﬁciency
+will assign the same faithfulness score to the two
+rationales extracted by the two FAs.
+In this paper, we aim to improve sufﬁciency and
+comprehensiveness in capturing the faithfulness of
+a FA. We achieve this by replacing the hard token
+perturbation with a simple yet effective soft erasure
+criterion (see Figure 1 for an intuitive example).
+Instead of entirely removing or retaining tokens
+from the input, we randomly mask parts of token
+vector representations proportionately to their FA
+importance.
+Our main contributions are as follows:
+•We propose two new faithfulness metrics, soft-
+comprehensiveness and soft-sufﬁciency that
+rely on soft perturbations of the input. Our
+metrics are more robust to distribution shifts
+by avoiding entirely masking whole tokens;
+•We demonstrate that our metrics are consis-
+tently more effective in terms of preferring
+more faithful rather than unfaithful (i.e. ran-
+dom) FAs (Chan et al., 2022), compared to
+their “hard” counterparts across various NLP
+tasks and different FAs.
+•We advocate for evaluating the faithfulness
+of FAs by taking into account the entire input
+rather than manually pre-deﬁning rationale
+lengths.
+2 Related Work
+2.1 Feature Attribution Methods
+A popular approach to assign token importance
+is by computing the gradients of the predictions
+with respect to the input (Kindermans et al., 2016;
+Shrikumar et al., 2017; Sundararajan et al., 2017).
+A different approach is based on making pertur-
+bations in the input or individual neurons aiming
+to capture their impact on later neurons (Zeiler
+and Fergus, 2014). In NLP, attention mechanism
+scores have been extensively used for assigning
+token importance (Jain and Wallace, 2019; Ser-
+rano and Smith, 2019; Treviso and Martins, 2020;Chrysostomou and Aletras, 2021b). Finally, a
+widely used group of FA methods is based on train-
+ing simpler linear meta-models to assign token im-
+portance (Ribeiro et al., 2016).
+Given the large variety of approaches, it is of-
+ten hard to choose an optimal FA for a given task.
+Previous work has demonstrated that different FAs
+generate inconsistent or conﬂicting explanations
+for the same model on the same input (Atanasova
+et al., 2020; Zhao et al., 2022).
+2.2 Measuring Faithfulness
+One standard approach to compare FAs and their
+rationales is faithfulness. A faithful model expla-
+nation is expected to accurately represent the true
+reasoning process of the model (Jacovi and Gold-
+berg, 2020).
+The majority of existing methods for quantita-
+tively evaluating faithfulness is based on input per-
+turbation (Nguyen, 2018; DeYoung et al., 2020; Ju
+et al., 2022). The main idea is to modify the input
+by entirely removing or retaining tokens according
+to their FA scores aiming to measure the difference
+in predictive likelihood .
+Commonly-used perturbation methods include
+comprehensiveness, i.e. removing the rationale
+from the input), and sufﬁciency, i.e. retaining only
+the rationale (DeYoung et al., 2020). Another com-
+mon approach is to remove a number of tokens and
+observe the number of times the predicted label
+changes, i.e. Decision Flip (Serrano and Smith,
+2019). On the other hand, Monotonicity incremen-
+tally adds more important tokens while Correla-
+tion between Importance and Output Probability
+(CORR) continuously removes the most important
+tokens (Arya et al., 2021). (In)ﬁdelity perturbs the
+input by dropping a number of tokens in a decreas-
+ing order of attribution scores until the prediction
+changes (Zafar et al., 2021). Additionally, Yin et al.
+(2022) proposed sensitivity and stability, which
+do not directly remove or keep tokens. Sensitiv-
+ity adds noise to the entire rationale set aiming to
+ﬁnd a minimum noise threshold for causing a pre-
+diction ﬂip. Stability compares the predictions on
+semantically similar inputs.
+One limitation of the metrics above is that they
+ignore the relative importance of each individual
+token within the selected rationale, treating all of
+them equally. Despite the fact that some of them
+might take the FA ranking into account, the rel-
+ative importance is still not considered. Jacovi4733and Goldberg (2020) have emphasized that faith-
+fulness should be evaluated on a “grayscale” rather
+than “binary” (i.e. faithful or not) manner. How-
+ever, current perturbation-based metrics, such as
+comprehensiveness and sufﬁciency, do not reﬂect a
+“grayscale” fashion as tokens are entirely removed
+or retained (e.g. comprehensiveness, sufﬁciency),
+or the rationale is entirely perturbed as a whole (e.g.
+sensitivity).
+2.3 Evaluating Faithfulness Metrics
+Quantitatively measuring the faithfulness of model
+explanations is an open research problem with sev-
+eral recent efforts focusing on highlighting the
+main issues of current metrics (Bastings and Filip-
+pova, 2020; Ju et al., 2022; Yin et al., 2022) and
+comparing their effectiveness (Chan et al., 2022).
+A main challenge in comparing faithfulness met-
+rics is that there is no access to ground truth, i.e.
+the true rationale for a model prediction (Jacovi
+and Goldberg, 2020; Ye et al., 2021; Lyu et al.,
+2022; Ju et al., 2022). Additionally, Ju et al. (2022)
+argue that it is risky to design faithfulness metrics
+based on the assumption that a faithful FA will gen-
+erate consistent or similar explanations for similar
+inputs and inconsistent explanations for adversarial
+inputs (Alvarez-Melis and Jaakkola, 2018; Sinha
+et al., 2021; Yin et al., 2022).
+Chan et al. (2022) introduced diagnosticity for
+comparing the effectiveness of faithfulness met-
+rics. Diagnosticity measures the ability of a metric
+on separating random explanations (non-faithful)
+and non-random ones (faithful). They empirically
+showed that two perturbation metrics, sufﬁciency
+and comprehensiveness, are more ‘diagnostic’, i.e.
+effective in choosing faithful rationales compared
+to other metrics.
+Despite the fact that sufﬁciency and comprehen-
+siveness are in general more effective, they suffer
+from an out-of-distribution issue (Ancona et al.,
+2018; Bastings and Filippova, 2020; Yin et al.,
+2022). More speciﬁcally, the hard perturbation
+(i.e. entirely removing or retaining tokens) creates
+a discretely corrupted version of the original input
+which might fall out of the distribution the model
+was trained on. It is unlikely that the model predic-
+tions over the corrupted input sentences share the
+same reasoning process with the original full sen-
+tences which might be misleading for uncovering
+the model’s true reasoning mechanisms.3 Faithfulness Evaluation Metrics
+3.1 Sufﬁciency and Comprehensiveness
+We begin by formally deﬁning sufﬁciency and com-
+prehensiveness (DeYoung et al., 2020), and their
+corresponding normalized versions that allow for
+a fairer comparison across models and tasks pro-
+posed by Carton et al. (2020).
+Normalized Sufﬁciency (NS): Sufﬁciency (S)
+aims to capture the difference in predictive like-
+lihood between retaining only the rationale p(ˆy|R)
+and the full text model p(ˆy|X). We use the normal-
+ized version:
+where S(x,ˆy,0)is the sufﬁciency of a baseline
+input (zeroed out sequence) and ˆyis the model
+predicted class using the full text xas input.
+Normalized Comprehensiveness (NC): Com-
+prehensiveness (C) assesses how much informa-
+tion the rationale holds by measuring changes in
+predictive likelihoods when removing the rationale
+p(ˆy|X). The normalized version is deﬁned as:
+3.2 Soft Nomralized Sufﬁciency and
+Comprehensiveness
+Inspired by recent work that highlights the out-of-
+distribution issues of hard input perturbation (Bast-
+ings and Filippova, 2020; Yin et al., 2022; Zhao
+et al., 2022), our goal is to induce to sufﬁciency and
+comprehensiveness the relative importance of all
+tokens determined by a given FA. For this purpose,
+we propose Soft Normalized Sufﬁciency (Soft-NS)
+and Soft Normalized Comprehensiveness (Soft-
+NC) that apply a soft-erasure criterion to perturb
+the input.
+Soft Input Perturbation: Given the vector rep-
+resentation of an input token, we aim to retain or
+remove vector elements proportionately to the to-
+ken importance assigned by a FA by applying a
+Bernoulli distribution mask to the token embed-
+ding. Given a token vector xfrom the input X
+and its FA score a, we soft-perturb the input as
+follows:
+x=x⊙e,e∼Ber(q) (3)4734whereBer a Bernoulli distribution and ea binary
+mask vector of size n.Ber is parameterized with
+probabilityq:
+q=/braceleftBigg
+a, if retaining elements
+1−a,if removing elements
+We repeat the soft-perturbation for all token em-
+beddings in the input to obtain x. Our approach is
+a special case of dropout (Srivastava et al., 2014)
+on the embedding level.
+Following Lakshmi Narayan et al. (2019), we
+have also tested two other approaches to soft pertur-
+bation in early-experimentation: (1) adding Gaus-
+sian noise to the embeddings; and (2) perturbing the
+attention scores, both in proportion to the FA scores.
+However, we found that dropout outperforms these
+two methods. Perhaps this is due to their sensitivity
+to hyperparameter tuning (e.g. standard deviation)
+which potentially contributes to their poor perfor-
+mance. Hence, we only conduct full experiments
+using dropout-based soft perturbation. Details on
+these alternative methods to perturb the input are
+included in Appendix C.
+Soft Normalized Sufﬁciency (Soft-NS): The
+main assumption of Soft-NS is that the more im-
+portant a token is, the larger number of embedding
+elements should be retained. On the other hand, if
+a token is not important most of its elements should
+be dropped. This way Soft-NS takes into account
+the complete ranking and importance scores of the
+FA while NS only keeps the top-k important tokens
+by ignoring their FA scores. We compute Soft-NS
+as follows:
+where Xis obtained by using q=ain Eq. 3 for
+each token vector x.
+Soft Normalized Comprehensiveness (Soft-
+NC): For Soft-NC, we assume that the more im-
+portant a token is to the model prediction, the heav-
+ier the perturbation to its embedding should be.
+Soft-NS is computed as:
+where Xis obtained by using q= 1−ain Eq. 3
+for each token vector x.
+4 Experimental Setup
+4.1 Tasks
+Following related work on interpretability (Jain
+et al., 2020; Chrysostomou and Aletras, 2022b),
+we experiment with the following datasets:
+•SST: Binary sentiment classiﬁcation into posi-
+tive and negative classes (Socher et al., 2013).
+•AG: News articles categorized in Science,
+Sports, Business, and World topics (Del Corso
+et al., 2005).
+•Evidence Inference (Ev.Inf.) : Abstract-only
+biomedical articles describing randomized
+controlled trials. The task is to infer the
+relationship between a given intervention
+and comparator with respect to an outcome
+(Lehman et al., 2019).
+•MultiRC (M.RC) : A reading comprehension
+task with questions having multiple correct
+answers that should inferred from informa-
+tion from multiple sentences (Khashabi et al.,
+2018). Following DeYoung et al. (2020)
+and Jain et al. (2020), we convert this to
+a binary classiﬁcation task where each ra-
+tionale/question/answer triplet forms an in-
+stance and each candidate answer is labelled
+as True/False.
+4.2 Models
+Following Jain et al. (2020), we use BERT (Devlin
+et al., 2019) for SST and AG; SCIBERT (Belt-
+agy et al., 2019) for EV .INF. and RoBERTa (Liu
+et al., 2019) for M.RC. See App. A for hyperpa-
+rameters. Dataset statistics and model prediction
+performance are shown in Table 1.
+4.3 Feature Attribution Methods
+We experiment with several popular feature attribu-
+tion methods to compare faithfulness metrics. We4735do not focus on benchmarking various FAs but to
+improve faithfulness evaluation metrics.
+•Attention (α):Token importance is com-
+puted using the corresponding normalized at-
+tention score (Jain et al., 2020).
+•Scaled attention ( α∇α):Attention scores
+scaled by their corresponding gradients (Ser-
+rano and Smith, 2019).
+•InputXGrad ( x∇x):It attributes importance
+by multiplying the input with its gradient com-
+puted with respect to the predicted class (Kin-
+dermans et al., 2016; Atanasova et al., 2020).
+•Integrated Gradients (IG): This FA ranks
+input tokens by computing the integral of the
+gradients taken along a straight path from a
+baseline input (i.e. zero embedding vector) to
+the original input (Sundararajan et al., 2017).
+•DeepLift (DL): It computes token impor-
+tance according to the difference between the
+activation of each neuron and a reference acti-
+vation, i.e. zero embedding vector (Shrikumar
+et al., 2017).
+4.4 Computing Faithfulness with Normalized
+Sufﬁciency and Comprehensiveness
+Following DeYoung et al. (2020), we compute the
+Area Over the Perturbation Curve (AOPC) for nor-
+malized sufﬁciency (NS) and comprehensiveness
+(NC) across different rationale lengths. AOPC pro-
+vides a better overall estimate of faithfulness (DeY-
+oung et al., 2020). We evaluate ﬁve different ra-
+tionale ratios set to 1%, 5%, 10%, 20% and 50%,
+similar to DeYoung et al. (2020) and Chan et al.
+(2022).
+4.5 Comparing the Diagnosticity of
+Faithfulness Metrics
+Comparing faithfulness metrics is a challenging
+task because there is no a priori ground truth ratio-
+nales that can be used.
+Diagnosticity: Chan et al. (2022) proposed diag-
+nosticity to measure the degree of a given faithful-
+ness metric favors more faithful rationales over less
+faithful ones. The assumption behind this metric
+is that the importance scores assigned by a FA are
+highly likely to be more faithful than simply assign-
+ing random importance scores to tokens. Given anexplanation pair (u,v), the diagnosticity is mea-
+sured as the probability of ubeing a more faithful
+explanation than vgiven the same faithfulness met-
+ricF.uis an explanation determined by a FA,
+whilevis a randomly generated explanation for
+the same input. For example the NC score of u
+should be higher than vwhen evaluating the di-
+agnosticity of using NC as the faithfulness metric.
+More formally, diagnosticity D(F)is computed
+as follows:
+D(F)≈1
+|Z|/summationdisplay1(u/followsv)(6)
+whereFis a faithfulness metric, Zis a set of
+explanation pairs, also called ε-faithfulness golden
+set,0≤ε≤1.1·is the indicator function which
+takes a value 1 when the input statement is true and
+a value 0 when it is false.
+Chan et al. (2022) randomly sample a subset
+of explanation pairs (u,v)for each dataset and
+also randomly sample a FA for each pair. In our
+experiments, we do not sample but we consider all
+the possible combinations of data points and FAs
+across datasets.
+5 Results
+5.1 Diagnosticity of Faithfulness Metrics
+We compare the diagnosticity of faithfulness met-
+rics introduced in Section 3. Tables 2 and 3 show
+average diagnosticity scores across FAs and tasks,
+respectively. See App. B for individual results for
+each faithfulness metric, FA and dataset.
+In general, we observe that Soft-NC and Soft-NS
+achieve signiﬁcantly higher diagnosticity scores
+(Wilcoxon Rank Sum, p < . 01) than NC and NS
+across FAs and datasets. The average diagnosticity
+of Soft-NC is 0.529 compared to 0.394 of NC while
+the diagnosticity of Soft-NS is 0.462 compared to
+NS (0.349). Our faithfulness metrics outperform
+NC and NS in 16 out of 18 cases, with the exception
+of Soft-NC on AG and Soft-NS on M.RC.
+In Table 2, we note that both NC and Soft-NC
+consistently outperform Soft-NS and NS, which
+corroborates ﬁndings by Chan et al. (2022). We
+also see that using different FAs result into different
+diagnosticity scores. For example, diagnosticity
+ranges from 0.514 to .561 for Soft-NC while Soft-
+NS ranges from .441 to .480. We also observe
+similar behavior for NC and NS conﬁrming results4736
+from Atanasova et al. (2020). Furthermore, we
+surprisingly see that various faithfulness metrics
+disagree on the rankings of FAs. For example DL
+is the most faithful FA measured by Soft-NC (.561)
+while NC ranks it as one of the least faithful (.372).
+However, Soft-NC and Soft-NS appear to be more
+robust by having less variance.
+In Table 3, we observe that the diagnosticity of
+all four faithfulness metrics is more sensitive across
+tasks than FAs (i.e. wider range and higher vari-
+ance). Also, we notice that in AG and M.RC, there
+is a trade-off between (Soft-)NS and (Soft-)NC.
+For example, on AG, Soft-NC is .649, the highest
+among all tasks but Soft-NS is the lowest. This
+result may be explained by the larger training sets
+of AG (102,000) and M.RC (24,029), compared
+to SST (6,920) and Ev.Inf (5,789) which might
+make the model more sensitive to the task-speciﬁc
+tokens.
+5.2 Qualitative Analysis
+We further conduct a qualitative analysis to shed
+light on the behavior of faithfulness metrics for
+different explanation pairs consisting of real and
+random attribution scores. Table 4 shows three
+examples from Ev.Inf, SST and AG respectively.
+Repetitions in rationales affect faithfulness:
+Examining Example 1 (i.e. a biomedical abstract
+from Ev.Inf), we observe that the rationale (top
+20% most important tokens) identiﬁed by DL con-
+tains repetitions of speciﬁc tokens, e.g. “aliskiren”,
+“from”, “in”. On one hand, “aliskiren” (i.e. a drug
+for treating high blood pressure) is the main sub-
+ject of the biomedical abstract and have been cor-
+rectly identiﬁed by DL. On the other hand, we
+observe that many of these repeated tokens might
+not be very informative (e.g. many of them are stop
+words), however they have been selected as part of
+the rationale. This might happen due to their prox-
+imity to other informative tokens such as “aliskiren”
+due to the information mixing happening because
+of the contextualized transformer encoder (Tutek
+and Snajder, 2020).
+We also notice that the random attribution base-
+line (Rand) selects a more diverse set of tokens that
+appear to have no connection between each other
+as expected. The random rationale also contains a
+smaller proportion of token repetitions. These may
+be the reasons why the random rationales may, in
+some cases, provide better information compared
+to the rationales selected by DL (or other FAs),
+leading to lower diagnosticity. Furthermore, NC
+between DL (.813) and Rand (.853) is very close
+(similar for NS) which indicates similar changes to
+predictive likelihood when retaining or removing
+rationales by DL and Rand. However, this may mis-
+leadingly suggest a similar model reasoning on the
+two rationales. We observe similar patterns using
+other FAs. Incorporating the FA importance scores
+in the input embeddings helps Soft-NC and Soft-S
+to mitigate the impact of issues above as they use
+all tokens during the evaluation.
+Evenly distributed FA scores affect NC and NS:
+We also notice that for some inputs, the token im-
+portance assigned by FAs is very close to each other
+as demonstrated in Example 3, i.e. a news article
+from AG. The evenly distributed importance scores
+lead to similar low NC and NS between the FA
+(IG) and the random baseline attribution. Consider-
+ing that the FA scores and ranking truly reﬂect the
+model reasoning process (i.e. the model made this
+prediction by equally weighing all tokens), then the
+faithfulness measurements provided by NS and NC
+might be biased.
+We conjecture that this is likely to happen be-
+cause these metrics entirely ignore the rest of the
+tokens even though these could represent a non-4737
+negligible percentage of the FA scores distribution.
+However, Soft-NC and Soft-NS take into account
+the whole FA distribution without removing or re-
+taining any speciﬁc tokens, hence they do not suffer
+from this limitation.
+Different part of speech preferences for tasks
+We ﬁnd that FAs tend to favor different parts of
+speech for different tasks. In Example 1 where the
+task is to reason about the relationship between a
+given intervention and a comparator in the biomed-
+ical domain, FAs tend to select proper nouns (e.g.
+“aliskiren”) and prepositions (e.g. “on”, “in” and
+“to”). On the other hand, in Example 2 which shows
+a text from SST, FAs favor adjectives (e.g. “uncon-
+scious” and “hard”) for the sentiment analysis task.
+In Example 3, we see that articles such as “the” and
+proper nouns such as “Greece” and “Bustos” are
+selected.
+6 Impact of Rationale Length on
+Faithfulness and Diagnosticity
+Up to this point, we have only considered com-
+puting cumulative AOPC NC and NS by evaluat-ing faithfulness scores at multiple rationale lengths
+together (see Section 3). Here, we explore how
+faithfulness and diagnosticity of NC and NS at in-
+dividual rationale lengths compare to Soft-NC and
+Soft-NS. We note that both ‘soft’ metrics do not
+take the rationale length into account.
+6.1 Faithfulness
+Figure 2 shows the faithfulness scores of NC and
+NS at different rationale lengths for all FAs includ-
+ing random baseline attribution in each dataset.
+We observe that the faithfulness scores of NC and
+NS follow an upward trend as the rationale length
+increases. This is somewhat expected because us-
+ing information from an increasing number of to-
+kens makes the rationale more similar to the origi-
+nal input.
+In AG and SST, NC and NS lines appear close
+by or overlap. One possible reason is that the in-
+put text in SST and AG is relatively short (average
+length of 18 and 36 respectively), possibly leading
+to higher contextualization across all tokens. There-4738
+fore, removing or retaining more tokens results in
+a similar magnitude of changes in predictive likeli-
+hood.
+In M.RC and Ev.Inf, two comprehension tasks
+that consist of longer inputs (average length is 305
+and 365 respectively), we observe a different rela-
+tionship between NC and NS. For instance, NC in
+Ev.Inf tends to be less impacted by the rationale
+length. This maybe due to the token repetitions in
+rationales discussed in Section 5.2. For example,
+when taking 2% of the top-k tokens out, e.g. 6 out
+of 300 tokens, all the task-related tokens may have
+been removed already.
+6.2 Diagnosticity
+Figure 3 shows the diagnosticity scores of NS and
+NC on different rationale lengths (average across
+FAs) together with the diagnosticity of Soft-NC
+and Soft-NS. Overall in all datasets, we see that
+the diagnosticity of NC and NS does not monotoni-
+cally increase as we expected. In SST and AG, the
+diagnosticity of NS and NC both initially increase
+and then decrease. This happens because after in-
+creasing to a certain rationale length, the random
+selected rationales (used in the diagnosticity met-
+ric) contain sufﬁcient information making it hard
+for FAs to beat. In M.RC and Ev.Inf, Soft-NC and
+Soft-NS have higher diagnosticity than NC and NS.
+One possible reason is that the corrupted version
+of input could fall out-of-distribution, confusing
+the model. Our ‘soft’ metrics mitigate this issue by
+taking all tokens into account.
+Based on the observations on Figures 2 and 3,
+we conclude that it is hard to deﬁne an optimal ra-
+tionale length for NC and NS which also has been
+demonstrated in previous work (Chrysostomou and
+Aletras, 2022b). In general, we see that diagnostic-
+ity decreases along with longer rationale length for
+NC and NS. On the other hand, faithfulness mea-
+sured by NC and NS increases for longer rationales
+(Figure 2). Therefore, this might be problematic
+for selecting optimal rationale length for NC and
+NS. For example, if we want to select an optimal ra-
+tionale length for M.RC by looking at its relation to
+faithfulness, we might choose a length of 30% over
+20% because it shows higher NC and NS. However,
+the diagnosticity of NC and NS is lower at 30%,
+which means the higher NC and NS results to less
+trustful rationales. Our metrics bypass these issues
+because they focus on evaluating the FA scores and
+ranking as a whole considering all the input tokens.
+Soft-NC and Soft-NS do not require a pre-deﬁned
+rationale length or evaluating faithfulness across
+different lengths.
+We suggest that it is more important to identify
+the most faithful FA given a model and task by tak-
+ing into account all tokens rather than pre-deﬁning
+a rationale of a speciﬁc length that ignores a frac-
+tion of the input tokens when evaluating faithful-
+ness. The choice of how the FA importance scores
+will be presented (e.g. a top-k subset of the input
+tokens or all of them using a saliency map) should
+only serve practical purposes (e.g. better visualiza-
+tion, summarization of model rationales).
+7 Conclusion
+In this work, we have proposed a new soft-
+perturbation approach for evaluating the faithful-
+ness of input token importance assigned by FAs.
+Instead of perturbing the input by entirely remov-
+ing or retaining tokens for measuring faithfulness,
+we incorporate the attribution importance by ran-4739domly masking parts of the token embeddings. Our
+soft-sufﬁciency and soft-comprehensiveness met-
+rics are consistently more effective in capturing
+more faithful FAs across various NLP tasks. In
+the future, we plan to experiment with sequence
+labeling tasks. Exploring differences in faithful-
+ness metrics across different languages is also an
+interesting avenue for future work.
+Limitations
+This work focuses on binary and multi-class clas-
+siﬁcation settings using data in English. Bench-
+marking faithfulness metrics in sequence labeling
+tasks as well as in multi-lingual settings should be
+explored in future work.
+Acknowledgements
+ZZ and NA are supported by EPSRC grant
+EP/V055712/1, part of the European Commis-
+sion CHIST-ERA programme, call 2019 XAI: Ex-
+plainable Machine Learning-based Artiﬁcial Intelli-
+gence. This project made use of time on Tier 2 HPC
+facility JADE2, funded by EPSRC (EP/T022205/1).
+We thank Huiyin Xue for her invaluable feedback.
+References474047414742A Model Hyperparameters
+We use pre-trained models from the Hugging-
+face library (Wolf et al., 2020). We use the AdamW
+optimizer (Loshchilov and Hutter, 2019) with an
+initial learning rate of 1efor ﬁne-tuning BERT.
+We ﬁne-tune all models for 3 epochs using a linear
+scheduler, with 10% of the data in the ﬁrst epoch as
+warming up. We also use a grad-norm of 1.0. The
+model with the lowest loss on the development set
+is selected. All models are trained across 5 random
+seeds, and we report the average. Experiments are
+run on a single Nvidia Tesla V100 GPU. Table 5
+shows an overview of models and hyperparameters.
+B Detailed Diagnosticity Results
+C Alternative implementations for soft
+perturbation
+Adding Gaussian noise We perturb the pre-
+trained word embeddings with standard Gaussian
+noise. This Gaussian noise-based embedding per-
+turbation is similar to the “statistical noise” used
+by Zhang and Yang (2018) and Lakshmi Narayan
+et al. (2019) for data augmentation. Speciﬁcally,
+we:1.Multiply the token embedding with the to-
+ken importance score, adding Gaussian noise.
+The resulting embedding is γλ⊙xin Equa-
+tion 7, where xis the original input embed-
+ding andλis the FA scores (importance de-
+gree),γis the hyperparameters based on the
+FA scores.⊙is element-wise multiplication.
+As demonstrated by Lakshmi Narayan et al.
+(2019), adding Gaussian noise to the embed-
+ding requires tuning the standard deviation.
+Similarly, we tune the standard deviation σ∈
+{0.005, 0.01, 0.05, 0.1, 0.5, 1, 2} for soft-
+comprehensiveness and soft-sufﬁciency sepa-
+rately.
+2.Add the embedding γλ⊙x, to the token em-
+bedding ( x) to obtain a perturbed embedding
+(x).
+x=x+γλ⊙x,γ∼N(µ,σ) (7)
+An alternative way to add noise is to:
+1.Generate a noise embedding by multiplying
+the token embedding with Gaussian noise with
+standard deviation, σ, associated with the im-
+portance score of the token. The embedding
+γ⊙xin Equation 8, where xis the origi-
+nal input embedding and λis the importance
+score.
+2.Addγ⊙x, to the token embedding ( x) to
+get the perturbed embedding ( x).
+x=x+γ⊙x,γ∼N(µ,σ)(8)
+Continuous attention mask We simply replace
+the binary-valued attention mask with a continuous-
+valued mask, where the continuous value is associ-
+ated with the FA score for each token. The remain-
+ing part of the embeddings and the model remain
+the same.4743ACL 2023 Responsible NLP Checklist
+A For every submission:
+/squareA1. Did you describe the limitations of your work?
+Left blank.
+/squareA2. Did you discuss any potential risks of your work?
+Not applicable. Left blank.
+/squareA3. Do the abstract and introduction summarize the paper’s main claims?
+Section 1
+/squareA4. Have you used AI writing assistants when working on this paper?
+Left blank.
+B/squareDid you use or create scientiﬁc artifacts?
+Section 4
+/squareB1. Did you cite the creators of artifacts you used?
+Yes, we use multiple datasets which are cited and presented in section 4
+/squareB2. Did you discuss the license or terms for use and / or distribution of any artifacts?
+Not applicable. Open source
+/squareB3. Did you discuss if your use of existing artifact(s) was consistent with their intended use, provided
+that it was speciﬁed? For the artifacts you create, do you specify intended use and whether that is
+compatible with the original access conditions (in particular, derivatives of data accessed for research
+purposes should not be used outside of research contexts)?
+Not applicable. Left blank.
+/squareB4. Did you discuss the steps taken to check whether the data that was collected / used contains any
+information that names or uniquely identiﬁes individual people or offensive content, and the steps
+taken to protect / anonymize it?
+Use of public datasets
+/squareB5. Did you provide documentation of the artifacts, e.g., coverage of domains, languages, and
+linguistic phenomena, demographic groups represented, etc.?
+Section 4
+/squareB6. Did you report relevant statistics like the number of examples, details of train / test / dev splits,
+etc. for the data that you used / created? Even for commonly-used benchmark datasets, include the
+number of examples in train / validation / test splits, as these provide necessary context for a reader
+to understand experimental results. For example, small differences in accuracy on large test sets may
+be signiﬁcant, while on small test sets they may not be.
+Section 4
+C/squareDid you run computational experiments?
+Section 4
+/squareC1. Did you report the number of parameters in the models used, the total computational budget
+(e.g., GPU hours), and computing infrastructure used?
+Appendix4744/squareC2. Did you discuss the experimental setup, including hyperparameter search and best-found
+hyperparameter values?
+Section 4 and Appendix
+/squareC3. Did you report descriptive statistics about your results (e.g., error bars around results, summary
+statistics from sets of experiments), and is it transparent whether you are reporting the max, mean,
+etc. or just a single run?
+Section 5
+/squareC4. If you used existing packages (e.g., for preprocessing, for normalization, or for evaluation), did
+you report the implementation, model, and parameter settings used (e.g., NLTK, Spacy, ROUGE,
+etc.)?
+also will provide a comprehensive list for the environment, packages and dependencies in the
+to-be-released git repo
+D/squareDid you use human annotators (e.g., crowdworkers) or research with human participants?
+Left blank.
+/squareD1. Did you report the full text of instructions given to participants, including e.g., screenshots,
+disclaimers of any risks to participants or annotators, etc.?
+No response.
+/squareD2. Did you report information about how you recruited (e.g., crowdsourcing platform, students)
+and paid participants, and discuss if such payment is adequate given the participants’ demographic
+(e.g., country of residence)?
+No response.
+/squareD3. Did you discuss whether and how consent was obtained from people whose data you’re
+using/curating? For example, if you collected data via crowdsourcing, did your instructions to
+crowdworkers explain how the data would be used?
+No response.
+/squareD4. Was the data collection protocol approved (or determined exempt) by an ethics review board?
+No response.
+/squareD5. Did you report the basic demographic and geographic characteristics of the annotator population
+that is the source of the data?
+No response.4745

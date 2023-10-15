@@ -1,1 +1,974 @@
-1075 Proceedings of the 60th Annual Meeting of the Association for Computational Linguistics Volume 1 : Long Papers , pages 1075 1093 May 22 - 27 , 2022 c(cid:13)2022 Association for Computational Linguistics 1076 1077 1078 1079 1080 1081 1082 1083 1084 1085 1086 1087 1088 1089 1090 1091 1092 1093 
+
+Soumya SanyalHarman SinghXiang RenUniversity of Southern CaliforniaIndian Institute of Technology, Delhi
+{soumyasa, xiangren}@usc.edu, harmansingh.iitd@gmail.com
+Abstract
+Transformers have been shown to be able to
+perform deductive reasoning on a logical rule-
+base containing rules and statements written
+in natural language. Recent works show that
+such models can also produce the reasoning
+steps (i.e., the proof graph ) that emulate the
+model’s logical reasoning process. Currently,
+these black-box models generate both the proof
+graph and intermediate inferences within the
+same model and thus may be unfaithful. In
+this work, we frame the deductive logical rea-
+soning task by defining three modular compo-
+nents: rule selection, fact selection, and knowl-
+edge composition. The rule and fact selection
+steps select the candidate rule and facts to be
+used and then the knowledge composition com-
+bines them to generate new inferences. This
+ensures model faithfulness by assured causal
+relation from the proof step to the inference
+reasoning. To test our framework, we pro-
+pose FRR(Faithful and Robust Reasoner)
+where the above three components are indepen-
+dently modeled by transformers. We observe
+thatFRRis robust to novel language pertur-
+bations, and is faster at inference than previ-
+ous works on existing reasoning datasets. Ad-
+ditionally, in contrast to black-box generative
+models, the errors made by FRRare more
+interpretable due to the modular approach.
+1 Introduction
+The field of AI has long pursued the goal of build-
+ing systems that can automatically reason over
+some given explicit knowledge to generate con-
+clusions and provide the reasoning steps involved
+in the process (McCarthy, 1959; Newell and Si-
+mon, 1956). Recently, Clark et al. (2020) proposed
+a modern version of this problem, where the for-
+mal representation of knowledge is replaced by
+natural language statements in English. Further,Figure 1: Example of a theory, a statement, and a
+valid proof graph - An instance contains multiple facts
+and rules in blue and yellow respectively, followed by a
+statement in red. The proof graph describes the reason-
+ing steps required to generate the statement.
+they proposed a transformer-based model (Vaswani
+et al., 2017) RuleTaker, that can predict if a candi-
+date statement is entailed by the natural language
+statements, by emulating deductive reasoning. As
+shown in Figure 1, in this deductive reasoning task,
+facts and rules from the rulebase are combined iter-
+atively to generate intermediate inferences which
+eventually entails the statement. Note that the rea-
+soning process implicitly involves two steps: deter-
+mining which rules and facts to combine at each
+iteration, followed by using them to generate an
+intermediate conclusion.
+While RuleTaker focuses on just predicting the
+statement entailment, some recent works (Saha
+et al., 2020; Tafjord et al., 2021) have further devel-
+oped systems that can also generate the reasoning
+steps (i.e., proof graph generation ). However, these
+systems do not explicitly ensure the causality from
+the rule/fact selection to generating the intermedi-
+ate inferences. Since these systems are inherently
+black-box models, it is unclear if such constraints
+are implicitly learned by the models without being
+enforced externally. This, in turn, questions the
+faithfulness of the model’s internal reasoning pro-
+cess (Lipton, 2018). Because the model has access1075to the full theory at input, it might use additional
+parts of the theory, than just the predicted proof, to
+generate the inference.
+In this paper, we address these shortcomings
+by developing a modularized framework to solve
+the deductive reasoning task. While existing meth-
+ods generate both proofs and conclusions in a sin-
+gle step, in our framework we break this process
+into three steps: rule selection, fact selection, and
+knowledge composition. The rule selection step
+decides the relevant rule to use for an iterative infer-
+ence step and fact selection uses this rule to select
+the relevant facts. Then, the knowledge composi-
+tion step reasons using only the selected rule and
+facts to generate the next intermediate inference.
+In Figure 2, we show the model schematics for our
+system and contrast it with previous methods. No-
+tably, we strictly restrict the information accessible
+at each step of our framework to make the reason-
+ing process more faithful. For example, the fact
+selection step depends only on the selected rule,
+instead of all the rules in the rulebase. Additionally,
+the generated inference depends explicitly on the se-
+lected rule and facts, as opposed to all the rules and
+facts in prior works. This makes the proof graph a
+by-product of the selection steps as we don’t need
+to generate any separate proofs. Since we constrain
+the inputs to each step, this also makes each sub-
+problem easier to learn, leading to an overall more
+robust reasoning model.
+To model these three steps, we develop FRR,
+in which each component is a transformer-based
+model learning to perform the modular tasks.
+Specifically, we use RoBERTa-based models (Liu
+et al., 2019) for the two selection tasks and a T5-
+based model (Raffel et al., 2020) for the composi-
+tion task. Similar to ProofWriter, we use synthetic
+rulebases to train FRR. To test the deductive
+reasoning capabilities in a more comprehensive
+way, we experiment with both existing deductive
+reasoning datasets and multiple newly-generated
+robustness dataset variants. Overall, we find that
+FRRis more robust to novel language pertur-
+bations than baselines. Additionally, our model
+is up to three times faster at inference due to the
+constrained input and outputs of different modules.
+Lastly, we find that the errors made by our model
+are more interpretable and easier to debug com-
+pared to baseline generative models. This further
+demonstrates the faithfulness of our modularized
+reasoning framework.
+2 Problem Definition
+Notations A theory Tconsists of a set of factsand rulesex-
+pressed in natural language. An example of a the-
+ory is depicted in Figure 1. Here, the sentences
+in the blue and yellow boxes are facts and rules,
+respectively. Further, a proof graph is a directed
+graph connecting facts and rules that describe how
+a specific inference can be obtained from the the-
+ory. In Figure 1, the proof graph shows the steps
+involved in generating the inference “ Charlie is
+white. ”. To generate the proof graph we may need
+to infer some intermediate conclusions c. These
+inferences are considered as part of the extended
+facts in the theory. For example, in Fig. 1, “ Charlie
+is kind ” is an intermediate inference required to
+generate the correct proof graph.
+Deductive Reasoning The task of deductive rea-
+soning is described as follows: given a theory T,
+and a statement s, predict if the theory supports the
+statement ( entailment prediction ) and if so, gen-
+erate the proof graph that supports the statement
+(proof generation ). For the example theory and
+statement in Figure 1, we see that the statement is
+indeed entailed by the theory and the valid proof
+graph is shown for the same. The main goal of this
+task is to evaluate if a model can generate valid rea-1076soning chains in the form of proof graphs to justify
+its entailment prediction.
+Reasoning Robustness We consider an auxiliary
+task that evaluates the robustness of the reason-
+ing abilities used by the model. Let Pbe a per-
+turbation function that modifies a given theory T
+(statement s) to a theory T(statement s), such
+that(T, s)just has some surface changes in the
+natural language form but still requires the sim-
+ilar reasoning process as required for (T, s). A
+function that alters the subjects in the theory to
+unseen subjects is an example of such perturba-
+tion function. We perturb each theory statement
+pair(T, s)to create an equivalence set defined as
+the set E={(T, s). . .(T, s)}, where
+each(T, s)is derived by perturbing the original
+theory, and Nis the total such perturbations per
+theory. Note that it is possible to generate different
+(T, s)pairs by controlling the stochasticity of P.
+The main goal of this task is to evaluate the con-
+sistency of the model’s predictions with minimal
+variations in the input theory.
+Evaluation Protocol We consider three main as-
+pects for evaluating the model performance in our
+study: (1) Entailment accuracy measures how ac-
+curately the model is able to predict the true state-
+ment entailment. (2) Proof accuracy measures
+how accurately the model can predict a valid proof
+for the statement. Following Saha et al. (2020);
+Tafjord et al. (2021), we use the strict metric for
+proof evaluation, i.e., for a match to count, both
+the predicted proof should exactly match a gold
+proof and the entailment should be correctly pre-
+dicted. (3) Consistency measures if the models
+are consistent in the entailment and proof predic-
+tion for different perturbation functions. For a
+theory statement pair (T, s)and its correspond-
+ing equivalence set E, consistency is defined
+asC=∑1[f(T, s)=f(T, s)],where
+f(⋅)is the model’s prediction. We compute the
+average consistency for both entailment and proof
+predictions on an equivalence set and further aver-
+age across the dataset to report the consistency.
+3 The FRR Method
+3.1 Approach Overview
+As illustrated by the example in Figure 1, to reliably
+generate a proof graph through deductive reason-
+ing, a model needs to generate multiple one-hopintermediate conclusions. This is the major limita-
+tion of models that use the theory to directly predict
+the proof (Figure 2 (a)), thus questioning the trust-
+worthiness of the reasoning process. Next, it is also
+intuitive to see that in order to faithfully generate
+these intermediate inferences, a model should first
+determine the proof (i.e., know the rules and facts
+to use) and then use them to infer the conclusion.
+That is, there is a causal relation from determining
+the proof to then generating the conclusion. We
+note that ProofWriter (“Iter”) lacks in this aspect.
+As shown in Figure 2 (b), it first generates the con-
+clusion and then the corresponding proof.
+Motivated by these points, we propose our causal
+reasoning framework which breaks the reasoning
+process into three desirable steps. As shown in Fig-
+ure 2 (c), in our framework, first a rule ris selected
+using the rules and facts in the theory. Following
+that, some relevant facts are selected from the fact
+list based on the selected rule r. This step does not
+use the other rules R\{r}in the theory. Finally, the
+selected rule and facts are jointly used to generate a
+new conclusion c. In this framework, the one-step
+proof is explicitly determined first via the selection
+steps followed by the inference generation, making
+the proof a by-product of the whole process. In
+contrast, prior works learned to generate the proof
+along with intermediate conclusion.
+3.2 FRR Modules
+At a high level, FRRis an iterative model in
+which the one-hop intermediate conclusions are
+generated step-by-step. To model our framework
+described in Sec. 3.1, we have four components in
+FRR as follows.
+Rule Selector (RS) The rule selector is a
+RoBERTa-based (Liu et al., 2019) classification
+model that takes the concatenated statement, facts,
+and rules as input, and selects a rule that is used
+to generate an intermediate conclusion in the cur-
+rent iterative step. It takes the input of the form, and gen-
+erates a one-hot output vector by classifying the
+token embedding from the [CLS] token and [SEP]
+tokens in front of the rules, via a linear classifier
+layer. Each classification is a binary classification,
+but overall only one of the tokens has the posi-
+tive class. Here sdenotes the statement, Fis the
+facts and concatenated with any intermediate con-
+clusions generated in a prior iteration, and {r}
+denotes the irule in the theory that contains a1077total of mrules.[ ]denotes continued concate-
+nation. An example input and output of the rule
+selector is shown in Figure 3. If a [SEP] token is
+selected, we select the rule sentence following the
+corresponding [SEP] token, otherwise if the [CLS]
+token is selected, we decide to stop the iteration.
+That is, the [CLS] selection acts as a stop signal
+for our iterative model. We note that it is possible
+to have more than one likely candidate rule since
+there can be multiple one-hop inferences possible
+for a given theory. Following Tafjord et al. (2021),
+we randomly select one of the possible candidate
+rules at each iteration.
+Fact Selector (FS) The fact selector is RoBERTa-
+based (Liu et al., 2019) token classification model
+that takes the statement, the rule selected by
+the rule selector, and facts in the theory, and
+then predicts a set of candidate facts that can
+be used with the rule to generate an intermedi-
+ate conclusion. It takes the input of the form, where sis
+the statement, ris the selected rule, and {f}is the
+ifact in the theory containing ntotal facts. Note
+that facts also include any previously generated
+intermediate conclusions. [ ]denotes continued
+concatenation. The output is generated by classify-
+ing each [SEP] token embedding in front of a fact
+using a linear layer, to determine if the correspond-
+ing fact is selected or not. An example input and
+output for the fact selector is depicted in Figure 3.
+We note that it is possible to have some rules that
+can reason over multiple facts jointly to generate
+a conclusion. An example of such a rule is “ rule2 ”
+in Figure 1. Hence, this component has the ability
+to select multiple facts.
+Knowledge Composer (KC) The knowledge
+composer is a generative text-to-text transformer
+T5 (Raffel et al., 2020) (T5-large) that can compose
+a set of facts and a rule to output a novel conclu-
+sion. The input to the model is the selected facts
+and rule concatenated together, and the output is
+the intermediate conclusion. An example input and
+output for knowledge composer is shown in Fig. 3.
+Solver The final component is the solver that op-
+erates after all iterations have finished (i.e., once
+the rule selector selects the [CLS] token indicat-
+ing to stop the iterative inference generation pro-
+cess). Similar to ProofWriter, our solver currently
+searches for the statement in the generated inter-
+mediate inferences (string matching). If found, it
+predicts that the statement is entailed by the theory.
+It also search for the negation of the statement,
+and if found, it predicts not entailed. If none of
+these are present, it predicts “Unknown” since it
+cannot prove or disprove the statement. The proof
+graph is constructed by using the one-hop proofs
+generated by the selected rule and facts at each step.
+For example, in Figure 1, the red dotted boxes (one-
+hop proofs) are stitched together to assemble the
+complete proof. For cases where the entailment
+is “Unknown”, the proof returned is “None”, since
+no proof for the statement exists in the theory. We
+note that our solver is not a learnable module.
+3.3 Training and Inference
+Each component of our model (except the solver,
+which is deterministic) is trained separately. We
+use the same dataset as ProofWriter to train these
+models, but process it such that each model re-
+ceives only the relevant inputs according to our
+causal framework. More concretely, suppose for a
+given theory T=R+F, a possible intermediate
+inference is cobtained by using a rule rand a fact
+f. Then, a training instance of ProofWriter, which
+is a T5 (Raffel et al., 2020) model, uses the input
+{R, F}and output {c, r, f}. We process the same1078instance to generate three training instances, one
+for each of rule selector, fact selector, and knowl-
+edge composer, respectively, as follows:
+RS Input={R, F};RS Output ={r},
+FS Input={r, F};FS Output ={f},
+KC Input={r, f};KC Output ={c}.
+Our selector models have the statement sas input
+to the model. Also, the outputs of rule selector and
+fact selectors are converted to class labels instead
+of text since our selectors are classification models.
+We use cross entropy loss to train the rule selec-
+tor, and binary cross entropy loss to train the fact
+selector. The knowledge composer is trained on
+language modeling loss.
+At inference time, the rule selector selects a
+rule to be used for generating one-step conclusions.
+Then, the fact selector selects some facts based on
+the selected rule, which is then collectively passed
+on to the knowledge composer to generate a conclu-
+sion. This three-step pipeline is run iteratively until
+the rule selector predicts a stop signal by selecting
+the [CLS] token which exits the iteration. Once
+the iteration finishes, the solver uses the generated
+intermediate inferences to decide if the statement is
+entailed or not, and generates a proof accordingly.
+Remark on Computational Complexity A prac-
+tical limitation of ProofWriter is that it performs an
+exhaustive forward search by enumerating all pos-
+sible inferences from a given theory. This leads to
+redundant inferences being generated for proving a
+particular statement. Additionally, using a text-to-
+text transformer model adds to the problem since it
+is usually quite expensive to run at inference time.
+InFRR, we alleviate this by introducing two
+changes. First, our causal framework allows only
+selected rule and facts as input to the knowledge
+composer, thus restricting the input length signif-
+icantly. Second, augmenting the question to our
+selector inputs helps reduce the candidate space
+because these models can learn to prioritize the se-
+lection based on the relevance to both the question
+and the theory. This ensures that FRRdoes not
+perform an exhaustive forward search and priori-
+tizes generating relevant inferences over the others.
+Both these changes lead to an overall improvement
+in inference speed. We perform more quantitative
+analysis on this later in Section 5.3.4 Experimental Setup
+Datasets Following (Tafjord et al., 2021; Clark
+et al., 2020), we use the D* datasets for our experi-
+ments. These are a set of multiple datasets - namely
+D0, D1, D2, D3, D0-D3, and D5. The theory in
+these datasets are synthetically generated with in-
+creasing reasoning depths. For example, D3 dataset
+contains statements that require at most 3-hop rea-
+soning steps. The D0-D3 contains all theories in
+D3 plus∼20% of the D0-D2 training set theories.
+We also use the ParaRules dataset (Clark et al.,
+2020) that contains around 2k theories expressed
+in paraphrased natural language.
+Additionally, we generate three datasets that
+evaluate the robustness of the reasoning models
+as follows:
+•Subject robustness : Here, subjects in a
+theory are perturbed by using some out-of-
+distribution proper and common names. For
+example, in Figure 1, “ Charlie ” can be re-
+placed with “ Paul” which is not used in the D*
+datasets. We generate five new theories cor-
+responding to each theory of the D3 dataset,
+by repeatedly perturbing all the proper and
+common names in the theory.
+•Attribute robustness : Here we sample out-
+of-distribution attributes. For example, “ blue”
+in Figure 1 can be replaced with “ soft”. As
+above, we generate five new theories for each
+theory of the D3 dataset.
+•Subject+Attribute robustness : This is a com-
+bination of subject and attribute robustness
+to study model performance when most of
+the training vocabulary is replaced by out-
+of-distribution words. Each theory has both
+novel subject and attribute.
+We include more details on the perturbation sets
+used in our experiments in Appendix B.
+Baselines We compare FRRwith two variants
+of ProofWriter (Tafjord et al., 2021): All-at-once
+(PW (“All”)) and Iterative (PW (“Iter”)), wherever
+applicable. The PW (“All”) model is trained to
+predict the entailment and generate proof graph di-
+rectly from the theory and statement in a single step.
+The PW (“Iter”) generates one-step inferences and
+corresponding proofs iteratively, until all possible
+inferences are generated, and then stitches the proof1079
+graph similar to our method. If not mentioned oth-
+erwise, ProofWriter uses a T5-large (Raffel et al.,
+2020) model. We omit comparisons with PRover
+since it was trained on a different dataset that adds
+specific constraints on the proof graph. Please refer
+to Appendix J for more details.
+5 Experiment Results
+We compare FRRwith ProofWriter variants on
+three settings: generalization on D* datasets, ro-
+bustness to perturbed theories, and efficiency in
+inference computation. We further conduct qualita-
+tive analysis to understand the inference errors.
+5.1 Performance on Same Depth Reasoning
+In this setting, we train and test both models on
+D0-D3 dataset. Note, D0-D3 contains statements
+with reasoning depths up to 3. This compares the
+ability of the models to generalize to seen reason-
+ing depths at train time. The results with increasing
+depths of reasoning are shown in Table 1. Here,
+depth “N/A” refers to statements that cannot be
+proven and hence don’t have an exact proof depth
+associated with it. We observe that overall both
+FRRand ProofWriter (“Iter”) performs compa-
+rably (last row with depth ’All’). Further, we find
+that our model’s performance is lower on d=3,
+indicating that our models tend to perform weaker
+with increasing depths. This happens majorly be-
+cause the rule selector in FRRtends to incor-
+rectly select the [CLS] token to indicate a stop
+signal instead of generating more possible inter-
+mediate inferences. We discuss more about this in
+Sections 5.3 and 5.4. Please refer to Appendix C
+for more results on unseen reasoning depths.
+5.2 Robustness to Perturbed Theories
+In this section, we test the robustness of
+ProofWriter (“Iter”) and FRRon different per-
+turbed theories. Since FRRfocuses on making
+deductive reasoning more robust and faithful, per-
+formance on these robustness experiments are the
+main results of our work. As described in Section
+4, we test the robustness on three different pertur-
+bations: subject, attribute, and subject+attribute.
+We compare the performance of both models after
+training on D0-D3 dataset. The consolidated re-
+sults are shown in Table 2 and depth-wise results
+for subject robustness are shown in Table 3. We
+report the entailment accuracy, proof accuracy, and
+consistency as defined in Section 2. Please refer
+to appendix D for the depth-wise breakdown of
+all the datasets. We observe that on subject and
+subject+attribute robustness, our models are consis-
+tently better than ProofWriter whereas on attribute
+robustness both models perform similarly. Fur-
+ther, we find that on average, FRRis both more
+accurate and consistent than the baseline. From
+this, we conclude that our model relies less on
+spurious correlations based on the subject while
+both models likely suffer from similar issues on
+attribute perturbations. Since ProofWriter uses the1080theory to generate the intermediate conclusion and
+proofs, it has the capacity to exploit some spurious
+patterns that can inflate performance. In contrast,
+our causal framework restricts this capacity by con-
+straining the inputs to each component as described
+in Section 3.1. Hence, these robustness evaluations
+demonstrate one of the prime benefits of our causal
+and modular approach.
+5.3 Study on Inference Efficiency
+Here we perform several analyses to evaluate the
+computational benefits of our method as described
+in Section 3.3. Inference efficiency is an impor-
+tant aspect of this problem for real-world scenarios
+where compute can be limited.
+Relevance of generated inferences Here, we
+study the relevance of the intermediate inferences
+generated by FRRand ProofWriter (“Iter”). Let
+Tbe the set of intermediate inferences required for
+generating the proof graph for the statement. Fur-
+ther, let Gbe the set of intermediate inferences actu-
+ally generated by a model. Then, the precision and
+recall are defined as P=,andR=
+In Figure 4, we plot the precision and recall for
+both FRRand ProofWriter (“Iter”) with increas-
+ing reasoning depths. We find that our model
+has close to 1.0precision at all depths, whereas
+ProofWriter has low precision. This demonstrates
+that our model is able to successfully prune the
+candidate inference space to generate relevant can-
+didate inferences almost perfectly. In contrast, we
+see that with increasing depths, our model’s re-
+call reduces from close to 1.0to≈0.95whereas
+ProofWriter has a perfect recall at all depths. While
+the drop is not very drastic, it indicates that our
+model fails to generate some essential inferences at
+higher depths. This is mainly because our rule se-
+lector decides to stop early and not generate further
+relevant inferences for some provable statements.
+Overall, we conclude that FRRalways generates
+inferences that are relevant to solving the instance,
+although at higher depths it can miss some relevant
+conclusions.
+Performance under inference budget constraints
+We analyze the performance of FRR and
+ProofWriter under a fixed inference budget con-
+straint by restricting the total number of conclu-
+sions that can be generated. We perform this anal-
+ysis for different reasoning depths and depict the
+results in Figure 5. We observe that FRRcon-
+sistently outperforms ProofWriter on lower bud-
+gets. This shows that FRRperforms a prioritized
+generation of conclusions that are relevant to the
+statement, which can be useful in scenarios with
+limited inference budgets. See Appendix G for
+more comparisons.
+Inference runtime analysis We next compare
+the time taken by both the models to solve the com-
+plete D5 dev set. Although FRRhas three sep-
+arate modules that run sequentially, it is 3.5times
+faster than ProofWriter (“Iter”) at inference time on
+average. We attribute this to the reduced inference
+candidate search space due to question augmenta-
+tion, and smaller input size to the T5 component
+(refer to Section 3.3 for details). Please refer to
+Appendix H for more details.
+5.4 Error Analysis
+We further analyze the different errors made by
+FRRand ProofWriter (“Iter”) on 50 randomly
+sampled errors for each model, from the D0-D3
+and the subject robustness dev splits. We manually
+inspect the proof inferences and compare it with
+the gold proof to classify the failures. The errors
+are broadly categorized as follows:
+Early stop errors: This is the most frequent
+error type for both models, accounting for 80%
+and50% errors in FRRand ProofWriter, respec-
+tively. This occurs when a model incorrectly gen-1081
+erates the stop signal and fails to generate all the
+required inference to prove a statement. We find
+that our model makes the majority of the mistakes
+due to early stopping. This can be possibly fixed
+by improving the rule selector architecture to better
+model the stop criteria.
+Wrong inference: This is the second error type,
+where the inferred conclusion is incorrect based
+on the predicted proof. This accounts for 20%
+and30% errors in FRRand ProofWriter, respec-
+tively. We observe that our knowledge composer
+is makes lesser errors on average compared to the
+ProofWriter generative model.
+Other generation errors: ProofWriter makes
+around 20% errors where the model generated out-
+put does not make sense. For example, it can hal-
+lucinate facts that are not present in the theory.
+Such errors are not interpretable and questions the
+model’s inner-working. FRRshows no such er-
+ror, since the proofs are always interpretable in our
+model due to the causal framework.
+Overall, we find that the errors made by FRR
+are more interpretable than ProofWriter, since we
+can pin-point which module is at fault. Whereas,
+in ProofWriter, it is sometimes hard to understand
+the source of errors. This feature also makes our
+framework easier to debug to potentially fix some
+components with techniques like data augmenta-
+tion. Please refer to Appendix I for more discussion
+and examples of errors.
+5.5 ProofWriter Input Ablation
+A key goal of FRRis to explicitly ensure causal-
+ity from the rule/facts selection step (proof gen-
+eration) to the reasoning step (intermediate infer-
+ence generation). This is essential for a reasoning
+method using forward chaining to solve a deduc-tive reasoning task. To understand if ProofWriter,
+which uses forward chaining, implicitly does this
+“select-then-reason” within the model, we perform
+the following case study: We sample theories from
+our subject perturbation dataset where ProofWriter
+made errors, and manually evaluate the model
+on inputs with all irrelevant rules/facts deleted.
+Next we sequentially start adding back the deleted
+rules/facts to see if the output still remains valid.
+As shown in Table 4, we see that ProofWriter gen-
+erates a correct inference for the first row which
+uses just the essential part of the theory required to
+generate the conclusion, and starts making errors as
+more sentences are included. Some more examples
+are shown in Table 16 in Appendix. This shows
+that internally ProofWriter is unable to faithfully
+perform the “select-then-reason” steps for larger
+theories. In contrast, FRRexplicitly separates
+these steps, leading to a faithful reasoning model.
+6 Related Works
+Reasoning in Text Reasoning in text is a well
+studied problem in NLP. Natural Language Infer-
+ence (NLI) (Dagan et al., 2006) is one of the most
+prominent tasks that require reasoning over text to
+answer if a statement is entailed, contradicted, or
+neutral, given a hypothesis. More recently, datasets
+like HotpotQA (Yang et al., 2018), bAbI (Weston
+et al., 2016), QuaRTz (Tafjord et al., 2019), ROPES
+(Lin et al., 2019), CLUTRR (Sinha et al., 2019),
+etc., have studied different aspects of reasoning
+over textual inputs. These tasks usually require
+implicit reasoning, where the model needs to in-
+ternally infer the rules required to solve the task.
+In contrast, RuleTaker (Clark et al., 2020) deals
+with explicit reasoning (also known as deductive
+reasoning).
+Proof Generation Recently, some works have
+been addressing the problem of proof generation
+from an NL-based theory. Prover (Saha et al., 2020)
+trains a RoBERTa-based model that predicts nodes
+and edges of the proof graph. ProofWriter (Tafjord
+et al., 2021) is a T5-based (Raffel et al., 2020)
+model, that iteratively generates one-hop conclu-
+sions and proofs from a theory. Another work Mul-
+tiProver (Saha et al., 2021), generates multiple pos-
+sible proofs for a statement. While we study the
+same problem of proof generation similar to these1082works, we develop a more faithful and robust model
+designing a modular system for proof generation.
+Formal Reasoning There are some prior works
+that try to solve the problem of entailment predic-
+tion by first parsing the formal language from text.
+Neural Theorem Prover (Rocktäschel and Riedel,
+2017; Weber et al., 2019) uses neural networks to
+parse the formal logic from natural language and
+then reason over them. While this approach is more
+symbolic, it can lead to many challenges while pars-
+ing (Kamath and Das, 2019). The proof generation
+setting considered here bypasses this step and di-
+rectly reasons over the given natural language text
+making it more useful in downstream applications.
+Model Interpretability With the advent of pre-
+trained language models (BERT (Devlin et al.,
+2019), RoBERTa (Liu et al., 2019), etc.), there has
+been an increasing trend on solving various reason-
+ing tasks with high accuracy. Faithfulness of such
+models (Jacovi and Goldberg, 2020) aims to under-
+stand whether the models are actually learning to
+solve the task or rather depending on some shortcut
+patterns. Saliency-based explanations (Sundarara-
+jan et al., 2017; Lundberg and Lee, 2017; Murdoch
+et al., 2018; Sanyal and Ren, 2021) mainly focus on
+identifying the important phrases in the input text
+that helped the model in solving a task. In contrast,
+the task of proof generation focuses on generating a
+deductive chain of reasoning from the given theory
+to the concluded statement. Thus, proof chains are
+easier to understand for end users, making it more
+useful to debug any systematic model errors.
+Causal Reasoning The study of causality and
+causal reasoning models (Pearl, 2000, 2004;
+Schölkopf, 2019) has been prevalent in machine
+learning. It has been applied in various domains
+such as algorithmic fairness (Loftus et al., 2018),
+gender bias mitigation (Vig et al., 2020), robust-
+ness from spurious correlations (Bühlmann, 2020;
+Veitch et al., 2021), counterfactual explanations
+(Feder et al., 2021b), etc. Causality in NLP is par-
+ticularly important to learn models that go beyond
+exploiting correlations and to improve their overall
+faithfulness (Feder et al., 2021a).
+7 Conclusion
+In this paper, we proposed FRR, a faithful and
+robust deductive reasoning model based on three
+modular components: rule selection, fact selec-
+tion, and knowledge composition. FRRensurescausality from proof generation to entailment pre-
+diction by design. We established the effectiveness
+of our approach through experiments on testing ro-
+bustness to language variations and demonstrating
+the interpretability of the errors made by our model.
+We also show that FRRis faster and more precise
+at deductive reasoning than prior baselines.
+Acknowledgments
+This research is supported in part by the Office
+of the Director of National Intelligence (ODNI),
+Intelligence Advanced Research Projects Activity
+(IARPA), via Contract No. 2019-19051600007,
+the DARPA MCS program under Contract No.
+N660011924033, the Defense Advanced Research
+Projects Agency with award W911NF-19-20271,
+NSF IIS 2048211, NSF SMA 1829268, and gift
+awards from Google, Amazon, JP Morgan and
+Sony. We would like to thank all the collabora-
+tors in USC INK research lab for their constructive
+feedback on the work.
+References108310841085
+A Depth Dataset Details
+For training and evaluation of FRR and
+ProofWriter, we use the D* datasets and the
+ParaRules dataset (Clark et al., 2020). The statis-
+tics of these datasets are shown in Table 5 which
+includes the number of theories, the total number
+of questions across all theories, and the number
+of conclusions per theory. The statistics are bro-
+ken down split wise. We use the same splits of
+train/dev/test as provided in the original datasets
+(Clark et al., 2020; Tafjord et al., 2021). All the
+dataset sources are properly cited and used accord-
+ing to the release license.
+B Robustness Dataset Details
+The robustness dataset is created by replacing
+all subjects (attributes, subject+attributes) in the
+D3 dataset with unseen subjects (attributes, sub-
+ject+attributes) to create the subject (attribute, sub-
+ject+attributes) robustness set. For this, we first
+curate new sets of subjects and attributes to be used
+as a global pool to sample from while replacing ex-
+isting subjects and attributes from the theory. These
+sets are detailed below:
+Subject proper name pool: {‘George’, ‘Paul’,
+‘Ronald’, ‘Emma’, ‘Magnus’, ‘Timothy’, ‘Chris’,
+‘Molly’, ‘Diana’, ‘Joseph’, ‘Becky’, ‘Kurt’, ‘Ivan’,
+‘Steve’, ‘Laura’, ‘Oliver’, ‘Adam’, ‘Larry’}
+Subject common name pool: {‘mother’, ‘fa-
+ther’, ‘baby’, ‘child’, ‘toddler’, ‘teenager’, ‘grand-
+mother’, ‘student’, ‘teacher’, ‘alligator’, ‘cricket’,
+‘bird’, ‘wolf’, ‘giraffe’, ‘dinosaur’, ‘thief’, ‘soldier’,
+‘officer’, ‘artist’, ‘shopkeeper’, ‘caretaker’, ‘jani-
+tor’, ‘minister’, ‘salesman’, ‘saleswoman’, ‘run-
+ner’, ‘racer’, ‘painter’, ‘dresser’, ‘shoplifter’}
+Attribute pool: {‘maroon’, ‘brown’, ‘black’,
+‘orange’, ‘cordial’, ‘friendly’, ‘adorable’, ‘old’,
+‘soft’, ‘violent’, ‘intelligent’, ‘square’, ‘warm’,
+‘large’, ‘cylindrical’, ‘spherical’, ‘tiny’, ‘micro-
+scopic’, ‘brilliant’, ‘noisy’, ‘playful’, ‘tender’, ‘gra-
+cious’, ‘patient’, ‘funny’, ‘hilarious’, ‘thorny’, ‘sen-
+sitive’, ‘diplomatic’, ‘thoughtful’}
+Then, for each theory in the D3 dataset, we re-
+place allthe subjects in the theory with randomly
+sampled subjects (without replacement) from the
+candidate set to create a perturbed theory. We per-
+form this replacement operation to generate five
+different perturbed theories. These perturbed theo-
+ries are called equivalence set. Note that the only
+change in each theory in an equivalence set is the
+subjects being replaced by some randomly sampled
+subjects. For example, “cat” in the original theory
+might be replaced by “child” in one perturbation,
+and with “teacher” in yet another perturbation. We
+follow the same procedure to create attribute and1086
+subject+attribute robustness sets.
+The statistics for these robustness datasets are
+shown in Table 6 which includes the dataset name
+depicting the perturbation type (subject, attribute
+or subject+attribute), number of theories, the total
+number of questions across all theories, and the
+number of conclusions per theory. Please note that
+one theory has multiple questions in general, and it
+is possible to have conclusions that are not a part
+of these questions, but can be deduced from the
+given theory. Each split of the original dataset is
+perturbed separately as described above, to create
+the new datasets.
+C Generalization to Reasoning Depths
+In this section, we experiment with a setting where
+models are trained on depths less than or equal to 3
+(i.e.,d≤3) and tested on D5 dataset that contains
+statements that require reasoning up to depth 5 (i.e.,
+d≤5). Here, we test the generalization of the mod-
+els to reasoning depths that are unseen at training
+time. These results are shown in Table 7. From
+this table, we observe that overall our model per-
+forms significantly better than ProofWriter (“All”)
+on proof accuracy ( +7.5%), but has a lower per-
+formance compared to ProofWriter (“Iter”) ( −3%).
+This shows that compared to ProofWriter (“Iter”),
+our models are weaker at generalizing to unseen
+reasoning depths. This happens majorly because
+our rule selector tends to stop the inference iter-
+ations earlier, which means some essential infer-
+ences are not generated by the model. Thus, this
+leads to lower performance with increasing reason-
+ing depths.
+But, we make another interesting observation
+here. The drops in entailment and proof accuracy
+with increasing depths are similar for FRR. For
+instance, considering the performance drops be-
+tween d=4tod=5,FRRhas∼9.5%drop
+in both entailment and proof accuracy. In contrast,
+ProofWriter (“All”) and ProofWriter (“Iter”) drops
+approximately 22% and11%, respectively in proof
+accuracy for a mere 1%drop in entailment accu-
+racy. This raises some concern on the causality of
+the proof generation process used for entailment
+prediction in these models, since it seems like the
+answer prediction and proof generation are not de-
+pendent via the same reasoning paths. In contrast,
+our causal framework grounds the entailment pre-
+diction to the proofs and this leads to more consis-
+tent performance variations in FRR.
+D Robustness to Perturbed Theories
+Here, we show the detailed depth-wise perfor-
+mance of FRRand ProofWriter (“Iter”) trained
+on D0-D3 dataset and evaluated on different ro-
+bustness datasets as described in Section 4. The
+results for subject, attribute, and subject+attribute1087
+robustness evaluations are shown in Tables 8, 9,
+and 10, respectively. We observe that ProofWriter
+(“Iter”) performs significantly worse compared to
+FRRon subject robustness. The results on sub-
+ject+attribute robustness are mostly comparable,
+while in attribute robustness our model performs
+worse. The drop in performance show that both
+the models are sensitive to attributes in the theory
+to varying degree. But the strong sensitivity of
+ProofWriter (“Iter”) to the subject perturbations is
+questionable, since the causality of the model’s rea-
+soning process seems to be compromised because
+the model learns some spurious correlations using
+the subjects.
+In another setting, we train different components
+of our model on the robustness data and check if
+that leads to some performance gains. These re-
+sults are reported in Table 11. We find that it is
+indeed possible to improve the performance of in-
+dividual components of our model by robust data
+augmentation. This also indicates that our indi-
+vidual components are flexible to intervention by
+data augmentation. Such abilities are lacking in
+ProofWriter.
+EGeneralization to paraphrased theories
+Here we test the ability of our model to gener-
+alize to unseen language in ParaRules by using
+limited training supervision. To test this, we first
+train our model on D0-D3 dataset and test it on
+the ParaRules dataset. This is a zero-shot evalu-
+ation on an unseen language form. In Figure 6
+we observe that the performance is significantly
+worse on this setting as expected. We also evalu-
+ated a checkpoint of ProofWriter (“Iter”) trained
+on D0-D3 which achieves a similar performance
+of62.13% entailment accuracy. Next, we gradu-
+ally start adding portions of ParaRules, along with
+the D0-D3 data, to the training dataset. We find
+thatFRRcan quickly achieve reasonable perfor-
+mance using even 10% additional data. This shows
+that our modularized approach is also efficient in
+adapting to unseen theories with limited data super-
+vision. For more comparisons with models trained
+on ParaRules, please refer to Appendix F.1088F Results on ParaRules training
+Following (Tafjord et al., 2021), we compare the
+performance of ProofWriter (“All”) and FRR
+on the ParaRules dataset, when trained on a com-
+bined partition of D3 and ParaRules train set. The
+ParaRules dataset contains complex linguistic ex-
+pressions in the theories that are more realistic than
+D* dataset theories, making it a more challenging
+dataset. These results are shown in Table 12, with a
+reasoning depth breakdown as before. We note that
+numbers for ProofWriter (“Iter”) are not reported
+in the paper, and no trained checkpoint is avail-
+able either, so we omit it from our comparisons.
+Also, the reported results for ProofWriter (“All”)
+are from evaluating a T5-11B model while ours
+is a T5-large model. Here, we see that our model
+performs better at higher depths compared to the
+baseline which demonstrates that FRRis better
+at handling paraphrases.
+G Inference Budget Analysis
+In the inference budget analysis, we compare the
+performance of FRRand ProofWriter under an
+inference budget constraint, i.e., we restrict the to-
+tal number of intermediate conclusions that can be
+produced by both models. We perform this analy-
+sis on three different depth datasets ( d={1,3,5})
+and upper bound the number of inferences by
+B={1,3,5,7,10}. We ensure that the budget
+is at least equal to the depth of the statements under
+consideration since proving a statement requires a
+model to generate inferences equal to at least the
+depth. From Figure 7 we observe that for all depths
+FRRconsistently outperforms ProofWriter on
+lower budgets. Only when the budget increases
+to 10, ProofWriter compares with or sometimes
+outperforms our model. This analysis demon-
+strates that FRRperforms a prioritized gener-
+ation of conclusions that are relevant to the state-
+ment, which can be useful in scenarios with limited
+inference budgets.
+H Runtime Analysis
+For inference runtime analysis, we time the evalua-
+tion of both FRRand ProofWriter (“Iter”) on D5
+dev set. Note that D5 dataset contains statements
+that require at most five reasoning steps to gener-
+ate an answer. The runtime for both methods are
+shown in Table 13. These results were obtained
+by running the inference algorithm on NVIDIA
+GeForce RTX 2080 Ti GPUs for both models. We
+observe that ProofWriter (“Iter”) has an almost con-
+stant runtime since it always generates all possible
+inferences for a theory. In contrast, our runtime
+increases almost linearly with increasing depth. On
+average, FRRis3.5times faster at inference than
+ProofWriter (“Iter”).
+I Error Analysis
+This is a follow-up of Section 5.4, where we delve
+deeper into the error analysis by discussing dif-
+ferent error examples and their potential reasons.
+First, the stop errors are easy to understand. These
+are cases where the model just decides to stop in-1089
+stead of generating any further conclusions. For
+our model, this can happen if the rule selector is
+under confident while selecting rules and it learns
+that a safer fallback is to stop generating rules. This
+aspect can probably be improved by a better mod-
+eling of the rule selector. We plan to explore this
+in future works.
+Next we look at some of the wrong inferences
+generated by both models in Tables 14 and 15. We
+observe that errors made by FRRare rather naive
+with small mistakes in the final conclusion (shown
+in red in Table 15). In contrast, ProofWriter tends
+to generate an invalid conclusion with no relation
+to the generated proof (rows 1 and 2 in Table 14).
+It also makes many non-interpretable generation er-
+rors where the model’s output format is completely
+violated or the model seems to hallucinate some
+facts (rows 3-6 in Table 14). Thus, we observe
+the benefit of our causal framework as the errors
+are interpretable and more believable. In contrast,
+errors made by ProofWriter clearly show that its in-
+ference reasoning process can often not rely on the
+proof at or, or even the generated proof sometimes
+doesn’t make sense.
+J Comparison with Baselines
+In this work we compare FRRwith baselines
+introduced by (Tafjord et al., 2021). We omit com-
+parisons with both PRover (Saha et al., 2020) and
+multiPRover (Saha et al., 2021), since they were
+trained on a different dataset that makes a closed-
+world assumption (CWA), whereas we use datasets
+that make an open-world assumption (OWA). One
+essential difference between these two datasets are
+that OWA allows for predicting the truth values
+as one of {True,False,Unknown} while in CWA,
+any fact that cannot be deduced from the theory is
+assumed to be false. As a result, in CWA, there
+are only two possible truth values {True,False} fora given statement. This CWA assumption also
+leads to a specific constraint in the generated proof
+graphs, where special NAF nodes need to be con-
+sidered. Please refer to Saha et al. (2020) for more
+details on this. Additionally, multiPRover (Saha
+et al., 2021) has a goal that is different from ours.
+Specifically, their focus is on generating multi-
+ple possible proofs for a given rulebase, and for
+this their training examples contain multiple gold
+proofs per instance. In FRRand ProofWriter
+(Tafjord et al., 2021), only one gold proof needs to
+be generated, making the comparisons a bit unfair.
+Following Tafjord et al. (2021), we report single
+run numbers for every experiment.
+K Hyperparameters
+We use RoBERTa-large models (Liu et al., 2019)
+to model the rule selector and fact selector in
+FRR. For selecting the best hyperparameters for
+both these components, we selected the max train-
+ing epochs in: {10,15,20}, warmup updates in:
+{0.05,0.1}, weight decay in: {0.1,0.01,0.001},
+learning rate in: {3e-6,5e-6,1e-6}, and batch size
+in{16,32}.
+We use T5 (Raffel et al., 2020) (T5-large) to
+model the knowledge composer in FRRand train
+it using the default hyperparameters available in
+the Hugging Face transformers library (Wolf et al.,
+2020). All models were trained on Nvidia Quadro
+RTX 8000 GPUs. Training a FRRon a single
+GPU takes around 20 hours on average.1090109110921093

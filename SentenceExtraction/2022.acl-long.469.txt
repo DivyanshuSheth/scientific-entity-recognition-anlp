@@ -1,1 +1,812 @@
-6804 Proceedings of the 60th Annual Meeting of the Association for Computational Linguistics Volume 1 : Long Papers , pages 6804 6818 May 22 - 27 , 2022 c(cid:13)2022 Association for Computational Linguistics 6805 6806 6807 6808 6809 6810 6811 6812 6813 6814 6815 6816 6817 6818 
+
+Varvara Logacheva, Daryna Dementieva, Sergey Ustyantsev, Daniil Moskovskiy,
+David Dale,Irina Krotova,Nikita Semenov,and Alexander PanchenkoSkolkovo Institute of Science and Technology, RussiaMobile TeleSystems (MTS), RussiaData and Web Science Group, University of Mannheim, Germany
+{v.logacheva,daryna.dementieva,s.ustyantsev}@skoltech.ru,
+{daniil.moskovskiy,d.dale,a.panchenko}@skoltech.ru,
+{i.krotova@mts.ai, nikita.semenov}@mts.ru
+Abstract
+We present a novel pipeline for the collection
+of parallel data for the detoxiﬁcation task. We
+collect non-toxic paraphrases for over 10,000
+English toxic sentences. We also show that
+this pipeline can be used to distill a large
+existing corpus of paraphrases to get toxic-
+neutral sentence pairs. We release two paral-
+lel corpora which can be used for the training
+of detoxiﬁcation models. To the best of our
+knowledge, these are the ﬁrst parallel datasets
+for this task. We describe our pipeline in detail
+to make it fast to set up for a new language or
+domain, thus contributing to faster and easier
+development of new parallel resources.
+We train several detoxiﬁcation models on the
+collected data and compare them with several
+baselines and state-of-the-art unsupervised ap-
+proaches. We conduct both automatic and
+manual evaluations. All models trained on par-
+allel data outperform the state-of-the-art unsu-
+pervised models by a large margin. This sug-
+gests that our novel datasets can boost the per-
+formance of detoxiﬁcation systems.
+1 Introduction
+Detection of toxicity (Zampieri et al., 2019)
+and other undesirable content, e.g. microag-
+gressions (Breitfeller et al., 2019) or patronizing
+speech (Perez Almendros et al., 2020), is a popu-
+lar topic of research in NLP. However, detection
+of harmful messages does not offer any proactive
+ways of ﬁghting them (besides deletion). We sug-
+gest that such messages could be automatically
+rewritten to keep the useful content intact and elim-
+inate toxicity.
+The task of rewriting toxic messages ( detox-
+iﬁcation ) has already been tackled by NLP re-
+searchers (Nogueira dos Santos et al., 2018; Tran
+et al., 2020). It is considered a variant of style
+transfer task, the task of rewriting a text savingthe content and changing the style ( style is de-
+ﬁned as a characteristic of text such as sentiment,
+level of formality, or politeness, author proﬁle (gen-
+der, political preferences), etc.). As a sequence-to-
+sequence task, style transfer can be performed with
+an encoder-decoder model trained on parallel data.
+However, there exist only a few parallel style trans-
+fer corpora (Carlson et al., 2018; Pryzant et al.,
+2020). Since they usually do not exist “naturally”,
+they need to be written from scratch. This is an ex-
+pensive and laborious process. Thus, such parallel
+datasets are extremely rare.
+Table 1: Examples of detoxiﬁed sentences from the col-
+lected parallel corpus.
+We aim at boosting the research in detoxiﬁca-
+tion by collecting an English parallel corpus of
+toxic sentences and their non-toxic paraphrases.
+We suggest a new crowdsourcing pipeline for col-
+lecting parallel style transfer data. It does not em-
+ploy experts, which makes the data collection faster
+and cheaper. In addition to generating the detoxi-
+ﬁed versions of texts, we consider a way to distill
+existing datasets of paraphrases for style-speciﬁc
+data. In particular, we ﬁnd the pairs of toxic and
+non-toxic sentences in the paraNMT dataset (Wi-
+eting and Gimpel, 2018) of English paraphrases6804and ﬁlter them using our crowdsourcing setup. The
+pipelines are described in detail to make them easy
+to replicate. Thus, we suggest that by reusing these
+pipelines the new parallel style transfer datasets
+can be collected in a fast and affordable way.
+Finally, we validate the usefulness of our
+datasets by training detoxiﬁcation models on them
+and comparing their performance with state-of-the-
+art methods. Models trained on parallel data signif-
+icantly outperform other models in terms of auto-
+matic metrics and human evaluation.
+The contributions of our work are three-fold:
+•We suggest a novel pipeline for collection of
+parallel data for the detoxiﬁcation task,
+•We use the pipeline to collect the ﬁrst parallel
+detoxiﬁcation dataset ParaDetox (see Table 1
+and Appendix A) and retrieve toxic-neutral
+pairs from ParaNMT corpus,
+•Using collected data we train supervised
+detoxiﬁcation models that yield SOTA results.
+2 Related Work
+Style Transfer Datasets When collecting non-
+parallel style transfer corpora, style labels often
+already exist in the data (e.g. positive and negative
+reviews (Li et al., 2018)) or its source serves as a
+label (e.g. Twitter, academic texts, legal documents,
+etc.). Thus, data collection is reduced to fetching
+the texts from their sources, and the corpus size
+depends only on the available amount of text.
+Conversely, parallel corpora are usually more
+difﬁcult to get. There exist parallel style transfer
+datasets fetched from “naturally” available parallel
+sources: the Bible dataset (Carlson et al., 2018)
+features multiple translations of the Bible from
+different epochs, biased-to-neutral Wikipedia cor-
+pus (Pryzant et al., 2020) uses the information on
+article edits.
+Besides these special cases, there exists a large
+style transfer dataset that was created from scratch.
+This is the GYAFC dataset (Rao and Tetreault,
+2018) of informal sentences and their formal ver-
+sions written by crowd workers and reviewed by ex-
+perts. Since toxic-neutral pairs also do not occur in
+the wild, we follow this data collection setup with
+a notable difference – we replace expert validation
+of crowdsourced sentences with crowd validation
+and additionally optimize the cost.Style Transfer and Detoxiﬁcation The vast ma-
+jority of style transfer models (including detoxi-
+ﬁcation models) are trained on non-parallel data.
+They can perform pointwise corrections of style-
+marked words (Li et al., 2018; Wu et al., 2019;
+Malmi et al., 2020). Alternatively, some works
+train encoder-decoder models on non-parallel data
+and push decoder towards the target style using
+adversarial classiﬁers (Shen et al., 2017; Fu et al.,
+2018). As another way of ﬁghting the lack of par-
+allel data, researchers jointly train source-to-target
+and target-to-source style transfer models using re-
+inforcement learning (Luo et al., 2019), amortized
+variational inference (He et al., 2020), or informa-
+tion from a style transfer classiﬁer (Lee, 2020).
+Detoxiﬁcation is usually formulated as style
+transfer from toxic to neutral (non-toxic) style, so
+it uses non-parallel datasets labeled for toxicity
+and considers toxic and neutral sentences as two
+subcorpora. Laugier et al. (2021) use the Jigsaw
+datasets (Jigsaw, 2018, 2019, 2020) for training,
+Nogueira dos Santos et al. (2018) create their own
+toxicity-labelled datasets of sentences from Reddit
+and Twitter. Following them, we also fetch sen-
+tences for rewriting from these datasets.
+Works on detoxiﬁcation often rely on style trans-
+fer models tested on other domains. Nogueira dos
+Santos et al. (2018) follow Shen et al. (2017) and
+Fu et al. (2018) and train an autoencoder with ad-
+ditional style classiﬁcation and cycle-consistency
+losses. Laugier et al. (2021) perform a similar ﬁne-
+tuning of T5 as a denoising autoencoder. Tran et al.
+(2020) apply pointwise corrections approach simi-
+lar to that of Wu et al. (2019) and then improve the
+ﬂuency of a text with a seq2seq model. Likewise,
+Dale et al. (2021) use a masked language model to
+perform pointwise edits of toxic sentences. They
+also suggest an alternative model which enhances a
+style-agnostic seq2seq model with style-informed
+language models which reweigh the seq2seq hy-
+potheses with respect to the desired style.
+When the parallel data is available, the majority
+of researchers use Machine Translation tools (Bri-
+akou et al., 2021) and pre-trained language mod-
+els (Zhang et al., 2020) to perform style trans-
+fer. We follow this practice by ﬁne-tuning BART
+model (Lewis et al., 2020) on our data.
+3 Data Collection Pipeline
+Our goal is to yield pairs of sentences that have
+the same meanings and are contrasted in terms of6805
+offensiveness — one of the sentences is toxic and
+the other is neutral. We consider two scenarios:
+the manual rewriting of toxic sentences into neutral
+ones and the selection of toxic-neutral pairs from
+existing paraphrases. Unlike a similar work of Rao
+and Tetreault (2018), we hire crowd workers not
+only for the generation of paraphrases but also for
+their validation, which reduces both time and cost.
+3.1 Crowdsourcing Tasks
+We ask crowd workers to generate paraphrases and
+then evaluate them for content preservation and
+toxicity. Each task is implemented as a separate
+crowdsourcing project. We use the crowdsourcing
+platform Yandex.Toloka.
+Task 1: Generation of Paraphrases The ﬁrst
+crowdsourcing task asks users to eliminate toxic-
+ity in a given sentence while keeping the content
+(see the task interface in Figure 1). However, it
+is not always possible. Some sentences cannot be
+detoxiﬁed, because they do not contain toxicity or
+because they are meaningless. Moreover, in some
+cases toxicity cannot be removed. Consider the
+examples:
+•Are you that dumb you can’t ﬁgure it out?
+•I’ve ﬁnally understood that wiki is nothing but
+a bunch of American racists.
+Not only the form but also the content of the
+messages are offensive, so trying to detoxify them
+would inevitably lead to a substantial change of
+sense. We prefer not to include such cases in the
+parallel dataset.
+If workers have to detoxify all inputs without a
+possibility to skip them, a large proportion of the
+generated paraphrases will be of low quality. Thus,
+we add the control “I can’t rewrite the text” and
+optional controls to indicate the reasons.
+Task 2: Content Preservation Check We show
+users the generated paraphrases along with their
+original variants and ask them to indicate if they
+have close meanings. Besides ensuring content
+preservation, this task implicitly ﬁlters out sense-
+less outputs, because they do not keep the original
+content. The task interface is shown in Figure 2.
+Task 3: Toxicity Check Finally, we check if the
+workers succeeded in removing toxicity. We ask
+users to indicate if the paraphrases contain any
+offense or swear words (see Figure 3).
+In addition to ﬁltering out unsuitable para-
+phrases, we use Tasks 2 and 3 for paying for Task 1.
+We accept or reject the generated paraphrases based
+on the labels they get in Tasks 2 and 3.
+3.2 Pipelines
+Generation Pipeline To yield a parallel dataset,
+we ﬁrst need to get toxic sentences for rewriting.
+We fetch them from corpora labeled for toxicity
+and additionally ﬁlter them with a toxicity classi-
+ﬁer (described in Section 3.3). The overall data
+collection pipeline (see Figure 4) is as follows:
+• Select toxic sentences for rewriting,
+• Feed the sentences to Task 1 ,
+•Feed the paraphrases generated in Task 1 to
+Task 2 ,
+•Feed the paraphrases which passed Task 2 to
+Task 3 ,
+•Pay for paraphrases from Task 1, if they
+passed checks in Task 2 and Task 3,
+•Pay for “I can’t rewrite” answers in Task 1 if
+two or more workers agreed on them.6806
+Retrieval Pipeline The generation pipeline can
+be used for cases when no parallel data is avail-
+able. However, we suggest that a sufﬁciently large
+parallel corpus of paraphrases can contain pairs of
+sentences belonging to different styles, and it is
+possible to distill such corpus into a style transfer
+dataset. We check this hypothesis for the toxic and
+neutral styles on the ParaNMT dataset (Wieting
+and Gimpel, 2018).
+We partially reuse the previously described setup.
+We do not need Task 1 since both toxic and neu-
+tral sentences are already available. However, we
+run Task 3 twice, because we need to check both
+parts of the pair for toxicity. Analogously to the
+generation pipeline, we use a toxicity classiﬁer to
+pre-select pairs of sentences where one sentence is
+toxic and the other one is neutral. The parallel data
+retrieval pipeline is shown in Figure 5. It is simpler
+because Tasks 2 and 3 do not serve for paying for
+the generated paraphrases and are only used for
+data ﬁltering. The pipeline is as follows:
+•Select a pair of sentences (toxic and non-toxic)
+from the parallel data,
+•Feed the toxic sentence candidate to Task 3
+to make sure it is toxic,
+•Feed the neutral sentence candidate to Task 3
+to make sure it is non-toxic,
+•Feed both sentences to Task 2 to check if their
+content matches.
+3.3 Crowdsourcing Settings
+Preprocessing To pre-select toxic sentences, we
+need a toxicity classiﬁer. We ﬁne-tune a RoBERTa
+model (Liu et al., 2019)on half of the three
+merged Jigsaw datasets (Jigsaw, 2018, 2019, 2020)
+(1 million sentences) and get a classiﬁer which
+yields the F-score of 0.76 on the Jigsaw test
+set (Jigsaw, 2018). We consider a sentence toxic
+if the classiﬁer conﬁdence is above 0.8. To make
+the sentences easier for reading and rewriting, wechoose the ones consisting of 5 to 20 tokens. For
+the retrieval pipeline, we also select parallel sen-
+tences with the cosine similarity of embeddings
+between 0.65 and 0.8. The similarity scores were
+provided as a part of ParaNMT dataset, the em-
+beddings come from the PARAGRAM-PHRASE
+model (Wieting et al., 2016). Based on a manual
+validation, sentences with lower similarity are often
+not exact paraphrases, and too-similar sentences
+are either both toxic or both non-toxic.
+Quality Control To perform paid tasks, users
+need to pass training andexam sets of tasks. Each
+of them has a corresponding skill – the percentage
+of correct answers. It is assigned to a user upon
+completing training or exam and serves for ﬁltering
+out low-performing users. Besides that, users are
+occasionally given control questions during label-
+ing. They serve for computing the labeling skill
+which can be used for banning low-performing and
+rewarding well-performing workers. The overall
+training and control pipeline is shown in Figure 6.
+It is used in Tasks 2 and 3.
+In Task 1 we perform different quality control.
+We ban users who submit answers which are: (i) a
+copy of the input, (ii) too short (< 3 tokens) or too
+long (more than doubled original length), (iii) con-
+tain too many rare words or non-words. The latter
+condition is checked as follows. We compute the
+ratio of the number of whitespace-separated tokens
+and the number of tokens identiﬁed by the BPE
+tokeniser (Sennrich et al., 2016).The rationale
+behind this check is that the BPE tokenizer tends
+to divide rare words into multiple tokens. If the
+number of BPE tokens in a sentence is two times
+more than the number of regular tokens, it might
+indicate the presence of non-words. We ﬁlter out
+these answers and ban users who produce them.
+In addition to that, we ban malicious workers
+using built-in Yandex.Toloka tools: (i) captcha ,
+(ii) number of skipped questions — we ban users
+who skip 10 task pages in a row, and (iii) task
+completion time — we ban those who accomplish
+tasks too fast (this usually means that they choose
+a random answer without reading).
+Payment In Yandex.Toloka, a worker is paid for
+a page that can have multiple tasks (the number is
+set by customer). In Task 1, a page contains 5 tasks
+and costs $0.02. In Tasks 2 and 3, we pay $0.026807
+and $0.01, respectively, for 12 tasks. In addition to
+that, in these tasks, we use skill-based payment. If
+a worker has the labeling skill of above 90%, the
+payment is increased to $0.03 (Task 2) and $0.02
+(Task 3).
+Tasks 2 and 3 are paid instantly, whereas in
+Task 1 we check the paraphrases before paying. If
+a worker indicated that a sentence cannot be para-
+phrased, we pay for this answer only if at least one
+other worker agreed with that. If a worker typed
+in a paraphrase, we send it to Tasks 2 and 3 and
+pay only for the ones approved by both tasks. The
+payment procedure is shown in Figure 4.
+Postprocessing To ensure the correctness of la-
+beling, we ask several workers to label each exam-
+ple. In Task 1, this gives us multiple paraphrases
+and also veriﬁes the “I can’t rewrite” answers. For
+Tasks 2 and 3, we compute the ﬁnal label using
+the Dawid-Skene aggregation method (Dawid and
+Skene, 1979) which deﬁnes the true label iteratively
+giving more weight to the answers of workers who
+agree with other workers more often. The number
+of people to label an example ranges from 3 to 5
+depending on the workers’ agreement.Dawid-Skene aggregation returns the ﬁnal label
+and its conﬁdence. To improve the quality of the
+data, we accept only labels with the conﬁdence of
+over 90% and do not include the rest in the ﬁnal
+data.
+3.4 The Pipeline Scalability
+The Yandex.Toloka platform has an interface in En-
+glish and workers from a large number of countries.
+Workers can be ﬁltered by their location and asked
+to pass built-in language tests (available for many
+languages) to ensure the knowledge of a particular
+language. This enables the use of Toloka for the
+creation of NLP resources in many languages.
+In our work, crowd workers manually rephrase
+sentences from non-parallel datasets. The pipeline
+does not require any speciﬁc data format and can
+be applied to any text. The only prerequisites are
+to deﬁne the source and target styles and to formu-
+late the task of transferring between them. Thus,
+we believe that the pipeline is suitable for creating
+parallel datasets for any other style transfer tasks,
+at least those which have non-parallel datasets and
+clear deﬁnitions of style (positive $negative, com-
+plex$simple, impolite $polite, etc.).
+We should admit that our pipeline suggests the
+availability of (non-parallel) datasets in the chosen
+styles or at least publicly available sources of such
+data (e.g. social networks, question answering plat-
+forms). However, this is also a prerequisite for any
+style transfer model trained on non-parallel data.
+Therefore, any work on style transfer suggests that
+there exists enough data in the chosen style pair and
+language. This should not be considered a speciﬁc
+limitation of the pipeline.
+4 Data Analysis
+We collected ParaDetox – a parallel detoxiﬁcation
+dataset with 1–3 paraphrases for over 12,000 toxic
+sentences. We also manually ﬁltered ParaNMT
+dataset and get 1,400 toxic-neutral pairs.68084.1 ParaDetox: Generated Paraphrases
+We fetched toxic sentences from three sources:
+Jigsaw dataset of toxic sentences (Jigsaw, 2018),
+Reddit and Twitter datasets used by Nogueira dos
+Santos et al. (2018). We selected 7,000 toxic sen-
+tences from each source and gave each of the sen-
+tences for paraphrasing to 3 workers. We get para-
+phrases for 12,610 toxic sentences (on average 1.66
+paraphrases per sentence), 20,437 paraphrases to-
+tal. Running 1,000 input sentences through the
+pipeline costs $41.2, and the cost of one output
+sample is $0.07. The overall cost of the dataset
+is $811.55. We give them examples of sentences
+in Appendix A. In addition to that, we provide
+some samples which could not be detoxiﬁed in Ap-
+pendix C. The statistics of the paraphrases written
+by crowd workers are presented in Table 2.
+The distribution of sentences from different
+datasets in the ﬁnal data is not equal. Jigsaw turned
+out to be the most difﬁcult to paraphrase. Fewer
+sentences from it are successfully paraphrased,
+making it the most expensive part of the collected
+corpus ($0.08 per sample). Figure 7 shows that the
+number of untransferable sentences in the Jigsaw
+dataset is larger than that of other corpora.
+Out of all crowdsourced paraphrases, only a
+small part was of high quality. We plot the per-
+centage of paraphrases which were ﬁltered out by
+content and toxicity checks in Figure 8. It also
+corroborates the difﬁculty of the Jigsaw dataset.
+While the overall number of generated paraphrases
+was slightly higher for it, much more of them were
+discarded.4.2 Analysis of Edits
+Although we did not give any special instructions
+to workers about editing, they often followed the
+minimal editing principle, making 1.36 changes
+per sentence on average. A change is deletion, in-
+sertion, or rewriting of a word or multiple adjacent
+words. Many of the changes are supposedly dele-
+tions because the average sentence length drops
+from 12.1 to 10.4 words after editing.
+The nature of editing differs for the three
+datasets. We compute the percentage of edits which
+consisted of removing the most common swear
+words or replacing them with neutral words. We
+ﬁrst deﬁne the differences between the original
+and transformed string with the difflib Python
+library and then compute the percentage of differ-
+ences that consist in editing swear words and other
+(non-offensive) words. We use a small manually
+compiled list of swear words which includes words
+f*ck,sh*t,a*s,b*tch ,d*mn and their variants. Ta-
+ble 3 shows that the deletion or replacements of the
+most common swearing constituted a large part of
+all edits for Reddit and Twitter datasets (22% and
+30%), while for Jigsaw it was only 3%.
+Another surprisingly common type of editing
+is the normalization of sentences. The users of-
+ten ﬁxed casing, punctuation, typos (e.g. dont!
+don’t ,there’s !there is ). They also tended to
+replace colloquial phrases with more formal and
+standard language. Finally, some users overcor-
+rected the sentences. For example, they replaced
+neutral words such as dead ,murder ,penis with
+euphemisms. This tendency indicates that work-
+ers consider any sensitive topic to be inappropriate
+content and try to avoid it as much as possible.
+4.3 ParaNMT: Existing Paraphrases
+Our automatic ﬁltering of ParaNMT for content
+yields 500,000 potentially detoxifying sentence
+pairs, which is 1% of the corpus. We then sample
+6,000 random pairs from this list and ask workers
+to evaluate them for toxicity and content preserva-
+tion. This leaves with 1,393 sentences, meaning
+that around 23% of the pre-selected sentence pairs
+were approved (for ParaDetox we get paraphrases
+for 61% input sentences). Thus, although the cost
+per 1,000 inputs is much lower than that of gener-
+ating the paraphrases, the cost per output sample is
+the same as that of generated paraphrases.
+ParaNMT dataset is different from ParaDetox.
+First, each sentence has only one paraphrase. These6809
+Swear words Other phrases
+Dataset Del Rep Del Rep Ins
+Jigsaw 2.3% 0.6% 30% 60% 6.8%
+Reddit 19% 9.1% 26% 41% 5.7%
+Twitter 15% 7.1% 23% 47% 8.2%
+ParaNMT 1.6% 1.2% 19% 64% 14%
+paraphrases were not gained via manual editing but
+via a chain of translation models. Thus, neutral
+sentences are less similar to the toxic sentences,
+and the edits are more diverse, which makes it
+more similar to Jigsaw dataset (see Table 3).
+5 Evaluation
+To evaluate the collected corpora, we use them to
+train several supervised detoxiﬁcation models. We
+separate the ParaDetox dataset into training and
+test parts (11,939 and 671 sentence pairs, respec-
+tively). The test sentences have one reference per
+sentence. We manually validate the test set to ex-
+clude the appearance of non-detoxiﬁable sentences
+or sentences which stayed toxic after rewriting (we
+need to verify that since the corpus was generated
+via crowdsourcing only). We do not use the test set
+neither for training nor for parameter selection of
+the models.
+5.1 Models
+We ﬁne-tune a Transformer-based generation
+model BART (Lewis et al., 2020)on our data.
+We test BART trained on the following datasets:•ParaDetox – our full crowdsourced dataset.
+•ParaDetox-unique – a subset of ParaDetox
+where each toxic sentence has only one para-
+phrase (selected randomly).
+•ParaDetox-1000 – 1,000 samples from the
+crowdsourced dataset (distributed evenly
+across data sources, each toxic sample has
+multiple non-toxic variants).
+•ParaNMT – ﬁltered ParaNMT corpus, auto
+stands for automatically ﬁltered 500,000 sam-
+ples, manual are 1,393 manually selected sen-
+tence pairs.
+We train BART for 10,000 epochs with the learn-
+ing rate of 3e-5 and the number of gradient accu-
+mulation steps set to 1. The other parameters are
+set to their default values.
+We also compare our models to other style trans-
+fer approaches:
+•Duplicate (baseline) – copy of the input,
+•Delete (baseline) – deletion of swear words,
+•BART-zero-shot (baseline) – BART model
+with no additional training.
+•Mask&Inﬁll (Wu et al., 2019) – BERT-based
+pointwise editing model,
+•Delete-Retrieve-Generate models (Li et al.,
+2018): DRG-Template (replacement of toxic
+words with similar neutral words) and DRG-
+Retrieve (retrieval of non-toxic sentences
+with the similar sense) varieties.
+•DLSM (He et al., 2020) encoder-decoder
+model that uses amortised variational infer-
+ence,
+•SST (Lee, 2020) – encoder-decoder model
+with the cross-entropy of a pretrained style
+classiﬁer as an additional discriminative loss.
+•CondBERT (Dale et al., 2021) – BERT-based
+model with extra style and content control,6810•ParaGeDi (Dale et al., 2021) – a model which
+enhances a paraphraser with style-informed
+LMs which re-weigh its output.
+5.2 Metrics
+We compute the BLEU score on the test set. In
+addition to that, we perform automatic reference-
+free evaluation which is used in many style transfer
+works. Namely, we evaluate:
+•Style accuracy (STA) – percentage of non-
+toxic outputs identiﬁed by a style classiﬁer.
+We use a classiﬁer from Section 3.3 trained
+on a different half of Jigsaw data.
+•Content preservation (SIM ) – cosine similar-
+ity between the embeddings of the original
+text and the output computed with the model
+of Wieting et al. (2019). This model is trained
+on paraphrase pairs extracted from ParaNMT
+corpus. The model’s training objective is to
+yield embeddings such that the similarity of
+embeddings of paraphrases is higher than the
+similarity between sentences that are not para-
+phrases.
+•Fluency (FL) – percentage of ﬂuent sentences
+identiﬁed by a RoBERTa-based classiﬁer of
+linguistic acceptability trained on the CoLA
+dataset (Warstadt et al., 2019).
+We compute the ﬁnal joint metric ( J) as the mul-
+tiplication of the three individual metrics.Since the automatic evaluation can be unreliable,
+we evaluate some models manually. We randomly
+select 200 sentences from the test set and ask asses-
+sors to evaluate them along the same three parame-
+ters: style accuracy ( STA), content preservation
+(SIM), and ﬂuency ( FL). All parameters can
+take values of 1 (good) and 0 (bad). We also re-
+port the joint metric Jwhich is the percentage of
+sentences whose STA,SIM, and FLare 1.
+The evaluation was conducted by 6 NLP re-
+searchers with a good command of English. Each
+sample was evaluated by 3 assessors. The inter-
+annotator agreement (Krippendorff’s ) reaches
+0.64 ( STA), 0.67 ( SIM), and 0.68 ( FL).
+5.3 Results
+Automatic Evaluation Table 4 shows the auto-
+matic scores of all tested models. Our BART mod-
+els trained on ParaDetox outperform other systems
+in terms of BLEU and J. The much lower scores of
+BART-zero-shot conﬁrm that this success is due to
+ﬁne-tuning and not the innate ability of BART. The
+majority of unsupervised SOTA approaches are not
+only worse than BART but also perform below the
+“change nothing” baseline. The closest competitor
+of our models is the Delete model. This can be
+explained by the fact that crowd workers often only
+remove or replaced swear words which is what the
+Delete model does.
+When comparing models trained on supervised
+data, we can see that BART does not beneﬁt from
+multiple detoxiﬁcations per sentence, its perfor-
+mance is the same when trained on ParaDetox and
+ParaDetox-unique. On the other hand, manual ﬁl-
+tering of ParaNMT is beneﬁcial, it increases the
+quality of BART trained on it, although the number
+of training sentences drops from 500,000 to 1,400.
+We also check which amount of data is sufﬁ-
+cient for a high detoxiﬁcation quality. We train the
+BART model on subsets of ParaDetox of different
+sizes. Figure 9 and the performance of ParaDetox-
+1000 model (Table 4) show that 1,000 training sam-
+ples is enough to get a good detoxiﬁcation. While
+SIM and FL are already high for vanilla BART
+(see BART-zero-shot model), STA can be improved
+with only a few parallel examples. This suggests
+that style transfer does not need large parallel cor-
+pora, making our pipeline more useful for other
+style transfer tasks. However, this is the result of
+the automatic evaluation, which as we show below
+is not always reliable. It needs extra investigation.6811
+Table 5 shows examples of different models
+output. Delete performs deterministic operations
+which can return disﬂuent text. CondBERT has to
+insert something instead of a toxic word, which is
+not always a good strategy. ParaGeDi generates
+sentences from scratch, which sometimes results in
+a distorted sense. BART trained on parallel data is
+usually free of these drawbacks. More examples of
+outputs are available in Appendix B.
+Manual Evaluation Manual evaluation (Ta-
+ble 6) conﬁrms the usefulness of parallel data.
+BARTs trained on parallel data outperform other
+competitors, even if the size of this data is small.
+However, manual and automatic evaluations do not
+always match. Here, the well-performing Delete
+model gets the lowest score.
+Overall, assessors agree with automatic metricsonly in terms of ﬂuency, their Spearman correlation
+ris 0.89. The manual style accuracy and content
+preservation are only moderately correlated with
+their automatic counterparts leaving space for fur-
+ther improvements. J and Jalmost do not corre-
+late. Besides that, BLEU correlates only with con-
+tent preservation score and is moderately inversely
+correlated with the style accuracy. Thus, BLEU
+measures only the degree of content preservation
+and cannot replace other metrics.
+6 Conclusions
+We present ParaDetox – an English parallel cor-
+pus for the detoxiﬁcation task. It contains almost
+12,000 user-generated toxic sentences manually
+rewritten by crowd workers. To the best of our
+knowledge, this is the ﬁrst parallel detoxiﬁcation
+dataset. We present a novel data collection pipeline
+and show that parallel data can be generated using
+only crowdsourcing. We also adopt this pipeline to
+the style-based distillation of paraphrase corpus.
+We conﬁrm the usefulness of our datasets by
+training sequence-to-sequence models on them.
+The experiments show that the use of parallel data
+yields models which signiﬁcantly outperform style
+transfer models trained on non-parallel data. Be-
+sides that, we conﬁrm that ﬁltering the noisy paral-
+lel data can lead to considerable improvement.
+We see that it is enough to get 1,000 parallel sen-
+tences to perform detoxiﬁcation with high quality.
+This suggests that our pipeline can be successfully
+applied to create useful parallel resources for style
+transfer even in cases of limited ﬁnance or lack
+of crowd workers because the cost of generating
+1,000 examples is very low.
+Finally, we investigate the relationship between
+metrics and ﬁnd that automatic evaluation does not
+always match the manual judgments and reference-
+based BLEU cannot replace human evaluation, be-
+cause it measures content preservation.6812Acknowledgements
+This work was supported by a joint MTS-Skoltech
+laboratory on AI.
+Ethical Considerations
+The research on toxicity raises some ethical issues.
+In terms of our work, the parallel corpus we cre-
+ated can indeed be used in the reverse direction,
+i.e. to “toxify” sentences. However, although we
+did not thoroughly evaluate the quality of such
+toxiﬁcation, our intuition is that it would not be
+high enough to make the corrupted sentences look
+natural. The reason is that the toxic part of our cor-
+pus consists of real toxic sentences fetched on the
+Internet, whereas their non-toxic counterparts are
+“translations” performed by crowd workers. We
+suggest that they obey the common regularities ob-
+served for translationese (texts manually translated
+from their original language into a different one):
+they differ from regular texts in terms of vocabu-
+lary (Koppel and Ordan, 2011) and syntax (Lem-
+bersky et al., 2011). The manually detoxiﬁed texts
+are different from the original non-toxic texts writ-
+ten by Internet users from scratch. While they are
+still recognized by human assessors as plausible
+sentences, we suggest that a sequence-to-sequence
+model trained to get translationese as input would
+not be as successful in transforming real texts (as it
+was shown for machine translation models (Freitag
+et al., 2019)).
+Thus, although our corpus can be used in the
+reverse direction, it is not symmetric, which makes
+it less efﬁcient as training datasets for “toxiﬁers”.
+However, we should emphasize that these state-
+ments are our hypotheses and should be further
+investigated. Finally, we argue that the risk of
+using our corpus for toxiﬁcation is perhaps not
+game-changing, as simpler approaches based on
+patterns (e.g. including a set of predeﬁned obscene
+fragments into neutral texts) can serve the same
+purpose relatively well.
+References681368146815A ParaDetox Samples
+Table 7 shows the examples of manually detoxiﬁed parallel sentences from the ParaDetox corpus.
+Original my computer is broken and my phone too!! wtf is this devil sh*t???
+Paraphrases My computer is broken and my phone too! So disappointed!
+My computer is broken and my phone too, what is this?
+Both my computer and phone are broken.
+Original sh*t is crazy around here.
+Paraphrases It is crazy around here.
+Stuff is crazy around here.
+Something is crazy around here.
+Original delete the page and shut up
+Paraphrases Delete the page and stay silent.
+please delete the page
+delete the page
+Original massive and sustained public pressure is the only way to get these
+b*stards to act.
+Paraphrases Massive and sustained public pressure is the only way to get them to act.
+massive and sustained preasure is the only way to get these people to act
+Original f*ck you taking credit for some sh*t i wanted to do
+Paraphrases You are taking credit for something I wanted to do
+You’re taking credit fro something i wanted to do.
+Original you gotta admit that was f*ckin hilarious though!
+Paraphrases you got to admit that was very hilarious though!
+you gotta admit that was hilarious though!
+Original as an american who thought it was a d*ck joke , thanks.
+Paraphrases as an american who thought it was a joke, thanks
+As an American who thought it was a bad joke, thanks
+Original for whatever reason , your comment just blew my f*cking mind.
+Paraphrases For whatever reason, your comment just blew my mind.
+for whatever reason, your comment just amazes me.
+Original what exactly is your f*cking problem here?
+Paraphrases What exactly is your problem here?
+Original who the f*ck are you gona call when that happens.
+Paraphrases Who are you gonna call when that happens?
+Original some idiots no longer believe in national sovereignty.
+Paraphrases Some people no longer believe in national sovereignty
+Original i was f*ckin bored as sh*t
+Paraphrases I was bored6816B Outputs of Detoxiﬁcation Models
+Table 8 contains the outputs of four well-performing detoxiﬁcation models: Delete model which determin-
+istically removes swear words, unsupervised ParaGeDi and CondBERT models (Dale et al., 2021), and
+BART model ﬁne-tuned on our parallel ParaDetox dataset.
+Original at least one party gives a cr*p about humans after birth.
+Delete at least one party gives a about humans after birth.
+CondBERT at least one party gives a whole story about humans after birth.
+ParaGeDi At the same time, at least one party doesn’t believe in human life
+after birth
+BART-ParaDetox at least one party cares about humans after birth.
+Original gosh, discrimination is such a b*tch!
+Delete gosh, discrimination is such a!
+CondBERT gosh, discrimination is such a thing!
+ParaGeDi Gosh, discrimination is a bit of a bad thing!
+BART-ParaDetox Discrimination is bad!
+Original he ll f*ck that up too.
+Delete he ll that up too.
+CondBERT he ll ’ ve picked that up too.
+ParaGeDi He’ll get that up.
+BART-ParaDetox He will mess that up too.
+Original whats the title of this report, no sh*t?
+Delete whats the title of this report, no?
+CondBERT whats the title of this report , no stuff?
+ParaGeDi What’s the name of the report, no?
+BART-ParaDetox whats the title of this report?
+Original because its f*cking reposted so much
+Delete because its reposted so much
+CondBERT because its parents have been reposted so much
+ParaGeDi Because it’d been so much re-enacted.
+BART-ParaDetox Because it reposted so much.
+Original to suggest otherwise is stupidly inﬂammatory.
+Delete to suggest otherwise is stupidly inﬂammatory.
+CondBERT to suggest otherwise is not necessarily inﬂammatory.
+ParaGeDi Saying otherwise would be a bad thing.
+BART-ParaDetox To suggest otherwise is inappropriate.
+Original he hasn t done sh*t for palestine.
+Delete he hasn t done for palestine.
+CondBERT he hasn t done much else for palestine.
+ParaGeDi He hasn’t done it for palestine.
+BART-ParaDetox He hasn’t done anything for palestine.6817C Non-detoxiﬁable Samples
+Table 9 gives examples of sentences which could not be detoxiﬁed by any of workers who tried to do that.
+We group the samples by the reasons of the inability to detoxify that the workers indicated.
+Unclear content
+she is! f*ck’s sake stross! *ﬁghts against you*
+yourwhy bring in the red herring of extramarital sex, getting desperate aj?
+wikibofh f*ck u u f*ckin suck argument is ﬁne u nerd now unblock me.
+you have to be a complete idiot to be supporting the gop ticket this go around.
+wikipedia review and tell the world why you not a grand d*ckhead
+trump will make a fool out of little potato
+dont dumb as in dead dummy.
+justin and his rat pack have an agenda.
+trump was an embarrassment to the u
+that guy knew how to kill commies like nobodys business!
+some stinks cannot be unstunk.
+Toxic content
+f*ck you you mother f*cking a*s cracker dildo licking piece of f*cking a*s sh*t!
+if by christian you mean hypocrites.
+lying anti american muslim mouthpiece.
+they simply are too stupid to do otherwise.
+xman is either an idiot or a psychopath or maybe both.
+youre the insigniﬁcant f*ck mother f*cker!
+hello, you sexy little lovehole!
+obviously feminists cant be good mothers or wives.
+we are country of losers and abusers.
+are you a troublemaker or just plain stupid or both?
+as anyone with half a brain would do.
+No toxicity
+this is all coming out of our darned pockets, and i am not conﬁdent!
+you people complete lack morals.
+this idea seems to be a rather ignorant one.
+youre implying, therefore, that women ought to stay away from all black men.
+blaming everyone else for the hole that you dug is pathetic.
+killing the innocent nearly born should be the very last choice.
+ignorant to me means without knowledge.
+how can students of colour be expected to learn in such a toxic environment of white supremacy?
+the problem is that their management is so ridiculously incompetent.
+trump will keep on committing political suicide.
+making stupid remarks is useless, do some research and then make a comment.6818

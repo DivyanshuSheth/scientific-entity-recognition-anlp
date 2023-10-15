@@ -1,1 +1,899 @@
-738 Proceedings of the 2022 Conference of the North American Chapter of the Association for Computational Linguistics : Human Language Technologies , pages 738 753 July 10 - 15 , 2022 © 2022 Association for Computational Linguistics 739 740 741 742 743 744 745 746 747 748 749 750 751 752 753 
+
+Ramya Ramakrishnan
+ASAPP
+rramakrishnan@asapp.comHashan Buddhika Narangodage
+ASAPP
+hnarangodage@asapp.com
+Mauro Schilman
+ASAPP
+mschilman@asapp.comKilian Q. Weinberger
+ASAPP, Cornell
+kweinberger@asapp.comRyan McDonald
+ASAPP
+rmcdonald@asapp.com
+Abstract
+Current approaches for controlling dialogue
+response generation are primarily focused on
+high-level attributes like style, sentiment, or
+topic. In this work, we focus on constrained
+long-term dialogue generation, which involves
+more ﬁne-grained control and requires a given
+set of control words to appear in generated re-
+sponses. This setting requires a model to not
+only consider the generation of these control
+words in the immediate context, but also pro-
+duce utterances that will encourage the genera-
+tion of the words at some time in the (possibly
+distant) future. We deﬁne the problem of con-
+strained long-term control for dialogue genera-
+tion, identify gaps in current methods for eval-
+uation, and propose new metrics that better
+measure long-term control. We also propose a
+retrieval-augmented method that improves per-
+formance of long-term controlled generation
+via logit modiﬁcation techniques. We show
+through experiments on three task-oriented di-
+alogue datasets that our metrics better assess
+dialogue control relative to current alternatives
+and that our method outperforms state-of-the-
+art constrained generation baselines.
+1 Introduction
+Despite recent advances in dialogue systems (Ser-
+ban et al., 2016; Ham et al., 2020), controlling di-
+alogue generation remains a signiﬁcant challenge.
+Response generation in dialogue can be controlled
+towards different topics and styles (Madotto et al.,
+2020) or towards a set of hard constraints (i.e., lex-
+ical control words need to appear in the generated
+text) (Sha, 2020). We focus on the hard constraint
+setting, also known as constrained generation, as
+this provides a more ﬁne-grained method of con-
+trolling dialogues.
+For example, consider a customer service use
+case (Figure 1), in which an agent speaks to aFigure 1: Examples of short vs. long-term control for
+dialogue generation. (Left) In short-term control, many
+control words are generated initially, but the conversa-
+tion is led away from the desired future. (Right) In
+long-term control, responses are generated with the fu-
+ture in mind with words generated at natural points in
+the conversation.
+customer about an issue. The goal is to gener-
+ate a given set of control words in the responses
+of one of the speakers (agent or customer). Naive
+constrained generation approaches (Pascual et al.,
+2020; Miao et al., 2019) use methods like beam
+search and stochastic search to force the genera-
+tion of these control words for short-term control,
+where control words need to appear in a single ut-
+terance or phrase. Because they do not consider the
+future, these approaches may generate the words
+all at once in a single response or not generate them
+at natural places in the conversation (Figure 1, left).
+The above example highlights the challenges
+of applying existing constrained generation meth-
+ods to long-term dialogue generation. First, since
+another speaker is involved in the dialogue, the
+model does not have full control of the generated
+text. Instead, the model can only control the dia-
+logue indirectly. Second, dialogues can be long and738thus, controlling utterances several time steps into
+the future is non-trivial. In this work, we propose
+the problem of long-term dialogue control, where
+the goal is to generate a set of control words over
+many utterances in a dialogue, which requires ap-
+propriately timing the generation of control words
+(Figure 1, right). To the best of our knowledge, we
+are the ﬁrst work to constrain long-term dialogue
+generation through lexical control words.
+We begin by highlighting challenges with evalua-
+tion for this problem. Successful long-term control
+of dialogue can be difﬁcult to measure. We de-
+scribe current evaluation metrics for constrained
+text generation and show that these metrics can be
+gamed by generating all or many control words
+early in the conversation. To resolve this and mea-
+sure how natural the control is, we propose a new
+set of metrics: long-term success rate, which mea-
+sures the percentage of control words in simulated
+roll-outs of the conversation, and precision, recall,
+and F1-score, which compare control words in gen-
+erated responses to those in reference responses
+from a historical dataset. The second set of met-
+rics speciﬁcally help to capture whether the control
+words are generated at the right time.
+Next, we propose a novel method to explicitly
+address long-term control. Prior methods are un-
+able to handle this task as the number of possible
+future sequences is exponential. To alleviate this is-
+sue, we retrieve similar conversations from training
+and condition on them during generation. We ﬁrst
+identify similar neighbors using a kNN-based ap-
+proach and then guide the language model towards
+generating similar responses, inspired by plug-and-
+play methods (Madotto et al., 2021; Dathathri et al.,
+2019; Pascual et al., 2020). The motivation for this
+is that retrieved conversations guide the model to
+generate the control words at more natural points
+in the conversation.
+We conduct experiments on multiple task-
+oriented dialogue datasets and show that our
+method outperforms several constrained text gen-
+eration baselines on automated evaluation metrics
+as well as human evaluation. Speciﬁcally, we are
+able to generate 30-40% more control words on
+long-term success rate compared with baselines,
+while preserving ﬂuency (scores of ≥4.3 out of 5),
+as measured by human evaluation.2 Related work
+Controllable text generation. Prior work has
+developed many methods for controllable text gen-
+eration. These approaches can be categorized into
+three general areas. The ﬁrst is altering decoding
+strategies (Grover et al., 2019; Deng et al., 2020),
+in which the sampling distribution can be modiﬁed
+(Ghazvininejad et al., 2017; Baheti et al., 2018)
+or hidden states in the models can be changed
+(Gu et al., 2017). The second area involves in-
+cluding prompts to guide text generation (Ribeiro
+et al., 2018; Jiang et al., 2020; Li and Liang, 2021),
+for example through universal trigger tokens (Wal-
+lace et al., 2019; Shin et al., 2020). Finally, ﬁne-
+tuning can be used to guide language model outputs
+through the use of a latent variable (Fan et al., 2018;
+Peng et al., 2018) or through CTRL codes (Keskar
+et al., 2019). Our work differs from the broad area
+of controllable language generation in that 1) we re-
+quire more ﬁne-grained generation through lexical
+control words and 2) we focus on dialogue settings
+where another speaker can also change the course
+of the conversation.
+Constrained text generation. The key differ-
+ence between constrained text generation and con-
+trollable text generation is the focus on hard rather
+than soft constraints. Typically, there are two gen-
+eral methods for constrained generation: beam
+search (Hokamp and Liu, 2017; Post and Vilar,
+2018; Pascual et al., 2020) and stochastic search
+(Miao et al., 2019; Sha, 2020). Directed Beam
+Search (DBS) (Pascual et al., 2020), modiﬁes lan-
+guage model logits to encourage generation of a
+speciﬁed set of “guide words", or control words.
+A method based on stochastic search (Miao et al.,
+2019) uses Metropolis-Hastings with the constraint
+of keyword inclusion. These approaches do not ap-
+ply to the dialogue setting where these constraints
+need to hold for many utterances into the future.
+Dialogue response generation. While many
+works develop methods for unconstrained response
+generation (Budzianowski and Vuli ´c, 2019; Peng
+et al., 2020; Cao et al., 2020; Hosseini-Asl et al.,
+2020; Yavuz et al., 2019), there is a subset of work
+more related to our problem focused on control-
+lingresponse generation. In one work, transformer
+models are ﬁne-tuned for dialogue through modiﬁ-
+cations of the inputs, for example by adding infor-
+mation about the user’s persona (Wolf et al., 2019).
+The work of Lippe et al. (2020) generates utter-739ances by paraphrasing templated responses. Sev-
+eral works control generation through exemplar-
+guided methods (Cai et al., 2020; Gupta et al.,
+2020), which is a different setting from ours since
+we want to guide generation based on a set of con-
+trol words rather than through a prototype. One
+work (Xu et al., 2019) controls response generation
+through meta-words that include desired attributes
+of the response (e.g., response length and speci-
+ﬁcity). Another work controls response generation
+through control words by adding inductive biases
+into training to guide generation (Wu et al., 2020).
+However, this work only controls generation for
+a single response, rather than controlling several
+utterances into the future. The closest work to ours
+is work by (Tang et al., 2019), which proposes a
+similar problem of long-term control towards a tar-
+get subject. While the setup is similar, we learn
+to constrain dialogue responses given a set of con-
+trol words rather than a target attribute, which also
+results in a different approach.
+Retrieval-augmented generation. Another re-
+lated area is retrieval-augmented language genera-
+tion, which inspires our approach of using retrieval
+to control dialogue generation. REALM (Guu et al.,
+2020) uses a latent knowledge retriever to identify
+relevant documents and backpropagates through
+this retrieval step. In another work (Fan et al.,
+2020), relevant information is retrieved from an ex-
+ternal knowledge base to guide dialogue generation.
+Several works by Khandelwal et al leverage nearest
+neighbor approaches to improve performance with
+no additional training (Khandelwal et al., 2019,
+2020). While these works condition on retrieval for
+uncontrolled generation, we leverage ideas from
+this space speciﬁcally for control in dialogue.
+3 Problem deﬁnition
+We ﬁrst deﬁne the problem of long-term con-
+strained dialogue generation. A conversation X=
+{s,u,s,u,...,s,u}is deﬁned as a list of ut-
+terances generated by two speakers: the system
+sthat we are trying to control and the user u,
+which we don’t have explicit control over. Tde-
+notes the total number of turns in the conversation.
+Given the current dialogue context of a conversa-
+tionx={s,u,...,s,u}up until timestep tand
+a set of control words W={w,w,...,w}, our
+goal is to generate the remaining responses of the
+conversationR={s,...,s}such that
+the control wordsWappear in the future generatedresponses. We consider a scenario in which some-
+one provides a set of control words to be included
+in the conversation without assumptions on their
+order. This means methods need to handle control
+words given in any order.
+We additionally assume access to a historical
+dataset of conversations D={x},i∈[1,...,N ]
+and a ﬁne-tuned language model Mon this dataset.
+We can leverage these inputs in order to control
+future responsesR. We focus on the plug-
+and-play setting (Pascual et al., 2020), in which
+approaches simply guide the given language model
+Mtowards generating the control words without
+any additional re-training.
+4 Proposed metrics for evaluation
+Directly evaluating the generated responses in
+terms of prior evaluation methods can lead to mis-
+leading results. Previous works on constrained text
+generation (Pascual et al., 2020) have used metrics
+like perplexity to measure ﬂuency and success rate
+to measure the percentage of control words gen-
+erated. However, these metrics are more relevant
+for short-term generation, as they can be gamed
+in settings where the control words would be nat-
+urally distributed across the full conversation. As
+shown in the left-hand side of Figure 1, when sev-
+eral words are forced into the ﬁrst response, the
+conversation may move away from the desired fu-
+ture and control word generation could be inap-
+propriately timed. To better evaluate how well the
+model generates the right words at the right time,
+we propose the following new metrics.
+The ﬁrst metric we propose is long-term suc-
+cess rate, which involves simulating conversations
+with a user language model and computing the per-
+centage of generated control words in the system
+responses of these simulated roll-outs. Prior work
+(Ghandeharioun et al., 2019) has used self-play for
+evaluation, but they do not propose roll-outs as a
+way to measure dialogue control.
+Long-term success rate: Our modiﬁed success
+rate metric is computed as the fraction of control
+words generated in a full simulated roll-out of the
+conversation. We compute this as: s=, where
+nis the number of control words that appear in
+all of the future system responses R.
+One limitation of long-term success rate is that it
+doesn’t measure the timing of control words in the
+conversation. So next, we want to evaluate whether
+the methods generate control words at appropriate740
+points in the conversation. To measure this, we
+propose computing precision, recall, and F1-score
+for control words. This particular evaluation is
+not done in simulation. Instead, we consider each
+true system response in the evaluation dataset in
+isolation and generate a response for each, given
+the conversation history up until that point. We
+compute the number of generated control words
+that are correctly predicted, when compared with
+the control words in the ground truth response in
+the same time step .
+For example, on the right side of Figure 1, when
+generating the second customer response (given
+the true conversation history up until then), we
+would count a “correct" prediction for P/R/F1 as
+a response that includes the word “shirt" (in any
+position in the response), as it is a control word
+that appears in the ground truth response in that
+time step. It is true that control words can also
+appear later in the conversation, but this setting
+is already evaluated by long-term success rate in
+simulated rollouts. After counting the number of
+correctly predicted control words for each response
+individually, we aggregate across all responses.
+Precision: Precision is calculated at the corpus-
+level as the number of correctly predicted control
+words over the total number of predicted control
+words (p=).
+Recall: Recall is similarly computed at the
+corpus-level as the number of correctly predicted
+control words over the total number of actual con-
+trol words (r=).
+F1-score: Finally, F1-score combines precision
+and recall into one metric ( f1 =).These metrics penalize models that condense
+all control words into one response. Instead, we
+want the models to naturally generate control words
+when they are relevant. These metrics evaluate
+whether control words are generated at the appro-
+priate position in a conversation. To introduce
+some ﬂexibility, an extension could be to compute
+a soft version of precision, recall, and F1-score that
+scores utterances based on whether control words
+appear within N utterances of the ground truth po-
+sition.
+Finally, we use human evaluation to evaluate
+how realistic and relevant the generated responses
+are. Speciﬁcally, we evaluate each conversation
+on ﬂuency, consistency of control word generation,
+relevance, coherence, and diversity.
+5 Retrieval-based Control
+We now present our proposed approach for con-
+strained dialogue generation. Inspired by work in
+retrieval-augmented generation (Guu et al., 2020;
+Fan et al., 2020), we retrieve similar pasts based on
+the current context xand use their futures to con-
+trol dialogue response generation. The key insight
+here is that by looking at how people have used
+these control words in similar conversations in the
+past, we can bias the models towards more natural
+dialogues. In other words, we use futures of the
+past conversations to guide the current response
+generation. To better motivate the use of retrieval
+in our problem, consider the example conversation
+in Figure 1. The agent asks which item the cus-
+tomer wants to return, and there are many possible
+answers (e.g., “I want my pant refunded.", “I want
+to return gloves I bought yesterday."). Keyword-741
+based retrieval will surface a response about shirts,
+a control word, which encourages the model to gen-
+erate a natural response with that word: “It’s a Nike
+shirt I bought a week ago."
+We present two variants of our retrieval-inspired
+Futures of the Past (FOP) approach: 1) FOP-
+retrieval: we retrieve the desired future from histor-
+ical data and simply use the retrieved utterance as
+the generated response and 2) FOP-guided: we use
+the utterance from FOP-retrieval as a reference sen-
+tence to guide the model towards similar responses.
+The simple variant of our approach, FOP-
+retrieval, is shown in Figure 2. It focuses on identi-
+fying what the model should say now that will lead
+to the control words in the future. The reason we
+need to determine what to say now is that control
+words in our problem are distributed across a long
+dialogue conversation. One possible approach to
+generate the current response is to run many roll-
+outs of the conversation and select the response that
+leads to the highest number of control words. How-
+ever, this brute force approach is computationally
+expensive and will not be effective for rich, diverse
+conversations. Instead, we leverage historical con-
+versation data to identify the most relevant futures
+given the current context and control words. The
+retrieved futures can guide the model towards what
+to say now that will lead to the desired future. The
+guided variant, shown in Figure 3, involves guiding
+the language model towards generating a response
+similar to the retrieved utterance.
+Our proposed approaches address some of the
+challenges of long-term control for dialogue gener-
+ation. First, another speaker can change the course
+of the conversation, which is why we retrieve a
+new set of similar past contexts at each time step
+to re-align with the current context. Second, to
+control responses many steps into the future, weretrieve historical conversations with the desired
+future (high percentage of control words) and gen-
+tly nudge the conversation in that direction, thus
+controlling not only the current utterance but also
+the future of the conversation.
+5.1 Retrieval Futures of the Past
+(FOP-retrieval)
+For the retrieval component, the goal is to select
+futures that have relevant past contexts as well as
+desired futures based on the control words. To
+do this, we employ a multi-step approach. First,
+we split each conversation xin the historical
+datasetDinto a set of past-future conversation
+pairsx={(p,f)}. We encode the current
+contextM(x)and each past conversation M(p)
+using the language model M. Then, we use kNN
+search based on FAISS, a library for fast nearest
+neighbor retrieval (Johnson et al., 2019), to identify
+ksimilar pasts from the historical data that closely
+match the current context x. We then ﬁlter the
+futures of these past conversations based on which
+have the highest percentage of control words.
+KNN=faiss (M(x),M(p),k)
+f=argmax ([count (f,W)])
+˜s=f[0],f={s,u,...,s,u}
+In the above equations, the count function counts
+the number of control words Win the future f.
+The reference response ˜sis simply the ﬁrst ut-
+terance of the retrieved future.
+5.2 Guided Futures of the Past (FOP-guided)
+Now that we have a candidate reference response
+˜s, we can guide the language model towards
+generating a similar response. To do this, we mod-
+ify the logits from the language model to encourage742generation of the control words or similar words.
+We start with the ﬁrst word win˜sand up-
+weight logits in a way similar to DBS (Pascual
+et al., 2020) using similarity of GloVe vector em-
+beddings:
+l=l+λ·min(0,cos(γ(t),γ(w))),
+whereγrepresents GloVe embeddings, tis the
+ith token of the language model’s vocabulary V,
+wis the current reference word, and λis a hyper-
+parameter specifying how much weight to put on
+generating words similar to w.
+With this approach, we observed that sometimes
+the model got stuck on the ﬁrst word and never
+moved on to later words. To enable more ﬂexible
+control, instead of requiring every word to be gener-
+ated before moving on to the next word, we include
+a window of size qand increase the logits of each
+word in the window, with a decay multiplier of,
+i∈q. If any of the words in the window have been
+generated, the window is shifted beginning from
+the generated word with the same window size of
+q. The process repeats until the full response has
+been generated.
+The decay multiplier is used to encourage the
+model to generate earlier words in the reference re-
+sponse and not skip words unless it’s highly likely.
+We generate Nsuch responses using this method
+and include an additional ranking step to select
+the best one. We ﬁrst sort by the number of con-
+trol words in the generated response. If multiple
+responses generate the highest number of control
+words, we sort by the loss from the model and
+select the response with the lowest loss l:
+˜R={M(l)|j∈[1,...,N ]}
+s=max([count (r,W)])
+ˆR={r|count (r,W) =s,r∈˜R}
+r=argmin ([loss (r)]),
+where ˜Ris the set of Ngenerated responses,
+using a model with logits l. The ﬁnal generated
+responseris selected based on the two-step
+ranking process. None of the other approaches
+include this ranking component.
+6 Experimental setup
+6.1 Task-Oriented Dialogue Datasets
+Our problem and approach are applicable to any
+general dialogue control setting. In our experi-
+ments, we controlled the customer in task-orienteddialogue. This is useful for constructing a customer
+bot that imitates real-life customers. By controlling
+the customer simulator (for example through con-
+trol words), we can develop a training environment
+for coaching customer service agents in a variety of
+diverse situations. For all datasets, we select con-
+trol words from the utterances of the customer by
+selecting the top Mranked words based on tf-idf.
+For some real-world applications, control words
+can also be manually selected by a designer.
+MultiWoz 2.3: The ﬁrst dataset we evaluate on
+is MultiWoz 2.3 (Han et al., 2020), which is widely
+used in the dialogue community. The dataset has
+over 10K dialogues and 5 domains.
+TaskMaster-3: The second is another commonly
+used task-oriented dialogue dataset TaskMaster-
+3 (Byrne et al., 2019). This dataset has 23,757
+dialogues in the movie ticketing domain.
+Action-Based Conversations Dataset (ABCD):
+The ﬁnal dataset (Chen et al., 2021) includes a set
+of agent-customer conversations focused on solv-
+ing customer problems. The dataset contains over
+10k dialogues and is also focused on one domain.
+6.2 Baselines
+W:The ﬁrst baseline is a naive approach that
+outputs all control words in the ﬁrst response of the
+conversation and nothing afterwards, which means
+words are not appropriately timed.
+Fine-tuned: This approach simply generates re-
+sponses using the ﬁne-tuned language model M.
+Prompt: This method is based on prompting ap-
+proaches (Li and Liang, 2021; Ribeiro et al., 2018;
+Jiang et al., 2020; Madotto et al., 2021). Because
+we focus on the plug-and-play setting, we simply
+append control words to the beginning of the con-
+text and generate using this modiﬁed input.
+Directed Beam Search (DBS): This is a con-
+strained text generation approach (Pascual et al.,
+2020), in which keywords are generated using logit
+modiﬁcation and beam search. It is not optimized
+for long-term control and is highly dependent on
+the ordering of control words.
+Constrained Sentence Generation by
+Metropolis-Hastings Sampling (CGMH):
+This method (Miao et al., 2019) is based on
+stochastic search methods that insert, delete, and
+replace words in a sentence with the requirement743
+that control words need to be present. It is neither
+optimized for long-term generation of control
+words nor forward generation and is particularly
+susceptible to aggressively generating all control
+words in a single response. It was also originally
+applied to the task of keyword-to-phrase genera-
+tion so we adapted it to dialogue generation by
+prompting the language model with the dialogue
+context and also replaced a bidirectional RNN
+model with our transformer-based model.
+7 Results
+7.1 Aggregated Results
+We begin by presenting a top-level overview of our
+main baselines and methods because each evalu-
+ation metric captures a different aspect of perfor-
+mance. Table 1 includes averaged scores across
+tasks, parameters, and/or metrics for the main re-
+sults in Tables 2 and 3 and Figure 4. These include
+results of our two proposed automatic metrics of
+long-term success rate and control word F1-score
+(Section 4) as well as human-evaluated quality
+metrics (Section 7.4). In subsequent sections, we
+will examine each of these results more closely.
+The key insight in these aggregated results is
+that while FOP-based methods are not always the
+best-performing system for each metric, they are
+consistently the most reliable. Speciﬁcally, CGMH
+has high success rate, but lowest F1 and human
+scores. Prompt, on the other hand has the highest
+human evaluation scores but the worst success rate.
+This is not too surprising. It is, after all, an unmod-
+iﬁed language model, so it should be ﬂuent and on
+topic when viewed by a human. However, given
+its extremely low success rate, it is not viable for
+long-form controlled generation. In contrast, FOP-
+based methods are either the top 1 or 2 performing
+system across all summary statistics.
+7.2 Long-term Success Rate
+The ﬁrst analysis involves comparing all methods
+on long-term success rate, which measures the per-
+centage of control words in generated simulated
+roll-outs. To do this, we train a separate user model
+with the training dataset. We perform a roll-out per
+test example with 10 generated system responses
+and 10 generated user responses and compute the
+percentage of control words in the generated sys-
+tem responses. When counting the number of gen-
+erated words, we compare word stems.
+Figure 4 shows the performance of all ap-
+proaches when varying the number of control
+words. Both of our approach variants (FOP-
+retrieval and FOP-guided) have higher success rates
+than Prompt and DBS. Prompt is the method with
+the lowest performance because including the con-
+trol words at the beginning without any re-training
+doesn’t provide the model with sufﬁcient informa-
+tion to generate the control words. DBS does well
+when there is only a few control words but strug-
+gles as the number of control words increases. This
+is because DBS is not able to ﬁlter out words that
+are irrelevant at the current time step and instead
+simply tries to generate the words one by one. This
+method is also unable to handle words when not in
+the exact order it should appear.
+FOP-retrieval, in some cases, has higher per-
+formance than FOP-guided because it will get all
+keywords in the retrieved response correct. FOP-
+guided can choose to ignore these keywords if
+the LM overrides it. So, we would expect FOP-
+retrieval to do better on this metric, compared to744
+FOP-guided. We also include an ablation experi-
+ment in Appendix A.1.1 to analyze the effect of re-
+moving the sliding window in FOP-guided. CGMH
+seems to do well on long-term success rate, but
+human evaluation (Section 7.4) results reveal that
+the generated responses are not very ﬂuent. This
+method is one that can game previous evaluation
+metrics, as it tends to condense many or all control
+words into one utterance. Thus, these approaches
+are better evaluated through the next set of metrics:
+precision, recall, and F1-score.
+7.3 Control Word P/R/F1
+We now measure how well the approaches generate
+control words at the right time using precision, re-
+call, and F1-score. Table 2 compares these metrics
+on all datasets. We see that, on average across all
+datasets, FOP-guided gets higher F1-scores com-
+pared with baseline methods. This is because by re-
+trieving similar futures, we are able to guide the lan-
+guage model towards generating control words atappropriate points in the conversation. FOP-guided
+does worse on MultiWoz because the dataset con-
+tains more domains and has much more variety in
+the conversations. This diversity makes it hard for
+retrieval-based methods to successfully ﬁnd similar
+conversations to guide generation.
+The naive approach Wgets low recall and
+precision since it only outputs the control words at
+the ﬁrst utterance. Similar to W, CGMH gets
+low F1-scores because it generates many control
+words early in the conversation rather than at a
+natural time. DBS also does not do well on these
+evaluation metrics as it is highly affected by the
+order of control words, while our method is able
+to retrieve similar futures to generate appropriate
+words at the current time step. Finally, Prompt
+does well on precision but not on recall as it’s not
+explicitly guided to generate the control words.
+7.4 Human Evaluation
+Finally, we rate all methods on human evaluation.
+We follow recent work on good evaluation practices
+for text generation approaches (Karpinska et al.,
+2021). Further details are in Appendix A.4.
+Fluency : Is the response ﬂuent and grammatical?
+Control consistency :When control words appear
+in the response, are they appropriately used?
+Relevance : Is the response a natural reply to the
+previous utterance in the conversation?
+Coherence : Are all of the system responses in the
+conversation coherent with respect to each other?
+Diversity : Is there diversity in the system re-
+sponses of the conversation?
+Two raters annotated each example, and agree-
+ment was measured using Krippendorff’s alpha for
+each of the 5 metrics (0.84, 0.74, 0.82, 0.76, 0.67).
+We present results in Table 3 for all ﬁve approaches
+as well as for the ground truth conversation. We745focus on comparisons between DBS, CGMH, and
+the FOP methods, as these were the methods that
+performed comparably on control metrics (at least
+40% on long-term success rate) and thus are rea-
+sonable baselines for long-term control.
+CGMH consistently gets low scores across all
+metrics. Compared to DBS, FOP-guided performs
+similarly on ﬂuency, relevance, and coherence but
+much better on control-consistency and diversity,
+which could be because retrieval helps decide nat-
+urally what to say throughout the conversation.
+FOP-guided is at least as good as FOP-retrieval
+on relevance, coherence, and diversity, while only
+slightly worse on ﬂuency and control-consistency.
+This is because FOP-guided uses the context and
+retrieved sentence to generate a response, while
+FOP-retrieval selects an already ﬂuent historical
+response. Overall, human evaluation results high-
+light that both of our proposed methods generate
+realistic, coherent text, while also generating a high
+percentage of control words.
+8 Conclusion
+In this paper, we propose the problem of con-
+strained dialogue generation, which involves con-
+trolling dialogue responses such that a set of con-
+trol words appear at some point in the future of
+the conversation. We propose a new set of metrics
+as well as a novel method that leverages retrieval
+of relevant conversations to control future gener-
+ated responses. We show on three datasets that our
+method outperforms several constrained text gen-
+eration baselines on quantitative metrics as well as
+human evaluation. As far as we are aware, this is
+the ﬁrst work to address the problem of long-term
+control for dialogue generation.
+9 Acknowledgments
+We thank S.R.K Branavan and Derek Chen for their
+insightful feedback. We thank Tianyi Zhang for
+his starting code that we built upon in this work.
+We also want to thank Ethan Elenberg, Felix Wu,
+Clemens Rosenbaum, Sam Altschul, David Sontag,
+and the rest of the ASAPP research team for all of
+their feedback in making this work stronger.
+References746747748A Appendix
+A.1 Additional results
+A.1.1 Ablation of window in FOP-guided
+We ran ablation experiments comparing FOP-
+guided with a version without the sliding window.
+Table 4 includes the results for all of the baselines
+on the most difﬁcult setting for ABCD (9 control
+words).
+Our approach FOP-guided gets more than 10%
+more control words in simulated rollouts, compared
+with FOP-guided without the window approach,
+which highlights the usefulness of the sliding win-
+dow component. We also compare the two FOP-
+guided variants when varying the number of con-
+trol words and see that FOP-guided consistently
+performs better (Figure 5).
+A.2 Example simulations on ABCD
+In Tables 5, 6, 7, 8, and 9, we show some example
+simulations on the ABCD dataset using a trained
+agent model for each of the methods.A.3 Experiment details
+We did a hyperparameter search over the following
+lambda values{0,5,10,15,20,25}for all datasets.
+On both ABCD and MultiWoz, the best hyperpa-
+rameter for FOP-guided was λ= 15 and for DBS,
+it wasλ= 20 . For TaskMaster, the best hyper-
+parameter for FOP-guided was λ= 10 and for
+DBS, it was λ= 15 . CGMH was run with the
+recommended hyperparameters from the authors.
+For all datasets, we used the number of candidate
+generations for FOP-guided as N= 10 and the
+window size for logit modiﬁcation as q= 4. The
+number of examples used for multiple splits of
+each dataset is as follows: For the ABCD dataset,
+we used 8034 conversations for training and 1004
+conversations each for dev and test splits. In the
+Multiwoz dataset, we used 8438, 1000, 1000 as
+train, dev and test splits respectively. Finally, for
+the Taskmaster-3 dataset, we used 16629, 3564,
+3564 as train, dev and test datasets respectively.
+We used the GPT2-medium model from the
+hugging-face repository as the pre-trained language
+model for all of our experiments. This model con-
+tains 345M parameters.
+For all our experiments, we used a p3.2xlarge
+EC2 instance. This instance has one GPU with
+16GB capacity and 61GB of RAM. Out of all of
+our experiments, simulated long-term success rate
+experiments took the most amount of GPU hours to
+run. Altogether it took somewhere between 24-36
+GPU hours to complete all the experiments.
+A.4 Human evaluation setting details
+We recruited four trained annotators to evaluate
+generated conversations on the following ﬁve met-
+rics, each on a scale of 1 to 5. We split up the
+examples across the four annotators such that each
+example was judged by two annotators. We in-
+cluded the ground truth conversation as an addi-
+tional baseline to act as an upper bound. To ensure
+the ratings would be high-quality, we provided a
+rubric, included below, for each metric with exam-
+ples for different ratings, did an initial pilot for a
+few sample conversations, and provided a reference
+sheet to help calibrate the ratings across annotators.
+A.4.1 Rubric
+Evaluate generated conversations on a few metrics,
+each on a scale of 1 to 5:
+[utterance-level] Fluency: Is this response ﬂu-
+ent and grammatical?749•1: Generated responses do not make any sense,
+English-wise and grammar-wise, which could
+include misspelled words, no transition words,
+limited punctuation, skipped words, etc (e.g.,
+“the ﬁgh help order”)
+•3: Generated responses have some good En-
+glish so you can make out what is being said
+but it’s not well-formed sentences (e.g., “will
+you help order”)
+•5: Generated responses have perfect English
+and perfect grammar. Customers can use
+lower-case text as less-formal style so ﬁrst-
+letter capitalization is not necessary (e.g., “can
+you help me refund my order?”)
+[utterance-level] Relevance: Is this response a
+natural reply to the previous utterance in the
+conversation?
+•1: The generated response is not at all relevant
+to the conversation context/history (e.g., when
+asked for account id: “I can’t get my promo
+code”)
+•3: The generated response is somewhat rel-
+evant to the conversation context/history but
+not the best ﬁt (e.g., when asked for account
+id: “No”)
+•5: The generated response is perfectly rele-
+vant and a great response to the conversation
+context/history (e.g., when asked for account
+id: “Account ID: 3425435”)
+[utterance-level] Control-consistency: If con-
+trol words appear in this response, are they ap-
+propriately used?
+•1: When used, the control words (which are
+uppercased) make no sense in the generated
+responses. They are fully forced into the re-
+sponses (e.g., “TODAY account id: 435650”)
+•3: When used, the control words (which are
+uppercased) make some sense in the gener-
+ated responses but are not super smooth (e.g.,
+“I need help with my order, can you help TO-
+DAY?“)
+•5: When used, the control words (which are
+uppercased) are perfectly and naturally used
+in the generated responses (e.g., “TODAY , I
+want to buy a shirt. Can you help me?”)[conversation-level] Diversity: Is there diver-
+sity in the customer responses of the conversa-
+tion?
+•1: Almost all of the responses are repetitive
+and have no diversity (e.g., “ok” “ok” “ok”
+“thanks”)
+•3: Some of the generated responses provide
+diversity while many do not (e.g., “I want to
+buy a shirt” “can you help me with this?” “ok”
+“thanks”)
+•5: All of the generated responses are diverse
+and provide a variety of interesting words
+through the conversation. The customer can
+still say ok and thanks but it shouldn’t happen
+all the time and has to be appropriate for that
+point in the conversation (e.g., “I want to buy
+a shirt” “can you help me with this?” “ok sure”
+“thank you very much for your help!”)
+[conversation-level] Coherence: Are all of the
+customer responses in the conversation coher-
+ent with respect to each other?
+•1: All of the responses have very little rela-
+tion when seen together (e.g., “I want to buy
+a shirt”, “can you help me with my promo
+code”, “my subscription expired”)
+•3: Some of the generated responses in a con-
+versation make sense together and some don’t
+(e.g., “I want to buy a shirt” “I have a promo
+code for buying this shirt” “my subscription
+expired”)
+•5: All generated responses make complete
+sense together (e.g., “I want to buy a shirt”,
+“I have a promo code for buying this shirt”,
+“thank you for helping me with this pur-
+chase!”)750FOP-guided
+Control words to generate: valid credit make minute try card purchase trying worked
+Speaker Utterance
+AGENT Hello, thank you for contacting AcmeCorp, how may I help you today?
+CUSTOMER Hi I was trying tomake apurchase but for some reason my credit card keeps
+getting rejected
+AGENT I would happy to help.
+CUSTOMER I got an email from you guys about a great sale and it listed this code and it said
+it was invalid
+AGENT Lets try a few things. First can you check the expiration date on your card.
+CUSTOMER No its valid thats why I am confused.
+AGENT Can you try to re-enter the card information one more time?
+CUSTOMER Ok just a minute please
+AGENT Alright, let me know if that helps.
+CUSTOMER Ok I did its s ordering right now. That worked and it says it is correct.
+AGENT Great, is there anything else I can help you with today? Is there anything else?
+CUSTOMER That is all I needed thanks
+AGENT Your welcome. Thank you for contacting us. Have a great day.
+CUSTOMER you too
+FOP-retrieval
+Control words to generate: valid credit make minute try card purchase trying worked
+Speaker Utterance
+AGENT Hello, thank you for contacting AcmeCorp, how may I help you today?
+CUSTOMER Hi! I was trying tomake apurchase but for some reason my credit card
+keeps getting rejected
+AGENT I would happy to help. Lets see if we can troubleshoot this issue.
+CUSTOMER ok let me know what i should try
+AGENT Lets try to make sure your card is not expired.
+CUSTOMER no. its valid . Thats why I am confused
+AGENT First can you try to log out and log back in.
+CUSTOMER Ok let me give that a shot.
+AGENT Okay, next can you check the expiration date on your card.
+CUSTOMER Ok hang on one minute let me trythat
+AGENT No problem.
+CUSTOMER Tried that. It didn’t work either
+AGENT Can you try to check the expiration on your card?
+CUSTOMER Let me trythat
+AGENT Alright.
+CUSTOMER Well that kinda helped. I do not know why751DBS
+Control words to generate: valid credit make minute try card purchase trying worked
+Speaker Utterance
+AGENT Hello, thank you for contacting AcmeCorp, how may I help you today?
+CUSTOMER I would like to know if there is any reasonable way for valid ating an order?
+AGENT I would happy to look into this for you.
+CUSTOMER I already got a credit for a return and would like to correct it.
+AGENT May I have your full name or account id please?
+CUSTOMER Crystal Minh
+AGENT Thank you Crystal.
+CUSTOMER Can you make sure that this is correct?
+AGENT One moment please.
+CUSTOMER ok
+AGENT What is your username, email address, and Order ID?
+CUSTOMER crystalm minute
+AGENT Thanks Crystal. I need to verify your purchase.
+CUSTOMER crystalm minute @email.com
+AGENT Your refund is in progress and you initiated it online.
+CUSTOMER Okay. I will tryit out now.
+CGMH
+Control words to generate: valid credit make minute try card purchase trying worked
+Speaker Utterance
+AGENT Hello, thank you for contacting AcmeCorp, how may I help you today?
+CUSTOMER Myvalid credit card make mepurchase minute wetrytocredit card to
+purchase . Have been trying thisworked
+AGENT I would happy to look into this for you.
+CUSTOMER I was wondering about this method of valid
+AGENT May I have your full name or account id please?
+CUSTOMER sure its a valid
+AGENT Thank you may I please have your full address?
+CUSTOMER 9 Guess valid
+AGENT What method of payment would you like to use?752Prompt
+Control words to generate: valid credit make minute try card purchase trying worked
+Speaker Utterance
+AGENT Hello, thank you for contacting AcmeCorp, how may I help you today?
+CUSTOMER Hi I’m having a problem with my account
+AGENT I would happy to help.
+CUSTOMER Thecredit card keeps getting rejected
+AGENT Lets see if we can try a few things.
+CUSTOMER ok
+AGENT Can you try entering the information again?
+CUSTOMER Okay I did but it still doesn’t work
+AGENT Next can you try logging out and back in?
+CUSTOMER Ok hold on
+AGENT Let me know if that helps.
+CUSTOMER hey that worked !753

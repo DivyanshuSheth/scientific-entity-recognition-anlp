@@ -1,1 +1,629 @@
-2417 Proceedings of the 60th Annual Meeting of the Association for Computational Linguistics Volume 1 : Long Papers , pages 2417 2426 May 22 - 27 , 2022 c(cid:13)2022 Association for Computational Linguistics 2418 2419 2420 2421 2422 2423 2424 2425 2426 
+
+Liang Ding, Longyue Wang, Shuming Shi, Dacheng Tao, Zhaopeng TuThe University of Sydney,Tencent AI Lab,JD Explore Academyldin3097@sydney.edu.au ,dacheng.tao@gmail.com ,{vinnylywang,shumingshi,zptu}@tencent.com
+Abstract
+Knowledge distillation (KD) is the prelimi-
+nary step for training non-autoregressive trans-
+lation (NAT) models, which eases the training
+of NAT models at the cost of losing impor-
+tant information for translating low-frequency
+words. In this work, we provide an appeal-
+ing alternative for NAT – monolingual KD ,
+which trains NAT student on external mono-
+lingual data with AT teacher trained on the
+original bilingual data. Monolingual KD is
+able to transfer both the knowledge of the
+original bilingual data (implicitly encoded in
+the trained AT teacher model) and that of
+the new monolingual data to the NAT student
+model. Extensive experiments on eight WMT
+benchmarks over two advanced NAT models
+show that monolingual KD consistently out-
+performs the standard KD by improving low-
+frequency word translation, without introduc-
+ing any computational cost. Monolingual KD
+enjoys desirable expandability, which can be
+further enhanced (when given more compu-
+tational budget) by combining with the stan-
+dard KD, a reverse monolingual KD, or en-
+larging the scale of monolingual data. Ex-
+tensive analyses demonstrate that these tech-
+niques can be used together proﬁtably to fur-
+ther recall the useful information lost in the
+standard KD. Encouragingly, combining with
+standard KD, our approach achieves 30.4 and
+34.1 BLEU points on the WMT14 English-
+German and German-English datasets, respec-
+tively. Our code and trained models are
+freely available at https://github.com/
+alphadl/RLFW-NAT.mono .
+1 Introduction
+Non-autoregressive translation (NAT, Gu et al.
+2018) has been proposed to improve the decoding
+efﬁciency by predicting all tokens independentlyand simultaneously. However, the independence as-
+sumption prevents a model from properly capturing
+the highly multimodal distribution of target trans-
+lations. In response to this problem, a sequence-
+level knowledge distillation (KD, Kim and Rush
+2016) becomes the preliminary step for training
+NAT models, which produces more deterministic
+knowledge by reducing the translation modes of
+the bilingual data (Zhou et al., 2020).
+Although the standard KD on original bilingual
+data eases the training of NAT models, distillation
+may lose some important information in the raw
+training data, leading to more errors on predicting
+low-frequency words (Ding et al., 2021c,b). To rem-
+edy this problem, Ding et al. (2021c) augmented
+NAT models the ability to learn lost knowledge
+from the raw bilingual data with an additional ob-
+jective, and Ding et al. (2021b) ﬁrst pre-trained
+NAT models on the raw training data and then ﬁne-
+tuned them on the distilled training data. While
+previous studies mainly focus on recalling the lost
+information during the distillation of the original
+bilingual data, in this work we propose to improve
+the prediction of low-frequency words by redis-
+tributing them in the external monolingual data,
+which has the great potential to complement the
+original bilingual data on the word distribution.
+Speciﬁcally, we leverage the monolingual data
+to perform KD ( monolingual KD , §2.2), and train
+the NAT student model on the distilled monolin-
+gual data (Figure 1b). Monolingual KD provides
+appealing beneﬁts. Firstly, the monolingual data
+and bilingual data in machine translation are gener-
+ally complementary to each other (Zhang and Zong,
+2016; Wu et al., 2019; Zhou and Keung, 2020; Sid-
+dhant et al., 2020; Jiao et al., 2021). Accordingly,
+monolingual KD is able to transfer both the knowl-
+edge of the bilingual data (implicitly encoded in the
+trained teacher model) and that of the monolingual
+data to the NAT student, without introducing addi-
+tional computational cost. Secondly, the amount2417of available monolingual data is several orders of
+magnitude larger than that of bilingual data, which
+offers monolingual KD the potential to further im-
+prove translation performance by exploiting more
+monolingual data.
+Furthermore, we analyze the bilingual links in
+the bilingual and monolingual distilled data from
+two alignment directions (i.e. source-to-target and
+target-to-source). We found that the monolingual
+KD makes low-frequency source words aligned
+with targets more deterministically compared to
+bilingual KD, but both of them fail to align low-
+frequency words from target to source due to in-
+formation loss. Starting from this ﬁnding, we pro-
+pose reverse monolingual KD to recall more align-
+ments for low-frequency target words. We then
+concatenate two kinds of monolingual distilled data
+(bidirectional monolingual KD , §2.3) to maintain
+advantages of deterministic knowledge and low-
+frequency information.
+We validated our approach on several transla-
+tion benchmarks across scales (WMT14 En $De,
+WMT16 Ro$En, WMT17 Zh$En, and WMT19
+En$De) over two advanced NAT models: Mask
+Predict (Ghazvininejad et al., 2019) and Leven-
+shtein (Gu et al., 2019). Experiments demonstrate
+the effectiveness and universality of our approach.
+Speciﬁcally, we have the following ﬁndings:
+•Monolingual KD achieves better performance
+than the standard KD in all cases, and the pro-
+posed bidirectional monolingual KD can fur-
+ther improve performance by a large margin.
+•Monolingual KD enjoys appealing expandabil-
+ity: enlarging the scale of monolingual data
+consistently improves performance until reach-
+ing the bottleneck of model capacity.
+•Monolingual KD is complementary to the stan-
+dard KD, and combining them obtains further
+improvement by alleviating two key issues of
+NAT, i.e., the multimodality problem and the
+low-frequency word translation problem.
+The paper is an early step in exploring monolingual
+KD for NAT, which can narrow the performance
+gap between NAT models and the SOTA AT mod-
+els. We hope the promising effect of monolingual
+KD on NAT can draw more interest and can make
+NAT a common translation framework.2 Redistributing Low-Frequency Words
+2.1 Preliminaries
+Non-Autoregressive Translation Recent years
+have seen a surge of interest in NAT (Gu et al.,
+2018), which can improve the decoding efﬁ-
+ciency by predicting all tokens independently
+and simultaneously. Speciﬁcally, the probabil-
+ity of generating a target sentence yby given
+the source sentence xis computed as p(yjx) =
+p(Tjx;)Qp(yjx;), whereTis the length
+ofy, which is predicted by a separate conditional
+distributionp(). The parameters are trained to
+maximize the likelihood of a set of training exam-
+ples according toL() = arg maxlogp(yjx;).
+The conditional independence assumption prevents
+an NAT model from properly capturing the highly
+multimodal distribution of target translations ( mul-
+timodality problem , Gu et al., 2018). As a result,
+the translation quality of NAT models often lags
+behind that of AT models (Vaswani et al., 2017).
+Standard Knowledge Distillation Knowledge
+distillation is the preliminary step for training NAT
+models by reducing the modes in the original bilin-
+gual data, which makes NAT easily acquire more
+deterministic knowledge and achieve signiﬁcant
+improvement (Zhou et al., 2020). Typically, a
+sequence-level KD (Kim and Rush, 2016) is em-
+ployed for NAT training, as shown in Figure 1a.
+2.2 Monolingual Knowledge Distillation
+Different Distributions of Source Words To
+empirically reveal the difference on word distri-
+bution between bilingual and monolingual data, we
+visualize the overall word distributions, as plotted
+in Figure 2. We can observe the signiﬁcant differ-
+ence between bilingual and monolingual data in the
+low-frequency part, which indicates that the words
+that occur less in the bilingual data are not nec-
+essarily low-frequent in the external monolingual
+data. Starting from the observation, we propose to
+exploit external monolingual data to offer more use-
+ful information for predicting low-frequent words
+in bilingual data, which are generally lost in the
+standard knowledge distillation.
+Our Approach Researches and competitions
+have shown that fully exploiting the monolingual
+data is at the core of achieving better generaliza-
+tion and accuracy for MT systems (Sennrich et al.,
+2016a; Zhang and Zong, 2016; Barrault et al.,2418
+2020). In this work we want to transfer the dis-
+tribution of lost information, e.g. low-frequency
+words, from monolingual data to the NAT train-
+ing. Figure 1b shows the pipeline of our proposed
+Monolingual KD for NAT, which differs from the
+Standard KD at how to construct the distilled data.
+Instead of reusing the source side of the original
+bilingual data, monolingual KD performs distilla-
+tion on newly monolingual data, which eliminates
+the dependency on the original training data.
+Intuitively, the monolingual KD can embed both
+the knowledge of the original bilingual data (im-
+plicitly encoded in the trained teacher model) and
+that of the newly introduced monolingual data. The
+comprehensive experiments in the following sec-
+tion provide empirical support for our hypothesis.
+In addition, the complementarity between the bilin-
+gual and monolingual data makes explicitly com-
+bining Standard KD andMonlingual KD can fur-
+ther improve model performance.Datas7!tLFW Links t7!sLFW Links
+R P F1 R P F1
+Raw 66.4 81.9 73.3 72.3 80.6 76.2
+ !KD73.4 89.2 80.5 69.9 79.1 74.2
+ !KD75.1 87.7 80.9 70.8 81.4 75.7  KD63.7 80.2 71.0 81.4 86.2 83.7 !KD75.7 89.6 82.1 80.5 79.4 79.9
+2.3 Bidirectional Monolingual KD
+Recalling Low-Frequency Target Words KD
+simpliﬁes the training data by replacing low-
+frequency target words with high-frequency
+ones (Zhou et al., 2020; Ding et al., 2021c). This
+is able to facilitate easier aligning source words
+to target ones, resulting in high bilingual cov-
+erage (Jiao et al., 2020). Inspired by the low-
+frequency word (LFW) links analysis (Ding et al.,
+2021b), we borrow this LFW analysis to show
+the necessity of leveraging both the source- and
+target-side monolingual data. Concretely, we fol-
+low (Ding et al., 2021b) to evaluate the links of
+low-frequency words aligning from source to tar-
+get ( s7!t) with three metrics: Recall (R) repre-
+sents how many low-frequency source words can
+be aligned to targets; Precision (P) means how
+many aligned low-frequency links are correct ac-2419cording to human evaluation. F1 is the harmonic
+mean between precision and recall. Similarly, we
+can analyze in an opposite direction ( t7!s) by con-
+sidering the links of low-frequency target words.
+Table 1 lists the results. Comparing with the
+standard !KD, the forward monolingual KD ( !KD
+in Section 2.2) achieves better alignment quality
+ofs7!tLFW links (F1: 80.9 vs. 80.5) by align-
+ing more low-frequency source words (R: 75.1 vs.
+73.4). The backward monolingual KD (  KD) can
+complementarily produce better alignment of low-
+frequency target words ( t7!sLFW links). As
+we expected, combining the two types of distilled
+data ( !KD) can produce better alignments for both
+low-frequency source (F1: 82.1 vs. 80.5) and target
+words (F1: 79.9 vs. 74.2).
+Our Approach (Bid. Monolingual KD ) Based
+on the above observations, we propose to train
+NAT models on bidirectional monolingual data by
+concatenating two kinds of distilled data. Like
+back-translation (Edunov et al., 2018), the reverse
+monolingual distillation  KDis to synthesize the
+source sentences by a backward AT teacher, which
+is trained in the reverse direction of the original
+bilingual data. The mixture of the source-original
+and target-original synthetic datasets (i.e. !KD)
+is used to train the ﬁnal NAT model. We expect
+that the better alignments of LFW links can lead to
+overall improvement of translation performance.
+3 Experiments
+3.1 Experimental Setup
+Bilingual Data We conducted experiments on
+two widely-used NAT benchmarks: WMT14
+English-German and WMT16 English-Romanian
+tasks, which consist of 4.5M and 0.6M sentence
+pairs respectively. To prove the universality of our
+approach on large-scale data, we also validated on
+WMT17 English-Chinese and WMT19 English-
+German tasks, which consist of 20.6M and 36.8M
+sentence pairs respectively. We shared the source
+and target vocabularies, except for En $Zh data.
+We split the training data into subword units using
+byte pair encoding (BPE) (Sennrich et al., 2016b)
+with 32K merge operations, forming a vocabulary
+of 37k, 32k, 33k/48k and 44k for WMT14 En $De,
+WMT16 En$Ro, WMT17 En$Zh and WMT19
+En$De respectively. We used case-sensitive token-
+BLEU (Papineni et al., 2002) to measure the trans-
+lation quality (except for En-Zh, we used sacre-Lang.Bilingual data Monolingual Data
+# Sent. # Word # Sent. # WordEn4.5M127.7M4.5M138.6M
+De 132.5M 124.0MEn0.6M16.1M0.6M16.5M
+Ro 16.7M 17.3MEn20.6M535.7M 20.6M 591.5M
+Zh 487.6M 18.4M 540.1MEn36.8M881.0M36.8M937.3M
+De 911.0M 867.6M
+BLEU (Post, 2018)), and sign-test (Collins et al.,
+2005) for statistical signiﬁcance test.
+Monolingual Data We closely followed previ-
+ous works to randomly sample monolingual data
+from publicly available News Crawl corpusfor
+the WMT tasks (Sennrich et al., 2016a; Wu et al.,
+2019). We randomly sampled English and Ger-
+man data from News Crawl 2007 2020, and ran-
+domly sampled Romanian data from News Crawl
+2015. For Chinese monolingual data, we used
+News Crawl 20082020, News Commendary v16
+and XMU data. For fair comparison, the mono-
+lingual data generally has the same size as corre-
+sponding bilingual data, as listed in Table 2.
+Model Training We validated our approach on
+two state-of-the-art NAT models:
+•MaskPredict [MaskT, Ghazvininejad et al. 2019]
+that uses the conditional masked language
+model (Devlin et al., 2019) to iteratively generate
+the target sequence from the masked input. We
+followed its optimal settings to keep the iteration
+number be 10 and length beam be 5.
+•Levenshtein Transformer [LevT, Gu et al. 2019]
+that introduces three steps: deletion, placeholder
+prediction and token prediction, and the decoding
+iterations adaptively depends on certain condi-
+tions. We followed their setting and reproduced
+their reported results.
+We trained both B and BTrans-
+former (Vaswani et al., 2017) as the AT teachers for
+both standard and monolingual KD. For Bmod-
+els, we adopted large-batch training (i.e. 458K to-2420DataMaskT LevT
+BLEU4 BLEU4
+ !KD 25.4 – 25.6 –
+ !KD 25.8 +0.4 26.2 +0.6  KD 24.9 -0.5 24.5 -1.1 !KD 26.6 +1.2 26.7 +1.1
+ !KD+ !KD 26.7 +1.3 26.8 +1.2  KD+ !KD 26.6 +1.2 26.5 +0.9 !KD+ !KD 27.1 +1.7 27.3 +1.7
+kens/batch) to optimize the performance (Ott et al.,
+2018). The En$Ro tasks employed Transformer-
+B as the teacher, and the other tasks used
+Transformer- Bas the teacher. We also used
+large-batch (i.e. 480K tokens/batch) to train NAT
+models with Adam optimizer (Kingma and Ba,
+2015). The learning rate warms up to 110
+for 10K steps, and then decays for 60k steps with
+the cosine schedule (Ro $En models only need 4K
+and 21K steps, respectively). Following the com-
+mon practices (Ghazvininejad et al., 2019; Kasai
+et al., 2020), we evaluate the performance on an en-
+semble of 5 best checkpoints (ranked by validation
+BLEU) to avoid stochasticity.
+3.2 Ablation Study on Monolingual KD
+In this section, we evaluated the impact of different
+components of the monolingual KD on WMT14
+En-De validation sets.
+Impact of Distillation Strategy Table 3 lists the
+results of different distillation strategies. The for-
+ward monolingual KD (“ !KD”) consistently out-
+performs its standard counterpart (“ !KD”) (i.e.
+25.8 vs. 25.4, and 26.2 vs. 25.6), which we at-
+tribute to the advantage of monolingual KD on
+exploiting both the original bilingual data knowl-
+edge (implicitly encoded in the trained AT teacher
+model) and the new monolingual data knowledge.
+Concatenating forward- and reverse-KD ( !KD)
+can further improve the NAT performance, which
+is consistent with the ﬁndings in Table 1.
+We also investigated whether monolingual KDSampling !KD + !KD
+MaskT LevT MaskT LevT
+R 26.6 26.7 27.1 27.3
+L-F 26.4 26.6 26.9 27.1
+L-S 26.9 26.8 27.4 27.5
+is complementary to standard KD (i.e. “+ !KD”
+column). As seen, standard KD consistently im-
+proves translation performance across monolin-
+gual KD variants. Another interesting ﬁnding is
+that although reverse monolingual KD (  KD) sig-
+niﬁcantly underperforms its forward counterpart
+( !KD) when used alone, they achieve comparable
+performance when using together with standard
+KD. We discuss in details how the two KD models
+complement each other in Section 3.4.
+Impact of Monolingual Data Sampling Some
+researchers may doubt that our approach heavily
+depends on the sampled monolingual data. To dis-
+pel the doubt, we investigated whether our model
+is robust to the selected monolingual data by vary-
+ing the sampling strategies. Speciﬁcally, we con-
+ducted experiments on the full set of monolingual
+data from News Crawl 2007 2020, which con-
+sist of 243M English and 351M German sentences.
+We compared with two representative approaches
+that sampled data with different priors: (1) L- samples difﬁcult examples containing low-
+frequency words (Fadaee and Monz, 2018); (2)
+L-Sselects high quality examples with lan-
+guage model (Moore and Lewis, 2010).
+As listed in Table 4, the difference of three sam-
+pling strategies w.r.t BLEU is not signiﬁcant under
+the signiﬁcance test p<0:05(Collins et al., 2005),
+demonstrating that our approach is robust to the
+monolingual data sampling . For the simplicity and
+robust applicability of our approach across differ-
+ent scenarios, we used R sampling as the
+default strategy in the following experiments.
+3.3 Main Results
+NAT Benchmarks Table 5 lists the results on
+the WMT14 En$De and WMT16 En $Ro bench-
+marks. Encouragingly, the conclusions in Sec-
+tion 3.2 hold across language pairs, demonstrating
+the effectiveness and universality of our approach.
+We also compared the performance against several2421Model Iter.WMT14 WMT16
+En-De De-En En-Ro Ro-En
+AT Models
+Transformer-B (En$Ro Teacher) n/a 27.3 31.3 33.9 34.1
+Transformer-B(En$De Teacher) n/a 29.2 32.4 - -
+Existing Advanced NAT Models with Standard KD
+DisCo (Kasai et al., 2020) 4.8 27.3 31.3 33.2 33.3
+Imputer (Saharia et al., 2020) 8.0 28.2 31.8 34.4 34.1
+Mask-Predict (Ghazvininejad et al., 2019)10.027.0 30.5 33.1 33.3
++Raw Data Pre-Train (Ding et al., 2021b) 27.8 - - 33.9
+Levenshtein (Gu et al., 2019)2.527.3 - - 33.3
++Raw Data Pre-Train (Ding et al., 2021b) 28.2 - - 33.8
+Our NAT Models
+Mask-Predict
++Standard KD
+10.027.0 31.1 32.9 33.3
++Mono. KD 28.231.8 33.633.7
++Standard KD 28.732.333.934.1
++Bidirectional Mono. KD 29.132.634.234.3
++Standard KD 30.133.735.035.3
+Levenshtein
++Standard KD
+2.527.3 30.9 32.7 33.2
++Mono. KD 28.632.133.533.9
++Standard KD 29.132.634.034.2
++Bidirectional Mono. KD 29.533.634.334.2
++Standard KD 30.434.134.935.4
+previous competitive NAT models. Although the re-
+sults are not directly comparable since we used ad-
+ditional monolingual data, our approach improves
+previous SOTA BLEU on the NAT benchmarks.
+Notably, our data-level approaches neither modify
+model architecture nor add extra training loss, thus
+does not increase any latency (“Speed”), maintain-
+ing the intrinsic advantages of NAT models. The
+main side-effect of our approach is the increased
+training time for training an additional AT teacher
+model to build distilled data in the reverse direc-
+tion. Fortunately, we can eliminate the side-effect
+by using only the monolingual KD (“Mono. KD”),
+which still consistently outperforms the standard
+KD without introducing any computation cost.
+Larger-Scale WMT Benchmarks To verify the
+effectiveness of our method across different data
+sizes, we further experimented on two widely-used
+large-scale MT benchmarks, i.e. WMT17 En $Zh
+and WMT19 En$De. As listed in Table 6, our bidi-ModelEn-Zh En-De
+!  !  
+AT Teacher 35.6 24.6 40.2 40.1
+MaskT
++Stand. KD 33.7 23.4 36.8 37.2
++Mono. KD 34.5 24.937.4 37.9
++Stand. KD 34.825.138.138.5
++Bid. Mono. KD 35.225.639.239.4
++Stand. KD 38.225.840.140.5
+LevT
++Stand. KD 33.9 23.3 37.5 37.7
++Mono. KD 34.6 24.638.1 38.4
++Stand. KD 35.124.738.539.1
++Bid. Mono. KD 35.425.539.640.2
++Stand. KD 38.525.840.540.82422Data All High Med. Low
+Raw 3.67 2.41 3.28 6.81
+ !KD 1.95 1.68 1.87 4.52 !KD 1.79 1.66 1.72 4.29
++ !KD1.77 1.62 1.71 3.95 !KD 1.72 1.52 1.64 4.01
++ !KD1.64 1.50 1.62 3.69
+rectional monolingual KD outperforms standard
+KD by averagely +1.9 and +2.3 BLEU points on
+En$Zh and En$De datasets, respectively, demon-
+strating the robustness and effectiveness of our
+monolingual KD approach. By combining with
+standard KD, our methods can achieve further +1.8
+and +0.9 BLEU improvements.
+3.4 Analysis
+In this section, we provide some insights into how
+monolingual KD works. We report the results on
+WMT14 En-De data using Mask-Predict.
+Monolingual KD Reduces Complexity of Train-
+ing Data by Improving Low-Frequency Word
+Alignment We ﬁrst present data-level qualitative
+analyses to study how monolingual KD comple-
+ments bilingual KD. Zhou et al. (2020) revealed
+that standard KD improves NAT models by reduc-
+ing the complexity of original bilingual data. Along
+this thread, we used the data complexity metric to
+measure different distilled datasets. Formally, the
+translation uncertainty of a source sentence xcan
+be operationalized as conditional entropy:
+H(YjX= x) = Xp(yjx) logp(yjx)
+XH(yjx=x);
+whereTdenotes the length of the source sentence,
+xandyrepresent a word in the source and target
+vocabularies, respectively.
+We run fast-align on each parallel corpus to
+obtain word alignment. For fair comparison, we
+sampled the subsets (i.e. 4.5M) of “ !KD” and
+“ !KD+ !KD” to perform complexity computation.
+As seen in Table 7, standard KD signiﬁcantly re-
+duces the data complexity compared to that of theDataWMT14 En-De WMT14 De-En
+H M L H M L
+AT Teacher
+Raw Data 84.7 80.2 73.0 85.4 81.1 74.2
+NAT Student !KD 82.4 78.2 68.4 83.7 79.6 69.9 !KD 82.9 78.4 69.5 83.9 80.1 71.2
++ !KD 83.1 78.7 70.8 84.3 80.5 72.1 !KD 84.1 79.1 72.7 85.0 80.9 73.4
++ !KD 84.6 79.7 73.6 85.2 81.4 75.2
+bilingual data (1.95 vs. 3.67), and monolingual
+KD reduces even more data complexity. Addition-
+ally, the data complexity can be further reduced by
+combining with standard KD.
+Monolingual KD Mainly Improves Low-
+Frequency Word Translation We ﬁrst followed
+Ding et al. (2021c) to measure the translation
+accuracy of words with different frequencies,
+as shown in Table 8. The improvements over
+low-frequency words are the major reason for the
+performance gains, where the monolingual KD
+and bidirectional monolingual KD outperform the
+standard KD by averagely +1.2% and +3.9%, re-
+spectively. These ﬁndings conﬁrm our hypothesis
+that monolingual KD can improve the translation
+of low-frequency words by redistributing them
+in the new monolingual data. Combining with
+standard KD can further improve the accuracy of
+translating low-frequency words, which reconﬁrms
+our hypothesis on the complementarity between
+the two KD methods on low-frequency words.
+3.5 Further Exploiting Monolingual Data
+In this section, we provide some potential direc-
+tions to further improve NAT performance by mak-
+ing the most of monolingual data.
+Exploiting Monolingual Data at Scale One
+strength of monolingual KD is the potential to ex-
+ploit more monolingual data to further improve
+translation performance. To validate our claim, we
+scaled the size of monolingual data by { 2,5,
+10}, which are randomly sampled from the full
+set of monolingual data. As shown in Table 9,2423Mono WMT14 En-De WMT14 De-En
+Size MaskT LevT MaskT LevT
+Bidirectional Monolingual KD
+1 29.1 29.5 32.6 33.6
+2 29.7 30.1 33.1 33.9
+5 30.6 30.9 33.9 34.5
+10 30.4 30.8 33.3 34.4
+Combining with Standard KD
+1 30.1 30.4 33.7 34.1
+2 30.7 30.9 34.2 34.5
+5 31.3 31.7 34.5 34.7
+10 30.9 31.5 34.2 34.6
+Mono. Mono. to Train BLEU
+KD AT NAT AT NAT
+n/a  29.2 27.0
+ !KD X 29.2 28.7
+X 30.1 27.8
+X X 30.1 28.9
+ !KD X 29.2 30.1
+X 31.8 28.2
+X X 31.8 30.5
+enlarging the monolingual data consistently im-
+proves the BLEU scores, while this trend does not
+hold when further scaling the monolingual data
+(i.e.10). One possible reason is that the limited
+capacity of NAT-base models cannot fully exploit
+the large data, which suggests future exploration of
+larger NAT architectures.
+Augmenting AT Teacher with Monolingual KD
+An alternative to exploit monolingual data is to
+strength the AT teacher with monolingual KD, as
+listed in Table 10. Applying monolingual KD for
+AT teacher is less effective than using it for NAT
+training, which we attribute to the information loss
+when transferred from AT teacher to NAT student.
+Applying monolingual KD to both AT teacher and
+NAT student can further improve the NAT perfor-
+mance, at the cost of more computational cost.4 Related Work
+To bridge the performance gap, a number of recent
+efforts have explored, including model architec-
+tures (Ghazvininejad et al., 2019; Gu et al., 2019;
+Ding et al., 2020; Guo et al., 2020), training objec-
+tives and methods (Shao et al., 2019; Ghazvinine-
+jad et al., 2020; Ding et al., 2021a). Another thread
+of work focus on understanding and improving dis-
+tillation training for NAT (Zhou et al., 2020; Ding
+et al., 2021c,b; Huang et al., 2022).
+Sequence-level KD (Kim and Rush, 2016) is a
+preliminary step for training NAT models to re-
+duce the intrinsic uncertainty and learning difﬁ-
+culty (Zhou et al., 2020; Ren et al., 2020). Recent
+studies have revealed that KD reduces the modes
+(i.e. multiple lexical choices for a source word) in
+the original data by re-weighting the training ex-
+amples (Furlanello et al., 2018; Tang et al., 2020),
+at the cost of losing some important information,
+leading to more errors on predicting low-frequency
+words (Ding et al., 2021c). In response to this prob-
+lem, Ding et al. (2021b) proposed to rejuvenate
+low-frequency words by pretraining NAT models
+on the raw bilingual data. In this study, we attempt
+to solve this problem from a different perspective –
+rediscovering low-frequency words from external
+monolingual data, which can simultaneously ex-
+ploit the knowledge of bilingual data (implicitly
+encoded in the parameters of AT teacher).
+Closely related to our work, Zhou and Ke-
+ung (2020) improved NAT models by augment-
+ing source-side monolingual data. Their work can
+be regarded as a special case of our approach (i.e.
+“Mono. KD +Standard KD ” in Section 3.3), and our
+work has several more contributions. Firstly, we
+demonstrated the effectiveness of using only mono-
+lingual KD for NAT models, which can achieve
+better performance than the standard KD without
+introducing any computational cost. Secondly, we
+proposed a novel bidirectional monolingual KD to
+exploit both the source-side and target-side mono-
+lingual data. Finally, we provide insights into how
+monolingual KD complements the standard KD.
+5 Conclusion
+In this work, we propose a simple, effective and
+scalable approach – monolingual KD to redistribute
+the low-frequency words in the bilingual data us-
+ing external monolingual data. Monolingual KD
+consistently outperforms the standard KD with
+more translation accuracy of low-frequency words,2424which attribute to its strength of exploiting both the
+knowledge of the original bilingual data (implicitly
+encoded in the parameters of AT teacher) and that
+of the new monolingual data.
+Monolingual KD enjoys appealing expandabil-
+ity, and can be further enhanced by (1) combining
+with a reverse monolingual KD to recall more align-
+ments for low-frequency target words; (2) combin-
+ing with the standard KD to explicitly combine
+both types of complementary knowledge; (3) en-
+larging the scale of monolingual data that is cheap
+to acquire. Our study empirically indicates the po-
+tential to make NAT a practical translation system.
+Future directions include designing advanced
+monolingual KD techniques and validating on
+larger-capacity NAT models (e.g. Bsetting)
+to strengthen the power of monolingual KD, and
+fully NAT models (Gu and Kong, 2021; Du et al.,
+2021) to show the universality of monolingual KD.
+Besides, it will be interesting to follow Liu et al.
+(2021) and Wang et al. (2022) to investigate the
+complementarity between our monolingual KD and
+pretrained language models to further enhance the
+NAT models.
+Acknowledgments
+We are grateful to the anonymous reviewers and
+the area chair for their insightful comments and
+suggestions.
+References24252426

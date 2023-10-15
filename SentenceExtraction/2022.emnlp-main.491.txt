@@ -1,1 +1,634 @@
-7283 Proceedings of the 2022 Conference on Empirical Methods in Natural Language Processing , pages 7283 7293 December 7 - 11 , 2022 © 2022 Association for Computational Linguistics 7284 7285 7286 7287 7288 7289 7290 7291 7292 7293 
+
+Binbin Xie, Xiangpeng Wei, Baosong Yang, Huan Lin, Jun Xie,
+Xiaoli Wang, Min Zhangand Jinsong SuSchool of Informatics, Xiamen University, ChinaAlibaba Group, ChinaKey Laboratory of Digital Protection and Intelligent Processing of Intangible
+Cultural Heritage of Fujian and Taiwan, Ministry of Culture and Tourism, ChinaSoochow University, China
+xdblb@stu.xmu.edu.cn pemywei@gmail.com
+yangbaosong.ybs@alibaba-inc.com sjs@xmu.edu.cn
+Abstract
+Keyphrase generation aims to automatically
+generate short phrases summarizing an input
+document. The recently emerged O2S
+paradigm (Ye et al., 2021) generates keyphrases
+as a set and has achieved competitive perfor-
+mance. Nevertheless, we observe serious cal-
+ibration errors outputted by O2S, espe-
+cially in the over-estimation of∅token (means
+“no corresponding keyphrase”). In this paper,
+we deeply analyze this limitation and identify
+two main reasons behind: 1) the parallel gener-
+ation has to introduce excessive ∅as padding
+tokens into training instances; and 2) the train-
+ing mechanism assigning target to each slot
+is unstable and further aggravates the ∅to-
+ken over-estimation. To make the model well-
+calibrated, we propose WR-O2Swhich
+extends O2Swith an adaptive instance-
+level cost Weighting strategy and a target Re-
+assignment mechanism. The former dynam-
+ically penalizes the over-estimated slots for
+different instances thus smoothing the uneven
+training distribution. The latter refines the orig-
+inal inappropriate assignment and reduces the
+supervisory signals of over-estimated slots. Ex-
+perimental results on commonly-used datasets
+demonstrate the effectiveness and generality of
+our proposed paradigm.
+1 Introduction
+Keyphrases are short phrases fully encoding the
+main information of a given document. They can
+not only facilitate readers to quickly understand
+the document, but also provide useful information
+to many downstream tasks, including document
+classification (Hulth and Megyesi, 2006), summa-
+rization (Wang and Cardie, 2013), etc.
+With the rapid development of deep learning,
+keyphrase generation (Meng et al., 2017) has at-
+tracted increasing attention due to its ability to pro-
+duce phrases that even do not match any contiguousFigure 1: An example of O2Sparadigm at training
+and inference stages. “Assigned Targets ( ∗-th iteration)”
+represents the multiple feasible target permutations gen-
+erated by K-step target assignment mechanism at dif-
+ferent training iterations. In this case, both “slot2” and
+“slot3” are expected to generate keyphrases. However,
+they often use ∅token as supervisory signals, and thus
+over-estimate and output ∅token.
+subsequence of the source document.Dominant
+models of keyphrase generation
+are constructed under three paradigms:
+O2O(Meng et al., 2017), O2S(Yuan
+et al., 2020) and O2S(Ye et al., 2021).
+Among these paradigms, O2Sexhibits
+the state-of-the-art (SOTA) performance. As
+illustrated in Figure 1, it considers keyphrase
+generation as a set generation task. After padding
+keyphrases to a fixed number with special token ∅,
+they define multiple slots that individually generate
+each keyphrase in parallel. During training, each
+slot is assigned with a keyphrase or ∅tokenvia a
+K-step target assignment mechanism. Specifically,
+the model first generates Ktokens from each slot
+and then determines the optimal target assignment
+using a bipartite matching algorithm (Kuhn, 2010).
+The superiority of O2Sstems from its
+conditional independence, that is, the prediction
+distribution of each slot depends only on the given
+document other than the order of keyphrases like7283O2S. This is more compatible with the
+unordered property of keyphrases and decreases
+the difficulty of the model training (Ye et al.,
+2021).
+Despite of its success, we observe serious over-
+estimation problem on ∅token, which significantly
+affects the generation quality. For example, in Fig-
+ure 1, both “slot2” and “slot3” are expected to gen-
+erate keyphrases, but ∅token is over-confidently
+given. Two questions naturally arise: 1) what
+are reasons behind the over-estimation problem
+inO2S?and 2) how can we alleviate them?
+In order to answer the first question, we con-
+duct extensive analyses, and conclude two reasons.
+Firstly, the over-estimation is a by-product inher-
+ently carried by the parallel generation. More con-
+cretely, excessive ∅tokens have been introduced
+as the padding tokens and served as supervisory
+signals in training data. The unbalanced data and
+the lack of dependency among slots leads each slot
+to learn to commonly generate ∅token. Secondly,
+theK-step target assignment mechanism provides
+multiple feasible target permutations that are as-
+signed to slots. As shown in Figure 1, the targets of
+the given document can be assigned in different per-
+mutation at each training iteration, which further
+increases the probability of ∅token to be assigned
+as supervisory signal for each slot, thus exacerbat-
+ing the over-estimation problem. Both problems
+make the learned probabilities of the assigned tar-
+gets deviate from its ground truth likelihood, finally
+constructing a miscalibrated model.
+Consequently, we approach the above problems
+from the calibration perspective and propose two
+strategies that extend O2StoWR-O2S.
+Specifically, an adaptive instance-level cost weight-
+ingis first introduced to penalize the over-estimated
+slots of different instances. According to the se-
+riousness of the issue, instances are rendered dif-
+ferent weights, therefore dynamically balancing
+the model training. Besides, we propose a target
+re-assignment mechanism to refine the original in-
+appropriate assignment and reduce the supervisory
+signals of ∅token. In particular, we re-assign
+targets for the slots potentially generating fresh
+keyphrases but being pre-assigned with ∅token.
+In these ways, WR-O2Sis encouraged to
+produce well-calibrated probabilities on keyphrase
+generation. Overall, major contributions of our
+work are three-fold:
+•Through in-depth analyses, we point out thatthe advanced keyphrase generation architec-
+tureO2Ssuffers from the ∅token over-
+estimation, which is inherently caused by its
+parallism and the target assignment mecha-
+nism.
+•We propose WR-O2Swhich enhances
+the original framework with two effective
+strategies to calibrate the over-estimation
+problem from the training perspective.
+•Extensive experiments on five widely-used
+datasets reveal the universal-effectiveness of
+our model.
+•We release our code at https://github.
+com/DeepLearnXMU/WR-One2Set .
+2 Related Work
+Early studies mainly focus on automatic keyphrase
+extraction (Hulth, 2003; Mihalcea and Tarau, 2004;
+Nguyen and Kan, 2007; Wan and Xiao, 2008),
+which aims to directly extract keyphrases from the
+input document. Recently, with the rapid develop-
+ment of deep learning, neural network-based mod-
+els have been widely used in keyphrase generation.
+Typically, these models are based on an attentional
+encoder-decoder framework equipped with copy
+mechanism, which is able to generate both present
+and absent keyphrases (Meng et al., 2017). Gener-
+ally, these models are constructed under the follow-
+ing paradigms: 1) O2O(Meng et al., 2017;
+Chen et al., 2019a,b). Under this paradigm, the in-
+put document is paired with each target keyphrase
+to form an independent training instance for model
+training. During inference, the models are en-
+couraged to produce multiple keyphrases via beam
+search. 2) O2S(Chan et al., 2019; Yuan et al.,
+2020; Chen et al., 2020; Wu et al., 2021). It consid-
+ers keyphrase generation as a sequence generation
+task, where different keyphrases are concatenated
+into a sequence in a predefined order. In this way,
+the semantic dependence between keyphrases can
+be exploited to benefit keyphrase generation. 3)
+O2S(Ye et al., 2021). Unlike O2S, this
+paradigm considers the keyphrases as a set, which
+can be predicted from slots in a parallel manner
+and partial target matching algorithm.
+Considering that O2Oneglects the correla-
+tion among keyphrases, the most popular paradigm
+O2Sexploits the correlation by pre-defining
+the keyphrases order for model training and infer-
+ence. Nevertheless, O2Sis the opposite of
+the flexible and unordered properties of keyphrases,7284increasing the difficulty of the model training. Due
+to the parallelism and the conditional independence,
+O2Sattracts much attention in the keyphrase
+generation community, and achieves the SOTA per-
+formance. As this method has just been put for-
+ward, it is inevitable to exist imperfections. Hence,
+we are committed to analyses and further optimiz-
+ing this framework. To the best of our knowledge,
+this is the first attempt to improve O2S.
+3 Background
+Here, we briefly introduce ST (Ye et al.,
+2021), which is based on the O2Sparadigm.
+It is a Transformer-based, semi-autoregressive
+model. Typically, it introduces Nslots, each of
+which introduces a learnable control code as the
+additional decoder input, to generate keyphrases
+or∅tokens in parallel. Its training involves two
+stages: 1) a K-step target assignment mechanism
+is firstly used to determine the correspondence be-
+tween each prediction and target, and then 2) a
+new training objective is introduced to optimize the
+whole model. It contains two set losses to sepa-
+rately deal with two kinds of keyphrases: present
+keyphrases appearing in the input document, and
+absent keyphrases that do not match any contigu-
+ous subsequence of the document.
+K-Step Target Assignment At this stage, the
+model predicts Ktokens from each slot, where
+the predicted probability distributions are also col-
+lected. Then, an optimal assignment mbetween
+predictions and targets can be found by a bipartite
+matching algorithm (Kuhn, 2010):
+m= arg min/summationdisplayC(y,P), (1)
+where M(N)denotes a set of all N-length target
+index permutations, and the optimal permutation m
+can be considered as a mapping function from the
+slotito the target index m(i).C(y,P)is
+a pair-wise matching loss between the target y
+and the predicted probability distributions Pof the
+sloti. Note that the set of targets are also padded
+to size Nwith∅tokens.
+Model Optimization with Set Losses During
+the second stage, the model is trained with the sum
+of two set losses. Concretely, slots are equallysplit into two sets, dealing with the generations of
+present and absent keyphrases, respectively. Next,
+the above target assignment is performed on these
+two sets separately, forming a mapping mfor
+present keyphrases, and a mapping mfor absent
+keyphrases. Finally, the training objective becomes
+where λis a hyper-parameter used to reduce the
+negative effect of excessive ∅tokens, zsymbol-
+izes the t-th token of the target z, and ˆpis the
+t-th predicted probability distribution of the i-th
+slot using teacher forcing. Meanwhile, L(θ, z)
+is defined in the similar way as L(θ, z)with a
+hyper-parameter λ.
+4 Preliminary Analyses
+Although O2Shas achieved competitive per-
+formance, it still faces one major problem, i.e. ∅to-
+ken over-estimation .This occurs in such slots that
+produce ∅tokens via the vanilla prediction while
+are able to generate correct keyphrases through
+the non- ∅prediction.For illustration, we force
+all slots to generate non- ∅predictions during in-
+ference, where 14.6% of slots can produce correct
+ones. However, if we remove this restriction, 34.5%
+of these slots directly output ∅tokens, revealing
+the over-estimation of ∅token. Such kind of mis-
+calibration (Guo et al., 2017; Kumar and Sarawagi,
+2019) is a common drawback in neural network
+based models, which not only seriously hurts the
+generation quality of the O2Sparadigm, but
+also limits the users’ trust towards it.
+To understand the reasons behind this, we use
+the commonly-used KP20k dataset (Meng et al.,
+2017) to train a standard ST model, where
+the assigned targets to the slots of each instance are
+recorded during the last 80,000 training steps with
+an interval of 8,000 steps. Here, we can obtain two
+crucial observations.
+Observation 1: Excessive ∅tokens have been
+introduced as the padding tokens and served as
+supervisory signals in training data. O2S
+models keyphrase generation in a parallel compu-
+tation fashion, therefore extensive padding ∅to-7285
+kens are used to make sure the fixed lengths of
+different samples. Table 1 shows the proportions
+of∅token and target keyphrases involved during
+the model training. We can observe that on both
+present and absent keyphrase slots, ∅token ac-
+counts for the vast majority, exceeding 70%. In
+addition, instances suffer from different degrees of
+∅token over-estimation. Table 2 shows the propor-
+tions of training instances grouped by the number
+of slots over-estimating ∅token. We can find that
+the instances (e.g. Instance(#OV-Slot ≥1)) account
+for significant proportions, and exist varying de-
+grees of ∅token over-estimation.
+Observation 2: TheK-step assignment mecha-
+nism is unstable and further increases the possibil-
+ity of∅tokens being served as supervisory signals
+for some slots. In spite of the clever design of K-
+step assignment mechanism, it unstably provides
+different feasible target permutations to slots at the
+training time. We argue that this further widens the
+gap between the distribution of supervisory signals
+and that of the ground-truth.
+To illustrate this, we classify the slots of each
+instance into three categories according to its tar-
+get assignments: 1) Slot( ∅), each slot of this cate-
+gory is always assigned with ∅tokens. Apparently,
+these slots hardly generate keyphrases after train-
+ing; 2) Slot(Target KP), each slot of this category
+is always assigned with target keyphrases and thus
+it has high probability of generating a keyphrase;
+3) Slot( ∅+Target KP), each slot is assigned with
+target keyphrases or ∅tokens at different iterations
+during model training. From Table 3, we can ob-
+serve that on both present and absent keyphrase
+slots, the proportions of Slot( ∅+Target KP) are
+quite high, exceeding those of Slot(Target KP).
+Quite evidently, the supervisory signals of slots
+in Slot( ∅+Target KP) are unstable. Those slots
+that should be labeled with Target KP are assigned
+with∅token, further decreasing the probabilities
+of these slots generating keyphrases.
+5 WR-O2S
+As discussed above, the parallelism and the train-
+ing mechanism of O2Sbring the advantages
+of conditional independence, but inherently lead
+to the miscalibration of the model. Our principle
+is to maintain the primary advantages, and mean-
+while, calibrating the model with lightweight strate-
+gies. To this end, we propose WR-O2Sthat
+significantly extends the conventional O2S
+paradigm in two training aspects, including an
+adaptive instance-level cost weighting strategy , and
+atarget re-assignment mechanism .
+To facilitate subsequent descriptions, we sum-
+marize all related formal definitions in Appendix,
+Table A.2 for better understanding this paradigm.
+5.1 Adaptive Instance-Level Cost Weighting
+Connection to Observation 1. As analyzed
+previously, excessive ∅tokens lead to the over-
+estimation of ∅token. Although ST intro-
+duces hyper-parameters λandλto adjust the
+training loss of conventional O2Sparadigm,
+such fixed hyper-parameters are still unable to deal
+with this issue well due to the different degrees
+of∅token over-estimation in different training
+instances.
+We alternatively develop an adaptive instance-
+level cost weighting strategy to dynamically scale
+the losses corresponding to ∅tokens, alleviating7286
+the class imbalance of training data. Concretely, we
+first identify a set of slots, denoted as C, where
+each slot is assigned with a keyphrase as super-
+visory signal. Intuitively, for each slot iinC,
+the degree of ∅token over-estimation is related to
+its two predicted probabilities using teacher forc-
+ing (See Section 4): 1) ˆp(y), symbolizing the
+predicted probability of the first token of assigned
+target, and 2) ˆp(∅), denoting the predicted prob-
+ability of ∅token. Thus, we directly use the ra-
+tio between ˆp(y)andˆp(∅)to approximately
+quantify the degree of ∅token over-estimation for
+training efficiency. Furthermore, we define this
+degree for each instance as
+λ=1
+|C|·/summationdisplaymin(ˆp(y)
+ˆp(∅),1).(4)
+Note that for each slot iinC, if its predicted
+probability ˆp(y)is greater than ˆp(∅), it is
+considered to have no ∅token over-estimation,
+and we directly limit its ratio to 1.
+Finally, we adjust the hyper-parameters λand
+λof Equation 3 into λ·λandλ·λ
+for each training instance, respectively. Note that,
+λis dynamically updated during the training
+process, and thus is more general for model training
+compared with fixed hyper-parameters.
+5.2 Target Re-Assignment
+Connection to Observation 2. Due to the effect of
+K-step target assignment mechanism, many slots
+are alternatively assigned with target keyphrases
+and∅tokens, which decreases the probabilities of
+these slots generating correct keyphrases.
+We propose a target re-assignment mechanism
+to alleviate this issue. As shown in the upper partof Figure 2, during the process of K-step target
+assignment, we first record three kinds of phrases
+for each slot i: 1)y, the assigned target of
+the slot i; 2)ˆy, the first Ktokens of the vanilla
+prediction from the slot i. Note that ˆymay be
+a∅token; and 3) ¯y, the first Ktokens of the
+non-∅prediction from the slot i.
+Here, we mainly focus on the slots, each of
+which is assigned with ϕtoken as supervisory sig-
+nals and its non- ϕK-token prediction is consistent
+with some targets. For such slot i, if its non- ∅
+K-token prediction ¯yis totally different from
+allK-token predictions {ˆy}, we consider it
+has the potential to generate a fresh keyphrase and
+boost the model performance. Thus, we include
+it into the potential slot set C. By contrast, if
+its¯yhas occurred in the set of {ˆy}, we re-
+gard it as an unimportant slot without effect on the
+model performance, and add it into the unimpor-
+tant slot set C. Back to Figure 2, we observe that
+the non- ∅K-token prediction of “slot3” is “ topic
+model ”, which is also the K-token prediction of
+“slot1” and “slot7”. Thus, “slot3” is an unimpor-
+tant slot. Meanwhile, both “slot5” and “slot6” are
+potential slots.
+Then, as illustrated in the lower part of Figure
+2, we employ two target re-assignment operations
+to deal with the above two kinds of slots, respec-
+tively: 1) we re-assign each slot of Cwith its
+best-matched target keyphrase, so as to increase
+the probability of this slot generating the target
+keyphrase; and 2) we assign no target to each slot
+ofC, which alleviates the problem that the same
+target is assigned to different slots as supervisory
+signals. In this way, the training losses of slots in
+Cwill be masked at this training iteration. Let us7287
+revisit Figure 2, we re-assign “slot5” with “ patch
+clustering ”, “slot6” with “ denoising ” and no super-
+visory signal to “slot3”. Through the above process,
+we can convert the original target assignment m
+into a new one, where we use the conventional
+training objective (See Equation 2) adjusted with
+λ(See Equation 3) to train our model.
+6 Experiments
+6.1 Setup
+Datasets . We train various models and select the
+optimal parameters on the KP20k validation dataset
+(Meng et al., 2017). Then, we evaluate these mod-
+els on five test datasets: Inspec (Hulth, 2003), NUS
+(Nguyen and Kan, 2007), Krapivin (Krapivin et al.,
+2009), SemEval (Kim et al., 2010), and KP20k. As
+implemented in (Yuan et al., 2020; Ye et al., 2021),
+we perform data preprocessing including tokeniza-
+tion, lowercasing, replacing all digits with the sym-
+bol⟨digit⟩and removing duplicated instances.
+Baselines. We compare our WR-O2S
+based model with the following baselines:
+•CS(R) (Yuan et al., 2020). This is
+the most popular RNN-based model trained
+under the O2Sparadigm, formulat-
+ing keyphrase generation as a sequence-to-
+sequence generation task.
+•CS(Ye et al., 2021). It is also trained
+under the O2Sparadigm, but utilizingTransformer as backbone.
+•UK (Wu et al., 2021). This is a
+large-scale pre-trained language model trained
+to extract and generate keyphrases jointly.
+•ST (Ye et al., 2021). It is our most
+important baselines. Besides, we report the
+performance of three ST variants:
+ST (w/o λ,λ)that does not
+introduce any hyper-parameter to alleviate
+the negative effect of excessive ∅tokens,
+ST (#S=N)that is equipped
+with N/2andN/2slots for present target
+keyphrases and absent ones, respectively, and
+ST (w/B )which sorts all
+training instances in the increasing order of
+target keyphrase numbers and uses batch-wise
+randomized order to keep the padding length
+optimized.
+•P KP(Wu et al., 2022). It firstly ex-
+tracts keywords for automatic prompt con-
+struction, and then uses a mask-predict-
+based approach to generate the final absent
+keyphrase constrained by prompt.
+Implementation Details. We use Transformer-
+base (Vaswani et al., 2017) to construct all mod-
+els. During training, we choose the top 50,002
+frequent tokens to form the predefined vocabulary.
+We use the Adam optimizer with a learning rate of
+0.0001, and a batch size of 12. During inference,
+we employ greedy search to generate keyphrases.7288
+To ensure a fair comparison with ST , we
+also set both slot numbers for present and absent
+keyphrases as 10, the target assignment step Kas
+2,λas 0.2 and λas 0.1, respectively. Par-
+ticularly, we run all experiments three times with
+different random seeds and report the average re-
+sults, so as to alleviate the impact of the instability
+of model training.
+Evaluation Metrics. Following previous studies
+(Chen et al., 2020; Ye et al., 2021), we use macro
+averaged F@5andF@Mto evaluate the quality
+of both present and absent keyphrases. When using
+F@5, if the prediction number is less than five,
+blank keyphrases are added to make the keyphrase
+number reach five. Particularly, we employ the
+Porter Stemmerto remove the identical stemmed
+keyphrases.
+6.2 Main Results
+Table 4 and Table 5 show the prediction results on
+present and absent keyphrases, respectively. We
+can draw the following conclusions:
+First, our reproduced ST achieves com-
+parable performance to Ye et al. (2021). Sec-
+ond, when removing both λandλfrom S-
+T , its performance significantly drops, show-
+ing that the ∅token over-estimation severely lim-
+its its full potential. Third, we observe no im-
+provements with different number of slots. Fourth,
+the commonly-used batching method for sequence
+generation is not beneficial for ST . Fi-
+nally, our model significantly surpasses all base-
+lines. These results strongly validate the effec-
+tiveness and generalization of our WR-O2S
+paradigm.
+6.3 Ablation Study
+To better investigate the effectiveness of our pro-
+posed strategies on WR-O2S, we report the
+performance of variants of our model on two test
+sets: 1) KP20k that is an in-domain one, and 2)
+the combination of Inspec, NUS, Krapivin and Se-
+mEval, which is out-domain . Here, we mainly
+consider three variants: 1) w/o R- , which
+removes the target re-assignment mechanism from
+our model; and 2) w/o W . It discards
+the adaptive instance-level cost weighting strategy;7289
+and 3) R-A⇒R-A . This variant
+randomly re-assigns targets to the slots in C.
+As shown in Table 6, when removing the target
+re-assignment mechanism, we observe a perfor-
+mance degradation on keyphrase predictions. Like-
+wise, the variant w/o W is obviously in-
+ferior to our model on most metrics. Therefore, we
+believe that our proposed strategies indeed benefit
+the generation of keyphrase set.
+6.4 Analyses of ∅Token Over-Estimation
+We also compare various models according to the
+proportion of slots over-estimating ∅tokens. Here,
+the proportion is the ratio between two slot num-
+bers obtained from the whole training data: one
+is the number of slots that directly output ∅token
+via the vanilla prediction while generating correct
+keyphrases through the non- ∅prediction; and the
+other is the number of slots that generate correct
+keyphrases via the non- ∅prediction. Table 7 dis-
+plays the results. The proportions of ST
+(w/oλ,λ) exceeds 70%, demonstrating the
+severe∅token over-estimation of the O2S
+paradigm. By comparison, the proportions of S-
+T decrease, validating the effectiveness of
+fixed hyper-parameters λandλon alleviat-
+ing the class imbalance of training data. More-
+over, whether adaptive instance-level cost weight-
+ing strategy or target re-assignment mechanism is
+used alone, the proportions of ST can be
+further reduced. Particularly, our model achieves
+the lowest proportions, proving that our strategies
+can complement each other.
+Besides, following Guo et al. (2017), we show
+the reliability diagram of ST and our
+model in Figure 3. It displays the relationship
+between the prediction confidence (the predicted
+probability of model) and the prediction accuracy
+within the confidence interval [0, 0.2]. Especially,
+the predictions within the confidence interval [0,
+0.2] account for 69.8% of all predictions. Please
+note that, if a model is well-calibrated, the gap
+between the confidence and the accuracy will be
+small. Overall, the gap of our model is less than
+that of ST , which demonstrates that our
+proposed strategies can calibrate the predictions
+with low confidence.
+6.5 Diversity of Predicted Keyphrases
+Follow previous studies (Chen et al., 2020; Ye et al.,
+2021), we report the average numbers of unique
+present and absent keyphrases, and the average
+duplication ratios of all predicted keyphrases, so as
+to investigate the ability of our model in generating
+diverse keyphrases,
+Table 8 reports the results. As expected, our
+model generates more keyphrases than previous
+models and achieves a slightly higher duplication
+ratio than ST , however, significantly lower
+than O2S-based models. Note that compared
+toST , theF@5andF@Mscores of our
+model are significantly improved, which demon-
+strates that our model performs much better on
+keyphrase generation.7290
+6.6 Analyses of Target Re-Assignment
+Here, we still focus on the assigned targets during
+the model training mentioned at the beginning of
+Section 4 and conduct two types of analyses to
+better understand the effects of our mechanism.
+First, we count the proportions of ∅tokens in as-
+signed targets. Specially, the assigned ∅tokens ac-
+counts for 72.4% and 80.4% on present and absent
+keyphrase slots, respectively, but decrease to 67.6%
+and 72.3% in our model. Second, as implemented
+in Section 4, we still classify the instance slots into
+three categories and report their proportions in Ta-
+ble 9. We can find the proportions of Slots( ∅+KP),
+where slots are assigned with target keyphrase and
+∅token at different iterations of model training,
+sharply decline. Besides, for each slot, we use the
+entropy of target assignment distribution to mea-
+sure the stability of its supervisory signals. Further-
+more, we average the entropy values of all slots
+to quantify the stability of supervisory signals for
+each instance. Consequently, we find that the en-
+tropy decreases in 68.2% of instances, increases in
+26.3% of instances, and remain unchanged in 5.5%
+of instances. These results indicate that our target
+re-assignment mechanism indeed not only reduces
+excessive target ∅tokens, but also alleviates the
+instability of supervisory signals.
+7 Conclusion
+In this paper, we in-depth analyze the serious cali-
+bration errors of the O2paradigm and point
+out its underlying reasons. To deal with this is-
+sue, we then significantly extend the conventional
+O2Sinto the WR-O2Sparadigm with
+an adaptive instance-level cost weighting strategy
+and a target re-assignment mechanism. Extensive
+experiments verify the effectiveness and generality
+of our extended paradigm.In the future, we plan to further refine our WR-
+O2Sparadigm by considering the semantic
+relation between keyphrases. Besides, we will im-
+prove our model by introducing variational neural
+networks, which have been successfully applied in
+many NLP tasks (Zhang et al., 2016a,b; Su et al.,
+2018a,b; Liang et al., 2022). Finally, we will lever-
+age the abundant knowledge from pre-trained mod-
+els to further enhance our model.
+Limitations
+As mentioned above, serious ∅token over-
+estimation problem exists in O2Sparadigm,
+leading to a miscalibrated model. To solve this
+problem, we propose several strategies based on
+conventional O2Susing the same fixed hyper-
+parameters as Ye et al. (2021). However, hyper-
+parameter selection is a labor-intensive, manual,
+time-consuming process and affects generation per-
+formance deeply. Thus, our future work will focus
+on exploring a parameter-free method. Besides, de-
+spite achieving impressive performance, our WR-
+O2Sparadigm is only conducted based on
+the Transformer, so that it is essential to leverage
+the abundant knowledge from pre-trained models
+for better document modeling and keyphrase gen-
+eration.
+Acknowledgements
+The project was supported by National Natural Sci-
+ence Foundation of China (No. 62276219, No.
+62036004), Natural Science Foundation of Fujian
+Province of China (No. 2020J06001), and Youth
+Innovation Fund of Xiamen (No. 3502Z20206059).
+We also thank the reviewers for their insightful
+comments.
+References72917292A Appendix
+A.1 Example
+A.2 Formal Definitions7293

@@ -1,1 +1,903 @@
-2953 Proceedings of the 2022 Conference of the North American Chapter of the Association for Computational Linguistics : Human Language Technologies , pages 2953 2967 July 10 - 15 , 2022 © 2022 Association for Computational Linguistics 2954 2955 2956 2957 2958 2959 2960 2961 2962 2963 2964 2965 2966 2967 
+
+Antoine Chafﬁn, Vincent Claveau, Ewa KijakCNRS, IRISA, Univ. Rennes 1, Campus de Beaulieu, 35000 Rennes, FranceIMATAG, 13 Rue Dupont-des-Loges, 35000 Rennes, France
+{antoine.chaffin, vincent.claveau, ewa.kijak}@irisa.fr
+Abstract
+Large language models (LM) based on Trans-
+formers allow to generate plausible long texts.
+In this paper, we explore how this generation
+can be further controlled at decoding time to
+satisfy certain constraints (e.g. being non-
+toxic, conveying certain emotions, using a spe-
+ciﬁc writing style, etc.) without ﬁne-tuning the
+LM. Precisely, we formalize constrained gen-
+eration as a tree exploration process guided
+by a discriminator that indicates how well
+the associated sequence respects the constraint.
+This approach, in addition to being easier and
+cheaper to train than ﬁne-tuning the LM, al-
+lows to apply the constraint more ﬁnely and dy-
+namically. We propose several original meth-
+ods to search this generation tree, notably the
+Monte Carlo Tree Search (MCTS) which pro-
+vides theoretical guarantees on the search efﬁ-
+ciency, but also simpler methods based on re-
+ranking a pool of diverse sequences using the
+discriminator scores. These methods are evalu-
+ated, with automatic and human-based metrics,
+on two types of constraints and languages: re-
+view polarity and emotion control in French
+and English. We show that discriminator-
+guided MCTS decoding achieves state-of-the-
+art results without having to tune the lan-
+guage model, in both tasks and languages. We
+also demonstrate that other proposed decod-
+ing methods based on re-ranking can be really
+effective when diversity among the generated
+propositions is encouraged.
+1 Introduction
+Generative language models exist for a long
+time, but with advent of the transformer architec-
+ture (Vaswani et al., 2017) and increasing comput-
+ing capabilities, they are now able to generate well
+written and long texts. In particular, large mod-
+els, such as the well known GPT-2 (Radford et al.,
+2019) and GPT-3 (Brown et al., 2020), have been
+used successfully for various applications: assist-
+ing writers, summarizing, augmentating data forsubsequent NLP tasks, generating fake news (Ku-
+mar et al., 2020; Papanikolaou and Pierleoni, 2020;
+Zellers et al., 2019). Yet, beside the prompt used
+to initiate the generation process, there are few op-
+tions to have control on the generation process. Be-
+ing able to add some constraints on the generated
+texts is useful for various situations. For example,
+it allows to create texts that follow a certain writ-
+ing style, convey a certain emotion or polarity or
+to ensure that a generated summary contains cor-
+rect information. More critically, it can be used to
+prevent the inherent toxicity of language models
+trained on the internet, or to not reproduce gender
+or race stereotypes. So far, most methods neces-
+sitate to ﬁne-tune the LM, so that it speciﬁcally
+learns to model this constraint, i.e. the constraint
+is –hopefully– incorporated in the LM. This ﬁne-
+tuning approach has several drawbacks. It implies
+to train multiple speciﬁc LMs (one per constraint),
+which is costly, when even possible given the size
+of current state-of-the-art LM, and results in several
+models.
+In this paper, we propose new approaches to add
+such additional constraints on the texts but at de-
+coding time. We exploit a discriminator that is
+trained to determine if a text follows a given con-
+straint or not; its output provides information to
+guide the generation toward texts that satisfy this
+expected constraint. In order to make the most
+of the discriminator information, we propose an
+original method based on the Monte Carlo Tree
+Search (MCTS) algorithm (Coulom, 2006), namely
+Plug and Play Language - Monte Carlo Tree Search
+(PPL-MCTS). We also propose simpler methods
+based on re-ranking to fulﬁl this goal. Both ap-
+proaches do not require to ﬁne-tune the LM; adding
+a new constraint can thus simply be done by pro-
+viding a discriminator verifying if a text complies
+with what is expected. More precisely, our main
+contributions are the following ones:
+1.we propose to use MCTS as a decoding strat-2953egy to implement constrained generation and
+we show, on 3 datasets and 2 languages, that
+it yields state-of-the-art results while offering
+more ﬂexibility;
+2.we also explore simpler generation methods
+based on re-ranking and show that this kind
+of approach, with low computational costs,
+can also be competitive if the diversity within
+propositions to re-rank is encouraged;
+3.we provide a fully functional code implement-
+ing a batched textual MCTSworking with
+the popular HuggingFace’s Transformers li-
+brary (Wolf et al., 2020)
+2 Related work
+The goal of constrained textual generation is to
+ﬁnd the sequence of tokens xwhich maximises
+p(x|c), given a constraint c. Few methods
+address the constrained textual generation.
+Class-conditional language models. Class-
+conditional language models (CC-LMs), as the
+Conditional Transformer Language (CTRL) model
+(Keskar et al., 2019), train or ﬁne-tune the weights
+θof a single neural model directly for controllable
+generation, by appending a control code in the
+beginning of a training sequence. The control code
+indicates the constraint to verify and is related to
+a class containing texts that satisfy the constraint.
+For the sake of simplicity, we will denote without
+distinction the class, the constraint veriﬁed by
+its texts and the associated control code by c.
+Trained with different control codes, the model
+learnsp(x|c) =p(x|x,c). The
+constraint can then be applied during generation
+by appending the corresponding control code to
+the prompt. While this method gives some kind
+of control over the generation, the control codes
+need to be deﬁned upfront and the LM still needs
+to be trained speciﬁcally for each set of control
+codes. This is an important limitation since the
+current trend in text generation is the use of large
+pre-trained models which can hardly be ﬁne-tuned
+(for instance, the last version of GPT, GPT-3,
+cannot be ﬁne-tuned without access to very large
+hardware resources).
+Discriminator-based methods The general idea
+of discriminator-guided generation is to combinea disciminator Dwith a generative LM. The dis-
+criminator explicitly models the constraint by cal-
+culating the probability p(c|x)of the se-
+quencexto satisfy the constraint c. This prob-
+ability is directly related to p(x|c)through
+Bayes’ rule : p(x|c)∝p(c|x)p(x).
+Discriminator-based methods alleviate the training
+cost problem, as discriminators are easier to train
+than a LM. Moreover, any additional constraint can
+be deﬁned a posteriori without tuning the LM, only
+by training another discriminator. The discrimina-
+tors have been used in different ways to explore the
+search space. In the work of (Holtzman et al., 2018;
+Scialom et al., 2020), the space is ﬁrst searched us-
+ing beam search to generate a pool of proposals
+with a high likelihood p(x), and then the dis-
+criminator is used to re-rank them. However, in
+addition that beam search can miss sequences with
+high likelihood, it is biased towards the likelihood,
+while the best sequence might only have an average
+likelihood, but satisﬁes the constraint perfectly.
+Hence, it might be more suitable to take the dis-
+criminator probability into account during decod-
+ing rather than after generating a whole sequence.
+In this case, the discriminator is used at each gen-
+eration steptto get the probability p(c|x)for
+each token of the vocabulary V, and merge it to the
+likelihoodp(x)to choose which token to emit.
+In order to reduce the cost of using a discrimina-
+tor on every possible continuation, GeDi (Krause
+et al., 2020) proposes to use CC-LMs as generative
+discriminators. The method relies on the fact that
+the CC-LM computes p(x|x,c)for all to-
+kens of the vocabulary which can be used to get
+p(c|x)for all tokens using Bayes’ equation.
+This approach is thus at the intersection of tuning
+the LM and using a discriminator: it tunes a small
+LM (the CC-LM) to guide a bigger one.
+In Plug And Play Language Model
+(PPLM) (Dathathri et al., 2020), the discriminator
+is used to shift the hidden states of the pre-trained
+transformer-based LM towards the desired class at
+every generation step. PPLM can be used on any
+LM and with any discriminator. However, PPLM
+needs to access the LM to modify its hidden states,
+while our approach only requires the output logits.
+As some LM can only be used through access to
+logits (e.g. GPT-3 API), this makes our approach
+more plug and play than PPLM.
+A common drawback of all these approaches is
+their lack of a long-term vision of the generation.2954Indeed, the discriminator probabilities become nec-
+essarily more meaningful as the sequence grows
+and might only be trustable to guide the search
+when the sequence is (nearly) ﬁnished. When used
+in a myopic decoding strategy, classiﬁcation errors
+will cause the generation process to deviate further
+and further. Trying to optimize a score deﬁned in
+the long horizon by making short term decisions is
+very similar to common game setups such as chess,
+where the Monte Carlo Tree Search (MCTS) has
+proven to be really effective (Silver et al., 2018),
+which motivated our approach.
+3 PPL-MCTS method
+The approach that we propose is in line with meth-
+ods using a discriminator to guide a large LM de-
+coding, without the need to re-train it. Also, it
+can be applied to any LM with any discriminator,
+following the plug and play paradigm. Unlike pre-
+vious approaches, it is able to have a long term
+vision on what is generated. Being able to make
+a short-term decision (choice of the next token x
+at time step t) that is promising in the long run is
+based on the exploration of the search space. We
+propose here to use the Monte Carlo Tree Search
+(MCTS) for an efﬁcient exploration of this space.
+MCTS is very well suited for this problem for
+three reasons. First, it allows to get a local score
+(i.e, a score for the next token to emit) using ﬁn-
+ished sequences. Hence, this score is more mean-
+ingful than scores based only on the next step. Sec-
+ond, it allows to explicitly deﬁne the compromise
+between exploitation of promising sequences (with
+a high likelihood), and exploration of other po-
+tentially promising sequences (to not miss better
+sequences with a lower likelihood). The fact that
+regret, i.e the number of simulations done on a sub-
+optimal sequence, has a theoretical upper bound
+in MCTS (Rosin, 2011) is a nice guarantee that
+the computation time is not wasted and the search
+is efﬁcient. Finally, it outputs a solution at each
+iteration and so can ﬁt our computational budget
+by allowing to adjust the quality of the solution to
+calculation spent.
+Text generation as tree exploration process.
+The search space of the text generation corresponds
+to a tree: its root is the prompt and the child of a
+node is its father’s sequence with one of the |V|pos-
+sible tokens appended. In the case of constrained
+generation, the goal is thus to ﬁnd the path, and
+therefore the sequence x, with the highest p(x|c)
+possible without exploring the whole tree in width
+and depth. As mentioned previously, this probabil-
+ity can be computed as the product of the likelihood
+p(x)and the probability given by a discrimina-
+torp(c|x). An illustration of such a tree can
+be found in Fig. 1, where the likelihood of xis
+forged by multiplying corresponding conditional
+probabilities along the path, and the classiﬁcation
+probability is calculated at the terminal node.
+Applying MCTS to text generation. MCTS is
+a heuristic based iterative algorithm that uses ran-
+domness to solve deterministic problems that can-
+not be solved using traditional approaches, often
+because the search space is too large to be entirely
+explored. Each iteration consists in four consec-
+utive steps. In the particular context of applying
+MCTS to text generation, we made some adapta-
+tions:
+1.Selection Recursively choose children from
+the root to a node that has not been expanded
+yet. To only explore viable sequences, the
+probabilityp(x|x)of a given token
+xgiven by the LM is used during the selec-
+tion phase. To this end, the children chosen
+are those maximizing the Polynomial Upper
+Conﬁdence Trees (PUCT) (Rosin, 2011) as
+deﬁned in (Silver et al., 2017):
+PUCT (i) =s
+n+cp(x|x)√N
+1 +n(1)
+withsthe aggregated score of the node i,n
+the number of simulations played after this
+node,Nthe number of simulations played2955after its parent, and ca constant deﬁning
+the compromise between exploration and ex-
+ploitation. In the task of constrained genera-
+tion, we deﬁne the score of a sequence as its
+probability knowing the class p(x|c).
+2.Expansion If the selected node is not termi-
+nal, use the LM to expand it by creating its
+children.
+3.Simulation (roll-out) Sample one of these
+children according to p(x|x), and go
+to a terminal node through a random walk or
+another pattern.
+4.Backpropagation Aggregate the ﬁnal score
+obtained at the terminal node ( p(x|c)) to
+each parent until root. There are different
+strategies to aggregate scores, as computing
+the average between the actual score and the
+one being backpropagated, or taking the max-
+imum of the two. We take the aggregated
+scoresassociated to the node ias the aver-
+aged probability over all simulations played
+after this node.
+When the number of iterations has reached the
+allocated budget, the building of the tree stops. The
+tokenxselected for the current decoding step can
+be selected as the most played node amongst the
+root’s children nodes, or the one with the highest
+aggregated score. We chose the most played one.
+These adaptations of MCTS to constrained gen-
+eration are summarized in Fig. 2. Note that any
+language model can be used for deﬁning the prob-
+abilityp(x|x)and any discriminator for
+scoring sequences, hence the name of our approach:
+Plug and Play Language - Monte Carlo Tree Search
+(PPL-MCTS). MCTS has been very recently used
+for machine translation (Leblond et al., 2021), ques-
+tion generation and summarization (Scialom et al.,
+2021). The differences with these concurrent stud-
+ies are discussed in Appendix A.5.
+Model improvements. In order to allow a ﬁner
+control on how the constraint is applied, we intro-
+duce a parameter α∈[0,1]to control the compro-
+mise between likelihood and constraint strength,
+modifying Bayes’ equation: p(x|c)∝p(c|
+x)p(x). Note that PUCT (1) already con-
+siders the likelihood of the sequence, favoring the
+selection of nodes with high likelihoods. Hence,
+even sequences generated with α= 1are correctly
+written. Setting α<1forces the algorithm to ex-
+plore solutions even closer to the language model.
+In our experiments, we set α= 1to strengthen the
+constraint.
+To avoid expensive roll-outs, one may also as-
+sign a value to unﬁnished sequences at the cost of
+a less precise evaluation that may be not as mean-
+ingful as when doing roll-outs. Indeed, the discrim-
+inator can be trained on sequences with variable
+numbers of tokens, allowing it to be used at each
+node without the need of simulations. In this setup,
+the MCTS is used as an efﬁcient compromise be-
+tween exploration and exploitation, losing part of
+its long view property but allowing to skew the
+exploration toward promising solutions.
+Finally, during our ﬁrst experiments, we ob-
+served that PPL-MCTS leads to repetitive patterns.
+This is very similar of what happens with greedy
+search, where a single sequence with a high likeli-
+hood is dominating the search. If such sequences
+also have a pretty high discriminator scores, they
+will be repeated often. CTRL (Keskar et al., 2019)
+offers a simple yet very powerful method to avoid
+noisy repetitions. It applies a scalar factor I(i)to
+the temperature parameter τof a given token x
+that penalizes this token if it is already in the in-
+put sequence. The probability of a given token
+becomes:
+p(x|x) =exp (z/(τ·I(i)))exp (z/(τ·I(v)))(2)
+with the repetition penalty I(i)>1ifxis already
+in the prompt and 1 otherwise, and zthe neural LM
+predicted logits over the vocabulary V. Thus, prob-
+abilities of already emitted tokens are penalized,
+but if the language model gives a really high score
+to one token (hence, it is very conﬁdent that this
+should be the token to emit), it may still be selected
+as the output token.29564 Experiments
+4.1 Performance assessment
+The goal of constrained generation is to generate
+samples that 1) belong to a speciﬁc class while 2)
+keeping the language quality of the original LM,
+and 3) with enough diversity across samples. We
+chose three different metrics to evaluate each of
+these aspects: 1) accuracy, which is veriﬁed by an
+external "oracle" discriminator trained on a dataset
+disjoint from the one used to guide the generation;
+2) perplexity, which is computed using an "oracle"
+LM, i.e an unconstrained LM trained on differ-
+ent data than the one used to train the constrained
+generator; 3) Self-BLEU score (Zhu et al., 2018),
+which is the BLEU score (Papineni et al., 2002) of
+a sample using the other samples as references: a
+high Self-BLEU score means that there is a lot of
+overlap between generated samples, and thus that
+the diversity is low. Such automatic metrics have
+known limitations (Caccia et al., 2020) but results
+of human evaluation on the CLS dataset, detailed
+in Section 4.6, conﬁrm that they provide a good
+overview of the performance.
+In practice, the studied dataset (see below) is
+split into two parts, each part being sub-divided
+in train/val/test sets. The ﬁrst part serves to train
+models used for the generation (LM and discrimina-
+tor), while the second is used to train oracles which
+serve to compute the automatic evaluation metrics.
+The test set of this second part will also be used to
+forge prompts for the generation. Further details on
+data splits are given in Appendix A.1. Each metric
+is evaluated on a pool of 900 generated samples.
+4.2 Datasets
+Three different datasets are used in the experiments
+presented hereafter: amazon_polarity (Zhang et al.,
+2015), CLS (from the FLUE (Le et al., 2020)
+dataset) and emotion (Saravia et al., 2018). The
+ﬁrst two are Amazon reviews which have been
+labeled as positive or negative, so the intended
+task is to study the possibility of applying po-
+larity to the generation. As CLS is in French,
+these two datasets will serve to ensure that the
+methods have the same behaviour for different lan-
+guages. Emotion is a collection of tweets clas-
+siﬁed under eight basic emotions: anger, antic-
+ipation, disgust, fear, joy, sadness, surprise and
+trust. This dataset is supposed to be more chal-
+lenging since there are more classes and texts are
+smaller (only composed of one sentence), hencethe model needs to precisely generate the target
+emotion with few tokens. It is worth noting that
+the 3 datasets have different sizes: 4,000,000 in-
+stances in total for amazon_polarity, 20,000 for
+emotion and 6,000 for CLS. They are available at
+https://huggingface.co/datasets/ .
+We adapted prompts used to start the genera-
+tion for each datasets depending on the data for-
+mat. Amazon_polarity comes with a "title" column
+which corresponds to the title the user gave to the
+review. This ﬁeld is directly used as prompt. For
+the two other datasets, the prompts are the very
+ﬁrst tokens of the text ﬁeld. Because texts from
+emotion and CLS have different lengths, the size
+of prompts are also different: it is arbitrarily set to
+6 tokens for CLS and 4 for emotion.
+4.3 Methods and baselines
+Baselines. Beside PPL-MCTS, we propose sev-
+eral baselines and simple techniques. Most studies
+on re-ranking create proposals using beam search
+and then re-rank them using the product of like-
+lihood and discriminator probability, limiting the
+diversity in the proposals pool. We propose re-
+ranking with different variations, in the way se-
+quences to re-rank are produced, and in the way the
+ﬁnal sequence is chosen in an attempt to improve
+such approaches. Three methods are tested to gen-
+erate propositions: beam search (Dept., 2018) (with
+a beam size of 3), nucleus (top-p) sampling (Holtz-
+man et al., 2020) (with p=0.9), as well as beam
+sampling (as described in (Caccia et al., 2020)).
+For the ﬁnal choice, we also propose three different
+methods: argmax , where the sequence that has the
+highestp(x|c)is chosen; ﬁrst true , where proposi-
+tions are sorted by descending likelihood and the
+ﬁrst sequence that belongs to the correct class ac-
+cording to the guiding discriminator is chosen; and
+sampling , where the distribution of p(x|c)for the
+propositions is normalized and the chosen sequence
+is sampled following this distribution. Similarly to
+PPL-MCTS, the likelihood part of p(x|c)is omit-
+ted (i.e,α= 1) since sequences in the pool of
+propositions already have an high likelihood.
+It should be noted that in our setting, a generated
+sequence corresponds to a document (e.g. a whole
+review). This choice makes sense for our datasets,
+but re-ranking at a smaller level (after each sen-
+tence, after x tokens...) would also be possible and
+might produce different results.2957
+Methods from the literature We compare our
+results with methods from the literature. In par-
+ticular, we test CC-LMs trained on the target task,
+similarly as CTRL. We tested this method using
+greedy search as well as sampling for decoding. We
+also propose an implementation of CC-LM trained
+with the classiﬁcation loss initially proposed for the
+GeDi method (Krause et al., 2020). These CC-LMs
+are further used to implement the state-of-the-art
+GeDi model. In the experiments reported below,
+we report results for GeDi models trained with and
+without the classiﬁcation loss. Finally, we report
+results of PPLM. For a fair comparison, the same
+discriminator and LM are used for our PPL-MCTS
+approach, the re-ranking approaches (baselines),
+and PPLM.
+4.4 Experimental setting
+For each method, a number of tokens equal to the
+average length of sequences of the dataset are gen-
+erated: 98 tokens for amazon_polarity, 23 for emo-
+tion and 137 for CLS. Fixing the number of gener-
+ated tokens ensures fair comparisons between the
+tested methods. Indeed, even though perplexity and
+Self-BLEU metrics are normalized by the length
+of the sequence, these metrics can tend to penalize
+a model producing longer sequences: such model
+has more risk to deviate and repeat itself, which
+would results in higher values compared to a model
+producing shorter sequences. An example of gen-
+eration from amazon_polarity is given in Fig. 3.
+To run all of these methods, three different mod-
+els are needed: one discriminator, a "vanilla" LM
+used as generator, and the CC-LM used in the
+CTRL and GeDi approaches. For the discrim-
+inator used to guide the generation, we rely on
+BERT-base-cased (Devlin et al., 2019) for the En-
+glish datasets and FlauBERT-large-cased (Le et al.,
+2020) for CLS. As vanilla LM, we use GPT-2
+small models, relying on OpenAI’s pre-trained
+model for the English datasets and on belgpt2 for
+the French one. The implementation and mod-
+els used for BERT, FlauBERT, GPT-2 and belgpt2
+are all found on https://huggingface.co/
+models . Given the particular format of data on
+our experimental datasets, the vanilla LM is trained
+on raw training sequences in order to produce texts
+corresponding to the task (for instance, reviews).
+The CC-LM is simply a ﬁne-tuned version of the
+vanilla LM with the control code appended.
+We tested three values for the temperature param-
+eter for each proposed method (1.0, 1.1 and 1.2).
+For PPL-MCTS, we also studied the impact of c
+by testing values 1.0, 3.0, 5.0 and 8.0 along with
+the different temperature values mentioned. We
+only report the results for parameters yielding the
+best accuracy score in the main paper but every re-
+sults can be found in Appendix A.2. The repetition
+penalty has been set to 1.2 as deﬁned in CTRL. The
+number of MCTS iteration per token is set to 50, as
+well as the number of propositions for re-ranking,
+except for beam sampling where it is set to 10 be-
+cause of memory limitations. Given the cost of
+roll-out for long sequences, we apply roll-out only
+on the emotion dataset to be able to run extensive
+experiments. Without roll-out, MCTS loses a part
+of its long view property but still allows to skew the
+exploration toward promising solutions. A study
+of the impact of the roll-out is detailed in a next
+sub-section. Parameters used for literature models
+are those provided by the authors. Experiments
+were conducted on a Quadro RTX 6000 with 80
+GB of RAM.
+4.5 Results
+Results on the emotion, CLS and amazon_polarity
+datasets are reported in Table 1. The statistical sig-
+niﬁcance against GeDi and PPLM is measured with
+a t-test with signiﬁcance level (p-value) of 1%. Re-2958sults show that PPL-MCTS is competitive against
+task-speciﬁcally trained LMs on the constraint ap-
+plication aspect (high accuracy), while keeping a
+fair amount of diversity (low Self-BLEU) and stay-
+ing close to the original distribution (low oracle
+perplexity). On all three datasets and metrics, it
+constantly yields top results; the only other method
+which is high-performing for all metrics and con-
+stant across the datasets is GeDi trained with the
+classiﬁcation loss.
+Another remarkable result is for the Sampling -
+Argmax method that selects among a pool of propo-
+sitions generated using sampling, the one with the
+highest probability to be from the correct class.
+Thanks to the sampling used for generating propo-
+sitions, its Self-BLEU is among the lowest of all
+reported values. Despite the simplicity and low
+computational cost of this approach, its accuracy is
+among the best on every dataset. These very good
+results should however be put into perspective of
+the very high perplexity of its generated texts. This
+indicates that the generated samples may be very
+different than those generated by a standard LM on
+this dataset. Hence, exploring accuracy/perplexity
+trade-offs achievable with different values of αis
+interesting, which is proposed in Appendix A.4.
+4.6 Human evaluation
+Since automatic metrics can be biased and may not
+faithfully represent the human judgement, we con-
+duct a human evaluation to compare with the results
+obtained through oracles and conﬁrm the results
+and the relevance of automatic metrics. Because of
+the annotation cost, we limit the tested methods to
+the two state-of-the-art methods (PPLM and GeDi),
+PPL-MCTS and the promising Sampling - Argmax.
+This allows to test if PPL-MCTS is indeed as efﬁ-
+cient as GeDi and if both are better than original
+PPLM. Also, this should conﬁrm that the high per-
+plexity of the Sampling - Argmax method is due
+to generated texts being very different from the
+ones generated by other methods. The evaluation
+has been performed on the CLS dataset by three
+volunteering colleagues, French native speakers.
+They labeled the same pool of reviews in order to
+measure the inter-annotator agreement.
+The pool consists of 50 reviews (25 positive
+and 25 negative ones) randomly sampled for each
+method, which results in 200 reviews in total. An-
+notators were asked to go through this (randomly
+shufﬂed) pool and to give two scores for each re-view:
+1.Polarity . Rate from 1 to 5 how well the text
+corresponds to the desired label (positive or
+negative). The text is rated 5 if it corresponds
+entirely to the expected label, down to 1 if
+it corresponds entirely to the opposite label.
+This score corresponds to the accuracy from
+the automatic metrics.
+2.Readability . Rate from 1 to 5 how well the
+text is written. 5 corresponds to a text without
+any mistake and which is perfectly understand-
+able. The more mistakes or incoherence, the
+lower the score. This score corresponds to the
+perplexity from the automatic metrics.
+The diversity within the pool of generated texts is
+complicated to evaluate and the Self-BLEU is fairly
+accurate as a diversity metric, so this property is
+not studied in the human evaluation.
+We report scores averaged over the 3 annota-
+tors as well as the standard deviation in Table 2.
+A t-test against PPLM (GeDi being best on both
+scores) is applied to test statistical signiﬁcance
+(with p-value=0.01). One can notice that the agree-
+ment between annotators is high and that the results
+are in line with conclusions from automatic met-
+rics. GeDi, when trained with the classiﬁcation
+loss, yields similar results as PPL-MCTS, in terms
+of constraint satisfaction and quality of writing.
+PPLM, on the other hand, generates samples of
+lower quality and has more difﬁculty for applying
+the constraint. Finally, given its readability score,
+Sampling - Argmax seems to generate samples with
+a low quality. Its polarity score, while being higher
+than PPLM, is lower than expected: given the ac-
+curacy reported by the oracle, it should be close to
+GeDi and PPL-MCTS. It is most likely due to the
+fact that evaluating the polarity of a badly written
+text is hard for an human, often resulting in review
+being scored as neutral.
+4.7 Effect of the roll-out
+Rolling out is costly for very long sequences, and
+the question of its usefulness necessarily arises. We
+study how rolling out for only a ﬁxed number of
+tokens (instead of until the end of the sequence)
+inﬂuences the performance of PPL-MCTS. For this
+experiment, we use the CLS dataset and set the
+roll-out to 0 (original result), 3, 5, 10 and 20 tokens.
+As one can note in Fig. 4, only 5 tokens allows
+PPL-MCTS to be on par with GeDi on this dataset.2959
+The roll-out size quickly improves accuracy, which
+then reaches a plateau. It suggests that having an
+horizon is really helpful but only up to a certain
+point. Beside, Self-BLEU and oracle perplexity
+values stay stable, varying respectively from 0.54
+to 0.57, and from 4.98 to 5.18 as the roll-out size
+increases from 0 to 20.The roll-out size can thus
+be set accordingly to the compute budget, further
+deﬁning the trade-off between cost and quality.
+5 Conclusion
+In this paper, we show that it is possible to con-
+trol generation with the help of a discriminator that
+implements some expected constraints on the text
+during decoding. This ﬂexible approach is very use-
+ful when using very large language models, such
+as GPT-3, whose ﬁne-tuning computational costs
+are prohibitive. In contrast, training a discrimina-
+tor is easier and cheaper. Our proposed methods,
+that mix the discriminator constraint and the gen-
+eration, yield performance that is equivalent to the
+best approaches based on LM tuning at lower train-
+ing cost. On the other hand, such approaches have
+an additional cost during inference because of thecost of the discriminator being applied to candi-
+date generations. A study on this additional cost
+depending on the type of discriminator used can be
+found in (Chafﬁn et al., 2022). PPL-MCTS offers
+a solution for cases where training is too costly
+for the downstream application or the language
+model is not directly accessible. Seeing text gen-
+eration as a tree exploration process, an existing
+approach such as GeDi indeed lowers the cost of
+width exploration but the depth exploration is still
+an issue. Using GeDi for constrained generation
+is thus very similar to a standard maximum likeli-
+hood search which still lacks of an optimal search
+method. On the other hand, Monte Carlo Tree
+Search provides an efﬁcient way to explore the tree
+by determining the best local choice in the long run,
+lowering the cost of depth exploration. Thus, these
+two methods solve different facets of constrained
+generation, and the combination of the two is a
+promising perspective. Moreover, MCTS allows to
+precisely deﬁne the best compromise between cost
+and quality through the number of iterations and the
+roll-out size, while ensuring the efﬁciency of the
+search theoretically. For reproducibility purposes,
+our implementation is made available at https:
+//github.com/NohTow/PPL-MCTS .
+Several research avenues are opened by this
+work. For methods yielding high perplexity, it
+would be interesting to explore how to set the α
+parameter in order to reach the best compromise
+between accuracy and perplexity. Similarly, the
+size (number of tokens considered) of the roll-
+out in MCTS offers some ways to control the
+cost/performance compromise. An adaptive roll-
+out size, for example rolling-out until the score of2960the discriminator is above or below a threshold as
+in (Cotarelo et al., 2021), would seem particularly
+suited for texts. It should also be noted that ﬁne-
+tuning a model and controlling the generation with
+a discriminator can be used jointly. For instance,
+one can use PPL-MCTS on a tuned LM, which will
+most likely result in even better performances be-
+cause sequences considered during the search will
+have an overall higher quality for the considered
+task. Finally, not only can PPL-MCTS be applied
+to any property that a discriminator can identify,
+but it can also work using other scoring methods
+(human evaluation, regular expressions, heuristic
+based evaluation, ...) as long as the score reﬂects
+compliance with the expected property.
+6 Ethics/Broader impact
+The ethical risks of large LMs are well known
+(Bender et al., 2021). Especially when they are
+trained on large quantities of non curated data, it
+has be shown that they tend to reproduce or ampli-
+ﬁes biases on gender, race, etc. and more generally
+may produce inappropriate content (Gehman et al.,
+2020). As for every automatic generation method,
+using our approaches may result in the production
+of unwanted, misleading or inappropriate content.
+Yet, it is noteworthy that the constrained genera-
+tion as we propose is one way to control, a poste-
+riori of the LM training, that the generated texts
+respect some criteria. It can be used for any appli-
+cation given that a discriminator is able to check
+the constraint accurately. The ethical interests are
+thus important, such as adding constraint about
+race diversity, gender equality, non toxicity, factual
+faithfulness, etc. as far as these properties can be
+detected by a (trained or hand-crafted) discrimina-
+tor. But of course, the same technique could be
+used for malicious purposes, such as constraining
+generation so it produces offensive texts, targeted
+fake news, etc. In such cases of misuse, discrim-
+inators similar to those used for constraining the
+generation could easily spot such texts since the
+constraint will, by design, be noticeable and easily
+grasped by a discriminator.
+Even though training language models on cu-
+rated data in the ﬁrst place is possible, totally cu-
+rated dataset is hard to obtain, and new biases may
+be highlighted. Indeed, deﬁning a priori what is ev-
+ery possible bias in every cultural context for every
+possible application, and curating the training data
+accordingly is hardly feasible. Hence, constant up-dates of language models will be necessary to make
+them as fair as possible. Given the cost of large
+language models training, updating them often is
+really harmful for the environment. Discrimina-
+tor guided constrained generation offers a way to
+ﬁlter text generation using up-to-date standards in
+terms of fairness by only updating the discrimina-
+tor, which is faster and require way less resources.
+References296129622963A Appendix
+In this technical appendix, we provide additional
+information about our methods, some settings and
+the experiments. Further experimental results, as
+well as examples, are given and discussed. Finally,
+a discussion on concurrent studies is provided.
+A.1 Data splits
+We adapted the way we split the dataset into two
+parts and train/test/validation sets depending on the
+original dataset splits. Amazon_polarity is com-
+posed of a training set of 3 600 000 examples and a
+test set of 400 000. We split both into two parts and
+kept 20% of each training set for validation. Emo-
+tion already comes with train, test and validation
+set, hence we just split each into two parts. Finally,
+CLS is composed of a train set and a test set of
+6000 examples. We split the training set in two and
+split the test set twice so we got two validation and
+test sets. Thus, for each dataset, we end up with
+two training sets, two validation sets and two test
+sets.
+The ﬁrst train and validation sets are used to
+train and control the training of models used for
+the generation: the guiding classiﬁer, the "vanilla"
+LM and the CC-LM. The test set serves to control
+their performance.
+The second ones are used to train the LM oracle
+and the classiﬁer used to measure the accuracy.
+The test set allows to verify that these models are
+trustworthy for accurate evaluation. Once all the
+models are trained, the constrained generation is
+evaluated on 900 samples generated from prompts
+never seen by models during training.
+A.2 Complementary results
+We tested three temperature values for each pro-
+posed method: 1.0, 1.1 and 1.2. As the temperature
+increases, the output distribution of the language
+model becomes more and more uniform. This
+means that high temperatures should result in high
+perplexities because the sampling deviates further
+from the original distribution.
+For PPL-MCTS, we also studied the impact of
+cby testing values 1.0, 3.0, 5.0 and 8.0 along
+with the different temperature values mentioned.
+cdeﬁnes the compromise between exploiting
+nodes that already have great scores and exploring
+less played but promising ones. A high cen-
+courages exploration. We remind that the repetition
+penaltyIin Eqn. 2 has been set to 1.2 as deﬁnedin CTRL.
+In Section ’Results’, for each method and
+dataset, we reported only the results obtained with
+the set of parameter values yielding the best ac-
+curracy. Hereafter, we report results with every
+tested set of parameters in Tables 3, 4 and 5 for re-
+spectively the emotion, CLS and amazon_polarity
+datasets.
+Unsurprisingly, the perplexity of methods which
+sample on the LM logits explodes when τincreases,
+without a noticeable gain in accuracy. Since the di-
+versity is already high for low τvalues, it seems to
+be better to keep the temperature low with these ap-
+proaches. Note that the couple c= 3,τ= 1.0
+for PPL-MCTS always leads to the best result. Us-
+ingc= 8seems to yield slightly worse results,
+especially with a low temperature. However, the
+different parameters do not greatly affect the results
+of PPL-MCTS.
+A.3 Examples of generation
+We provide an example of generation for ama-
+zon_polarity and emotion datasets using PPL-
+MCTS, PPLM, GeDi and Sampling - Argmax meth-
+ods, respectively in Figures 5 and 6. Texts gener-
+ated using Sampling - Argmax are rather differ-
+ent as suggested by the reported high perplexity
+results. Note that emotion texts are only one sen-
+tence while those of amazon_polarity are complete
+reviews. This difference motivated the choice of
+these datasets. Also, we preferred amazon_polarity
+over IMDb used in the GeDi and PPLM papers
+because of its bigger size, suitable format and be-
+cause a French equivalent is available (CLS), which
+allows us to test another language with a similar
+dataset.
+A.4 Constraint strength through α
+As described in the model improvements section,
+a parameter αcan be deﬁned to control the rela-
+tive importance of the discriminator score and the
+language model likelihood. Thus, this parameter
+allows to control the constraint application strength
+as it helps to deﬁne a trade-off between staying
+close the original LM and satisfying the constraint.
+Note that in all of our experiments reported earlier,
+this parameter has been set to 1, focusing on the
+constraint application since the proposed methods
+already inherently provide legible texts.
+Here, as a proof of concept, we test a range of
+values forα, using the Sampling - Argmax method
+on the amazon_polarity dataset with the automatic2964metrics. We chose this method and dataset since
+it yields the best accuracy, but also exhibits a very
+high perplexity. In this case, it seems interesting to
+trade a bit of accuracy for better written texts.
+Results are roughly constant when αis lower
+than 0.98, so it has an impact only for values be-
+tween 0.98 and 1. This is due to the fact that, for
+a long enough sequence, p(x)is often relatively
+small compared to p(c|x). This difference of
+scale annihilates the inﬂuence of α. This [0.98-1]
+interval thus corresponds to values of αthat rescale
+p(c|x)andp(x)on a same order of mag-
+nitude. As shown in Figure 7, within this regime,
+we can observe a linear dependency between α
+and the accuracy as well as the perplexity. This
+illustrate that a trade-off can be obtained by tuning
+this parameter, allowing to deﬁne the strength of
+the constraint application which also deﬁnes how
+far the generation can be from the original LM
+distribution.
+A.5 Concurrent work
+During the time of writing, two preprints using
+MCTS for NLP tasks have been released (Leblond2965
+et al., 2021; Scialom et al., 2021). While we
+emphasize that these are concurrent studies, PPL-
+MCTS has some major differences. Indeed, these
+studies focus on improving the overall quality of
+generated texts rather than following a given con-
+straint. While "being well written" can be seen as a
+constraint, PPL-MCTS rather explores how a con-
+straint that is not present in the original language
+model (i.e. not a goal in the original training of
+the LM) can be added at generation time. Scialom
+et al. (2021) train a discriminator to distinguish
+generated and real samples because their goal is
+ultimately to train the language model in a Genera-
+tive Adversarial setup to create a better LM. This
+iterative training, in addition to not being possible
+in our task, is not wanted since we aim to be plug
+and play. Our goal is indeed to apply an additional
+constraint to an untouched original language model.
+Yet, even if goals are different and applying MCTS
+for constrained generation is not trivial, the "MLE2966Coop-MCTS" is close to PPL-MCTS. However,
+focusing on MCTS as a decoding only strategy al-
+lowed an in-depth study that provided interesting
+results, in particular the effect of the roll-out size
+(the roll-out is totally omitted in their paper) and
+theαparameter.
+On the other hand, Leblond et al. (2021) also
+focus on MCTS as a decoding strategy but for the
+very speciﬁc case of machine translation. MCTS
+is used to optimize metrics for machine translation,
+which are known to not necessarily correlate with
+human judgement (Novikova et al., 2017). Again,
+the goal is different since these metrics are used as
+a proxy of the sample quality. In contrast, our work
+shows that MCTS can be used to optimize a given
+property, but instead of optimizing the quality of
+samples, we optimize for a given constraint while
+retaining the original quality of writing. The fact
+that MCTS also works in such cases was non triv-
+ial since adding such constraints to the generation
+could lead to deteriorate texts.
+Beside MCTS, we also proposed and explored
+simpler methods based on re-ranking for our task
+and showed that diversity allows to satisfy the con-
+straint, often at the price of a lower quality, empha-
+sizing the compromise between exploration and
+exploitation made by the MCTS.
+Finally, these concurrent studies provide evi-
+dences that MCTS is promising for many different
+usage in NLP. We hope that the large amount of ex-
+periments, parameter analysis and the availability
+of our open-sourced code working out-of-the-box
+will help foster future research in this direction.2967

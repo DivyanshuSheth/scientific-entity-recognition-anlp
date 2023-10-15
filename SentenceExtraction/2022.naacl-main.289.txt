@@ -1,1 +1,699 @@
-3938 Proceedings of the 2022 Conference of the North American Chapter of the Association for Computational Linguistics : Human Language Technologies , pages 3938 3948 July 10 - 15 , 2022 © 2022 Association for Computational Linguistics 3939 3940 3941 3942 3943 3944 3945 3946 3947 3948 
+
+Pengzhi Gao, Zhongjun He, Hua Wu, and Haifeng Wang
+Baidu Inc. No. 10, Shangdi 10th Street, Beijing, 100085, China
+{gaopengzhi,hezhongjun,wu_hua,wanghaifeng}@baidu.com
+Abstract
+We introduce Bi-SimCut: a simple but effec-
+tive training strategy to boost neural machine
+translation (NMT) performance. It consists of
+two procedures: bidirectional pretraining and
+unidirectional finetuning. Both procedures uti-
+lize SimCut, a simple regularization method
+that forces the consistency between the output
+distributions of the original and the cutoff sen-
+tence pairs. Without leveraging extra dataset
+via back-translation or integrating large-scale
+pretrained model, Bi-SimCut achieves strong
+translation performance across five translation
+benchmarks (data sizes range from 160K to
+20.2M): BLEU scores of 31.16foren→de
+and38.37forde→enon the IWSLT14
+dataset, 30.78foren→deand35.15for
+de→enon the WMT14 dataset, and 27.17
+forzh→enon the WMT17 dataset. Sim-
+Cut is not a new method, but a version of Cut-
+off (Shen et al., 2020) simplified and adapted
+for NMT, and it could be considered as a
+perturbation-based method. Given the univer-
+sality and simplicity of SimCut and Bi-SimCut,
+we believe they can serve as strong baselines
+for future NMT research.
+1 Introduction
+The state of the art in machine translation has been
+dramatically improved over the past decade thanks
+to the neural machine translation (NMT) (Wu et al.,
+2016), and Transformer-based models (Vaswani
+et al., 2017) often deliver state-of-the-art (SOTA)
+translation performance with large-scale corpora
+(Ott et al., 2018). Along with the development
+in the NMT field, consistency training (Bachman
+et al., 2014) has been widely adopted and shown
+great promise to improve NMT performance. It
+simply regularizes the NMT model predictions to
+be invariant to either small perturbations applied
+to the inputs (Sato et al., 2019; Shen et al., 2020)
+and hidden states (Chen et al., 2021) or the model
+randomness and variance existed in the training
+procedure (Liang et al., 2021).Specifically, Shen et al. (2020) introduce a set
+of cutoff data augmentation methods and utilize
+Jensen-Shannon (JS) divergence loss to force the
+consistency between the output distributions of the
+original and the cutoff augmented samples in the
+training procedure. Despite its impressive perfor-
+mance, finding the proper values for the four addi-
+tional hyper-parameters introduced in cutoff aug-
+mentation seems to be tedious and time-consuming
+if there are limited resources available, which hin-
+ders its practical value in the NMT field.
+In this paper, our main goal is to provide a sim-
+ple, easy-to-reproduce, but tough-to-beat strategy
+for training NMT models. Inspired by cutoff aug-
+mentation (Shen et al., 2020) and virtual adversar-
+ial regularization (Sato et al., 2019) for NMT, we
+firstly introduce a simple yet effective regulariza-
+tion method named SimCut. Technically, SimCut
+is not a new method and can be viewed as a sim-
+plified version of Token Cutoff proposed in Shen
+et al. (2020). We show that bidirectional backprop-
+agation in Kullback-Leibler (KL) regularization
+plays a key role in improving NMT performance.
+We also regard SimCut as a perturbation-based
+method and discuss its robustness to the noisy in-
+puts. At last, motivated by bidirectional training
+(Ding et al., 2021) in NMT, we present Bi-SimCut,
+a two-stage training strategy consisting of bidi-
+rectional pretraining and unidirectional finetuning
+equipped with SimCut regularization.
+The contributions of this paper can be summa-
+rized as follows:
+•We propose a simple but effective regulariza-
+tion method, SimCut, for improving the gen-
+eralization of NMT models. SimCut could be
+regarded as a perturbation-based method and
+serves as a strong baseline for the approaches
+of robustness. We also show the compatibil-
+ity of SimCut with the pretrained language
+models such as mBART (Liu et al., 2020).3938•We propose Bi-SimCut, a training strategy for
+NMT that consists of bidirectional pretrain-
+ing and unidirectional finetuning with SimCut
+regularization.
+•Our experimental results show that NMT train-
+ing with Bi-SimCut achieves significant im-
+provements over the Transformer model on
+five translation benchmarks (data sizes range
+from 160K to 20.2M), and outperforms the
+current SOTA method BiBERT (Xu et al.,
+2021) on several benchmarks.
+2 Background
+2.1 Neural Machine Translation
+The NMT model refers to a neural network with
+an encoder-decoder architecture, which receives
+a sentence as input and returns a correspond-
+ing translated sentence as output. Assume x=
+x, ..., xandy=y, ..., ythat correspond to
+the source and target sentences with lengths I
+andJrespectively. Note that ydenotes the spe-
+cial end-of-sentence symbol ⟨eos⟩. The encoder
+first maps a source sentence xinto a sequence
+of word embeddings e(x) = e(x), ..., e (x),
+where e(x)∈R, and dis the embedding
+dimension. The word embeddings are then en-
+coded to the corresponding hidden representations
+h. Similarly, the decoder maps a shifted copy
+of the target sentence y, i.e.,⟨bos⟩, y, ..., y,
+into a sequence of word embeddings e(y) =
+e(⟨bos⟩), e(y), ..., e (y), where ⟨bos⟩denotes a
+special beginning-of-sentence symbol, and e(y)∈
+R. The decoder then acts as a conditional lan-
+guage model that operates on the word embeddings
+e(y)and the hidden representations hlearned by
+the encoder.
+Given a parallel corpus S={x,y}, the
+standard training objective is to minimize the em-
+pirical risk:
+L(θ) = E[ℓ(f(x,y;θ),¨y)], (1)
+where ℓdenotes the cross-entropy loss, θis a set
+of model parameters, f(x,y;θ)is a sequence of
+probability predictions, i.e.,
+f(x,y;θ) =P(y|x,y;θ), (2)
+and¨yis a sequence of one-hot label vectors for y.2.2 Cutoff Augmentation
+Shen et al. (2020) introduce a set of cutoff meth-
+ods which augments the training by creating the
+partial views of the original sentence pairs and
+propose Token Cutoff for the machine transla-
+tion task. Given a sentence pair (x,y),Ncut-
+off samples {x,y}are constructed by ran-
+domly setting the word embeddings of x, ..., x
+andy, ..., yto be zero with a cutoff probability
+p. For each sentence pair, the training objective
+of Token Cutoff is then defined as:
+L (θ) =L(θ) +αL(θ) +βL(θ),(3)
+where
+L(θ) =ℓ(f(x,y;θ),¨y), (4)
+L(θ) =1
+N/summationdisplayℓ(f(x,y;θ),¨y),(5)
+L(θ) =1
+N+ 1{/summationdisplayKL(f(x,y;θ)∥p)
++KL(f(x,y;θ)∥p)}, (6)
+p=1
+N+ 1{/summationdisplayf(x,y;θ)
++f(x,y;θ)}, (7)
+in which KL(·∥·)denotes the Kullback-Leibler
+(KL) divergence of two distributions, and αandβ
+are the scalar hyper-parameters that balance L(θ),
+L(θ)andL(θ).
+3 Datasets and Baseline Settings
+In this section, we describe the datasets used in
+experiments as well as the model configurations.
+For fair comparisons, we keep our experimental
+settings consistent with previous works.
+Datasets We initially consider a low-resource
+(IWSLT14 en↔de) scenario and then show fur-
+ther experiments in standard (WMT14 en↔de)
+and high (WMT17 zh→en) resource scenarios
+in Sections 5 and 6. The detailed information
+of the datasets are summarized in Table 1. We
+here conduct experiments on the IWSLT14 English-
+German dataset, which has 160K parallel bilingual3939IWSLT WMT
+en↔de en ↔de zh →en
+train 160239 4468840 20184941
+valid 7283 6003 2002
+test 6750 3003 2001
+sentence pairs. Following the common practice,
+we lowercase all words in the dataset. We build
+a shared dictionary with 10K byte-pair-encoding
+(BPE) (Sennrich et al., 2016) types.
+Settings We implement our approach on top of
+the Transformer (Vaswani et al., 2017). We apply
+a Transformer with 6 encoder and decoder layers,
+4 attention heads, embedding size 512, and FFN
+layer dimension 1024. We apply cross-entropy loss
+with label smoothing rate 0.1and set max tokens
+per batch to be 4096 . We use Adam optimizer
+with Beta (0.9,0.98),4000 warmup updates, and
+inverse square root learning rate scheduler with ini-
+tial learning rates 5e. We use dropout rate 0.3
+and beam search decoding with beam size 5and
+length penalty 1.0. We apply the same training con-
+figurations in both pretraining and finetuning stages
+which will be discussed in the following sections.
+We use multi-bleu.plfor BLEU (Papineni
+et al., 2002) evaluation. We train all models until
+convergence on a single NVIDIA Tesla V100 GPU.
+All reported BLEU scores are from a single model.
+For all the experiments below, we select the saved
+model state with the best validation performance.
+4 Bi-SimCut
+In this section, we formally propose Bidirectional
+Pretrain and Unidirectional Finetune with Simple
+Cutoff Regularization (Bi-SimCut), a simple but
+effective training strategy that can greatly enhance
+the generalization of the NMT model. Bi-SimCut
+consists of a simple cutoff regularization and a
+two-phase pretraining and finetuning strategy. We
+introduce the details of each part below.
+4.1 SimCut: A Simple Cutoff Regularization
+for NMT
+Despite the impressive performance reported in
+Shen et al. (2020), finding the proper hyper-
+parameters (p, α, β, N )in Token Cutoff seemsto be tedious and time-consuming if there are lim-
+ited resources available, which hinders its practi-
+cal value in the NMT community. To reduce the
+burden in hyper-parameter searching, we propose
+SimCut, a simple regularization method that forces
+the consistency between the output distributions of
+the original sentence pairs and the cutoff samples.
+Our problem formulation is motivated by Vir-
+tual Adversarial Training (V AT), where Sato et al.
+(2019) introduces a KL-based adversarial regular-
+ization that forces the output distribution of the
+samples with adversarial perturbations δ∈R
+andδ∈Rto be consistent with that of the
+original samples:
+KL(f(e(x), e(y);θ)∥f(e(x)+δ, e(y)+δ;θ)).
+Instead of generating perturbed samples by
+gradient-based adversarial methods, for each sen-
+tence pair (x,y), we only generate one cutoff sam-
+ple(x,y)by following the same cutoff strat-
+egy used in Token Cutoff. For each sentence pair,
+the training objective of SimCut is defined as:
+L (θ) =L(θ) +αL(θ),(8)
+where
+L(θ) =KL(f(x,y;θ)∥f(x,y;θ)).
+There are only two hyper-parameters αandp
+in SimCut, which greatly simplifies the hyper-
+parameter searching step in Token Cutoff. Note
+that V AT only allows the gradient to be backprop-
+agated through the right-hand side of the KL di-
+vergence term, while the gradient is designed to
+be backpropagated through both sides of the KL
+regularization in SimCut. We can see that the con-
+straints introduced by L(θ)andL(θ)in(3)
+still implicitly hold in (8):
+•L(θ)in Token Cutoff is designed to guaran-
+tee that the output of the cutoff sample should
+close to the ground-truth to some extent. In
+SimCut, L(θ)requires the outputs of the
+original sample close to the ground-truth, and
+L(θ)requires the output distributions of
+the cutoff sample close to that of the original
+sample. The constraint introduced by L(θ)
+then implicitly holds.
+•L(θ)in Token Cutoff is designed to guar-
+antee that the output distributions of the orig-
+inal sample and Ndifferent cutoff samples3940Method en→de de →en
+Transformer 28.70 34.99
+V AT 29.45 35.52
+R-Drop 30.73 37.30
+Token Cutoff 30.89 37.61
+SimCut 30.98 37.81
+should be consistent with each other. In Sim-
+Cut,L(θ)guarantees the consistency be-
+tween the output distributions of the original
+and cutoff samples. Even though SimCut only
+generates one cutoff sample at each time, dif-
+ferent cutoff samples of the same sentence
+pair will be considered in different training
+epochs. Such constraint raised by L(θ)still
+implicitly holds.
+4.2 Analysis on SimCut
+4.2.1 How Does the Simplification Affect
+Performance?
+We here investigate whether our simplification on
+Token Cutoff hurts its performance on machine
+translation tasks. We compare SimCut with Token
+Cutoff, V AT, and R-Drop (Liang et al., 2021), a
+strong regularization baseline that forces the output
+distributions of different sub-models generated by
+dropout to be consistent with each other. Table
+2 shows that SimCut achieves superior or compa-
+rable performance over V AT, R-Drop, and Token
+Cutoff, which clearly shows the effectiveness of
+our method. To further compare SimCut with other
+strong baselines in terms of training cost, we sum-
+marize the validation BLEU score along the train-
+ing time on IWSLT14 de→entranslation task in
+Table 3. From the table, we can see that the BLEU
+score of SimCut continuously increases in the first
+1500 minutes. The results on V AT are consistent
+with the previous studies on adversarial overfit-
+ting, i.e., virtual adversarial training easily suffer-
+ing from overfitting (Rice et al., 2020). Though
+SimCut needs more training time to converge, the
+final NMT model is much better than the baseline.
+For the detailed training cost for each epoch, Token
+Cutoff costs about 148 seconds per epoch, while
+SimCut costs about 128 seconds per epoch. Note
+that the training cost of Token Cutoff is greatly in-
+fluenced by the hyper-parameter N. We set Ntobe1in our experiments. With the increasing of
+N, the training time of Token Cutoff will be much
+longer. Due to the tedious and time-consuming
+hyper-parameter searching in Token Cutoff, we
+will not include its results in the following sections
+and show the results of SimCut directly.
+4.2.2 How Does the Bidirectional
+Backpropagation Affect Performance?
+Even though the problem formulation of SimCut
+is similar to that of V AT, one key difference is that
+the gradients are allowed to be backpropagated
+bidirectionally in the KL regularization in SimCut.
+We here investigate the impact of the bidirectional
+backpropagation in the regularization term on the
+NMT performance. Table 4 shows the translation
+results of V AT and SimCut with or without bidirec-
+tional backpropagation. We can see that both V AT
+and SimCut benefit from the bidirectional gradient
+backpropagation in the KL regularization.
+4.2.3 Performance on Perturbed Inputs
+Given the similar problem formulations of V AT
+and SimCut, it is natural to regard cutoff operation
+as a special perturbation and consider SimCut as
+a perturbation-based method. We here investigate
+the robustness of NMT models on the perturbed
+inputs. As discussed in Takase and Kiyono (2021),
+simple techniques such as word replacement and
+word drop can achieve comparable performance
+to sophisticated perturbations. We hence include
+them as baselines to show the effectiveness of our
+method as follows:
+•UniRep : Word replacement approach constructs
+a new sequence whose tokens are randomly re-
+placed with sampled tokens. For each token in
+the source sentence x, we sample ˆxuniformly
+from the source vocabulary, and use it for the
+new sequence xwith probability 1−p:
+x=/braceleftigg
+x,with probability p,
+ˆx,with probability 1−p.(9)
+We construct yfrom the target sentence yin the
+same manner. Following the curriculum learning
+strategy used in Bengio et al. (2015), we adjust
+pwith the inverse sigmoid decay:
+p= max( q,k
+k+ exp ()), (10)
+where qandkare hyper-parameters. pdecreases
+toqfrom 1, depending on the training epoch num-3941Minutes 10 30 60 90 150 300 600 900 1200 1500
+Transformer 11.51 31.20 34.19 34.88 35.17 34.86 34.43 34.28 34.23 33.95
+V AT 1.87 20.08 31.69 33.95 35.41 35.78 35.81 35.63 35.17 34.99
+R-Drop 2.11 26.32 32.81 34.25 35.88 36.91 37.18 37.43 37.52 37.43
+Token Cutoff 2.16 28.88 32.82 34.61 35.90 36.84 37.70 37.81 37.93 37.83
+SimCut 1.99 25.12 32.21 33.66 34.93 36.37 37.31 37.62 37.89 38.10
+Method en→de de →en
+V AT 29.45 35.52
++ Bi-backpropagation 29.69 36.26
+SimCut 30.98 37.81
+- Bi-backpropagation 30.29 36.91
+Method probability
+0.00 0.01 0.05 0.10
+Transformer 34.99 34.01 30.38 25.70
+UniRep 35.67 34.91 31.54 27.24
+WordDrop 35.65 34.73 31.22 26.46
+V AT 35.52 34.65 30.48 25.44
+R-Drop 37.30 36.24 32.27 27.19
+SimCut 37.81 36.94 33.16 27.93
+bert. We use paspin epoch t. We set qandk
+to be 0.9and25respectively in the experiments.
+•WordDrop : Word drop randomly applies the
+zero vector instead of the word embedding e(x)
+ore(y)for the input token xory(Gal and
+Ghahramani, 2016). For each token in both
+source and target sentences, we keep the orig-
+inal embedding with the probability βand set it
+to be the zero vector otherwise. We set βto be
+0.9in the experiments.
+We construct noisy inputs by randomly replac-
+ing words in the source sentences based on a pre-
+defined probability. If the probability is 0.0, we
+use the original source sentence. If the probabil-ity is 1.0, we use completely different sentences
+as source sentences. We set the probability to be
+0.00,0.01,0.05, and 0.10in our experiments. We
+randomly replace each word in the source sentence
+with a word uniformly sampled from the vocabu-
+lary. We apply this procedure to IWSLT14 de→en
+test set. Table 5 shows the BLEU scores of each
+method on the perturbed test set. Note that the
+BLEU scores are calculated against the original
+reference sentences. We can see that all methods
+improve the robustness of the NMT model, and
+SimCut achieves the best performance among all
+the methods on both the clean and perturbed test
+sets. The performance results indicate that SimCut
+could be considered as a strong baseline for the
+perturbation-based method for the NMT model.
+As shown in Table 6, the baseline model com-
+pletely ignores the translation of “in spielen (in
+games)” due to the replacement of “denken (think)”
+with “festgelegten (determined)” in the source sen-
+tence. In contrast, our model successfully captures
+the translation of “in spielen” under the noisy input.
+This result shows that our model is more robust to
+small perturbations in an authentic context.
+4.2.4 Effects of αandp
+We here investigate the impact of the scalar hyper-
+parameters αandpin SimCut. αis a penalty
+parameter that controls the regularization strength
+in our optimization problem. pcontrols the
+percentage of the cutoff perturbations in SimCut.
+We here vary αandpin{1,2,3,4,5}and
+{0.00,0.05,0.10,0.15,0.20}respectively and con-
+duct the experiments on the IWSLT14 de→en
+dataset. Note that SimCut is simplified to R-Drop
+approximately when p= 0.00. The test BLEU
+scores are reported in Figure 1. By checking model
+performance under different combinations of αand
+p, we have the following observations: 1) A too
+small α(e.g., 1) cannot achieve as good perfor-
+mance as larger α(e.g., 3), indicating a certain de-3942Inputwir denken (festgelegten), dass wir in der realität nicht so gut
+sind wie in spielen.
+Reference we feel that we are not as good in reality as we are in games.
+Vaswani et al. (2017) on Input we think we’re not as good in reality as we are in games.
+on Noisy Input we realized that we weren’t as good as we were in real life.
+SimCut on Input we think in reality, we’re not as good as we do in games.
+on Noisy Input we realized that we’re not as good in reality as we are in games.
+gree of regularization strength during NMT model
+training is conducive to generalization. Mean-
+while, an overwhelming regularization ( α= 5)
+is not plausible for learning NMT models. 2)
+When α= 3, the best performance is achieved
+when p= 0.05, and p= 0.00performs sub-
+optimal among all selected probabilities. Such an
+observation demonstrates that the cutoff perturba-
+tion in SimCut can effectively promote the general-
+ization compared with R-Drop.
+4.2.5 Is SimCut Compatible with the
+Pretrained Language Model?
+The multilingual sequence-to-sequence pretrained
+language models (Song et al., 2019; Liu et al.,
+2020; Xue et al., 2021) have shown impressive
+performance on machine translation tasks, where
+the pretrained models generally learn the knowl-
+edge from the large-scale monolingual data. It
+is interesting to investigate whether SimCut can
+gain performance improvement based on the pre-
+trained language model. We adopt mBART (LiuMethod de→en
+Transformer 32.4
+mBART 38.5
+mBART with SimCut 39.3
+et al., 2020) as the backbone model, which is a
+sequence-to-sequence denoising auto-encoder pre-
+trained on CC25 Corpus. We conduct experiments
+on IWSLT14 de→endataset and only remove
+the duplicated sentence pairs following mBART50
+(Tang et al., 2021) in the data preprocessing step.
+The source and target sentences are jointly tok-
+enized into sub-word units with the 250K Sentence-
+Piece (Kudo and Richardson, 2018) vocabulary of
+mBART. We use case-sensitive sacreBLEU (Post,
+2018) to evaluate the translation quality, and the
+methods applied in the experiments are as follows:
+•Transformer: The Transformer model is ran-
+domly initialized and trained from scratch.
+We utilize the same model and training con-
+figurations discussed in Section 3.
+•mBART: The Transformer model is directly
+finetuned from mBART. We utilize the default
+training configurations of mBART.
+•mBART with SimCut: The Transformer
+model is finetuned from mBART with SimCut
+regularization. We utilize the default training
+configurations of mBART.
+From Table 7 we can see that SimCut could further
+improve the translation performance of mBART,3943Method en→de de →en
+Transformer 28.70 34.99
+Bi-Pretrain 28.94 35.64
++ Finetune 28.82 35.66
+Bi-R-Drop Pretrain 30.30 37.01
++ R-Drop Finetune 30.85 37.55
+Bi-SimCut Pretrain 30.57 37.70
++ SimCut Finetune 31.16 38.37
+which again shows the effectiveness and universal-
+ity of our method.
+4.3 Training Strategy: Bidirectional Pretrain
+and Unidirectional Finetune
+Bidirectional pretraining is shown to be very ef-
+fective to improve the translation performance
+of the unidirectional NMT system (Ding et al.,
+2021; Xu et al., 2021). The main idea is to
+pretrain a bidirectional NMT model at first and
+use it as the initialization to finetune a unidi-
+rectional NMT model. Assume we want to
+train an NMT model for “English →German”, we
+first reconstruct the training sentence pairs to
+“English +German →German +English”, where the
+training dataset is doubled. We then firstly train
+a bidirectional NMT model with the new training
+sentence pairs:
+E[ℓ(f(x,y;θ),¨y) +ℓ(f(y,x;θ),¨x)],(11)
+and finetune the model with “English →German”
+direction. We follow the same training strategy
+in Ding et al. (2021) and apply SimCut regular-
+ization to both pretraining and finetuning proce-
+dures. Table 8 shows that bidirectional pretraining
+and unidirectional finetuning strategy with SimCut
+regularization could achieve superior performance
+compared with strong baseline such as R-Drop.
+Comparison with Existing Methods We sum-
+marize the recent results of several existing works
+on IWSLT14 en↔debenchmark in Table 9. The
+existing methods vary from different aspects, in-
+cluding Virtual Adversarial Training (Sato et al.,
+2019), Mixed Tokenization for NMT (Wu et al.,
+2020), Unified Dropout for the Transformer model
+(Wu et al., 2021), Regularized Dropout (Liang et al.,Method en→de de →en Average
+Transformer 28.70 34.99 31.85
+V AT 29.45 35.52 32.49
+Mixed Rep29.93 36.41 33.17
+UniDrop29.99 36.88 33.44
+R-Drop 30.73 37.30 34.02
+BiBERT30.45 38.61 34.53
+Bi-SimCut 31.16 38.37 34.77
+2021), and BiBERT (Xu et al., 2021). We can see
+that our approach achieves an improvement of 2.92
+BLEU score over Vaswani et al. (2017) and surpass
+the current SOTA method BiBERT that incorpo-
+rates large-scale pretrained model, stochastic layer
+selection, and bidirectional pretraining. Given the
+simplicity of Bi-SimCut, we believe it could be
+considered as a strong baseline for the NMT task.
+5 Standard Resource Scenario
+We here investigate the performance of Bi-SimCut
+on the larger translation benchmark compared with
+the IWSLT14 benchmark.
+5.1 Dataset Description and Model
+Configuration
+For the standard resource scenario, we evaluate
+NMT models on the WMT14 English-German
+dataset, which contains 4.5M parallel sentence
+pairs. We combine newstest2012 and newstest2013
+as the validation set and use newstest2014 as the
+test set. We collect the pre-processed data from
+Xu et al. (2021)’s release, where a shared dictio-
+nary with 52K BPE types is built. We apply a
+standard Transformer Big model with 6 encoder
+and decoder layers, 16 attention heads, embedding
+size 1024, and FFN layer dimension 4096. We
+apply cross-entropy loss with label smoothing rate
+0.1and set max tokens per batch to be 4096 . We
+use Adam optimizer with Beta (0.9,0.98),4000
+warmup updates, and inverse square root learning
+rate scheduler with initial learning rates 1e. We
+decrease the learning rate to 5ein the finetuning
+stage. We select the dropout rate from 0.3,0.2,
+and0.1based on the validation performance. We3944Method en→de de →en Average
+Transformer + Large Batch(Ott et al., 2018) 29.30 - -
+Evolved Transformer(So et al., 2019) 29.80 - -
+BERT Initialization (12 layers)(Rothe et al., 2020) 30.60 33.60 32.10
+BERT-Fuse(Zhu et al., 2020) 30.75 - -
+R-Drop (Liang et al., 2021) 30.13 34.54 32.34
+BiBERT(Xu et al., 2021) 31.26 34.94 33.10
+SimCut 30.56 34.86 32.71
+Bi-SimCut Pretrain 30.10 34.42 32.26
++ SimCut Finetune 30.78 35.15 32.97
+use beam search decoding with beam size 4and
+length penalty 0.6. We train all models until con-
+vergence on 8 NVIDIA Tesla V100 GPUs. All
+reported BLEU scores are from a single model.
+5.2 Results
+We report test BLEU scores of all comparison meth-
+ods and our approach on the WMT14 dataset in
+Table 10. With Bi-SimCut bidirectional pretrain-
+ing and unidirectional finetuning procedures, our
+NMT model achieves strong or SOTA BLEU scores
+onen→deandde→entranslation benchmarks.
+During the NMT training process, we fix pto
+be0.05and tune the hyper-parameter αin both
+R-Drop and SimCut based on the performance on
+the validation set. Note that the BLEU scores of
+R-Drop are lower than that reported in Liang et al.
+(2021). Such gap might be due to the different pre-
+possessing steps used in Liang et al. (2021) and Xu
+et al. (2021). It is worth mentioning that Bi-SimCut
+outperforms BiBERT on de→endirection even
+though BiBERT incorporates bidirectional pretrain-
+ing, large-scale pretrained contextualized embed-
+dings, and stochastic layer selection mechanism.
+6 High Resource Scenario
+To investigate the performance of Bi-SimCut on the
+distant language pairs which naturally do not share
+dictionaries, we here discuss the effectiveness of
+Bi-SimCut on the Chinese-English translation task.
+6.1 Dataset Description and Model
+Configuration
+For the high resource scenario, we evaluate NMT
+models on the WMT17 Chinese-English dataset,
+which consists of 20.2M training sentence pairs,Method share zh →en
+Transformer x 25.53
+Transformer ✓ 25.31
+SimCut x 26.86
+SimCut ✓ 26.74
+Bi-SimCut Pretrain ✓ 26.13
++ SimCut Finetune ✓ 27.17
+and we use newsdev2017 as the validation set and
+newstest2017 as the test set. We firstly build the
+source and target vocabularies with 32K BPE types
+separately and treat them as separated or joined
+dictionaries in our experiments. We apply the
+same Transformer Big model and training configu-
+rations used in the WMT14 experiments. We use
+beam search decoding with beam size 5and length
+penalty 1. We train all models until convergence on
+8 NVIDIA Tesla V100 GPUs. All reported BLEU
+scores are from a single model.
+6.2 Results
+We report test BLEU scores of the baselines and
+our approach on the WMT17 dataset in Table 11.
+Note that share means the embedding matrices
+for encoder input, decoder input and decoder out-
+put are all shared. The NMT models with sepa-
+rated dictionaries perform slightly better than those
+with the shared dictionary. We can see that our
+approach significantly improves the translation per-
+formance. In particular, Bi-SimCut achieves more
+than1.6BLEU score improvement over Vaswani
+et al. (2017), showing the effectiveness and univer-3945sality of our approach on the distant language pair
+in the NMT task.
+7 Related Work
+Adversarial Perturbation It is well known that
+neural networks are sensitive to noisy inputs, and
+adversarial perturbations are firstly discussed in the
+filed of image processing (Szegedy et al., 2014;
+Goodfellow et al., 2015). SimCut could be re-
+garded as a perturbation-based method for the ro-
+bustness research. In the field of natural language
+processing, Miyato et al. (2017) consider adversar-
+ial perturbations in the embedding space and show
+its effectiveness on the text classification tasks.
+For the NMT tasks, Sato et al. (2019) and Wang
+et al. (2019) apply adversarial perturbations in the
+embedding space during training of the encoder-
+decoder NMT model. Cheng et al. (2019) leverage
+adversarial perturbations and generate adversarial
+examples by replacing words in both source and
+target sentences. They introduce two additional
+language models for both sides and a candidate
+word selection mechanism for replacing words in
+the sentence pairs. Takase and Kiyono (2021) com-
+pare perturbations for the NMT model in view of
+computational time and show that simple pertur-
+bations are sufficiently effective compared with
+complicated adversarial perturbations.
+Consistency Training Besides perturbation-
+based methods, our approach also highly relates
+to a few works of model-level and data-level con-
+sistency training in the NMT field. Among them,
+the most representative methods are R-Drop (Liang
+et al., 2021) and Cutoff (Shen et al., 2020). R-Drop
+studies the intrinsic randomness in the NMT model
+and regularizes the NMT model by utilizing the out-
+put consistency between two dropout sub-models
+with the same inputs. Cutoff considers consistency
+training from a data perspective by regularizing
+the inconsistency between the original sentence
+pair and the augmented samples with part of the
+information within the input sentence pair being
+dropped. Note that Cutoff takes the dropout sub-
+models into account during the training procedure
+as well. We want to emphasize that SimCut is not
+a new method, but a version of Cutoff simplified
+and adapted for the NMT tasks.
+8 Conclusion
+In this paper, we propose Bi-SimCut: a simple
+but effective two-stage training strategy to improveNMT performance. Bi-SimCut consists of bidi-
+rectional pretraining and unidirectional finetuning
+procedures equipped with SimCut regularization
+for improving the generality of the NMT model.
+Experiments on low (IWSLT14 en↔de), standard
+(WMT14 en↔de), and high (WMT17 zh→en)
+resource translation benchmarks demonstrate Bi-
+SimCut and SimCut’s capabilities to improve trans-
+lation performance and robustness. Given the uni-
+versality and simplicity of Bi-SimCut and Sim-
+Cut, we believe: 1) SimCut could be regarded as a
+perturbation-based method, and it could be used as
+a strong baseline for the robustness research. 2) Bi-
+SimCut outperforms many complicated methods
+which incorporate large-scaled pretrained models
+or sophisticated mechanisms, and it could be used
+as a strong baseline for future NMT research. We
+hope researchers of perturbations and NMT could
+use SimCut and Bi-SimCut as strong baselines to
+make the usefulness and effectiveness of their pro-
+posed methods clear. For future work, we will
+explore the effectiveness of SimCut and Bi-SimCut
+on more sequence learning tasks, such as multilin-
+gual machine translation, domain adaptation, text
+classification, natural language understanding, etc.
+Acknowledgements
+We would like to thank the anonymous reviewers
+for their insightful comments.
+References394639473948

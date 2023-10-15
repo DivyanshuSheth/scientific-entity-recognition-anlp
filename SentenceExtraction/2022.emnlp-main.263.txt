@@ -1,1 +1,679 @@
-3964 Proceedings of the 2022 Conference on Empirical Methods in Natural Language Processing , pages 3964 3975 December 7 - 11 , 2022 © 2022 Association for Computational Linguistics 3965 3966 3967 3968 3969 3970 3971 3972 3973 3974 3975 
+
+Bowen Xingand Ivor W. TsangAustralian Artificial Intelligence Institute, University of Technology Sydney, AustraliaCentre for Frontier Artificial Intelligence Research, A*STAR, Singapore
+bwxing714@gmail.com, ivor.tsang@gmail.com
+Abstract
+Recent joint multiple intent detection and slot
+filling models employ label embeddings to
+achieve the semantics-label interactions. How-
+ever, they treat all labels and label embeddings
+as uncorrelated individuals, ignoring the depen-
+dencies among them. Besides, they conduct the
+decoding for the two tasks independently, with-
+out leveraging the correlations between them.
+Therefore, in this paper, we first construct a Het-
+erogeneous Label Graph (HLG) containing two
+kinds of topologies: (1) statistical dependencies
+based on labels’ co-occurrence patterns and hi-
+erarchies in slot labels; (2) rich relations among
+the label nodes. Then we propose a novel
+model termed ReLa-Net. It can capture benefi-
+cial correlations among the labels from HLG.
+The label correlations are leveraged to enhance
+semantic-label interactions. Moreover, we also
+propose the label-aware inter-dependent decod-
+ing mechanism to further exploit the label corre-
+lations for decoding. Experiment results show
+that our ReLa-Net significantly outperforms
+previous models. Remarkably, ReLa-Net sur-
+passes the previous best model by over 20% in
+terms of overall accuracy on MixATIS dataset.
+1 Introduction
+Intent detection and slot filling (Tur and De Mori,
+2011) are two fundamental tasks in spoken lan-
+guage understanding (SLU) (Young et al., 2013)
+which is a core component in the dialog systems.
+In recent years, a bunch of joint models (Liu and
+Lane, 2016; Goo et al., 2018; Li et al., 2018; Liu
+et al., 2019a; E et al., 2019; Qin et al., 2019; Zhang
+et al., 2019; Qin et al., 2021b) have been proposed
+to tackle single intent detection and slot filling at
+once via modeling their correlations.
+In real-world scenarios, a single utterance usu-
+ally expresses multiple intents. To handle this,
+multi-intent SLU (Kim et al., 2017) is explored and
+Gangadharaiah and Narayanaswamy (2019) first
+propose to jointly model the multiple intent detec-
+tion and slot filling in a multi-task framework. QinFigure 1: Illustration of top-3 high-probability occur-
+ring intent (in blue) and slot (in green) labels when
+B-depart_date.date_relative (Label_A) oc-
+curs in the training samples of MixATIS dataset.
+et al. (2020) and Qin et al. (2021c) further utilize
+graph attention networks (GATs) (Velickovic et al.,
+2018) which model the interactions between the
+embeddings of predicted intent labels and the se-
+mantic hidden states of slot filling task to leverage
+the dual-task correlations in an explicit way. And
+significantly improvements have been achieved.
+However, we argue that previous works are es-
+sentially limited by ignoring the rich topological
+structures and relations in the joint label space of
+the two tasks because they treat the embeddings
+of intent labels and slot labels as individual param-
+eter vectors to be learned. Based on our observa-
+tion, there are two kinds of potential topological
+structures in the joint label space. (1) The global
+statistical dependencies among the labels based on
+their co-occurrence patterns, which we discover
+are widely-existing phenomenons. Fig. 1 shows an
+example of label co-occurance. (2) The hierarchies
+in the slot labels. Although there is no officially
+predefined slot label hierarchy in the datasets, we
+discover and define two kinds of hierarchies. An
+example is shown in Fig. 2. Firstly, it is intuitive
+that there is an intrinsic dependency between a B-
+slot label and its I- slot label: in the slot sequence
+of an utterance, an I- slot label must occur after
+its B- slot label, and an I- slot cannot occur solely.
+Therefore, in the label space, there should be a
+hierarchy between a B- slot and its I- slot, while3964
+existing methods regard all slot labels as indepen-
+dent ones. Secondly, we discover that some B- slot
+labels share the same prefix, which indicates their
+shared semantics. Therefore, the prefix can be re-
+garded as a pseudo slot label connecting these slot
+labels. We believe the above statistical dependen-
+cies and hierarchies can help to capture the inner-
+and inter-task label correlations which benefit the
+joint task reasoning. Thus in this paper, we focus
+on exploiting the label topologies and relations for
+tackling the joint task.
+Besides, previous models decode the two tasks’
+hidden states independently without leveraging the
+dual-task correlations. This causes the misalign-
+ment of the two tasks’ correct predictions. As
+a result, the performance (Overall Accuracy) on
+sentence-level semantic frame parsing is much
+worse than the two tasks. Therefore, we argue
+that the label embeddings conveying the dual-task
+correlative information should be leveraged in the
+decoders to guide the decoding process.
+To overcome the above challenges, in this pa-
+per, we first construct a heterogeneous label graph
+(HLG) including both the global statistical depen-
+dencies and slot label hierarchies, based on which
+we define a bunch of edge types to represent the
+topological structures and rich relations among the
+labels. Then we propose a novel model termed
+Recurrent h eterogeneous Label m atching Network
+(ReLa-Net) to capture the beneficial label correl-
+ative information from HLG and sufficient lever-
+age them for tackling the joint task. To capture
+the label correlative information from HLG, we
+design a Heterogeneous Label Graph Transforma-
+tions (HLGT) module, which conducts relation-
+specific information aggregation among the label
+nodes. We design a recurrent dual-task interacting
+module to leverage label correlations for semantics-
+label interactions. At each step, it takes both tasks’
+semantic hidden states and label knowledge gener-
+ated at the previous step as input. Then sequence-
+reasoning BiLSTM (Hochreiter and Schmidhuber,1997) and GATs (Velickovic et al., 2018) are uti-
+lized for interactions. As for decoding, we design a
+novel label-aware inter-dependent decoding mech-
+anism that takes both the hidden states and label
+embeddings as input and measures their correlation
+scores in the joint label embedding space. By this
+means, the joint label embedding space serves as
+a bridge to connect the two tasks’ decoding pro-
+cesses which then can be guided by the dual-task
+inter-dependencies conveyed in the learned label
+embeddings. We evaluate our ReLa-Neton bench-
+mark datasets and the results show that ReLa-Net
+achieves new state-of-the-art performance. Further
+analysis proves that our method can capture non-
+trivial correlations among the two tasks’ labels and
+effectively leverage them to tackle the joint task.
+2 Problem Definition
+Given a utterance U, the task of joint multiple intent
+detection and slot filling aims to output a intent la-
+bel set O={o, ..., o}and a slot label sequence
+O={o, ..., o}, where nis the length of Uand
+mis the number of intents expressed in U.
+3 Heterogeneous Label Graph
+Mathematically, the HLG can be denoted as G=
+(V,E,A,R), where Vis the set of nodes, Eis the
+set of edges, Ais the set of node types and Ris
+the set of relations or edge types. As shown in Fig.
+3, there are three types of nodes: intent nodes, slot
+nodes, and pseudo nodes, which correspond to the
+intent labels, slot labels, and pseudo slot labels.
+In HLG, there are two kinds of topologies, which
+correspond to statistical and hierarchical depen-
+dencies, respectively. To represent and capture
+these dependencies, we define 12 relations on HLG:
+r∼rfor statistical dependencies and r∼r
+for hierarchical dependencies, whose definitions
+are shown in Table 1. And |V|=N+N+N,
+in which N, NandNdenote the numbers of
+intent nodes, slot nodes and pseudo nodes.
+r∼rare based on the conditional probability
+between two labels, and two thresholds ( λ, λ)
+are used to determine whether there is statistical
+dependency or strong statistical dependency from
+node ito node jregarding P(j|i). A high value
+ofP(j|i)denotes that when label ioccurs, there
+always exists label jin the sample. Namely, label j
+can be potentially deduced when label iis predicted.
+In this case, an edge is established from node ito3965
+nodejwith the corresponding relation. Note that in
+each sample, most slot labels are Owhich denotes
+the word has no meaningful slot. Considering the
+slot label Ocannot provide valuable clues, although
+it has high conditional probabilities (always 1.0)
+with other labels. Therefore, the slot node Ois set
+as an isolated node in HLG.
+r∼rare based on the hierarchies we discov-
+ered in slot labels. A B- slot node can connect and
+interact with many nodes, including intent nodes,
+other B- slot nodes, its parent pseudo node, and
+its I- slot node. Differently, an I- slot node only
+connects with its B- slot nodes because there is a
+natural affiliation relation between a pair of B- and
+I- slot labels: an I- slot label can only appear after
+its B-slot label. As for the pseudo labels we defined,
+there is a parent-child relationship between the par-
+ent pseudo labels and their child B- slot labels. In
+HLG, a pseudo label works like an information sta-
+tion, which allows its children (B- slot nodes) to
+share their semantics and features.
+4 ReLa-Net
+Overview. The architecture of our ReLa-Net is
+shown in Fig. 4. Firstly, the initial label em-
+beddings containing beneficial label correlations
+are generated by the proposed Heterogeneous La-
+bel Graph Transformations (HLGT) module, and
+the initial semantic hidden states are generated by
+the Self-Attentive Semantics Encoder. Then we
+allow the two tasks to interact recurrently. At
+each time step, for each task, the semantic hid-
+den states and the label knowledge of both tasks
+are fused, and their correlations are learned in a
+BiLSTM and then a GAT. Then the designed Label-
+Aware Inter-Dependent Decoding mechanism pro-
+duces the estimated labels via measuring the cor-
+relations between the hidden state and the label
+embeddings. The obtained labels are fed to the
+designed Dynamically-Masked Heterogeneous La-
+bel Graph Transformations (DM-HLGT) module,
+which dynamically derives the sample-specific la-
+bel knowledge via operating on a DM subgraph of
+HLG. Then the obtained label knowledge is used
+at the next time step. Finally, after Tstep, the last
+produced labels are taken as the final predictions.
+Next, we introduce the details of each module.
+4.1 HLGT
+To capture the correlations among the intent and
+slot labels, inspired by (Schlichtkrull et al., 2018;
+Xing and Tsang, 2022a), we conduct relation-
+specific graph transformations to achieve informa-3966tion aggregation on HLG:
+where ldenotes the layer number; Ndenotes the
+set of node i’s neighbors which are connected to
+it with r-type edges; Wis self weight matrix and
+Wis relation-specific weight matrix. The initial
+node representations are obtained from an initial-
+ized matrix which is trained with the model.
+After Llayers, the initial intent label embedding
+matrix Eand slot label embedding matrix Eare
+obtained. Although EandEcontain beneficial
+correlative information, the HLG is globally built
+on the whole train set. Therefore, they are not flex-
+ible enough for every sample, whose labels may
+form a local subgraph on HLG. And we believe
+capturing the sample-specific label correlations can
+further enhance the reasoning by discovering po-
+tential neighbor labels. To this end, we propose the
+Dynamically-Masked HLGT, which will be intro-
+duced in Sec. 4.3.4.
+4.2 Self-Attentive Semantics Encoder
+Following previous works, we adopt the self-
+attentive encoder (Qin et al., 2020, 2021c) to gener-
+ate the initial semantic hidden states. It includes a
+BiLSTM (Hochreiter and Schmidhuber, 1997) and
+a self-attention mechanism (Vaswani et al., 2017).
+The input utterance’s word embeddings are fed to
+the BiLSTm and self-attention separately. Then the
+two streams of word representations are concate-
+nated as the output semantic hidden states.
+4.3 Recurrent Dual-Task Interacting
+4.3.1 Semantics-Label Interaction
+BiLSTM has been proven to be capable of sequence
+reasoning (Vaswani et al., 2016; Katiyar and Cardie,
+2016; Zheng et al., 2017). In this paper, we utilize
+two BiLSTMs for intent and slot to achieve the
+fusion and interactions among the semantics and
+label knowledge of both tasks. Specifically, the two
+BiLSTMs can be formulated as:
+where ∥denotes concatenation operation.
+For Intent BiLSTM ( BiLSTM), the input is the
+concatenation of intent semantic hidden states h,
+sentence-level intent label knowledge Kand the
+sentence-level slot label knowledge K, where tdenotes the step number of recurrent dual-task inter-
+acting. Here we use sentence-level label knowledge
+because multiple intent detection is on sentence-
+level. For Slot BiLSTM ( BiLSTM), the input is
+the concatenation of slot semantic hidden states
+h, sentence-level intent label knowledge Kand
+the token-level slot label knowledge K. Here we
+use token-level slot label knowledge because slot
+filling is a token-level task. And we use sentence-
+level intent label knowledge here because it can pro-
+vide indicative clues of potential slot labels regard-
+ing the captured inter-task dependencies among
+intent and slot labels.
+At the first step, there is no available label knowl-
+edge, so the inputs of the two BiLSTMs are the
+initial hidden states generated in Sec. 4.2. How to
+obtain K, K, Kis depicted in Sec. 4.3.5.
+4.3.2 Graph Attention Networks
+Global-GAT Since multiple intent detection is
+a sentence-level task, we believe it is beneficial
+to further capture the global dependencies among
+the words. We first construct a fully-connected
+graph on the input utterance. There are nnodes
+in this graph and each one corresponds to a word.
+And we adopt the GAT (Velickovic et al., 2018) for
+information aggregation. The initial representation
+of node iisˆhgenerated by BiLSTM. After L
+layers, we obtain /tildewideH={/tildewideh}.
+Local-GAT Since slot filling is on token-level,
+we adopt a Local-GAT to capture the token-level
+local dependencies.The Local-GAT works on a
+locally-connected graph where node iis connected
+to nodes {i−w, ..., i +w}, where sliding window
+sizewis a hyper-parameter. The initial represen-
+tation of node iisˆhgenerated by BiLSTM.
+After Llayers, we obtain /tildewideH={/tildewideh}. And
+we adopt the GAT (Velickovic et al., 2018) for in-
+formation aggregation.
+4.3.3 Label-Aware Inter-Dependent Decoding
+In this work, we design a novel label-aware inter-
+dependent decoding mechanism (shown in Fig. 5)
+to leverage the dual-task correlative information
+conveyed in the learned label embeddings to guide
+the decoding process. Concretely, the hidden state
+is first projected into the joint label embedding
+space, and then the dot products are conducted be-
+tween it and all label embeddings of a specific task
+to obtain the correlation score vector. The larger
+correlation score indicates the shorter distance be-3967
+tween the hidden state’s projection and the label
+embedding. Thus the hidden state more likely be-
+longs to the corresponding class. In this way, the
+joint label embedding space serves as a bridge that
+connects the decoding processes of the two tasks,
+and the beneficial correlative information conveyed
+in the learned label embeddings can guide the inter-
+dependent decoding for the two tasks. Next, we
+introduce the intent and slot decoders in detail.
+Intent Decoder Following previous works, we
+conduct token-level multi-label classification.
+Firstly, the intent hidden state /tildewidehis projected into
+the joint label embedding space via an MLP. Then
+the correlation score vector Cis calculated via
+dot products between it and all intent label embed-
+dings. This process can be formulated as:
+where Cis aN-dimensional vector; /hatwideEis the
+sample-specific intent label embedding matrix at
+stept;Wandbare model parameters.
+Then Cis fed to the sigmoid function to obtain
+the token-level intent probability vector. And a
+threshold (0.5) is used to select the intents. Finally,
+we obtain the predicted sentence-level intents by
+voting for all tokens’ intents (Qin et al., 2021c).
+Slot Decoder Following (Qin et al., 2021c), we
+conduct parallel decoding. Similar to Eq. 3, the
+slot correlation score vector Cis obtained by:where Cis aN-dimensional vector; /hatwideEis the
+sample-specific slot label embedding matrix at step
+t;Wandbare model parameters.
+Then Cis fed to the softmax function to obtain
+the slot probability distribution. Finally, the argmax
+function is used to select the predicted slot.
+4.3.4 DM-HLGT
+After decoding, we obtain the predicted intents
+and slots at step t. To capture the sample-specific
+label correlations, which we believe further benefit
+the reasoning in the next step, we first construct
+a DM subgraph of HLG for each sample. The
+process is simple: the nodes of predicted intent
+labels and slot labels and their first-order neighbors
+are reserved, while other nodes on HLG are masked
+out. Then relation-specific graph transformations
+are conducted on this graph to achieve information
+aggregation, whose formulation is similar to Eq. 1.
+At the first step, the /hatwideEand/hatwideEareEandE.
+4.3.5 Label Knowledge Projection
+To provide label knowledge for next time step, the
+predicted labels should be projected into vectors. In
+Sec. 4.3.1, we use three kinds of label knowledge:
+K, K, K.KandKare sentence-level in-
+tent and slot label knowledge, respectively. Kis
+the sum of label embeddings of the predicted in-
+tents and Kis the sum of label embeddings of the
+predicted slots while the Oslot is excluded. Kis
+token-level slot label knowledge, which is the label
+embedding of the predicted slot of token t.
+4.4 Optimization
+Following previous works, the standard loss func-
+tion for intent task ( L) and slot task ( L) are:
+Besides, we design a constraint loss ( L) to push
+ReLa-Net to generate better label distributions at
+steptthan step t−1:
+AndLcan be derived similarly.3968Then the final training objective is:
+where γ= 0.1andγ= 0.9balance the two
+tasks; β= 0.01andβ= 1.0balance the stan-
+dard loss and constraint loss for the two tasks.
+5 Experiments
+5.1 Settings
+Datasets. Following previous works, we con-
+duct experiments on two benchmarks: MixATIS
+and MixSNIPS (Hemphill et al., 1990; Coucke
+et al., 2018; Qin et al., 2020). In MixATIS, the
+split of train/dev/test set is 13162/756/828 (utter-
+ances). In MixSNIPS, the split of train/dev/test set
+is 39776/2198/2199 (utterances).
+Evaluation Metrics. Following previous works,
+we evaluate multiple intent detection using accu-
+racy (Acc), slot filling using F1 score, and sentence-
+level semantic frame parsing using overall Acc.
+Overall Acc denotes the ratio of utterances for
+which both intents and slots are predicted correctly.
+Implementation Details. Following previous
+works, the word and label embeddings are ran-
+domly initialized and trained with the model. Due
+to limited space, the experiments using pre-trained
+language model is presented in the Appendix. The
+dimension of the word/label embedding is 128
+on MixATIS and 256 on MixSNIPS. For HLG,
+λ= 0.4andλ= 0.9. The hidden dim is 200.
+The max layer number of all GNNs is 2. Max
+time step Tis 2. We adopt Adam (Kingma and
+Ba, 2015) optimizer to train our model using the
+default setting. For all experiments, we select the
+best model on the dev set and report its results on
+the test set. Our source code will be released.
+5.2 Main Results
+We compare our model with: (1) Attention BiRNN
+(Liu and Lane, 2016); (2) Slot-Gated (Goo et al.,
+2018); (3) Bi-Model (Wang et al., 2018); (4) SF-ID
+Network (E et al., 2019); (5) Stack-Propagation
+(Qin et al., 2019); (6) Joint Multiple ID-SF (Tur
+and De Mori, 2011); (7) AGIF (Qin et al., 2020);
+(8) GL-GIN (Qin et al., 2021c). Table 2 lists the
+results on the test sets. We can observe that:
+1. Our Rela-Net consistently outperforms all base-
+lines by large margins on all datasets and tasks.
+Specifically, compared with Gl-GIN, the previous
+best model, ReLa-Net achieves an absolute im-
+provement of 9.2% in terms of Overall Acc on
+MixATIS, a relative improvement of over 20%.
+2. ReLa-Net gains larger improvements on the in-
+tent task than slot task. The reason is that ReLa-Net
+is the first model to allow the two tasks to interact
+with each other, while previous models only lever-
+age the predicted intents to guide slot filling.
+3. Generally, the results on overall Acc are obvi-
+ously worse than slot F1 and intent Acc, indicating
+that it is hard to align the correct prediction of in-
+tents and slots. Compared with baselines, our ReLa-
+Net achieves especially significant improvements
+on overall Acc and effectively reduces the perfor-
+mance gap between overall Acc and slot F1/intent
+Acc. This can be attributed to the fact that our
+model can capture sufficient and beneficial label
+correlations from HLG, and the designed label-
+aware inter-dependent decoding mechanism can
+leverage the label correlations to guide decoding,
+making the two tasks’ decoding processes correla-
+tive. As a result, the correct predictions of the two
+tasks are better aligned.
+4. ReLa-Net gains more significant improvements
+on MixATIS dataset than MixSNIPS. The reason
+is that MixATIS dataset includes much more la-
+bels than MixSNIPS: MixATIS includes 17 intent
+labels and 117 slot labels, while MixSNIPS only
+include 7 intent labels and 72 slot labels. More
+labels in MixATIS dataset cause it is much harder
+for correct predictions, which can be proved by the
+lower Overall Acc scores of all models on MixATIS
+than MixSNIPS. However, the core strength of our
+model is leveraging the label topologies and rela-
+tions. Therefore, more labels in MixATIS dataset
+result in larger improvements.
+5.3 Ablation Study
+We conduct two groups of ablation experiments
+on HLG and ReLa-Net to verify the necessities of3969
+their components. Table 3 shows the results.
+HLG. w/o stat_dep denotes the statistical depen-
+dencies are removed, which means there are no
+edges between intent and slot label nodes on HLG.
+We can observe sharp drops in the performances
+of two tasks and the semantic frame parsing. This
+proves that statistical dependencies can effectively
+capture beneficial inter-task dependencies. w/o hi-
+erarchy denotes the slot hierarchies are removed.
+We can find although Intent Acc is not seriously
+affected, the Slot F1 and Overall Acc are both sig-
+nificantly reduced. This proves that slot hierarchies
+can effectively bring improvements via capturing
+the beneficial structural dependencies among slot
+labels. w/o relation denotes HLG collapses into
+a homogeneous graph without specific relations.
+Its poor performances prove that the defined rich
+relations on HLG are crucial for capturing the label
+correlations, which play key roles in dual-task rea-
+soning and label-aware inter-dependent decoding.
+ReLa-Net. w/o matching denotes the designed
+matching decoders in ReLa-Net are replaced with
+the linear decoders used in previous models. Its
+worse results prove that our designed matching de-
+coders can effectively improve the decoding qual-
+ity via leveraging the beneficial label correlations
+captured from HLG. w/o GATs denotes the Global-
+GAT and Local-GAT are removed. Its worse results
+prove that the sentence-level global dependencies
+and the token-level local dependencies are impor-
+tant for the intent task and slot task, respectively.
+However, even if its semantics and semantics-label
+interactions are only modeled via LSTM, it still out-
+performs all baselines. This can be attributed to the
+fact that ReLa-Net can learn beneficial label corre-
+lations from HLG and sufficiently leverage them
+for decoding. w/o DM-HLGT denotes the DM-
+HGT is removed. And its results verify that DM-
+HLGT can effectively enhance the performance via
+capturing the sample-specific label correlations and
+discovering potential neighbor labels.
+5.4 Visualization of Hidden State Clusters
+To better understand the promising results of ReLa-
+Net, we perform TSNE (van der Maaten and Hin-
+ton, 2008) visualization on the final hidden states
+of the utterances words in the test set of MixATIS.
+It is hard to visualize intent states because a single
+hidden state usually corresponds to multiple intents.
+Therefore, we visualize the final slot hidden state of
+each word in the utterances. Since there are more
+than 100 slot labels, to simplify the visualization,
+we rank the slot labels regarding their frequencies
+in the test set, and we show the results of the top-24
+labels. Besides, most slot labels in the test set are O,
+and we randomly pick 500 ones. The slot clusters
+visualization of our ReLa-Net is shown in Fig. 6.
+From Fig. 6, we can observe that the bound-
+aries of the clusters are clear, and the data points3970
+in the same cluster are tightly closed to each other.
+And we can find that the B- slot clusters and their
+corresponding I- slot clusters are clearly separated.
+Besides, there is nearly no incorrect I- slot data
+point. The high accuracy of I- slot labels prove
+that our ReLa-Net effectively resolves the uncoor-
+dinated slot problem (e.g., B-singer followed
+byI-song ). This is attributed to the beneficial
+slot hierarchies we discovered and leveraged.
+For comparison, we visualize GL-GIN’s slot
+clusters in the same way, as shown in Fig. 7. We
+can observe that GL-GIN’s slot clusters boundaries
+are not clear. Some data points of ‘ O’ slot are close
+to other clusters. And some B- clusters and their I-
+clusters even significantly overlap each other.
+The above observations prove that our method
+can learn better hidden states via effectively captur-
+ing and leveraging the label correlations.
+5.5 Visualization of Label Correlations
+To further look into the label correlations, we vi-
+sualize the label co-occurrence probability matrix
+constructed from MixATIS training set and the cor-
+relation matrix of ReLa-Net’s learned label embed-
+dings, as shown in Fig. 8 (a) and (b). Label correla-
+tions of two labels are measured by the cosine sim-
+ilarity of their embeddings. For simplification, we
+visualize all intent labels (17 ones) and some slot la-
+bels (18 ones). From Fig.8 (a), we can observe that
+there exist many distinct co-occurrence patterns
+among the labels of the two tasks. The core of this
+work is capturing and leveraging the beneficial la-
+bel correlations, and promising improvements havebeen observed from the experiment results, while
+previous works neglect this point. From Fig.8 (b),
+we can find that our ReLa-Net learns non-trivial
+label embeddings. From the patterns of label corre-
+lations in Fig. 8 (b), we can hardly observe the label
+co-occurrence patterns in Fig. 8 (a). This proves
+that ReLa-Net can comprehensively leverage the
+label co-occurrences to learn robust and effective
+label embeddings, rather than just mechanically
+memorize them.
+6 Related Work
+To capture and leverage the dual-task correlations, a
+group of models (Zhang and Wang, 2016; Hakkani-
+Tür et al., 2016; Goo et al., 2018; Li et al., 2018;
+E et al., 2019; Liu et al., 2019a; Qin et al., 2019;
+Zhang et al., 2019; Wu et al., 2020; Qin et al.,
+2021b; Ni et al., 2021) have been proposed for
+joint intent detection and slot filling. However, they
+only consider the single-intent scenario. Unlike
+them, we tackle the joint task of multiple intent
+detection and slot filling, which is more challenging
+and practical in the real-world scenario.
+Recently, multi-intent SLU has received increas-
+ing attention since it can handle complex utter-
+ances expressing multiple intents. Kim et al. (2017)
+propose a two-stage model to tackle the multi-
+ple intent detection task. And Gangadharaiah
+and Narayanaswamy (2019) propose the first joint
+model that employs a multi-task framework in-
+cluding a slot-gate mechanism to tackle the joint
+task of multiple intent detection and slot filling.
+With the wide utilization of graph neural networks3971(GNNs) in various NLP tasks (Lin et al., 2019;
+Fang et al., 2020; Qin et al., 2021a; Xing and Tsang,
+2022b,c,d,e), state-of-the-art multi-intent SLU sys-
+tems also leverage GNNs to model the cross-task
+interactions. Qin et al. (2020) utilize GATs to intro-
+duce the fine-grained information of the predicted
+multiple intents into slot filling in an adaptive way.
+Further, Qin et al. (2021c) propose a GAT-based
+model in which slot filling is conducted in a non-
+autoregressive manner.
+Previous models ignore the correlations among
+the two tasks’ labels, treating their embeddings as
+separated parameters to be learned. Our method is
+significantly different from previous ones. This is
+the first work to discover, capture and leverage the
+topologies and relations among the labels for joint
+multiple intent detection and slot filling.
+7 Conclusion
+In this work, we improve joint multiple intent de-
+tection and slot filling from a new perspective: ex-
+ploiting label typologies and relations. Specifically,
+we first design a heterogeneous label graph to rep-
+resent the statistical dependencies and hierarchies
+in rich relations. Then we propose a recurrent het-
+erogeneous label matching network to end-to-end
+capture and leverage the beneficial label correla-
+tions. Experiments demonstrate that our method
+significantly outperforms previous models, achiev-
+ing new state-of-the-art. Further studies verify the
+advantages of our methods and show that our model
+can generate better hidden states and learns non-
+trivial label embeddings. In the future, we will
+apply our method in other multi-task scenarios.
+Limitations
+The core of this work is proving the power of the
+learned label embeddings obtained by exploiting
+label topologies and relations. Therefore, to bet-
+ter demonstrate that the significant improvements
+come from the learned label embeddings, we do not
+focus on enhancing the interactions between the la-
+bel knowledge and semantics. We adopt BiLSTM,
+a relatively basic module, to model the interactions
+between the prediction information and semantics.
+However, there is no doubt that BiLSTM is not the
+optimal module for these label-semantics interac-
+tions, and in practice, many modules can be applied
+to achieve this better. For instance, GL-GIN adopts
+not only BiLSTM but the proposed global-locally
+graph interaction layers working on the designedlabel-semantic graph to model the label-semantics
+interactions. Therefore, although our ReLa-Net
+significantly outperforms state-of-the-art models,
+intuitively, its performance is limited by the simple
+module for modeling the label-semantics interac-
+tions. In our future work, we will design more ad-
+vanced modules for semantics-label interactions.
+Acknowledgements
+This work was supported by Australian Research
+Council Grant DP200101328. Bowen Xing and
+Ivor W. Tsang were also supported by ASTAR
+Centre for Frontier AI Research.
+References39723973
+A Experiment Results on Pre-trained
+Language Model
+To explore the effect of the pre-trained language
+model, we use the pre-trained RoBERTa (Liu et al.,
+2019b) encoderto replace the self-attentive en-
+coder and RoBERTa is fin-tuned in the training
+process. For each word, its first subword’s hidden
+state at the last layer is taken as its word repre-
+sentation fed to the BiLSTMs in Sec. 4.3.1. We
+adopt AdamW (Loshchilov and Hutter, 2019) opti-
+mizer to train the model with its default configura-
+tion. Since our computation resources are limited,
+we did not conduct hyper-parameter searching for
+RoBERTa+ReLa-Net. Thus we use the same hyper-
+parameters for RoBERTa+ReLa-Net with ReLa-
+Net (LSTM).
+Fig. 9 shows the results comparison of our ReLa-
+Net, AGIF, and GL-GIN as well as their variants
+using RoBERTa encoder. We have the following
+observations:
+1. We can find that although the pre-trained
+RoBERTa encoder brings remarkable improve-
+ments via generating high-quality word represen-
+tations, our RoBERTa+ReLa-Net significantly out-
+performs its counterparts. This is because the core3974
+of our ReLa-Net is capturing and leveraging the
+correlations among the intent labels and slot labels,
+which is not overlapped with the advantage of the
+pre-trained language model focusing on semantic
+features.
+2. Although RoBERTa provides much better word
+representations, the performances of RoBERTa-
+based models are still not very satisfactory, espe-
+cially on MixATIS (lower than 60%). We think the
+difficulty is mainly caused by the large number of
+labels, e.g. there are more than 135 labels in Mix-
+ATIS dataset. Besides, our ReLa-Net (with LSTM
+encoder) even surpasses RoBERTa+AGIF. This is
+because ReLa-Net can capture and leverage the
+beneficial correlations among the massive labels.
+And this proves that the idea of exploiting label
+topologies and relations proposed in this paper is a
+promising perspective for improving joint multiple
+intent detection and slot filling.3975

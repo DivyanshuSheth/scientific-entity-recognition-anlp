@@ -1,1 +1,714 @@
-3870 Proceedings of the 2022 Conference of the North American Chapter of the Association for Computational Linguistics : Human Language Technologies , pages 3870 3885 July 10 - 15 , 2022 © 2022 Association for Computational Linguistics 3871 3872 3873 3874 3875 3876 3877 3878 3879 3880 3881 3882 3883 3884 3885 
+
+Sosuke NishikawaRyokan Ri
+Ikuya YamadaYoshimasa TsuruokaIsao Echizen
+Abstract
+We present EASE, a novel method for learn-
+ing sentence embeddings via contrastive learn-
+ing between sentences and their related entities.
+The advantage of using entity supervision is
+twofold: (1) entities have been shown to be
+a strong indicator of text semantics and thus
+should provide rich training signals for sen-
+tence embeddings; (2) entities are defined in-
+dependently of languages and thus offer useful
+cross-lingual alignment supervision. We eval-
+uate EASE against other unsupervised mod-
+els both in monolingual and multilingual set-
+tings. We show that EASE exhibits competi-
+tive or better performance in English seman-
+tic textual similarity (STS) and short text clus-
+tering (STC) tasks and it significantly outper-
+forms baseline methods in multilingual settings
+on a variety of tasks. Our source code, pre-
+trained models, and newly constructed multi-
+lingual STC dataset are available at https:
+//github.com/studio-ousia/ease .
+1 Introduction
+The current dominant approach to learning sen-
+tence embeddings is fine-tuning general-purpose
+pretrained language models, such as BERT (Devlin
+et al., 2019), with a particular training supervision.
+The type of supervision can be natural language
+inference data (Reimers and Gurevych, 2019), ad-
+jacent sentences (Yang et al., 2021), or a parallel
+corpus for multilingual models (Feng et al., 2020).
+In this paper, we explore a type of supervision
+that has been under-explored in the literature: entity
+hyperlink annotations from Wikipedia. Their ad-
+vantage is twofold: (1) entities have been shown to
+be a strong indicator of text semantics (Gabrilovich
+and Markovitch, 2007; Yamada et al., 2017, 2018;
+Ling et al., 2020) and thus should provide rich
+training signals for sentence embeddings; (2) en-
+tities are defined independently of languages andFigure 1: Illustration of the main concept behind EASE.
+Using a contrastive framework, sentences are embedded
+in the neighborhood of their hyperlink entity embed-
+dings and kept apart from irrelevant entities. Here, we
+share the entity embeddings across languages for multi-
+lingual models to facilitate cross-lingual alignment of
+the representation.
+thus offer a useful cross-lingual alignment supervi-
+sion (Calixto et al., 2021; Nishikawa et al., 2021;
+Jian et al., 2022; Ri et al., 2022). The extensive
+multilingual support of Wikipedia alleviates the
+need for a parallel resource to train well-aligned
+multilingual sentence embeddings, especially for
+low-resource languages. To demonstrate the effec-
+tiveness of entity-based supervision, we present
+EASE (Entity-Aware contrastive learning of Sen-
+tence Embeddings), which produces high-quality
+sentence embeddings in both monolingual and mul-
+tilingual settings.
+EASE learns sentence embeddings with two
+types of objectives: (1) our novel entity contrastive
+learning (CL) loss between sentences and their re-
+lated entities (Figure 1); (2) the self-supervised CL
+loss with dropout noise. The entity CL objective
+pulls the embeddings of sentences and their related
+entities close while keeping unrelated entities apart.
+The objective is expected to arrange the sentence
+embeddings in accordance with semantics captured3870by the entities. To further exploit the knowledge in
+Wikipedia and improve the learned embeddings, we
+also introduce a method for mining hard negatives
+based on the entity type. The second objective, the
+self-supervised CL objective with dropout noise
+(Gao et al., 2021; Liu et al., 2021), is combined
+with the first one to enable sentence embeddings to
+capture fine-grained text semantics. We evaluate
+our model against other state-of-the-art unsuper-
+vised sentence embedding models, and show that
+EASE exhibits competitive or better performance
+on semantic textual similarity (STS) and short text
+clustering (STC) tasks.
+We also apply EASE to multilingual settings. To
+facilitate the evaluation of the high-level semantics
+of multilingual sentence embeddings, we construct
+a multilingual text clustering dataset, MewsC-16
+(Multilingual Short Text Clustering Dataset for
+News in 16 languages). Multilingual EASE is
+trained using the entity embeddings shared across
+languages. We show that, given the cross-lingual
+alignment supervision from the shared entities,
+multilingual EASE significantly outperforms the
+baselines in multilingual STS, STC, parallel sen-
+tence matching, and cross-lingual document classi-
+fication tasks.
+We further demonstrate the effectiveness of the
+multilingual entity CL in a more realistic scenario
+for low-resource languages. Using multilingual
+entity CL, we fine-tune a competitive multilingual
+sentence embedding model, LaBSE (Feng et al.,
+2020), and show that the tuning improves the per-
+formance of parallel sentence matching for low-
+resource languages under-supported by the model.
+Finally, we analyze the EASE model by studying
+ablated models and the multilingual properties of
+the sentence embeddings to shed light on the source
+of the improvement in the model.
+2 Related Work
+2.1 Sentence Embeddings
+Sentence embeddings, which represent the mean-
+ing of sentences in the form of a dense vector, have
+been actively studied. One of the earliest meth-
+ods is Paragraph Vector (Le and Mikolov, 2014)
+in which sentence embeddings are trained to pre-
+dict words within the text. Subsequently, various
+kinds of training tasks have been explored includ-
+ing reconstructing or predicting adjacent sentences
+(Kiros et al., 2015; Logeswaran and Lee, 2018) and
+solving a natural language inference (NLI) task(Conneau et al., 2017).
+Recently, with the advent of general-purpose
+pretrained language models such as BERT (De-
+vlin et al., 2019), it has become increasingly com-
+mon to fine-tune pretrained models to produce
+high-quality sentence embeddings, revisiting the
+aforementioned supervision signals (Reimers and
+Gurevych, 2019; Yang et al., 2021), and using self-
+supervised objectives based on contrastive learn-
+ing (CL). In this paper, we present a CL objective
+with entity-based supervision. We train our EASE
+model with entity CL together with self-supervised
+CL with dropout noise and show that the entity CL
+improves the quality of sentence embeddings.
+Contrastive learning The basic idea of con-
+trastive representation learning is to pull semanti-
+cally similar samples close and keep dissimilar sam-
+ples apart (Hadsell et al., 2006). CL for sentence
+embeddings can be classified by the type of posi-
+tive pairs used. As representative examples, several
+methods use entailment pairs as positive pairs in
+NLI datasets (Gao et al., 2021; Zhang et al., 2021).
+To alleviate the need for an annotated dataset, self-
+supervised approaches are also being actively stud-
+ied. Typical self-supervised methods involve gen-
+erating positive pairs using data augmentation tech-
+niques, including discrete operations such as word
+deletion and shuffling (Yan et al., 2021; Meng et al.,
+2021), back-translation (Fang et al., 2020), inter-
+mediate BERT hidden representations (Kim et al.,
+2021), and dropout noise within transformer lay-
+ers (Gao et al., 2021; Liu et al., 2021). Contrastive
+tension (CT)-BERT (Carlsson et al., 2021) regards
+as positive pairs the outputs of the same sentence
+from two individual encoders. DeCLUTR (Giorgi
+et al., 2021) uses different spans of the same doc-
+ument. In contrast to these methods that perform
+CL between sentences, our method performs CL
+between sentences and their associated entities.
+Multilingual sentence embeddings Another yet
+closely related line of research is focused on learn-
+ing multilingual sentence embeddings, which cap-
+ture semantics across multiple languages. Early
+competitive methods typically utilize the sequence-
+to-sequence objective with parallel corpora to learn
+multilingual sentence embeddings (Schwenk and
+Douze, 2017; Artetxe and Schwenk, 2019); re-
+cently fine-tuned multilingual pretrained models
+have achieved state-of-the-art performance (Feng
+et al., 2020; Goswami et al., 2021). However, one3871drawback of such approaches is that, to achieve
+strong results for a particular language pair, they
+need rich parallel or semantically related sentence
+pairs, which are not necessarily easy to obtain.
+In this work, we explore the utility of Wikipedia
+entity annotations, which are aligned across lan-
+guages and already available in over 300 languages.
+We also show that the entity CL in a multilin-
+gual scenario effectively improves the alignment
+of sentence embeddings between English and low-
+resource languages not well supported in an exist-
+ing multilingual model.
+2.2 Learning Representations Using
+Entity-based Supervision
+Entities have been conventionally used to model
+text semantics (Gabrilovich and Markovitch, 2007,
+2006). Several recently proposed methods learn
+text representations based on entity-based super-
+vision by predicting entities from their relevant
+text (Yamada et al., 2017) or entity-masked sen-
+tences (Ling et al., 2020). In the proposed EASE
+model, the existing self-supervised CL method
+based on BERT (Gao et al., 2021) is extended using
+entity-based supervision with carefully designed
+hard negatives. Moreover, it is applied to the multi-
+lingual setting by leveraging the language-agnostic
+nature of entities.
+3 Model and Training Data
+In this section, we describe the components of our
+learning method for sentence embeddings, EASE,
+which is trained using entity hyperlink annotations
+available in Wikipedia.
+3.1 Contrastive Learning with Entities
+Given pairs of a sentence and a semantically related
+entity (positive entity) D={(s, e)}, we train
+our model to predict the entity embedding e∈R
+from the sentence embedding s∈R. Following
+the contrastive framework in Chen et al. (2020),
+the training loss for (s, e)with a minibatch of N
+pairs is:
+l=−loge
+/summationtexte, (1)
+where W∈Ris a learnable matrix weight, τ
+is a temperature hyperparameter, and sim(·)is the
+cosine similarity.Data We construct the sentence-entity paired
+datasets from the January 2019 version of
+Wikipedia dump. We split text in the articles into
+sentences using polyglot .For each sentence,
+we extract the hyperlink entities as semantically re-
+lated entities.Each entity forms a training instance
+(s, e)for the sentence. We restrict the entities to
+those that appear more than ten times as hyper-
+links in the training corpus. They are converted
+into Wikidata entities, which are shared across lan-
+guages, using inter-language links obtained from
+the March 2020 version of the Wikidata dump.
+3.2 Hard Negative Entities
+The introduction of hard negatives (data that are
+difficult to distinguish from an anchor point) has
+been reported to be effective in improving CL mod-
+els (Gao et al., 2021; Robinson et al., 2021). We
+introduce a hard negative mining technique that
+finds negative entities similar to the positive entity
+but yet unrelated to the sentence.
+Specifically, for each positive entity, we collect
+hard negative entity candidates that satisfy the fol-
+lowing two conditions: (1) entities with the same
+type as the positive entity. Entity types are defined
+as the entities in the “instance of” relation on Wiki-
+data, following the work of Xiong et al. (2020).
+If there are more than one appropriate type, we
+randomly choose one; (2) entities that do not ap-
+pear on the same Wikipedia page. Our assumption
+here is that entities on the same page are topically
+related to the positive entity and thus are not ap-
+propriate for negative data. Finally, we randomly
+choose one of the candidates to construct hard nega-
+tive training data. For example, the “Studio Ghibli”
+entity has the type “animation studio” and one of
+the hard negative entity candidates is “Walt Disney
+Animation Studios”.
+Given datasets with hard negative entities D=
+{(s, e, e)}, the loss function is38723.3 Pretrained Entity Embeddings
+We initialize entity embeddings using English en-
+tity embeddings pretrained on Wikipedia. These
+embeddings are trained using the open-source
+Wikipedia2Vec tool (Yamada et al., 2020) and
+the January 2019 English Wikipedia dump. The
+vector dimension is set to 768, which is the same
+as those of the hidden representations of the base
+pretrained models, and the other hyperparameters
+to their default values. The parameters of the entity
+embedding matrix are updated during the training
+process.
+3.4 Self-supervised Contrastive Learning with
+Dropout Noise
+Self-supervised CL with dropout noise, which in-
+puts a sentence and predicts itself using dropout as
+noise, is an effective method for learning sentence
+embeddings in an unsupervised way (Liu et al.,
+2021; Gao et al., 2021). We combine this method
+with our entity CL.
+Given two embeddings with different dropout
+masks s,s, the training loss of self-supervised
+CLlis defined by
+l=−loge
+/summationtexte. (3)
+In summary, our total loss is
+l=λl+l, (4)
+where landlare defined in Equations (2) and
+(3) respectively, and λdenotes a hyperparameter
+that defines the balance between the entity CL and
+self-supervised CL with dropout noise. The details
+on the hyperparameters of the models can be found
+in Appendix A.
+4 Experiment: Monolingual
+We first evaluate EASE in monolingual settings.
+We fine-tune monolingual pre-trained language
+models using only English Wikipedia data.
+4.1 Setup
+We use one million pairs sampled from the En-
+glish entity-sentence pairs described in Section 3
+as training data. In this setting, we train sentence
+embedding models from pre-trained checkpoints of
+BERT (Devlin et al., 2019) or RoBERTa (Liu et al.,
+2019) and take the [CLS] representation as the sen-
+tence embedding. We add a linear layer after the
+output sentence embeddings only during training,
+as in Gao et al. (2021).
+We compare our method with unsupervised sen-
+tence embedding methods including average GloVe
+embeddings (Pennington et al., 2014), average
+embeddings of vanilla BERT or RoBERTa, and
+previous state-of-the-art approaches such as Sim-
+CSE (Gao et al., 2021), CT (Carlsson et al., 2021),
+and DeCLUTR (Giorgi et al., 2021).
+We evaluate sentence embeddings using two
+tasks: STS and STC. These tasks are supposed
+to measure the degree of sentence embeddings cap-
+turing fine-grained and broad semantic structures.
+Semantic textual similarity STS is a measure of
+the capability of capturing graded similarity of sen-
+tences. We use seven monolingual STS tasks: STS
+2012-2016 (Agirre et al., 2012, 2013, 2014, 2015,
+2016), STS Benchmark (Cer et al., 2017), and
+SICK-Relatedness (Marelli et al., 2014). Follow-
+ing the settings of Reimers and Gurevych (2019),
+we calculate Spearman’s rank correlation coeffi-
+cient between the cosine similarity of the sentence
+embeddings and the ground truth similarity scores.
+Short text clustering Another important aspect
+of sentence embeddings is the ability to capture cat-
+egorical semantic structure, i.e., to map sentences
+from the same categories close together and those
+from different categories far apart (Zhang et al.,
+2021). We also evaluate sentence embeddings
+using eight benchmark datasets for STC (Zhang
+et al., 2021) to investigate how well our method
+can encode high-level categorical structures into3873
+sentence embeddings. These datasets contain
+short sentences, ranging from 6 to 28 average
+words in length, from a variety of domains such
+as news, biomedical, and social network service
+(Twitter). We cluster the sentence embeddings
+using K-Means (MacQueen, 1967) and compute
+the clustering accuracy using the Hungarian algo-
+rithm (Munkres, 1957) averaged over three inde-
+pendent runs.
+4.2 Results
+Table 1 shows the evaluation results for the seven
+STS and eight STC tasks. Overall, our EASE meth-
+ods significantly improve the performance of the
+base models (i.e., BERT and RoBERTa), and on
+average outperform the previous state-of-the-art
+methods on all tasks except STC with the RoBERTa
+backbone. The most significant improvement is ob-
+served for EASE-BERT, with an average improve-
+ment of 61.6%to63.1%over the previous best
+result for STC tasks. These results suggest that
+EASE is able to measure the semantic similarity
+between sentences, and simultaneously excel at
+capturing high-level categorical semantic structure.
+5 Experiment: Multilingual
+To further explore the advantage of entity annota-
+tions as cross-lingual alignment supervision, we
+test EASE in multilingual settings: we fine-tune
+multilingual pre-trained language models using
+Wikipedia data in multiple languages.5.1 Setup
+We sample 50,000 pairs for each language and
+use them together as training data from the entity-
+sentence paired data in 18 languages.As our pri-
+mary baseline model, we use a SimCSE model
+trained using the same multilingual data as EASE
+(i.e., sentences in entity-sentence paired data).In
+this setting, we start fine-tuning from pre-trained
+checkpoints of mBERT or XLM-R (Conneau et al.,
+2020) and take mean pooling to obtain sentence em-
+beddings for both training and evaluation on both
+EASE and SimCSE. We also tested other pooling
+methods, but mean pooling was the best in this
+experiment for both models (Appendix B).
+5.2 Multilingual STS and STC
+We evaluate our method using the extended version
+of the STS 2017 dataset (Reimers and Gurevych,
+2020), which contains annotated sentences for ten
+language pairs: EN-EN, AR-AR, ES-ES, EN-AR,
+EN-DE, EN-TR, EN-ES, EN-FR, EN-IT, and EN-
+NL. We compute Spearman’s rank correlation as
+in Section 4.1. We also conduct experiments on
+our newly introduced multilingual STC dataset de-
+scribed as follows:3874
+MewsC-16 To evaluate the ability of sen-
+tence embeddings to encode high-level cate-
+gorical concepts in a multilingual setting, we
+constructed MewsC-16 ( Multilingual Short Text
+Clustering Dataset for N ewsin16languages) from
+Wikinews.MewsC-16 contains topic sentences
+from Wikinews articles in 13 categories and 16 lan-
+guages. More detailed information is available in
+Appendix E. We perform clustering and compute
+the accuracy for each language as in Section 4.1.
+Tables 2 and 3 show the results of our multilin-
+gual STS and STC experiments. Overall, EASE
+substantially outperforms the corresponding base
+models (i.e., mBERT and XLM-R) on both tasks.
+Similar to the results for the monolingual setting,
+the average performance of EASE exceeds that
+of SimCSE for multilingual STC tasks with an
+improvement of 34.1%to36.0%for mBERT and
+31.8%to35.4%for XLM-R. This result suggests
+that even in a multilingual setting, EASE can en-
+code high-level categorical semantic structures into
+sentence embeddings. Moreover, EASE signifi-
+cantly outperforms SimCSE in multilingual STS
+tasks Specifically, the score of EASE-mBERT is
+better than that of SimCSE-mBERT ( 50.9vs57.2),
+and that of EASE-XLM-R is better than that of
+SimCSE-XLM-R ( 54.1vs57.1). This improve-
+ment is much more significant than the monolin-
+gual setting (Table 1), where the improvement is
+less than one point. This indicates the effectivenessof language-independent entities as cross-lingual
+alignment supervision in learning multilingual sen-
+tence embeddings.
+5.3 Cross-lingual Parallel Matching
+We evaluate EASE on the Tatoeba dataset (Artetxe
+and Schwenk, 2019) to assess more directly its abil-
+ity to capture cross-lingual semantics. This task
+is to retrieve the correct target sentence for each
+query sentence, given a set of parallel sentences.
+We perform the retrieval using the cosine similar-
+ity scores of the sentence embeddings. For each
+language-pair dataset, we compute the retrieval ac-
+curacy averaged over the forward and backward
+directions (English to the target language and vice-
+versa).
+Table 4 shows the evaluation results for the lan-
+guages in the CL training data. EASE significantly
+outperforms the corresponding base models and
+SimCSE for all languages. Notably, the mean per-
+formance of EASE-mBERT is better than that of
+vanilla mBERT by 13.5percentage points. This
+indicates that EASE can capture cross-lingual se-
+mantics owing to the cross-lingual supervision of
+entity annotations, which aligns semantically sim-
+ilar sentences across languages. One interesting
+observation is that the performance of SimCSE-
+mBERT is worse than that of vanilla mBERT. We
+conjecture that this is because the SimCSE model
+is trained using only the positive sentence pairs
+within the same language, which sometimes leads
+to less language-neutral representations.3875To further explore the cross-lingual ability of
+EASE, we evaluate it on languages not included in
+the EASE training set (Table 5). The results show
+that EASE performs robustly on these languages
+as well, which suggests that, in EASE, the cross-
+lingual alignment effect propagates to other lan-
+guages not used in additional training with EASE
+(Kvapilíková et al., 2020).
+5.4 Cross-lingual Zero-shot Transfer
+We further evaluate our sentence embeddings on
+a downstream task in which sentence embeddings
+are used as input features, especially in the cross-
+lingual zero-shot transfer setting. For evaluation
+in this setting, we use MLDoc (Schwenk and
+Li, 2018), a cross-lingual document classification
+dataset that classifies news articles in eight lan-
+guages into four categories. We train a linear classi-
+fier using sentence embeddings as input features on
+the English training data, and evaluate the resulting
+classifier in the remaining languages. To directly
+evaluate the ability of the resulting sentence em-
+beddings, we do not update the parameters of the
+sentence encoder but only train the linear classifier
+in this setting. The detailed settings are shown in
+Appendix D.
+As shown in Table 6, our EASE models achieve
+the best average performance on both back-bones,
+suggesting that multilingual embeddings learned
+with the CL are also effective in the cross-lingual
+transfer setting.
+6 Case Study: Fine-tuning Supervised
+Model with EASE
+Existing multilingual sentence representation mod-
+els trained on a large parallel corpus do not always
+perform well, especially for languages that are not
+included in the training data. In contrast, EASE
+requires only the Wikipedia text corpus, which is
+available in more than 300 languages.Thus, one
+possible use case for EASE would be to comple-
+ment the performance of existing models in low-
+resource languages by exploiting the Wikipedia
+data in those languages.
+To test this possibility, we fine-tune LaBSE
+(Feng et al., 2020), which is trained on both mono-
+lingual and bilingual data in 109 languages, with
+our EASE framework in five low-resource lan-
+guages (kab, pam, cor, tr, mhr). These languages
+are not present in the original training corpus, so
+the model performed particularly poorly on these
+languages. We fine-tune the model using 5,000
+pairs each from English and the corresponding lan-
+guage data.
+As shown in Figure 2, EASE improves the per-
+formance of LaBSE across all target languages,
+which is an intriguing result considering that
+LaBSE has already been trained on about six bil-
+lion parallel corpora. These results suggest the
+potential benefit of combining EASE with other
+models using parallel corpora, especially for lan-
+guages without or with only a few parallel corpora.
+7 Analysis
+7.1 Ablation Study
+We conduct ablation experiments to better under-
+stand how each component of EASE contributes to
+its performance. We measure the performance of
+the models using monolingual STS in the monolin-
+gual setting and multilingual STS in the multilin-
+gual setting, without one of the following compo-
+nents: the self-supervised CL loss, hard negatives,
+and Wikipedia2Vec initialization (Table 7). As a
+result, we find all of the components to make an
+important contribution to the performance.
+It is worth mentioning that entity CL alone (i.e.,
+w/o self-supervised CL) also improves the baseline
+performance significantly. The performance contri-
+butions in the multilingual setting are particularly
+significant ( 49.3for mBERT and 53.1for XLM-R)
+and comparable to those for the SimCSE models.
+These results suggest that CL with entities by it-
+self is effective in learning multilingual sentence
+embeddings.3876
+7.2 Alignment and Uniformity
+To further understand the source of the performance
+improvement with EASE, we evaluate two key
+properties to measure the quality of the represen-
+tations obtained from contrastive learning (Wang
+and Isola, 2020): alignment measures the closeness
+of representations between positive pairs; unifor-
+mity measures how well the representations are
+uniformly distributed. We let f(x)denote the nor-
+malized representation of x, and compute the two
+measures using
+l≜ E∥f(x)−f(x)∥,(5)
+l ≜log Ee,(6)
+where pdenotes positive pairs and pdenotes
+the entire data distribution. We compute these met-
+rics using BERT-based models on the STS-B devel-
+opment set data. For investigation in the multilin-
+gual setting, we compute them using mBERT-based
+models on the multilingual STS data used in the
+experiment Section 5. We compute the averages of
+alignment and uniformity for each language pair.
+For each setting, we take STS pairs with a score
+higher than 4 in the 0-to-5 scale as pand all STS
+sentences as p.As shown in Figure 3, the trends are similar in
+both settings: (1) both EASE and SimCSE signifi-
+cantly improve uniformity compared with that for
+the vanilla model; (2) EASE is inferior to SimCSE
+in terms of uniformity and superior in terms of
+alignment. This result suggests that entity CL does
+not have the effect of biasing embeddings towards a
+more uniform distribution. Instead, it has the effect
+of aligning semantically similar samples, which
+leads to the improved performance of the resultant
+sentence embeddings.
+7.3 Qualitative analysis
+To investigate how EASE improves the quality of
+sentence embeddings, we conduct qualitative analy-
+sis by comparing the results of EASE and SimCSE
+on STS Benchmark. Table 8a shows typical cases
+of how EASE improves sentence embeddings. We
+find that EASE embeddings are more robust to syn-
+onyms and grammatical differences since they are
+more aware of the topic similarity between sen-
+tences, resulting in more accurate score inference.
+On the other hand, as shown in the deterioration
+cases in Table 8b, EASE embeddings are some-
+times overly sensitive to topical similarity, making
+it difficult to capture the correct meaning of the
+whole sentence.
+8 Discussion and Conclusion
+Our experiments have demonstrated that entity su-
+pervision in EASE improves the quality of sentence
+embeddings both in the monolingual setting and,
+in particular, the multilingual setting. As recent
+studies have shown, entity annotations can be used
+asanchors to learn quality cross-lingual representa-
+tions (Calixto et al., 2021; Nishikawa et al., 2021;
+Jian et al., 2022; Ri et al., 2022), and our work
+is another demonstration of their utility, particu-
+larly in sentence embeddings. One promising fu-
+ture direction is exploring how to better exploit the
+cross-lingual nature of entities.3877
+Our experiments also demonstrate the utility of
+Wikipedia as a multilingual database. As described
+in Section 6, Wikipedia entity annotations can com-
+pensate for the lack of parallel resources in learning
+cross-lingual representations. Wikipedia currently
+supports more than 300 languages, and around
+half of them have over 10,000 articles.Moreover,
+Wikipedia is ever growing; it is expected to include
+more and more languages.This will motivate
+researchers to develop methods for multilingual
+models including low-resource languages in the
+aid of entity annotations in Wikipedia.
+However, the reliance on Wikipedia for train-
+ing data may limit the application of the models
+to specific domains (e.g., general or encyclopedia
+domains). To apply EASE to other domains, one
+may need to annotate text from the domain either
+manually or automatically. Future work can inves-
+tigate the effectiveness of the entity CL in other
+domains and possibly its the combination with an
+entity linking system.
+Finally, we note that the supervision signal in
+EASE is inherently noisy. Different entities havedifferent characteristics as a topic indicator, and
+sentences that contain the same entity do not neces-
+sarily share meaning. Future work can address this
+by considering how an entity is used in a sentence
+to obtain more reliable supervision.
+Acknowledgements
+This work was partially supported by JSPS
+KAKENHI Grants JP16H06302, JP18H04120,
+JP21H04907, and JP21K18023, and by JST
+CREST Grants JPMJCR18A6 and JPMJCR20D3,
+Japan. JPMJCR18A6: JST CREST (FY2018-
+FY2023) PI Prof. Yamagishi JPMJCR20D3: JST
+CREST (FY2020-FY2025) PI Prof. Echizen
+JP16H06302: KAKENHI, Scientific Research (S)
+(FY2016-FY2020) PI Prof. Babaguchi, Co-PI Prof.
+Echizen JP18H04120: KAKENHI, Scientific Re-
+search (A) (FY2018-FY2020) PI Prof. Echizen,
+Co-PI Prof. Yamagishi
+<Follows are newly accepted.> JP21H04907:
+KAKENHI, Scientific Research (A) (FY2021-
+FY2023) PI Prof. Echizen, Co-PI Prof. Yamagishi
+JP21K18023: KAKENHI, Early-Career Scientists
+(FY2021-FY2023) PI Dr. Le Trung-Nghia3878References387938803881A Training Details
+We implement our EASE model using transformerslibraries. For the monolingual settings, we
+use the STS-B development set as in (Gao et al., 2021). For multilingual settings, we use the STS-B and
+SICK-R development set. In this setting, we simply concatenate the entity-sentence paired data for all 18
+languages and randomly sample from the concatenated data to construct batches.In both settings, we
+train our model for one epoch, compute evaluation scores every 250 training steps on the development
+data, and keep the best model. We conduct a grid-search for batch size ∈ {64,128,256,512}and learning
+rate∈ {3e−05,5e−05}. The chosen hyperparameters for each model is shown in Table 9.
+For the loss balancing term λand softmax temperature τin the EASE models (section 3), we empirically
+find that λ= 0.01,τ= 100 for the monolingual setting and τ= 10 for the multilingual setting work
+well.
+Computing Infrastructure We run the experiments on a server with AMD EPYC 7302 16-Core CPU
+and a NVIDIA A100-PCIE-40GB GPU. The training of EASE takes approximately 1 hour.
+B Pooling Methods for SimCSE and EASE
+We compare several pooling methods on both SimCSE and EASE in the multilingual setting: [CLS] with
+MLP; [CLS] with MLP during training only; [CLS] without MLP; mean pooling. Table 10 shows the
+evaluation results based on the STS-B and SICK-R development set.
+Pooler SimCSE EASE
+[CLS] pooling
+w/ MLP 63.0 65.0
+w/ MLP (train) 72.0 73.3
+w/o MLP 72.0 73.4
+mean pooling 72.1 73.8
+The mean pooling representation performs best on both models. We thus use mean pooling on both
+models in Section 5.3882C Parallel Sentence Mining
+We evaluate the multilingual sentence embeddings with the parallel sentence mining task using the
+BUCC 2018 shared task dataset (Zweigenbaum et al., 2018). The task is to find the parallel pairs given
+monolingual sentence pools in two languages, with 2–3% of the sentences being parallel, to find the
+parallel pairs.
+Each model uses the raw embedding output and performance is evaluated without fine-tuning. We
+first encode all sentences into embeddings and compute the cosine similarity scores between all possible
+sentence pairs. We then retrieve the sentence pairs with above a fixed threshold and compute the F1 score
+using the ground-truth parallel pairs.
+As the test set is not publicly available, we use the sample set to tune the threshold of the parallel
+sentence mining and the training set for evaluation, which is a common practice in similar studies (Hu
+et al., 2020; Feng et al., 2020).
+The results are summarized in Table 11. Our EASE models outperform the SimCSE baselines across the
+languages, demonstrating that the entity contrastive objective improves the alignment of the multilingual
+sentence embeddings without a parallel corpora. However, performance is significantly poor than that of
+LaBSE, which is trained using massive amounts of parallel corpora, suggesting that we still need parallel
+resources to be competitive on this task.
+en-de en-fr en-ru en-zh
+SimCSE-mBERT 13.2 19.2 7.9 11.5
+EASE-mBERT 26.9 33.8 24.2 32.9
+SimCSE-XLM-R 31.8 32.3 28.9 19.9
+EASE-XLM-R 33.3 33.2 33.6 23.4
+LaBSE 89.0 88.2 84.7 74.2
+D Detailed Settings for MLDoc Experiment
+We use the english.train.1000 and english.dev datasets for the training and validation data, respectively.
+We conduct a grid-search for batch size ∈ {32,64,128}and learning rate ∈ {0.1,0.01,0.001}using
+validation data 12. We run the experiment three times with different random seeds and record the average
+scores.
+Model Batch size Learning Rate
+mBERT(avg.) 32 0.1
+XLM-R(avg.) 32 0.1
+SimCSE-mBERT 32 0.1
+SimCSE-XLM-R 32 0.01
+EASE-mBERT 32 0.01
+EASE-XLM-R 32 0.013883E Construction of MewsC-16 Dataset
+To construct the MewsC-16 dataset, we collect sentences for each category in each language from the
+Wikinews dump.We first select 13 topic categories in the English Wikinewsthat are also defined
+in other languages (Science and technology, Politics and conflicts, Environment, Sports, Health, Crime
+and law, Obituaries, Disasters and accidents, Culture and entertainment, Economy and business, Weather,
+Education, Media). We then collect pages with topic categories for each language and remove the pages
+with two or more topic categories. We clean the text on each page with the Wikiextractor tool,
+and split it into sentences using the polyglot sentence tokenizer. Finally, we use the first sentence
+assuming that it well represents the topic of the entire article (Baxendale, 1958; Edmundson, 1969). The
+corpus statistics for each language are shown in Table 13.
+Language # of sentences # of label types Language # of sentences # of label types
+ar 2,243 11 fr 10,697 13
+ca 3,310 11 ja 1,984 12
+cs 1,534 9 ko 344 10
+de 6,398 8 pl 7,247 11
+en 12,892 13 pt 8,921 11
+eo 227 8 ru 1,406 12
+es 6,415 11 sv 584 7
+fa 773 9 tr 459 7
+total 65,425 133884F Baselines
+For average GloVe embedding (Pennington et al., 2014), we use open-source GloVe vectors trained on
+Wikipedia and Gigaword with 300 dimensions.We use the pretrained model from HuggingFace’s
+Transformersfor vanilla pretrained language models, including BERT (bert-base-uncased) (Devlin
+et al., 2019), RoBERTa (roberta-base) (Liu et al., 2019), mBERT (bert-base-multilingual-cased) and
+XLM-R (xlm-roberta-base) (Conneau et al., 2020). We use the published checkpoints for unsupervised
+SimCSE (Gao et al., 2021), CT (Carlsson et al., 2021), and DeCLUTR (Giorgi et al., 2021).
+G Monolingual STS and STC
+Table 14 and 15 show the complete results for seven STS tasks and eight STC tasks. For STS, the average
+EASE performance is slightly better than that of SimCSE, although the advantage is not consistent across
+tasks. For most of the STC tasks, EASE consistently outperforms SimCSE. These results indicate that
+EASE stands out at capturing high-level categorical semantic structures and that its ability to measure
+sentence semantic similarity is comparable to or better than that of SimCSE.3885

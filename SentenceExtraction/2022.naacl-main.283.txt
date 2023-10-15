@@ -1,1 +1,646 @@
-3859 Proceedings of the 2022 Conference of the North American Chapter of the Association for Computational Linguistics : Human Language Technologies , pages 3859 3869 July 10 - 15 , 2022 © 2022 Association for Computational Linguistics 3860 3861 3862 3863 3864 3865 3866 3867 3868 3869 
+
+Yue Fang, Hainan Zhang, Hongshen Chen, Zhuoye Ding,
+Bo Long,Yanyan Lanand Yanquan ZhouBeijing University of Posts and Telecommunications, Beijing, ChinaJD.com, Beijing, China
+{fangyue, zhouyanquan}@bupt.edu.com ,
+zhanghainan1990@163.com,ac@chenhongshen.com ,
+lanyanyan@ict.ac.cn ,{dingzhuoye, bo.long}@jd.com
+Abstract
+Due to the dialogue characteristics of unstruc-
+tured contexts and multi-parties with first-
+person perspective, many successful text sum-
+marization works have failed when dealing
+with dialogue summarization. In dialogue sum-
+marization task, the input dialogue is usually
+spoken style with ellipsis and co-references but
+the output summaries are more formal and com-
+plete. Therefore, the dialogue summarization
+model should be able to complete the ellipsis
+content and co-reference information and then
+produce a suitable summary accordingly. How-
+ever, the current state-of-the-art models pay
+more attention on the topic or structure of sum-
+mary, rather than the consistency of dialogue
+summary with its input dialogue context, which
+may suffer from the personal and logical incon-
+sistency problem. In this paper, we propose
+a new model, named ReWriteSum, to tackle
+this problem. Firstly, an utterance rewriter is
+conducted to complete the ellipsis content of
+dialogue content and then obtain the rewriting
+utterances. Then, the co-reference data aug-
+mentation mechanism is utilized to replace the
+referential person name with its specific name
+to enhance the personal information. Finally,
+the rewriting utterances and the co-reference re-
+placement data are used in the standard BART
+model. Experimental results on both SAMSum
+and DialSum datasets show that our ReWrite-
+Sum significantly outperforms baseline models,
+in terms of both metric-based and human evalu-
+ations. Further analysis on multi-speakers also
+shows that ReWriteSum can obtain relatively
+higher improvement with more speakers, vali-
+dating the correctness and property of ReWrite-
+Sum.
+1 Introduction
+Despite many existing text summarization works
+on single-speaker written documents, such as
+news and encyclopedia articles (Rush et al., 2015;
+Table 1: Two personal and logical inconsistent exam-
+ples from the state-of-the-art model in dialogue sum-
+marization. Green words in ground-truth indicate the
+dialogue facts. Red words in BART show the inconsis-
+tent content, results from ellipsis and co-reference.
+Gehrmann et al., 2018), dialogue summarization
+has gain increasing attention (Zhang et al., 2021).
+One reason is that it has various promising applica-
+tions in real world, such as customer services and
+doctor-patient interaction. More importantly, the
+dialogue summarization process is more difficult
+since there are more interactive participants with
+first-person perspective, and unstructured context
+to consider (Chen and Yang, 2021), which poses
+great challenges for researchers in this area.
+For this task, it is clear that there is a big gap
+between the input spoken dialogue and the out-
+put formal summaries. That is, in dialogue, users
+tend to use many incomplete utterances, which al-3859ways omit or refer back to entities appeared in the
+history, called ellipsis and co-reference. But the
+summary is usually formal and written, which con-
+tains rich and complete salient information. Here
+we give two examples, as shown in Table 1. In
+the first example, the incomplete utterance “I will
+take it” omits “laptop” which can be seen in the
+first sentence, while the ground-truth summary con-
+tains the complete information “Ann will take it for
+$250 with accessories”. We can see that the gener-
+ated summary by BART confuses the accessories
+“bag” with the subject “laptop” and then generate a
+logic inconsistent summary “pick a bag”. And in
+the second example, many people’s names are in
+the contexts, which are more difficult for the sum-
+marization model to distinguish the co-reference
+relationship, i.e., “I’ll have to hit on her” refers
+to “Dave” via “I”. As a result, BART confuses
+“Mike” with “Dave”, and then generates a personal
+inconsistent summary “Mike will have to hit on
+her”. What’s more, such factual inconsistencies
+have also been observed in previous studies (Cao
+et al., 2018; Kry ´sci´nski et al., 2019, 2020). There-
+fore, it is critical to complete the omission and
+co-reference information in dialogue utterances for
+dialogue summarization task.
+However, the current models pay more atten-
+tion on introducing intrinsic information, such as
+dialogue acts (Goo and Chen, 2018), key point
+sequence (Liu et al., 2019a) and co-reference infor-
+mation (Liu et al., 2021b). They demonstrate that
+the introduction of intrinsic information and human
+annotation is effective in improving the quality of
+summary generation. However, dialogue acts and
+key point sequence require a lot of human effort, so
+they can not be widely used in applications. The co-
+reference chain is integrated by GNN, which only
+pays attention to the referencing information of en-
+tities but not supplement and restore the referred
+and omitted pronouns in the dialogue utterances, re-
+sulting in the misunderstanding of omitted contents.
+More importantly, they all ignore the consistency
+between the dialogue summary and its source dia-
+logue, which may lead to the personal and logical
+inconsistency problem caused by multi-speakers.
+In this paper, we propose a new model, namely
+ReWriteSum, to tackle this problem. The core
+idea is to use the utterance rewriting mechanism to
+complete the omitted content and utilize the data
+augmentation strategy to enhance the co-reference
+information. Specifically, we first use the utter-ance rewriter to complete the ellipsis content in
+dialogue contexts, and then obtain the rewritten
+utterances dataset. Then, we use the co-reference
+data augmentation mechanism to replace the ref-
+erential person name with its specific name with a
+certain probability to enhance the personal informa-
+tion. Finally, we use both the rewritten utterances
+and the co-reference replacement data as input, and
+utilize the state-of-the-art model BART to generate
+the corresponding summary.
+In our experiments, we use two public datasets
+to evaluate our proposed models, i.e. SAMSum
+and DialSum. The results show that ReWriteSum
+has the ability to produce more consistent and suit-
+able summary than traditional summarization mod-
+els. Besides, we conduct an analysis on multi-
+speakers, and the results show that the ReWriteSum
+obtains relatively higher improvement with more
+speakers, which indicates that the incomplete utter-
+ance rewriting and co-reference data augmentation
+mechanism by our model are reasonable.
+2 Related Work
+2.1 Document Summarization
+The aim of automatic document summarization is
+to convert a well-structured document into short
+text containing salient information. It has received
+widespread attention in recent literature, especially
+abstractive document summarization. For exam-
+ple, Rush et al. (2015) introduce an attention-based
+sequence-to-sequence model for abstractive docu-
+ment summarization. To solve out-of-vocabulary
+and content repeat issues, See et al. (2017) propose
+a pointer-generator network with copy and cover-
+age mechanism. Chen and Bansal (2018) leverage
+reinforcement learning to extract salient sentences
+in document and then generate summary. Recent
+studies have focused on the pre-trained models.
+Liu and Lapata (2019) take use of pre-trained lan-
+guage model BERT (Kenton and Toutanova, 2019)
+in extractive summarization and abstractive summa-
+rization. Lewis et al. (2020) propose BART which
+combined bi-directional encoder from BERT and
+auto-regressive decoder from GPT (Radford et al.,
+2018) to obtain the results of language generation.
+2.2 Dialogue Summarization
+Compared with document summarization, dialogue
+summarization aims at generating condensed text
+from the dialogue contexts among multiple speak-
+ers. For instance, Shang et al. (2018) propose an3860unsupervised multi-sentence compression method
+to generate meeting summaries. Zhao et al. (2019)
+employ a hierarchical encoder and a reinforced
+decoder based on sequence-to-sequence model to
+generate meeting summaries.
+Some studies have focused on employing conver-
+sational analysis for dialogue summarization. Goo
+and Chen (2018) use sentence-gated mechanism
+to apply dialogue act in the generation process.
+Liu et al. (2019a) design a key point sequence as
+auxiliary information to describe the logic of the
+abstract. Liu et al. (2019c) and Li et al. (2019) intro-
+duce topic information for dialogue summarization.
+However, their methods need a large amount of
+human annotation. To avoid this issue, Chen and
+Yang (2020) use diverse conversational structures
+like topic segments and conversational stages to
+design a multi-view summarizer. Recent works of-
+ten introduce intrinsic information to better model
+the dialogue process. Liu et al. (2021b) use the
+graph neural network to employ co-reference infor-
+mation to generate summaries. Feng et al. (2020)
+introduce the dialogue discourse information, and
+design Meeting Graph to describe them. Lei et al.
+(2021) introduce speaker information to improve
+the generation performance in the context with
+multi-speakers.
+2.3 Incomplete Utterance Rewriting
+Incomplete utterance rewriting has received exten-
+sive research attention. In question answering, Ku-
+mar and Joshi (2016) propose non-sentential ut-
+terance resolution based on sequence-to-sequence
+model for utterance rewriting. To resolve incom-
+plete follow-up questions, retrieval-based sequence-
+to-sequence model (Kumar and Joshi, 2017) and
+copy-based sequence-to-sequence model (Elgohary
+et al., 2019; Quan et al., 2019) are proposed, which
+can generate complete questions. Liu et al. (2019b)
+take use of question structures to rewrite utter-
+ance in conversational semantic parsing. Pan et al.
+(2019) leverage BERT to select words, and use
+these words to generate rewritten utterance. Su
+et al. (2019) distinguish the weights of context ut-
+terances for utterance rewriting. Liu et al. (2020)
+employ edit-based text generation and semantic
+similarity measurement for utterance rewriting.
+3 Model
+In this section, we will describe our ReWriteSum
+model in detail, with architecture shown in Figure 1.
+ReWriteSum consists of an incomplete utterance
+rewriter, a co-reference data augmentation and a
+transformer-based BART summarization model.
+For incomplete utterance rewriting, we establish
+a word-level edit matrix (Liu et al., 2020), whose
+element determines three editing operations: sub-
+stitute, insert and none. To obtain the edit matrix,
+we conduct three neural networks, as shown in Fig-
+ure 2: a BiLSTM-based context layer to obtain
+the word representation, an encoder layer to model
+the local information, and a segmentation layer to
+model the global information.
+For co-reference data augmentation, we replace
+the co-reference word with its specific name en-
+tity through a co-reference resolution model (Joshi
+et al., 2020) and then augment the dataset with
+these replacement data. Specifically, we firstly
+use the co-reference resolution model to obtain
+the co-reference chain of the entire dialogue, then
+replace the pronoun in the co-reference chain with
+the specific name entity based on a certain proba-
+bility. Finally, we utilize these replacement data
+to augment the personal information for dialogue
+summarization task.
+3.1 Problem Formulation
+Given the dialogue content set D =
+{u, . . . , u} ∈ D, each utterance in Dis
+represented as u={x, . . . , x}, where x
+represents the kword in utterance u. The
+corresponding summary of Dis represented as3861
+S={y, . . . , y}, where yrepresents the j
+word in summary S.
+We adopt a neural model for abstractive dialogue
+summarization. In detail, given the dialogue D
+as input, we firstly utilize the utterance rewriting
+system and the co-reference resolution system to
+generate the new complete rewriting dialogue D.
+And then, we use the rewriting dialogue Das input,
+instead of dialogue D, to generate the dialogue
+summary.
+3.2 Incomplete Utterance Rewriting
+Given the whole dialogue D={u, . . . , u},
+we define the context as C={u, . . . , u}and
+the incomplete utterance as u(t≤ |D|). Incom-
+plete utterance rewriting aims at rewriting utou
+through the context C. After rewriting, ushould
+not only have the same meaning as u, but also
+can be understood separately. Specifically, we con-
+catenate all the contextual utterances Cinto a K-
+length word sequence c= (c, . . . c). At the
+same time, the incomplete utterance is represented
+asu={x, . . . x}, where Lis the length of u.
+And then, the rewritten utterance ucan be ob-
+tained by editing the incomplete dialogue uusing
+the words in c.
+In order to determine the editing operation, we
+define a word-level edit matrix M(Liu et al., 2020),
+where each element mrepresents the editing type
+between candx. There are three editing types:
+substitute, insert and None. The substitute oper-
+ation means replacing the word xwith the con-
+text word c. The insert operation means insert-
+ing a word cbefore or after a certain token x.
+And None means no operation. Following Liu
+et al. (2020), we establish a word-level edit matrix
+through three neural layers: a context layer, an en-coding layer and a subsequent segmentation layer,
+as shown in Figure 2, and then generate rewritten
+utterance based on this word-level edit matrix.
+3.2.1 Context Layer
+Given the contextual word sequence cand the in-
+complete utterance u, we firstly concatenate the
+canduas input, and employ Glove (Pennington
+et al., 2014) to initialize the word embedding. And
+then, we use BiLSTM (Schuster and Paliwal, 1997)
+with both the left-to-right and right-to-left text rep-
+resentations to obtain the contextual information:
+BiLSTM (c;u) = (g;h),
+where gis the hidden state of contextual word c
+incandhis the hidden state of the word xinu.
+3.2.2 Encoding Layer
+After obtaining the context-aware hidden states g
+andh, we use three similarity functions to calcu-
+late the word-level relevance between context and
+incomplete utterance. Specifically, for each word
+candx, a D-dimensional vector F(x, c)is set
+to indicate the relevance:
+F(x, c) = [h⊙g; cos (h,g) ;hWg],
+(1)
+where⊙is the element multiplication operation to
+obtain the element-wise similarity, cos(., .)is the
+cosine similarity, and Wis a learned parameter
+in learned bi-linear similarity. Finally, we obtain
+the feature map matrix F∈R.
+Similarity function is used to describe word-to-
+word relevance from various aspects, which is a
+necessary condition for the edit type. However,
+the encoder layer can only obtain local informa-
+tion, which is not enough for incomplete utterance
+rewriting. Therefore, we conduct a segmentation
+layer to introduce the global information.
+3.2.3 Segmentation Layer
+Given the feature map matrix F∈Rin
+Equation 1, we use the segmentation layer to cal-
+culate the word-level edit matrix M∈R.
+The segmentation layer is inspired by UNet (Ron-
+neberger et al., 2015), consisting of five convolu-
+tional neural network(CNN) with skip-connection
+mechanism, which is used to extract the global con-3862textual editing information, as shown in Figure 2:
+F=CNN (F),
+F=CNN (Pool(F)),
+F=DeConv (CNN (Pool(F))),
+F=DeConv (CNN (F,F)),
+M=FeedForward (CNN (F,F)),
+where CNN (.)is the two layers of convolutional
+modules, Pool (.)is the MaxPooling operation,
+DeConv (.)is the deconvloution neural network,
+andFeedForward (.)is the feedforward layer.
+Given the word-level edit matrix M, for each
+word cin contextual utterances and xin incom-
+plete utterance, the element Mdetermines one
+of three editing operations: substitute, insert and
+none. Specifically, when Mis close to 0, the
+corresponding operation is none. When close to
+1, the operation is substitution, 2is inserting be-
+fore and 3is inserting after. After that, we can
+rewrite every utterance uinDasubased on M.
+Finally, we use all the rewritten utterances uto
+replace DasD, and obtain the rewriting dataset
+D={(D, S),(D, S), . . . , (D, S)}.
+3.3 Co-reference Data Augmentation
+Taking into account that there are a large number
+of names and referential relations in the dialogue
+process, we propose to use the data augmentation
+mechanism to enhance the personal information for
+dialogue summarization task.
+Given a dialogue content D, we utilize a
+co-reference resolution system (Joshi et al.,
+2020) to obtain its corresponding co-referential
+chain set E ={e, e, . . . , e}, where
+e={x, x, . . . , x}is represented as the
+ico-referential chain in dialogue Dandx
+denotes the jword in co-referential chain e.
+Take the example two in Table 1 as an example, the
+E={{Mike, . . . , I},{Wendy, . . . , her},
+{Dave, . . . , I},{Jerry}}, where the
+wordis the idxword in c.
+Then, we refer to all the pronouns in the whole
+dialogue Dand replace it with its corresponding
+person name xbased on a certain probabil-
+ity: when the length of pronouns |e|>= 5,
+if the output probability of co-reference system
+P(x)>= 0.5, then replace xwithx, oth-
+erwise, no replacement; when 0<|e|<5, if
+P(x)>= 0.8, then replace; when |e|= 0,
+remove this example.Finally, after the person’s name replacement,
+we obtain an additional dialogue dataset D=
+{(D, S), . . .(D, S)}, where Gis the number
+of dialogue-summary pairs after removing.
+3.4 Summary Generation
+Given DandD, we combine them to ob-
+tain our rewriting dataset D. To generate the
+summary, we utilize the state-of-the-art model
+BART (Lewis et al., 2020) to encode the dialogue
+content Dand decode the summary Sstep by step.
+We use maximum likelihood estimation to train
+our model. Given a pair of dialogue Dand sum-
+mary S={y, . . . , y}fromD, we minimize
+the negative log-likelihood of the target sequence:
+L=
+−/summationdisplay/summationdisplaylogP(y|y...y, D;θ).
+4 Experiments
+In this section, we conduct experiments on two
+English dialogue summarization datasets SAM-
+Sum (Gliwa et al., 2019) and DialSum (Chen et al.,
+2021) to evaluate our proposed method.
+4.1 Experimental Settings
+We first introduce some empirical settings, i.e.,
+datasets, baselines, and evaluation measures.
+4.1.1 Datasets
+We use two public dialogue summarization datasets.
+SAMSum contains everyday English message-like
+dialogues and annotated summary. We randomly
+split the SAMSum data to training, validation, and
+testing sets, which contains 14,732, 818 and 819
+pairs, respectively. DialSumcontains English
+speaking practice dialogue and annotated summary,
+which has been cleaned and pre-processed by pub-
+lisher, including deleting non-English characters,
+correcting spelling errors and grammatical errors.
+We randomly split the DialSum data to training,
+validation, and testing sets, which contains 12,460,
+500 and 500 pairs, respectively.
+4.1.2 Baselines and Parameters Setting
+Seven baseline models are used for comparison
+on SAMSum, and four baseline models on Di-
+alSum. Lead3 (See et al., 2017) model extracts3863the first three leading sentences in the article as
+the summary. LONGEST (Gliwa et al., 2019)
+model selects the top N longest sentences as the
+summary. PTGen (See et al., 2017) model intro-
+duces copy and coverage mechanisms into the basic
+sequence-to-sequence model. FastAbs-RL (Chen
+and Bansal, 2018) model firstly selects salient sen-
+tences and then generates abstractive summaries
+through reinforcement learning. DynamicConv +
+GPT-2/News (Wu et al., 2018) model replaces the
+attention mechanism with a lightweight dynamic
+in transformer. BART (Lewis et al., 2020) is a
+pre-trained model, which uses the noise function
+to destroy text, and then reconstructs the origi-
+nal text, including two versions, BART(base) and
+BART(large). Multiview BART (Chen and Yang,
+2020) extracts different views of dialogue features,
+and then uses a multi-view decoder to combine
+these features to generate summaries.
+Our model uses a pre-trained model
+BART(large)for initialization. In detail,
+BART (large) has 12 layers of encoder-decoder
+Transformer structure. Each layer has 16 attention
+heads. The hidden size and feed forward filter size
+are 1024 and 4096, respectively. It contains a total
+of 400M trainable parameters. The dropout rates
+for all layers are set to 0.1. The optimizer uses
+Adam (Kingma and Ba, 2015) with 200 warmup.
+The learning rates of SAMSum and DialSum are
+both 3e-5, and the maximum tokens for a certain
+batch are 800 and 1000, respectively. We run our
+models on a Tesla V100 GPU card with Pytorch.
+4.1.3 Evaluation Measures
+To evaluate our models, we utilize both quantitative
+metrics and human evaluation in our experiment. In
+detail, we use ROUGE-1, ROUGE-2 and ROUGE-
+L as quantitative metrics, which is widely used
+in NLP and summary tasks (Liu et al., 2021a,b;
+Chen and Yang, 2020). For human evaluation, we
+randomly select 100 dialogue-summary pairs from
+the test set of SAMSum and DialSum, respectively.
+Five annotators(all CS majored students studying
+NLP) are demanded to give the comparison be-
+tween our model and baseline models. They are not
+told which summaries are derived from the base-
+line model and which summaries are derived from
+our model. They are required to evaluate the gen-
+erated summary from three aspects: whether the
+generation is fluent, whether it has omitted content,
+and whether it has factual inconsistent errors. The
+evaluation results are represented as win, loss and
+tie, respectively indicating that the quality of gen-
+erated summary by ReWriteSum is better, weaker
+or equal to baselines.
+4.2 Experimental Results
+In this section, we demonstrate our experiment
+results on SAMSum and DialSum datasets.
+4.2.1 Metric-based Evaluation
+The quantitative evaluation results on SAM-
+Sum and DialSum datasets are shown in Ta-
+ble 2. For SAMSum dataset, we refer to (Gliwa
+et al., 2019) to show the results of Lead3, PT-
+Gen, DynamicConv+GPT-2/News, and FastAbs-
+RL. From the results, we can see that the pre-
+trained models, such as BART and Multiview
+BART, outperform the traditional summarization
+models, showing the effectiveness of pre-training3864
+language model for dialogue summarization task.
+Our ReWriteSum model performs the best. Take
+the ROUGE-1 and ROUGE-L score for example,
+our ReWriteSum model obtains 54.2 and 50.1, re-
+spectively, which obviously outperforms Multiview
+BART model, i.e., 52.2 and 49.9.
+From the results on DialSum in Table 2, we can
+see that our model also obtains the best perfor-
+mance. Take the ROUGE-1 and ROUGE-L score
+for example, our ReWriteSum obtains 35.1 and
+32.1, respectively, which obviously outperforms
+BART(large), i.e., 34.1 and 31.2. However, the
+performance increment on DialSum is not signif-
+icant as comparation on SAMSum. The reason is
+that utterances in DialSum are relatively more com-
+plete and the interactive speakers are fewer than
+SAMSum. According to statistics, there are only
+13 sentences with more than 4 speakers in Dial-
+Sum, which leads to relatively few errors caused by
+multi-speakers. We have conducted the significant
+test, and the result shows that the improvements
+of our model are significant on both datasets, i.e.,
+p-value <0.01.
+In conclusion, our ReWriteSum model has the
+ability to generate a more complete and accurate
+summary than baselines.
+4.2.2 Human Evaluation
+Human evaluation results are shown in Table 3.
+The percentages of win, loss and tie, as compared
+with the baselines, are given to evaluate the fluency,
+completeness and consistency of generated sum-
+mary by ReWriteSum. From the results, we can
+see that the proportion of evaluators who think our
+model better is the largest, surpassing other models.
+Take SAMSum dataset for example, ReWriteSum
+model obtains preference gains (win subtract loss)
+41.6%, 47.5%, respectively.4.2.3 Case Study
+To further understand our proposed model, we give
+some generated cases in Table 4. According to the
+result, we can notice that ReWriteSum model per-
+forms better than baseline models. Take example1
+in Table 4 as an example, BART model generates
+that “Tom will buy a flight ticket for himself”, but
+in the dialogue content, the dialogue fact is “Tom
+will buy a flight ticket for Mia’. The reason is that
+the dialogue content tends to be omitted in daily
+dialogues. From example1, we can see that, in the
+entire dialogue, only Mia mentions "help me to
+buy a flight ticket" at the beginning, and this sen-
+tence is omitted in the subsequent utterances, which
+makes BART unable to correctly understand who
+the "ticket" will be bought for. When we rewrite
+the incomplete dialogue (in blue font), "help Mia
+to buy a flight ticket" is added to the end of some
+utterances, so that our model can generate a more
+accurate and logical consistent summary.
+From example2, due to the complex references
+in this dialogue, BART misunderstood "Lawrence
+will be late" as "Lawrence will meet tomorrow
+evening at 17:15". When co-reference data aug-
+mentation is carried out, it strengthens the con-
+nection between "you" and "Alexander, Martha,
+Sarah" in the sentence "Lawrence: I will be late,
+but you can start without me", so as to avoid this
+personal inconsistency error.
+4.3 Analysis
+In order to confirm whether the improvement is
+related to incomplete utterance rewriting(IUR) and
+co-reference data augmentation(CDA), a further
+analysis is conducted, containing ablation study,
+the impact of participants, and the error analysis.3865
+4.3.1 Ablation Study
+To confirm the effectiveness of our IUR and CDA
+module, we conduct ablation experiments on SAM-
+Sum dataset. The results are shown in Table 6.
+ReWriteSum w/o IUR means that ReWriteSum
+model removes IUR module and only with CDA to
+generate summaries. From the results, we can see
+that when only CDA is applied, the ROUGE score
+is still larger than the baseline, but smaller than
+the ReWriteSum model. ReWriteSum w/o CDA
+means that our ReWriteSum model removes the
+CDA module and only with IUR to generate sum-
+maries. We can see that the ROUGE has decreased
+as compared with our ReWriteSum model, but it
+is still higher than baseline models. Therefore, we
+think that both incomplete utterance rewriting and
+co-reference data augmentation have positive ef-
+fects for dialogue summarization.
+Not only that, we also notice that the ROUGE
+score using IUR alone is higher than using CDA
+alone, indicating that IUR contributes more to the
+dialogue summarization task.
+4.3.2 Impact of Participants
+We conduct an experimental analysis with different
+number of participants, by calculating the ROUGE
+score for baselines and our ReWriteSum model on
+SAMSum. From the Figure 3 , we can see that
+with the increase of participants, the rouge score
+of our model decreases more slowly, because: (1)
+with the increase of participants, the omitted in-
+formation will also increase, but our incomplete
+utterance rewriting module has the ability to re-
+duce the impact of too much omitted information
+in the summary; (2) our co-reference data augmen-
+tation module can reduce the impact of complex
+referencing caused by too many participants.
+4.3.3 Error Analysis
+To further study the impact of IUR and CDA on
+the quality of generated summaries, we count the
+following 3 kinds of errors that appear in the sum-
+maries generated by the baseline model and our
+model: Missing Information : content information
+that appears in gold summaries is missing from
+generated summaries. Wrong Reference : content
+in the generated summaries, such as the person’s
+actions or name, does not match what is described
+in the source dialogue. Incorrect reasoning : the
+conclusions drawn by the generated summaries are
+inconsistent with the facts in the source dialogue.
+We randomly select 100 dialogues and their gen-
+erations from SAMSum and count the error cat-
+egories, as shown in Table 5. In terms of miss-
+ing information, our model outperforms the base-
+line model because IUR can effectively prevent the
+model from missing information. According to the
+wrong reference numbers, our model performs bet-
+ter than the baselines because CDA can enhance
+the model’s understanding of referential informa-
+tion. Errors occur in incorrect reasoning are also
+reduced as our model complements default infor-
+mation and enhances understanding of referential
+information.
+5 Conclusion
+In this work, we propose a new dialogue sum-
+marization model, namely ReWriteSum, which
+leverages incomplete utterance rewriting and co-
+reference data augmentation mechanism to gener-
+ate summaries for dialogue. Our motivation comes
+from the fact that there are a lot of ellipsis and
+demonstrative pronouns in the dialogue, which se-
+riously affects the quality of dialogue summary
+generation. Our core idea is to utilize the incom-
+plete utterance rewriting module to complete the
+ellipsis information in the dialogue content and en-
+hance the personal entities with the co-reference
+data augmentation mechanism. We conduct exper-3866iments on both SAMSum and DialSum datasets,
+and the results on both quantitative and qualitative
+analysis verify the effectiveness of our proposed
+model. Therefore, we obtain the conclusion that
+the incomplete utterance rewriting and co-reference
+data augmentation are effective for improving the
+quality of generation for dialogue summarization.
+6 Ethical Considerations
+The abstractive summarization dialogue system
+proposed in this work can be applied to dialogue
+scenarios. It can quickly process a lengthy dialogue
+into a short content containing the core idea of the
+dialogue. Such features can be applied to meet-
+ings, customer service, and medical scenarios to
+facilitate people’s life. The datasets SAMSum and
+DialSum used in this work are publishable and for
+research purposes only. There may be some biased
+content in the datasets, which should be viewed
+carefully.
+Acknowledgement
+Hainan Zhang and Yanquan Zhou are the corre-
+sponding authors. We would like to thank anony-
+mous reviewers for their thoughtful comments and
+suggestions.
+References386738683869

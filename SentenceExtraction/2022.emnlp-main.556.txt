@@ -1,1 +1,753 @@
-8122 Proceedings of the 2022 Conference on Empirical Methods in Natural Language Processing , pages 8122 8132 December 7 - 11 , 2022 © 2022 Association for Computational Linguistics 8123 8124 8125 8126 8127 8128 8129 8130 8131 8132 
+
+Bin Wang, Jiangzhou Ju, Yang Fan, Xinyu Dai, Shujian Huang, Jiajun Chen
+National Key Laboratory for Novel Software Technology, Nanjing University
+Collaborative Innovation Center of Novel Software Technology and Industrialization, Nanjing
+{wangbin, jujiangzhou, fanyang}@smail.nju.edu.cn
+{daixinyu, huangsj, chenjj}@nju.edu.cn
+Abstract
+As one of the challenging NLP tasks, design-
+ing math word problem (MWP) solvers has
+attracted increasing research attention for the
+past few years. In previous work, models de-
+signed by taking into account the properties
+of the binary tree structure of mathematical
+expressions at the output side have achieved
+better performance. However, the expressions
+corresponding to a MWP are often diverse (e.g.,
+n+n×n−n,n×n−n+n, etc.), and
+so are the corresponding binary trees, which
+creates difficulties in model learning due to
+the non-deterministic output space. In this pa-
+per, we propose the Structure-Unified M-Tree
+Coding Solver (SUMC-Solver), which applies
+a tree with any M branches (M-tree) to unify
+the output structures. To learn the M-tree, we
+use a mapping to convert the M-tree into the
+M-tree codes, where codes store the informa-
+tion of the paths from tree root to leaf nodes
+and the information of leaf nodes themselves,
+and then devise a Sequence-to-Code (seq2code)
+model to generate the codes. Experimental re-
+sults on the widely used MAWPS and Math23K
+datasets have demonstrated that SUMC-Solver
+not only outperforms several state-of-the-art
+models under similar experimental settings but
+also performs much better under low-resource
+conditions.
+1 Introduction
+Given the description text of a MWP, an automatic
+solver needs to output an expression for solving
+the unknown variable asked in the problem that
+consists of mathematical operands (numerical val-
+ues) and operation symbols ( +,−,×,÷), as shown
+in Fig. 1. It requires that the solver not only un-
+derstand the natural-language problem but also be
+able to model the relationships between the numer-
+ical values to perform arithmetic reasoning. TheseFigure 1: An example of math word problems, which
+has multiple solution expressions and binary trees, but
+only one M-tree output.
+challenges mean MWP solvers are often broadly
+considered good test beds for evaluating the intelli-
+gence level of agents (Lin et al., 2021).
+In recent years, the research on designing auto-
+matic MWP solvers has also made great progress
+due to the success of neural network models on
+NLP. Wang et al. (2017) first apply a Sequence-to-
+Sequence (seq2seq) model to solve the MWP, and
+since then more methods (Wang et al., 2018; Chi-
+ang and Chen, 2019; Wang et al., 2019) based on
+seq2seq models have been proposed for further im-
+provement. To use the structural information from
+expressions more effectively, other methods (Liu8122et al., 2019a; Xie and Sun, 2019) use Sequence-
+to-Tree (seq2tree) models with a well-designed
+tree-structured decoder to generate the pre-order
+sequence of a binary tree in a top-down manner
+and have achieved better performance. Zhang et al.
+(2020b) combines the merits of the graph-based en-
+coder and tree-based decoder (graph2tree) to gen-
+erate better solution expressions.
+Promising results have been achieved in solving
+MWP, but the existing methods learn to output only
+one expression sequence or binary tree, ignoring
+that there is likely to be far more than one that
+can obtain the correct answer. For example, in Fig.
+1, to answer the question “How many pages has
+Mike read so far?”, we can add up the number of
+pages that Mike read each day to get the expression
+“2×3 + 4 + 5 ”; we can also calculate the first two
+days followed by the sum of pages read on the third
+day to get the expression “ 3×2 + (5 + 4) ”; or we
+could even calculate the problem in a less obvious
+way with the expression “ 5 + 3×2 + 4 ”. The
+number of different expression sequences or binary
+trees can grow very large with different combina-
+tions, which results in a large non-deterministic
+output space and creates difficulties in model learn-
+ing. Specifically, when a problem has multiple
+correct outputs, but the solver only obtains one of
+them, the knowledge learned by the model will be
+incomplete, and the demand for data will also in-
+crease, making most data-driven methods perform
+poorly under low-resource conditions.
+In previous work, to overcome these limitations,
+Wang et al. (2018, 2019) used the equation nor-
+malization method, which normalizes the output
+sequence by restricting the order of operands and
+has only a limited effect. Zhang et al. (2020a) pro-
+posed to use multiple decoders to learn different ex-
+pression sequences simultaneously. However, the
+large and varying number of sequences for MWPS
+makes the strategy less adaptable. For the mod-
+els that learn the binary-tree output (Xie and Sun,
+2019; Wu et al., 2020; Zhang et al., 2020b), they
+generally use a tree decoder to perform top-down
+and left-to-right generation that only generate one
+binary tree at a time, which dose not propose a
+solution to these limitations.
+To address the challenge that the output diversity
+in MWP increases the difficulty of model learning,
+we analyzed the causes for the diversity, which can
+be summarized as the following:
+•Uncertainty of computation order of the math-ematical operations: This is caused by 1) giv-
+ing the same priority to the same or different
+mathematical operations. For example, in the
+expression n+n+n−n, three operations
+have the same priority. Consequently, the calcu-
+lations in any order can obtain the correct answer,
+which leads to many equivalent expressions and
+binary trees. And 2) brackets can also lead to
+many equivalent outputs with different forms.
+For example, n+n−n,n−(n−n)and
+(n+n)−nare equivalent expressions and
+can be represented as different binary trees.
+•The uncertainty caused by the exchange of
+operands or sub-expressions: Among the four
+basic mathematical operations { +,−,×,÷}, ad-
+dition “ +” and multiplication “ ×” have the prop-
+erty that the operands or sub-expressions of both
+sides are allowed to be swapped. For example,
+the expression n+n×ncan be transformed
+to get: n+n×n,n×n+n, etc.
+In this paper, to account for the aforementioned
+challenge, we propose SUMC-Solver for solving
+math word problems. The following describes the
+main contents of our work:
+We designed the M-tree to unify the diverse out-
+put. Existing work (Xie and Sun, 2019; Wu et al.,
+2020, 2021b) has demonstrated through extensive
+experiments that taking advantage of the tree struc-
+ture information of MWP expressions can achieve
+better performance. We retain the use of a tree
+structure but further develop on top of the binary
+tree with an M-tree which contains any M branches.
+The ability of the M-tree to unify output structures
+is reflected in both horizontal and vertical direc-
+tions:
+•To deal with the uncertainty of computation or-
+ders for mathematical operations, we set the root
+to a specific operation and allow any number
+of branches for internal nodes in the M-tree, re-
+ducing the diversity of the tree structure in the
+vertical direction.
+•To deal with the uncertainty caused by the ex-
+change between the left and right sibling nodes
+in original binary trees, we redefine the opera-
+tions in the M-tree to make sure that the exchange
+between any sibling nodes will not affect the cal-
+culation process and treat M-trees that differ only
+in the left-to-right order of their sibling nodes
+as the same. Like the M-tree example shown in8123Fig. 1. The exchange between node “ 5”, “×”,
+and “ 4” will neither affect the calculation process
+nor form a new tree. With this method, the struc-
+tural diversity in the horizontal direction is also
+reduced.
+We designed the M-tree codes and a seq2code
+framework for the M-tree learning. We abandoned
+the top-down and left-to-right autoregressive gen-
+eration used for binary trees in previous methods.
+The reason is that the generation can not avoid
+the diversity caused by the generation order of sib-
+ling nodes. Instead, we encode the M-tree into
+M-tree codes that can be restored to the original
+M-tree, where the codes store the information of
+the paths from the root to leaf nodes and leaf nodes
+themselves. And inspired by the sequence labeling
+methods used in studies mentioned in 2.2, we inno-
+vatively use a seq2code framework to generate the
+M-tree codes in a non-autoregressive way, which
+takes the problem text as the input sequence and
+outputs the M-tree codes of the numbers (numer-
+ical values) in the math word problem. Then we
+restore the codes to a M-tree that can represent the
+calculation logic between the numbers and finally
+calculate the answer.
+Our contributions can be summarized as follows:
+•We analyze the causes of output diversity in
+MWP and design a novel M-tree-based solu-
+tion to unify the output.
+•We design the M-tree codes to represent the M-
+tree and propose a seq2code model to generate
+the codes in a non-autoregressive fashion. To
+the best of our knowledge, this is the first work
+to analyze mathematical expressions with M-
+tree codes and seq2code.
+•Experimental results on MAWPS (Koncel-
+Kedziorski et al., 2016) and Math23K datasets
+(Wang et al., 2017) show that SUMC-Solver
+outperforms previous methods with similar
+settings. This is especially the case in low-
+resource scenarios, where our solver achieves
+superior performance.
+2 Related Work
+2.1 Math Word Problem Solver
+With the success of deep learning (DL) in various
+NLP tasks, designing a DL-Based MWP solver has
+become a major research focus lately. Wang et al.
+(2017) first addresses the MWP with a seq2seqmodel, which implements the solver as a generative
+model from problem text sequence to expression
+sequence. By utilizing the semantic meanings of
+operation symbols, Chiang and Chen (2019) ap-
+ply a stack to help generate expressions. To bet-
+ter utilize expression structure information, other
+methods (Liu et al., 2019a; Xie and Sun, 2019; Li
+et al., 2020) transform expressions into binary-tree-
+structured representations and learn the tree out-
+put. Zhang et al. (2020b) additionally introduces
+a graph-based encoder to enrich the representation
+of problems.
+There are also approaches that explore the use of
+more extensive networks and external knowledge to
+help solve the MWP. Li et al. (2019) builds several
+special attention mechanisms to extract the critical
+information of the input sequence, and Zhang et al.
+(2020a) propose using teacher-student networks
+that combine two solvers to solve the MWP. Wu
+et al. (2020) utilizes external knowledge through
+the use of an entity graph extracted from the prob-
+lem sequence and Lin et al. (2021) proposes a hier-
+archical encoder with a dependency parsing mod-
+ule and hierarchical attention mechanism to make
+better use of the input information. Following the
+previous work, Wu et al. (2021b) continues to use
+external knowledge to enrich the problem represen-
+tations and further explicitly incorporate numerical
+value information encoded by an external network
+into solving math word problems. Based on the
+graph2tree framework, Wu et al. (2021a) uses exter-
+nal knowledge to further enrich the input graph in-
+formation. Yu et al. (2021) uses both a pre-trained
+knowledge encoder and a hierarchical reasoning
+encoder to encode the input problems. Qin et al.
+(2021) constructed different auxiliary tasks using
+supervised or self-supervised methods and external
+knowledge (common sense and problem’s part-of-
+speech) to help the model learn the solution of
+MWPs.
+Different from the above methods that mainly
+focused on the input side and directly generated
+expression sequences or binary trees, we designed
+the structure-unified M-tree and the M-tree codes
+on the output side. Also, we design a simple model
+to test the advances of the M-tree and M-tree codes
+by comparing with methods under similar experi-
+mental settings, which means that methods using
+additional knowledge or multiple encoders will not
+become our baselines.81242.2 Sequence Labeling Parsing
+Our method of converting the M-tree into the M-
+tree codes has similarities with that of sequence
+labeling parsing, both of which convert complex
+structural information into a collection of equiva-
+lently expressed codes or labels. Constituent pars-
+ing is an NLP task where the goal is to obtain
+the syntactic structure of sentences expressed as
+a phrase structure tree. As the tree can be repre-
+sented by a sequence of labels of the input sen-
+tence, Gómez-Rodríguez and Vilares (2018) pro-
+pose transforming constituent parsing into a se-
+quence labeling task and significantly reduce the
+time required for constituent parsing. Vilares et al.
+(2019) modify the labeling scheme to avoid cer-
+tain types of errors. They predict three parts of the
+label separately to reduce data sparsity and then
+combine various strategies to alleviate the error
+transmission problem in the original method. For
+discontinuous constituent parsing, the experiments
+(Vilares and Gómez-Rodríguez, 2020) show that
+despite the architectural simplicity, under the suit-
+able representation, the sequence labeling can also
+be fast and accurate. Strzyz et al. (2019b) propose
+using a similar sequence labeling method for de-
+pendent parsing, and Strzyz et al. (2019a) combine
+constituent parsing labeling and dependent parsing
+labeling with training a multi-task learning model
+that can perform both parsing tasks with higher
+accuracy.
+In the above work, the labels are used for the
+classification task, where the output is a one-hot
+vector, and each token in the input sequence cor-
+responds to a single label. In contrast, our model
+only learns the codes of the numbers in the input
+sequence, where the codes are represented as non-
+one-hot vectors because each number may have
+multiple codes. Also, these codes cannot be ob-
+tained directly from the problem definition, making
+the design of the M-tree codes challenging.
+3 The Design of SUMC-Solver
+In this section, we present the design and imple-
+mentation details regarding our proposed SUMC-
+Solver, including the problem definition in Section
+3.1, the design of the M-tree in Section 3.2, and
+the detailed description of the M-tree codes and the
+seq2code model in Section 3.3.3.1 Problem Definition
+A math word problem is represented by a sequence
+of tokens, where each token can be either a word
+(e.g., “Mike” and “candies” in Fig. 2) or a nu-
+merical value (e.g., “9” and “8”). Some exter-
+nal constants, including 1andπ, which are re-
+quired to solve the math word problem, but not
+mentioned in the problem text, are also added
+to the sequence to get the final input sequence
+X= (x, x, ..., x). All the numerical values
+(including added constants) that appear in Xare
+denoted as a set V={v, v, ..., v}, and our goal
+is to generate a set C={c,c, ...,c}, where c
+is a target code vector for v.
+3.2 M-Tree
+Data Pre-processing For the input sequence, we
+add additional constants (e.g., 1andπ) that may be
+used to the front of the input sequence and replace
+each numerical value vwith a special symbol. For
+the given expression in dataset, we try to remove all
+the brackets of the expression by using the SymPy
+Python package to prepare for the conversion of
+expression to the M-tree. For example, n+ (n±
+n)is converted to n+n±nandn×(n±n)
+is converted to n×n±n×n. For mathematical
+operations other than {+,−,×, /}, such as a, we
+convert it to a product of multiple operands, which
+allows the M-tree to be extended to solve more
+complex mathematical problems.
+The Design of M-Tree We define the M-tree as
+follows: M-tree is a tree with only two kinds of
+nodes: internal nodes and leaf nodes, and each in-
+ternal node has any M branches, where M is an
+integer greater than or equal to 1. There are four
+types of leaf nodes, corresponding to four forms
+of the numerical value: {v,−v,,−}, which de-
+note the original value vin the problem X, the
+opposite of v, the reciprocal of v, and the oppo-
+site of the reciprocal of v, respectively. There are
+four types of internal nodes, corresponding to four
+redefined operations {+,×,×−,+/}that ensure
+sibling nodes are structurally equivalent in the M-
+tree and two M-trees that differ only in the order
+of their sibling nodes will be treated as the same.
+The root of the M-tree is set as a “ +” node to unify
+the structure (operators can have only 1operand,
+son×nwill be represented as a unique subtree
+of the root node). For an internal node that has8125
+kchildren {v, v, ..., v}, where kis an integer
+greater than or equal to 1:
+•The node of “ +” (“×”) means to sum (mul-
+tiply) the values of all its child nodes: v+
+v+, ...,+v(v×v×, ...,×v).
+•The node of “ ×−”(“+/”) means to get the op-
+posite (reciprocal) of the product (sum) value
+of all its child nodes: −v×v×, ...,×v
+().
+The implementation details of the M-tree are pro-
+vided in Section A in the Appendix.
+3.3 M-Tree Codes and Seq2code Model
+3.3.1 The Design of M-Tree Codes
+Since the nodes in the M-tree can have any num-
+ber of branches and sibling nodes are structurally
+equivalent, autoregressive-based generation cannot
+avoid the diversity caused by the sequential order
+of sibling nodes at the output side. To address this
+challenge, we encode the structure information of
+the M-tree into each leaf node, forming a mapping
+between the M-tree and the codes set of leaf nodes
+so that the model can generate the codes in a non-
+autoregressive way. Details about M-tree codes are
+as follows:
+Components of M-tree Codes The M-tree code
+of each leaf node consists of two parts: one part
+describes the numerical value, and the other part
+is formed by the path from the root node to the
+current leaf node. A specific example is shown in
+Fig. 2. The first part of the code uses two binarybits to distinguish the four forms (mentioned in
+3.2) of numerical values. Specifically, for a leaf
+node in the M-tree represented as v, where vis
+the numerical value in the input sequence, the first
+part of the M-tree code of vwill be set according
+to the following rules:
+• Ifv=v, the code is set as “ 0_0”;
+• Ifv=−v, the code is set as “ 1_0”;
+• Ifv=, the code is set as “ 0_1”;
+• Ifv=−, the code is set as “ 1_1”;
+The second part is set as the sequential operation
+symbols of all internal nodes on the path from the
+root to the current leaf node v, so leaf nodes with
+the same parent node will share the same second
+part code. For example, the second part of the M-
+tree code of “ −8” in the example showing in Fig. 2
+is “+”, and the code of " 1" or “ 3” is “+_×_+/”.
+In some special cases, if the internal nodes that are
+siblings have the same type (e.g., all “ ×” nodes),
+they need to be marked with a special symbol added
+to the end to distinguish them from each other in
+order to restore the correct M-tree from the codes.
+After converting all M-trees in the training
+dataset to M-tree codes, a set of M-tree codes will
+be obtained. The final set of M-tree codes is de-
+noted as B={b, b, ..., b}, which has ldifferent
+codes in total. For example, in the example of Fig.
+2, the M-tree code “ 1_0_+” of “−8” is an element
+ofB.
+Vector Representation of M-tree Codes The
+final code vector cfor model learning will be ob-
+tained based on B. Considering that the value v8126that appears only once in the input problem text
+may appear multiple times in the M-tree. For
+example, in “ v×v±v×v”,vwill appear
+in two leaf nodes and have two identical or dif-
+ferent M-tree codes. Consequently, the set of
+numerical values V={v, v, ..., v}is map-
+ping to a set of l-dimensional non-one-hot vectors:
+C={c,c, ...,c}, where cis the code vector
+of the corresponding vand the value of cin the k-
+th dimension indicates how many codes of bthat
+vhas. For example, the final code vector of the
+value “ π” in the example showing in Fig. 2 will be
+set as [1,0, ...,0], where only the first dimension
+has the value of 1indicating that “ π” has only one
+M-tree code “None”, which means that it does not
+appear in the M-tree.
+Reducing M-tree codes to M-tree The process
+of converting M-tree to M-tree codes is reversible.
+Briefly, a code vector is generated for each number
+in the text and mapped to one or more M-tree codes
+at first. Then, the number is formatted according
+to the first part of the M-tree code. Finally, all the
+numbers are merged by scanning the second part
+of the M-tree code from back to front, while the
+M-tree is generated bottom-up.
+3.3.2 Sequence-to-Code Model
+To verify the advances of the M-tree and M-tree
+codes, we design a simple seq2code model to tackle
+the MWP task, which takes the problem sequence
+as its input and then outputs the corresponding
+codes (represented as vectors) for numerical values
+in the problem. After combining all the codes to
+restore the M-tree, we can calculate the final answer
+for the problem. Next, we introduce the two core
+parts of the model: the problem encoder and the
+code generator.
+Problem Encoder We use an encoder to trans-
+form the words of a MWP into vector representa-
+tions. There are two kinds of encoders used in our
+experiments: a Recurrent Neural Network (RNN)
+encoder or a pre-trained language model (PLM)
+encoder.
+For the RNN encoder, we use a bidirectional
+LSTM (BiLSTM) (Hochreiter and Schmidhuber,
+1997) network. Formally, given the input sequence
+X= (x, x, ..., x)and the numerical values set
+V={v, v, ..., v}, we denote the positions of
+the numerical values as Q={q, q, ..., q}, in
+which qis the position of vinX. The encoder en-
+codes the input sequence into a sequence of hiddenstatesH={h,h, ...,h} ∈Ras follows:
+h=/bracketleftig− →h,← −h/bracketrightig
+,
+− →h,− →c=BiLSTM/parenleftig
+e,− − →c,− − →h/parenrightig
+,
+← −h,← −c=BiLSTM/parenleftig
+e,← − −c,← − −h/parenrightig
+.(1)
+Where eis the word embedding vector for x,n
+is the size of input sequence X,dis the size of the
+LSTM hidden state, and his the concatenation of
+the forward and backward hidden states.
+And then for the numerical value vin the prob-
+lemX, its semantic representation eis modeled
+by the corresponding BiLSTM output vector:
+e=h. (2)
+In order to better capture the relationship between
+different numerical values and the relationship be-
+tween vand the unknown value to be solved (an-
+swer of the problem), we use an attention layer to
+derive a context vector Eforv, which is expected
+to summarize the key information of the input prob-
+lem and help generate the final target code for v.
+The context vector Eis calculated as a weighted
+representation of the source tokens:
+E=/summationdisplayαh, (3)
+where
+α=exp (score ( e,h))/summationtextexp (score ( e,h))
+and
+score ( e,h) =Utanh ( W[e,h]).
+where UandWare trainable parameters. Finally,
+we concatenate context vector Eandeto obtain
+zas the input of the generator:
+z= [E,e]. (4)
+For the PLM encoder, we use RoBERTa-base
+(Liu et al., 2019b) or BERT-base (Devlin et al.,
+2019) to encode the input sequence Xto get the
+token embeddings Ems ={em}and get the
+semantic representation ein the same way as the
+RNN encoder, but for the context vector ewe use8127the output embedding of the special token [CLS]
+in RoBERTa.
+e=em, (5)
+E=em. (6)
+Code Generator We use a simple three-layer
+Feedforward Neural Network (FFNN) to imple-
+ment the generator. With the input z, the final
+code vector cis generated as follows:
+z=σ/parenleftig
+zW+B/parenrightig
+,
+z=σ/parenleftig
+zW+B/parenrightig
+,
+c=zW+B.(7)
+Where σis an activation function, WandBare
+the parameters of the FFNN.
+Training Objective Given the training dataset
+D={/parenleftbig
+X, C/parenrightbig
+: 1≤i≤N}, where Cis the
+set of all the code vectors corresponding to the
+numerical values appearing in X, we minimize
+the following loss function:
+L=/summationdisplay/summationdisplayL(c,c), (8)
+where
+L(c,c) =1
+l/summationdisplay/parenleftig
+c−c/parenrightig
+.(9)
+where lis the dimensionality of code vectors.
+4 Experiments
+4.1 Datasets
+We evaluate our SUMC-Solver on two commonly
+used MWP datasets, MAWPS (Koncel-Kedziorski
+et al., 2016) with 2,373 problems and Math23K
+with 23,162 problems. For Math23K, we use the
+public test set. For MAWPS, we evaluate the perfor-
+mance via five-fold cross-validation and improved
+the pre-processing method in the previous work
+(Xie and Sun, 2019; Zhang et al., 2020b) to avoid
+coarsely filtering out too much data, and the final
+amount of available data was 2,373 (previously
+1,921). We use answer accuracy as the evaluation
+metric: if the value predicted by the solver equals
+the true answer, it is thought of as correct.4.2 Implementation Details
+The parameter settings are as follows: 1) For the
+RNN encoder, the dimensionality of word embed-
+ding and hidden states are 128and512, respec-
+tively. We select nearly 2500 words that appear
+most frequently in the training set as the vocabu-
+lary and replace the remaining words with a unique
+token UNK. The global learning rates are initial-
+ized to 0.002for Math23K and 0.008for MAWPS.
+2) For the PLM encoder, we use RoBERTa-base
+and BERT-base for Math23K and MAWPS, respec-
+tively. The initial global learning rate for both
+datasets is 2×10. 3) For the code generator, the
+dimension of the FFNN is (2048, 1024, |c|), where
+cis the code vector and its dimensionality is 153
+for Math23K and 28for MAWPS, respectively.
+4.3 Compared Methods
+Considering SUMC-Solver with one traditional se-
+quence encoder without any other external knowl-
+edge as input and one simple generator, we only
+compare methods with similar settings: T-RNN
+Wang et al. (2019) applied a seq2seq model to
+predict a tree-structure template, which includes
+inferred numbers and unknown operators. Then,
+They used a RNN to obtain unknown operator
+nodes in a bottom-up manner. StackDecoder Chi-
+ang and Chen (2019) used the RNN to understand
+the semantics of problems, and a stack was applied
+to generate post expressions. GTS Xie and Sun
+(2019) utilized a RNN to encode the input and an-
+other RNN to generate the expression based on
+top-down decomposition and bottom-up subtree
+embedding. GTS-PLM replaces the encoder with
+a pre-trained language model compared to the orig-
+inal GTS. SAU-Solver Qin et al. (2020) devised
+Universal Expression Trees to handle MWPs with
+multiple unknowns and equations. Then a RNN
+encodes the input and a well-designed decoder
+considering the semantic transformation between
+equations obtains the expression. Graph2Tree
+(Zhang et al., 2020b) is a graph-to-tree model
+that leverages an external graph-based encoder to
+enrich the quantity representations in the prob-
+lem. UniLM-Solver UNIfied Pre-trained Lan-
+guage Model (UniLM) (Dong et al., 2019) have
+achieved superior performance on natural language
+understanding and generation tasks, which can be
+used to model the generation process from the input
+text to the output expression.8128
+4.4 Results and Analyses
+Answer Accuracy The experiment results are
+shown in Table 1. We observe that SUMC-Solver
+outperforms all baselines in the two MWP datasets.
+When using an RNN as the encoder, SUMC-Solver
+surpasses StackDecoder and T-RNN that learn the
+sequence output by 9-10 percent. For methods that
+learn the binary-tree output, SUMC-Solver also
+achieves better results than GTS, SAU-Solver and
+Graph2Tree, although these methods used a well-
+designed tree decoder or an external graph-based
+encoder to enrich the representations. When using
+a PLM as the encoder, SUMC-Solver achieves an
+accuracy of 82.5%, a significant improvement ( 3
+and5percent, respectively) over GTS-PLM and
+UniLM-Solver. In conclusion, the two different
+encoder settings above both show that the design
+of the M-tree and M-tree codes is reasonable and
+advanced, which allows us to achieve better perfor-
+mance using only a simple seq2code model.
+Comparison in Low-resource Situations The
+annotation cost for MWPs is high, so it is desirable
+for the model to perform well in lower resource
+settings. Therefore, we evaluate our model perfor-
+mance with GTS, SAU-Solver and Graph2Tree on
+training sets of different sizes. The test set con-
+tains 2,312 randomly sampled instances. Detailed
+results can be found in Fig. 3. Tt can be observed
+that SUMC-Solver consistently outperforms other
+models irrespective of the size of the training set.
+Firstly, when the size of the training set is less
+than6000 , the performance of SAU-Slover is bet-
+ter than that of GTS; when the number exceeds
+6000 , these two models perform similarly. In terms
+of overall performance, the results of SAU-Solver
+Model Math23K MAWPS*
+RNNT-RNN 66.9 66.8
+StackDecoder 67.8 -
+GTS 75.6 75.2
+SAU-Solver 76.275.5
+Graph2Tree 76.678.1
+SUMC-Solver 77.4 79.9
+PLMUniLM-Solver 77.578.0
+GTS-PLM 79.579.8
+SUMC-Solver 82.5 82.0
+and Graph2Tree are better than those of the GTS
+when resources are constrained. Secondly, with
+a 6000-sample training set, the most significant
+performance gap between SUMC-Solver and other
+models occurs, where our model approximately ob-
+tains an additional 5%on accuracy. This shows that
+SUMC-Solver has the most prominent advantages
+in low-resource situations.
+Performance on Different Numbers of Operands
+We divide the test set (2,312 randomly sampled in-
+stances) into different levels according to the num-
+ber of operands (numerical values in problems)
+required to calculate the answer and evaluate the
+model performance on these different data. The8129Codes Code set sizeTest set
+coverage (%)
+M-tree 153 100.0
+Binary-tree 1290 93.5
+details are shown in Fig. 4. From the results, we
+can see that most of the MWPs require between 2
+and4operands, and SUMC-Slover performs better
+than the baseline models on data requiring more
+operands, which shows that our solver has the po-
+tential to solve more complex problems.
+Comparison of Binary-Tree and M-Tree Codes
+The seq2code framework can also be applied to the
+binary-tree structure if choosing one binary tree for
+each MWP and converting it to the codes in the
+same way. We transformed the data of Math23K’s
+training set and compared the binary-tree codes and
+M-tree codes, which is shown in the Table 2. It can
+be observed that applying the M-tree structure can
+greatly reduce the size of the code set and ensure
+that the obtained codes can cover the data in the
+test set, which shows the effect of the M-tree on
+unifying the output structure is very significant.
+5 Conclusion
+In this paper, we proposed SUMC-Slover to solve
+math word problems, which applies the M-tree to
+unify the diverse output and the seq2code model
+to learn the M-tree. The experimental results on
+the widely used MAWPS and Math23K datasets
+demonstrated that SUMC-Solver outperforms sev-
+eral state-of-the-art models under similar settings
+and performs much better under low-resource con-
+ditions.
+Limitations
+Some discussions on the limitations of SUMC-
+Solver are as follows: 1) The M-tree corresponding
+to the output of each MWP is unique. However,
+as mentioned in Section 3.3.1, some special M-
+trees need to be distinguished by introducing spe-
+cial symbols randomly when converting them into
+M-tree codes, which makes the M-tree codes cor-
+respond to the MWP may not be unique. Through
+the statistics of the datasets, we found that about
+90% of the data do not belong to this particular
+case. At the same time, for the remaining 10%,despite the increased difficulty, they are still learn-
+able based on previous work experience, which
+makes SUMC-Solver still achieve a significant per-
+formance improvement. 2) The network structure
+is relatively simple for the seq2code framework
+used in SUMC-Solver. In previous work, the use of
+graph-based encoders and the introduction of exter-
+nal knowledge to enrich the representation of the
+input problem text have been shown to further im-
+prove the performance of the solver, and seq2code
+can be naturally integrated with these improved
+approaches to try to achieve better results.
+Acknowledgements
+We would like to thank the anonymous reviewers
+for their constructive comments. This work was
+supported by the National Natural Science Founda-
+tion of China (No. 61936012 and 61976114).
+References81308131A Implementation Details of the M-tree
+After the data pre-processing for expression men-
+tioned in 3.2, We can easily convert it into a M-tree
+based on the following steps:
+(1) By following the order of priority for oper-
+ations: (operations in brackets) >(×=÷)>
+(+ =−), Converting the operations one-by-one in
+the expression as follows:
+1.Forv÷v, it is converted to v×v, where
+vis the reciprocal of v.
+2.Forv−v, it is converted to v+v, where
+vis the opposite of v.
+3.Forv−v×v, it is converted to v+
+v(×−)v, where v(×−)vmeans the op-
+posite of v×v.
+4.Forv÷(v+v), it is converted to v×
+v(+/)v, where v(+/)vmeans the recip-
+rocal of v+v.
+After the conversion, only four operations we de-
+fined in the M-tree will be left in the new expres-
+sion, and they all have the property that the compu-
+tation is not affected by the left-right order between
+child nodes, which can be used to reduce the struc-
+tural diversity in the horizontal direction.
+(2) After obtaining the new expression, we con-
+vert it to a binary tree and then reduce it from top
+to bottom to get the final M-tree. Let the parent
+node be vand the child node be v, and the details
+are as follows:
+1.If it is one of the 4cases: 1) “ v=v= +”,
+2) “v=v=×”, 3) “ v= +/andv=
++”, 4) “ v=×−andv=×”, then merge
+directly, delete the child node vand assign its
+children (if has) to vand continue checking
+down.
+2.If “v=×andv=×−”, then make “ v=
+×−” and do the same as 1.
+3.If “v=×− andv=×−”, then make
+“v=×” and do the same as 1.
+After merging the nodes from top to bottom, the
+height of the tree will be minimized, and the tree
+structure will be unified in the vertical direction.
+And we obtain a structure-unified M-Tree for the
+origin solution expression.8132

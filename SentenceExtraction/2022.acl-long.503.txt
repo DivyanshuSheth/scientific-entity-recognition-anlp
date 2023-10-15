@@ -1,1 +1,747 @@
-7287 Proceedings of the 60th Annual Meeting of the Association for Computational Linguistics Volume 1 : Long Papers , pages 7287 7301 May 22 - 27 , 2022 c(cid:13)2022 Association for Computational Linguistics 7288 7289 7290 7291 7292 7293 7294 7295 7296 7297 7298 7299 7300 7301 
+
+Jue Wang, Ke Chen, Gang Chen, Lidan Shouand Julian McAuleyCollege of Computer Science and Technology, Zhejiang UniversityState Key Laboratory of CAD&CG, Zhejiang UniversityUniversity of California, San Diego
+{zjuwangjue,chenk,cg,should}@zju.edu.cn ,
+jmcauley@ucsd.edu
+Abstract
+In this paper, we propose SkipBERT to accel-
+erate BERT inference by skipping the compu-
+tation of shallow layers. To achieve this, our
+approach encodes small text chunks into inde-
+pendent representations, which are then mate-
+rialized to approximate the shallow representa-
+tion of BERT. Since the use of such approx-
+imation is inexpensive compared with trans-
+former calculations, we leverage it to replace
+the shallow layers of BERT to skip their run-
+time overhead. With off-the-shelf early exit
+mechanisms, we also skip redundant computa-
+tion from the highest few layers to further im-
+prove inference efﬁciency. Results on GLUE
+show that our approach can reduce latency
+by 65% without sacriﬁcing performance. By
+using only two-layer transformer calculations,
+we can still maintain 95% accuracy of BERT.
+1 Introduction
+Pre-trained language models, such as ELMo (Pe-
+ters et al., 2018), GPT (Radford et al., 2018), BERT
+(Devlin et al., 2019), XLNet (Yang et al., 2019),
+and RoBERTa (Liu et al., 2019), have yielded sig-
+niﬁcant improvements to NLP tasks. Despite the
+gain in accuracy, these models have signiﬁcant de-
+mands in computation and inference time, limit-
+ing their use in resource-constrained or latency-
+sensitive applications. Therefore, it is desirable to
+reduce the computational overhead of these models
+while retaining acceptable accuracy.
+Knowledge distillation (KD, Hinton et al. 2015)
+facilitates the transfer of knowledge embedded in
+pre-trained language models into small student
+models (Sanh et al., 2019; Sun et al., 2019; Jiao
+et al., 2020), which usually reduces the redundant
+parameters of BERT in a uniform manner. Early
+exit mechanisms (Xin et al., 2020; Zhou et al.,Figure 1: Comparison of inference between BERT and
+SkipBERT. The computation of shallow (lower) layers
+of SkipBERT are skipped by searching PLOT.
+2020; Liu et al., 2020) then use an adaptive num-
+ber of transformer layers during inference, aiming
+to reduce redundant calculations from the highest
+few layers. However, since they build the sequence
+representation from scratch for each forward pass,
+they require a certain number of lower layers to
+capture basic syntactic and semantic information,
+making it difﬁcult to further reduce inference costs.
+This naturally raises a question: Can we reduce the
+computation at the lower transformer layers?
+In this paper, we propose SkipBERT, a novel
+scheme that skips the computation at the shallow
+transformer layers of BERT. As revealed by Jawa-
+har et al. (2019); Rogers et al. (2020), the lower
+layers of BERT mainly focus on short-distance
+context, while the higher layers are able to capture
+long-range dependencies. Therefore, it is reason-
+able to assume that, at lower layers, even if distant
+tokens are masked, the representation for each to-
+ken will not vary dramatically. Here, by sweeping
+over the input text, we get short chunks (n-grams)
+and use their representations to approximate the
+hidden states of BERT’s lower layers. We then pre-
+compute and store representations of text chunks in
+aprecomputed lookup table (PLOT). Thus, during
+inference we only need to access PLOT to get the
+representations of short chunks, which is inexpen-7287sive compared with transformer computation.
+Fig. 1 compares the inference procedure be-
+tween vanilla BERT and our proposed SkipBERT.
+In BERT, the input text needs to be processed by
+a large number of transformer layers in turn, lead-
+ing to high latency in inference. In comparison,
+SkipBERT precomputes the hidden states of lower
+transformer layers, which are accessed via table
+lookups, rather than computed in inference-time.
+Moreover, SkipBERT exhibits effective compati-
+bility with early exit mechanisms: Since the initial
+sequence representation in our work is partially
+contextualized (thanks to PLOT) rather than indi-
+vidual word embeddings, SkipBERT allows exiting
+from a relatively earlier layer than typical BERT
+variants, while maintaining good accuracy. We em-
+pirically verify this in Section 4.5. Therefore, our
+approach can skip the calculations of lower and
+higher layers for the same input, thereby further
+improving the inference speed.
+Our contributions are listed as follows:
+We present SkipBERT to avoid computation at
+BERT’s lower layers during inference. Instead,
+we construct PLOT and use it to approximate
+their hidden states.
+We incorporate early exit mechanisms as an
+enhancement to skip redundant computation,
+leading to further network acceleration.
+We conduct extensive experiments on GLUE.
+Compared with BERT, SkipBERT is capable
+of accelerating inference by up to 65% without
+compromising GLUE score, or accelerating by
+82% while retaining 95% accuracy.
+2 Related Work
+Knowledge Distillation (Hinton et al., 2015) pro-
+vides an effective way to transfer the knowl-
+edge embedded in a teacher network to a student
+network. The student network is usually more
+lightweight than the teacher network and thus more
+computationally efﬁcient. The student network can
+be structurally identical to the teacher but contains
+fewer layers or hidden units, e.g. BERT-PKD (Sun
+et al., 2019), DistilBERT (Sanh et al., 2019), Tiny-
+BERT (Jiao et al., 2020), MiniLM (Wang et al.,
+2020), and BERT-EMD (Li et al., 2020). Mean-
+while, some work adopts speciﬁcally designed net-
+works, e.g. SqueezeBERT (Iandola et al., 2020)
+and MobileBERT (Sun et al., 2020), to reduce the
+computation per layer.
+Input-adaptive inference allows models to
+choose different computational paths according to
+the input during inference. In this way, simpler
+input samples usually require less calculation to
+make predictions. Recently, DeeBERT (Xin et al.,
+2020) adapts conﬁdence-based BranchyNet (Teer-
+apittayanon et al., 2016), which uses entropy as an
+early-exit criterion. FastBERT (Liu et al., 2020)
+uses self-distillation to train the branch classiﬁers.
+RightTool (Schwartz et al., 2020) leverages the
+same early-exit criterion as in the Shallow-Deep
+Network (Kaya et al., 2019), i.e., softmax scores of
+predictions. PABEE (Zhou et al., 2020) stops infer-
+ence when the intermediate predictions of the inter-
+nal classiﬁers remain unchanged consecutively.
+Precomputation has also been studied in infor-
+mation retrieval, where documents are assumed to
+be stored at local database so their representation
+can be precomputed (Gao et al., 2020). However,
+this method may not be suitable for other tasks
+where the input text is unknown before inference.
+3 Model
+During training, SkipBERT consists of two groups
+of transformer layers, local transformer layers for
+encoding short-distance context, and global trans-
+former layers for leveraging the full context. Once
+pre-training ﬁnishes, our approach will replace lo-
+cal transformer layers with PLOT, which stores the
+hidden states of local transformer layers; we also
+enhance global transformer layers with early exit
+mechanisms to further accelerate inference speed.
+Fig. 2 presents the overview of our system.72883.1 Preparing Inputs
+We deﬁne the input text as a sequence of tokens
+x= [x]in BERT’s input style, where nis
+the number of input tokens.
+As shown in Fig. 3, we sweep over the input
+text to get three-token chunks (tri-grams, X=
+[x;x;x]), which will also be taken as the
+index entries of PLOT later. We let cross-border
+tokens be padding tokens, i.e. x=x=x .
+We show in Section 4.8.2 that using longer text
+chunks (e.g. 5-grams) will improve accuracy since
+they can bring more context information than tri-
+grams. However, the number of 5-grams is too
+large to be enumerated and stored, and thus it is
+hard to use them in actual applications.
+3.2 Leveraging Local Context
+Fig. 3 illustrates our procedure to leverage local
+context. By mapping each word to a d-dimensional
+embedding, we denote the chunk embeddings by
+~X2R. For local transformer layers, we inject
+position embeddings P2R, and deﬁne the
+initial chunk representations as follows:
+H=LN(~X+P) (1)
+where LN ()is layer normalization.
+We useLtransformer layers to leverage the
+local context of each text chunk. For layer 0
+m<L, we have:
+H =Transformer(H): (2)
+Note that since each chunk is short enough, it
+would be possible to precompute these represen-
+tations before inference. More importantly, these
+representations are good approximations of those
+produced by the respective shallow layers of BERT.
+Thus, given a tri-gram, the embedding produced
+from (L 1)-th layer is taken as its respective
+data entry stored in PLOT. We also precompute
+bi-grams and uni-grams following the same proce-
+dure of tri-grams. When a lookup of tri-gram fails
+(out-of-vocabulary, OOV), the system will resort to
+bi-grams or uni-grams as an alternative.
+Speciﬁcally, we randomly replace %of tri-
+grams by bi-grams during training. On the one
+hand, such random replacement allows the model
+to encounter bi-grams during training, so as to bet-
+ter handle OOVs in inference; on the other hand, it
+can also be considered a variant of Dropout (Srivas-
+tava et al., 2014), which drops tokens rather than
+hidden units, thereby improving the robustness of
+our approach. Section 4.7 shows = 10% works
+well with different OOV rates. We also show in
+Section 4.8.2 that even bi-grams have a clear ad-
+vantage over the baseline, which can be seen as an
+extreme case when all tri-gram lookups fail.
+3.3 Aggregating Text Chunks
+Now we get a list of contextualized chunk embed-
+dings. Here we aggregate them to form a feature
+sequence corresponding to the original input text.
+Each token occurs at three consecutive tri-grams,
+as shown in Fig. 3. By calculating a weighted sum
+of embeddings that correspond to the same token,
+we can leverage its context of ﬁve tokens:
+~h=XHGate(H);(3)
+where Gate()is a sigmoid-based gating mecha-
+nism such that Gate(x) =(vx+b), where
+vis a learnable vector and bis a learnable scalar.
+Note that these embeddings do not have a sense
+of the order of the sequence. So we need to inject
+position and segment embeddings before sending
+them to the subsequent transformer layers:=(;;(4)
+where ~pand~s are position and segment em-
+beddings respectively as in Devlin et al. (2019).
+3.4 Leveraging Global Context
+We denote by h= [h]the aggregated
+sequence representation. We use Ltransformer
+layers to further contextualize it. For layer 0
+m<L, we have:
+h=Transformer(h): (5)7289Since we focus on text classiﬁcation and regres-
+sion tasks, we use the representation corresponding
+to tokenx to compute logit scores:
+z=Classiﬁer (h) (6)
+where Classiﬁer ()is a two-layer feedforward neu-
+ral network.
+When an early exit mechanism is activated, we
+compute logit scores for each global transformer
+layer as follows:
+z=Classiﬁer(h) (7)
+We adopt a simple conﬁdence-based early exit
+mechanism, i.e., once the prediction’s maximum
+logit score is higher than a pre-deﬁned threshold,
+the result will be returned without passing through
+the next transformer layers.
+3.5 Training
+We mainly adopt the two-stage learning proce-
+dure proposed in TinyBERT (Jiao et al., 2020). It
+includes general distillation (GD) conducted on
+large-scale unlabeled corpora, and task-speciﬁc dis-
+tillation (TD) to learn from ﬁne-tuned BERT.
+General Distillation We perform distillation on
+the hidden states and attention scores. We com-
+pute loss on the chunk aggregation layer and global
+transformer layer. The local transformer layers are
+trained with supervision signals from upper layers.
+The loss is deﬁned as follows:
+L=L+L (8)
+and we deﬁneLandLas the mean-squared
+error (MSE) of attention scores and hidden states
+between the teacher (T) and student (S):
+L=XMSE(a;a ) (9)
+L=XMSE(hW;h )(10)
+where aandhrepresent the attention
+score matrix and hidden states of the m-th trans-
+former layer; his the outputs of chunk aggrega-
+tion layer; Wis a learnable matrix to transform
+the hidden states of the student into the same space
+as the teacher; g()andg()deﬁne the layer
+mapping function between the student and teacher.For attention-based distillation, we use the uni-
+form mapping strategy to leverage the heteroge-
+neous attention patterns across different layers. For
+hidden states-based distillation, we use top map-
+ping strategy since the initial sequence represen-
+tation (outputs of chunk aggregation) are already
+partially contextualized. The detailed illustration
+of layer mapping is presented at Appendix E.
+Task-Speciﬁc Distillation We start from the
+generally distilled SkipBERT, and use ﬁne-tuned
+BERT as the teacher for task-speciﬁc distillation.
+The loss is deﬁned as follows:
+L=(L+L) +L (11)
+whereis a factor to control the loss weight; L
+is the prediction loss that will be deﬁned below.
+For classiﬁcation, the loss function Lis cal-
+culated via cross entropy:
+L=CE(z=;z=) (12)
+wherezare the logits predicted by the student;
+zare the logits predicted by the teacher; is the
+temperature to smooth the probability distribution
+to facilitate distillation training. For regression, the
+loss is instead calculated by MSE, i.e., L=
+MSE(z;z).
+Early Exit Speciﬁcally, when SkipBERT enables
+early exit mechanisms, we need to train internal
+classiﬁers to predict based on the hidden states of
+their respective layers. Overall, we train the model
+to minimize a weighted average loss as follows:
+L=PmLPm(13)
+whereLis the loss between the predictions of
+the teacher and the m-th intermediate classiﬁer of
+the student.
+3.6 Constructing PLOT
+Considering that the local transformer layers
+mostly capture generalized knowledge, which do
+not vary signiﬁcantly across different tasks, we
+do not update the local transformer layers during
+ﬁne-tuning. Therefore, once general distillation
+is ﬁnished, we can compute their hidden states to
+construct PLOT.
+To ensure fast response, PLOT should ideally be
+loaded in the server’s RAM during inference. How-
+ever, such a table could be too large to fully ﬁt into7290
+RAM. Hence we propose to adopt memory-mapped
+ﬁles ( mmap ), which allows for ﬁle access via the
+virtual memory mechanism. By using mmap , the
+frequently used chunk embeddings reside in RAM
+for fast lookup, while the rare chunks can be stored
+on SSD, and will be loaded to RAM only when the
+system demand-pages them. Appendix D presents
+a simple implementation of PLOT.
+4 Experiments
+4.1 Data
+We use the corpora of Wikipediaand BooksCor-
+pus(Zhu et al., 2015) to perform general distil-
+lation. For task-speciﬁc distillation, we mainly
+evaluate SkipBERT and compare it with other base-
+lines on the GLUE benchmark (Wang et al., 2018).
+Appendix F provides some details.
+4.2 Setup
+We denote by SkipBERTthe scheme with 6 lo-
+cal transformer layers (converted to PLOT) and 6
+global transformer layers, each having a hidden
+size of 768 and intermediate size of 3072. For di-
+rect comparisons with 4-layer baselines, we instan-
+tiate SkipBERTwith 4 thin global transformer
+layers (hidden size of 312 and intermediate size of
+1200). We also instantiate SkipBERTwith only2 global transformer layers to further reduce the
+latency. Appendix C presents detailed settings.
+Training For general distillation, we randomly
+initialize SkipBERT, and pre-train it with Lamb
+optimizer (You et al., 2019). We use linear learning
+rate decay with the peak learning rate of 1e-3 and a
+batch size of 2048 for around 80k steps, including
+4000 warm-up steps.
+For task-speciﬁc distillation, under the super-
+vision of a ﬁne-tuned BERT, we use AdamW
+(Kingma and Ba, 2015) to train 20 epochs with
+a learning rate of 2e-5. We slightly tune the hyper-
+parameters across different tasks, and the details
+can be found in Appendix B. We do not use any
+data augmentation strategies.
+Inference Following prior work, we evaluate la-
+tency by performing inference on a per-instance
+basis, i.e. the batch size for inference is set to 1.
+This is a common latency-sensitive scenario when
+processing individual requests from different users.
+We note that latency on modern GPUs is not sensi-
+tive to the hidden size, but mainly depends on the
+number of sequential operations, i.e. the number of
+network layers. We report the median performance
+over 5 runs with different random seeds.
+4.3 Results on GLUE
+We submitted our model predictions to the ofﬁcial
+GLUE evaluation serverto obtain results on the7291test set, as summarized in Table 1. We present the
+results of TinyBERT v2 reported by Li et al. (2020)
+as the v2 model employs more training corpora
+than v1, and they eliminate the data augmentation
+strategy for a fair comparison.
+By comparing with baselines (we compare with
+6-layer models and 4-layer models separately), we
+can see that SkipBERT outperforms all compared
+approaches in terms of GLUE score. Compared
+with TinyBERT, as we mainly follow their distilla-
+tion process, our approach shows clear advantages
+on all tasks. BERT-EMD employs a more sophis-
+ticated task-speciﬁc distillation process based on
+general-distilled TinyBERT, and further improves
+the overall performance. Nevertheless, SkipBERT
+still maintains an advantage in the overall score.
+Speciﬁcally, SkipBERThas a similar infer-
+ence speed to the 4-layer baselines, but achieves
+higher accuracy on most tasks. We consider that
+a 4-layer model is somewhat too shallow to cap-
+ture complex dependencies from scratch. In con-
+trast, SkipBERT effectively compensates by adding
+“more layers” in effect, even though their computa-
+tion is skipped by PLOT search during inference.
+These layers are useful to capture the basic linguis-
+tic information, thereby reducing the burden on
+subsequent layers. Moreover, our method can fur-
+ther reduce the latency with only a slight loss in
+accuracy. SkipBERTwhich performs only two-
+layer transformer calculations maintains accuracy
+comparable to 4-layer models.
+For the 6-layer track, TinyBERT and BERT-
+EMD both achieve performance comparable to the
+teacher model. However, SkipBERTalso shows
+competitive results, especially for the challenging
+CoLA task (predicting linguistic acceptability judg-
+ments), on which previous methods do not work
+well. The local transformer layers of SkipBERT
+can effectively capture the short-distance grammat-
+ical knowledge, e.g. subject-verb-object word order
+and verbal argument structure, etc., which is con-
+sidered crucial to CoLA (Warstadt et al., 2019).
+The early exit mechanism, tagged by “w/ exit” in
+Table 1, provides a ﬂexible way to tune the speed-
+accuracy tradeoff. With early exit enabled, both
+SkipBERTand SkipBERTachieve further
+improvements on inference speed with only a mi-
+nor decrease in accuracy. More exploration will be
+done in Section 4.5.
+4.4 Results on SQuAD
+We also investigate the effectiveness of SkipBERT
+on the reading comprehension task, SQuAD v1.1
+(Rajpurkar et al., 2016a). Following previous work,
+we treat this task as sequence labeling and predict
+the possibility of each token as the start or end of
+answer span. Table 2 shows that SkipBERT out-
+performs all the baselines with large margins. This
+experiment shows that our approach also works
+well for relatively complicated task forms.
+4.5 Accuracy-Latency Curve
+Here we investigate the compatibility between early
+exit mechanisms and SkipBERT. We draw the
+accuracy-latency curve by tuning the early exit
+threshold. The goal is to enlarge the area un-
+der the curve – so the model can maintain good
+accuracy when the average exit layer is small.
+Fig. 4 compares the results of TinyBERTv2 and
+SkipBERT, both using the same early exit mech-7292
+anism. We observe that SkipBERT consistently
+outperforms TinyBERT on both MRPC and SST-
+2. Speciﬁcally, the curve of SkipBERT is “ﬂatter”
+than that of TinyBERT, which indicates that even
+if SkipBERT is forced to exit at a relatively shal-
+low layer, it can still maintain a desirable accuracy.
+Compared with baselines, our approach starts infer-
+ence based on PLOT search results rather than from
+scratch, so even at a lower layer, the representation
+is well-learned for making predictions.
+4.6 Breakdown of Computation and Latency
+Table 3 presents the breakdown of computation and
+average latency of SkipBERT. Detailed hardware
+information can be found at Appendix A. We can
+observe that the transformer layers account for the
+majority of inference time.
+We note that there may be some variation in the
+latency of retrieving data from mmap , depending
+on the cache memory managed by the operating
+system. Fig. 5 presents the latency distribution of
+retrieving chunks contained in a text sequence with
+128 tokens under different RAM sizes. We perform
+experiments in Docker containers to limit the RAM
+size; more results can be found in Appendix G.
+The upper half of Fig. 5 shows that with enough
+RAM, the system can directly collect chunk em-
+beddings from RAM, yielding latencies clustered
+around 20 µs. Meanwhile, with a smaller RAM
+as shown in the lower half of Fig. 5, most of the
+latency is still around 20 µs but a small portion of
+items take several hundred µs due to cache misses.
+We also observe that the long tail of latency is
+distributed in several clusters, mainly due to I/O
+queuing. However, even under heavy I/O load, re-
+trieving data from mmap takes less time than the
+computation of a single transformer layer.
+4.7 Space Costs and OOV
+The previous sections prioritize accuracy and ef-
+ﬁciency by sacriﬁcing space. Reducing the space
+costs (by dropping less frequent chunks) allows
+users to use more economical hardware, but it will
+lead to OOV issues which may compromise accu-
+racy. Here we only count OOV for tri-grams, since
+OOVs for bi-grams rarely occur ( <0.5%) and have
+little impact on the ﬁnal performance.
+We collect tri-grams on news corporaand train-
+ing sets of GLUE to construct PLOT.
+Table 4 shows results by reducing the space costs.
+= 0% means that the model does not see any bi-
+grams during training. In this case, if the model
+encounters a tri-gram lookup failure and reverts
+to bi-grams, the performance will suffer to some
+extent. When we randomly replace %of tri-grams
+with bi-grams during training, the model becomes
+more robust to OOVs, and can even slightly im-
+prove accuracy. We ﬁnd = 10% works well for
+all cases, and thus we use it as the default value.
+Generally, our method can maintain the advan-7293
+tage even if the OOV rate is at a moderate level. As
+we will see later at Section 4.8.2, if we only use
+bi-gram embeddings, i.e. the OOV rate is 100%,
+our approach is still better than the baseline that
+does not apply PLOT.
+To understand why the backoff strategy, namely
+to replace tri-grams with bi-grams for OOVs, does
+not hurt accuracy, we investigate the similarity be-
+tween them. As shown in Fig. 6, most of them are
+similar, conﬁrming the feasibility of our backoff
+strategy; but there is also a long tail where bi-grams
+cannot well compensate for the missing tri-grams.
+Fig. 6 also shows some examples with different
+similarities. Generally, auxiliary tokens that do
+not contain much meaning by themselves tend to
+rely more on context. Meanwhile, tokens rich in
+semantics, e.g. noun phrases, do not vary much in
+embedding under different ranges of context.
+4.8 Ablation Study
+We conduct an ablation study in this subsection.
+We only pre-train SkipBERT on the Wikipedia cor-
+pus for 1 epoch for fast validation. We also prepare
+a generally distilled small BERT(the model archi-
+tecture is identical to TinyBERT) with the same
+setup and corpus as a baseline. We report the re-
+sults on the development set.
+4.8.1 Tuning the Number of Skipped Layers
+Table 5 compares the results with different num-
+bers of local transformer layers. BERTis a base-
+line that does not employ any skipping mechanism.
+We can see that all settings that use additional
+local transformer layers have better performance
+than BERT, indicating the effectiveness of our
+approach. In general, the performance increases
+when we gradually enlarge the number of local
+transformer layers. CoLA beneﬁts most from the
+local transformer layers due to better modeling of
+short-distance context. However, when it reaches
+a certain number of local transformer layers, the
+improvement becomes minimal. We believe that
+since each token only has the context of ﬁve tokens,
+too many layers may increase the risk of overﬁtting,
+which harms the performance. Thus we adopt 6
+layers as our default setting.
+We also construct variants that replace local
+transformer layers with a single-layer FFN or CNN,
+which are computationally lightweight and thus
+may not need precomputation. However, their ac-
+curacy improvement against BERTis very limited,
+which shows that even for short-distance context,
+using a relatively complex and deep network is
+beneﬁcial to the ﬁnal performance.
+4.8.2 Effect of Short Context
+We investigate the effect of short-distance context
+leveraged in the local transformer layers of Skip-
+BERT. Table 6 presents the comparisons of us-
+ing different ranges of short-context in local trans-
+former layers. 1-grams are equivalent to conven-
+tional word embeddings, and the performance is
+similar to the baseline. When using 2-grams, Skip-
+BERT obtains notable improvements since each
+token can now access its direct neighbors in local
+transformer layers. 3-grams and 5-grams bring con-
+sistent improvements to all tasks. Generally, the
+results are improved when we broaden the recep-
+tive ﬁeld of local transformer layers, showing that7294more contexts are always beneﬁcial. However, due
+to its large number, it would be hard to enumerate
+n-grams with n>3. It might require certain prun-
+ing or compression strategies, which we leave as
+future work.
+In addition, we also study the effect of the
+weighted sum used in chunk aggregation, Eq. (3).
+We add comparison against a variant that only
+uses the embedding of the central token of each
+chunk, denoted “ctr. only”. Table 6 shows that
+the weighted sum brings improvements over all
+tasks for the 3-gram setting. However, it is not
+as effective for the 5-gram setting on MRPC and
+MNLI. We believe using a weighted sum for ﬁve
+chunks may confuse important semantics and thus
+affect the accuracy; while for 3-gram setting, this
+problem is not as serious, and using a weighted
+sum for neighbor chunks can bring more context
+information to improve the accuracy.
+4.8.3 Effect of Distillation Objective
+We here show the effects of different distillation
+objectives. We try to eliminate attention-based or
+hidden state-based distillation. Results in Table 7
+indicate that all distillation objectives are helpful
+both in the general distillation and task-speciﬁc dis-
+tillation process. In general distillation, both atten-
+tion and hidden states-based distillation are critical
+to the ﬁnal performance of relatively small datasets,
+e.g. CoLA and MRPC. But for large-scale datasets,
+e.g. MNLI, removing attention based distillation
+even improves the performance, which may imply
+that the student model can beneﬁt more from a ﬁne-
+tuned teacher model as long as the downstream task
+has enough data.
+In the task-speciﬁc distillation, the two distilla-
+tion objectives are marginally helpful for CoLA and
+MRPC, while acting more importantly for MNLI.
+The original TinyBERT uses a data augmentation
+strategy for all tasks during ﬁne-tuning, which sig-
+niﬁcantly enlarges the training set and makes the
+effect of task-speciﬁc distillation more signiﬁcant.5 Conclusion
+In this paper, we proposed SkipBERT, a straightfor-
+ward yet effective approach to skip the computation
+of BERT’s shallow layers. We used representations
+of short text chunks to approximate BERT’s shal-
+low representation, and stored them in PLOT for
+fast retrieval during inference. Empirical results
+showed that SkipBERT could achieve performance
+comparable to BERT while signiﬁcantly reducing
+inference time. In the future, we would like to lever-
+age discontinuous text chunks to further improve
+the accuracy and inference speed. We will also try
+to reduce storage requirements with appropriate
+pruning and compression strategies.
+Acknowledgements
+This work was supported by the Key Research
+and Development Program of Zhejiang Province of
+China (No. 2021C01009), NSF of China Grant No.
+62050099, and the Fundamental Research Funds
+for the Central Universities.
+References72957296
+A Hardware Information
+Computation Related We test on Intel(R)
+Xeon(R) Gold 6240C CPU with 24.75M Cache
+and 2.60 GHz (3.90 GHz maximum). The GPU
+model is Tesla V100 with 32GB Graphics RAM.
+Data Retrieval Related The server has 384GB
+RAM. We store PLOT as mmap ﬁles and read them
+from SSD. The SSD used is Toshiba PX04PMC160
+1.6TB with NVMe driver. It contains four caches
+of Micron’s 5ME77 D9QBJ, DDR3L 1600 MHz.
+Each one has 512MB capacity, and thus the four
+make up a 2GB cache capacity. We also note that
+the CPU used in the experiments contains 48 lanes
+of PCIe 3.0 bandwidth and throughput for demand-
+ing I/O-intensive workloads.
+We attach below the results of random 4k read
+benchmark on our SSD with ﬁo,and it takes
+107.24 µs on average to retrieve 4k data randomly,
+which is in line with our latency tests.
+B Fine-tuning Details
+In this section, we introduce the detailed settings
+during ﬁne-tuning. We set the maximum sequence
+length to 128 for the GLUE benchmark. We train
+20 epochs with a learning rate of 2e-5. We choose
+batch sizes from {16, 32}, and from {0.1, 0.2}.
+According to TinyBERT (Jiao et al., 2020), it is
+useful to ﬁrst perform the intermediate layer dis-
+tillation (i.e. with no prediction loss) on the aug-
+mented dataset using a ﬁne-tuned teacher model for
+several epochs. In our experiments, without data
+augmentation, this strategy is still useful for CoLA,SST-2, MRPC, STS-B, and RTE but not as useful
+for other tasks. Speciﬁcally, we train additional
+10 epochs with no prediction loss for CoLA and
+STS-B, and 1 epoch for SST-2, MRPC, and RTE.
+C Model Architecture
+Table 8 presents the neural network architecture
+of SkipBERT, SkipBERTand SkipBERT,
+and we compare with BERTas a reference. The
+local transformer layers of SkipBERT only appear
+in the training phase, and we replace them with
+PLOT in inference-time. We use the same set-
+tings of local transformer layers for SkipBERT,
+SkipBERTand SkipBERT, since they do not
+affect inference speed. We reduce the hidden size
+of SkipBERTso as to be able to compare with
+recent 4-layer counterparts, and we add a linear
+layer between local and global transformer layers
+to match their hidden size. We also instantiate
+SkipBERTwith only 2 global transformer lay-
+ers to further reduce the latency, where the hidden
+size setting is the same to SkipBERT.
+D PLOT Implementation
+We here provide a simple implementation of
+PLOT, as shown in Fig. 7. We store chunk represen-
+tations in a mmap ﬁle as a huge numpy array. We
+use python built-in dictionary to map text chunks
+(n-grams) to their corresponding IDs, which are the
+offsets to their corresponding representations in the
+mmap ﬁle. By such a two-step procedure, we can
+get the chunk representation without transformer
+layer computation.7297
+We note that the implementation of PLOT can be
+extended to a distributed key-value store to support
+parallel accesses and larger keys (longer n-grams)
+with reasonable engineering efforts. We welcome
+community participation to further optimize the
+structure in the future.
+E Distillation Layer Mapping
+Fig. 8 presents the layer mapping of different Skip-
+BERT variants.
+We use the uniform mapping strategy for
+attention-based distillation to leverage the hetero-
+geneous attention patterns across different layers.
+For SkipBERT, we match the student’s atten-
+tion scores with the attention scores of every two
+transformer layers of the teacher (BERT-base). For
+SkipBERT, we match with every three trans-
+former layers of the teacher. And for SkipBERT,
+we match the 3rd and 7th transformer layer of the
+teacher.
+We use the top mapping strategy for hidden
+states-based distillation. That it, we match the stu-
+dent’s hidden states with the top few transformer
+layers of the teacher. Since the initial sequence
+representation (outputs of chunk aggregation) are
+already partially contextualized, SkipBERT can
+learn from higher transformer layers of the teacher
+while skipping shallow layers.F Data and Tasks
+We evaluate our approach on the GLUE benchmark.
+This benchmark consists of a diverse set of 9 NLU
+tasks:
+CoLA Corpus of Linguistic Acceptability,
+a single-sentence classiﬁcation task to predict
+whether a sentence can be accepted a grammati-
+cally correct one. (Warstadt et al., 2019)
+SST-2 Stanford Sentiment Treebank, a single-
+sentence classiﬁcation task to predict the sentiment
+of movie reviews. (Socher et al., 2013)
+MRPC Microsoft Research Paraphrase Corpus,
+a paraphrase identiﬁcation task to predict whether
+two sentences are paraphrases of each other. (Dolan
+and Brockett, 2005)
+STS-B Semantic Textual Similarity Benchmark,
+a regression task to evaluate the similarity of two
+pieces of texts by a score from 1 to 5. (Cer et al.,
+2017)
+QQP Quora Question Pairs, a bi-sentence classiﬁ-
+cation task to determine whether two questions are
+semantically equivalent. (Chen et al., 2018)
+MNLI Multi-Genre Natural Language Inference,
+a bi-sentence classiﬁcation task. Given a pair of
+premise and hypothesis, the task aims to predict
+whether the hypothesis is an entailment, contra-
+diction, or neutral with respect to the premise.7298
+(Williams et al., 2018)
+QNLI Question Natural Language Inference, a
+bi-sentence classiﬁcation task. Given a pair of ques-
+tion and context, the task aims to predict whether
+the context contains the answer to the question.
+(Rajpurkar et al., 2016b)
+RTE Recognizing Textual Entailment, a bi-
+sentence classiﬁcation task, determining whether
+the meaning of one sentence is entailed from the
+other sentence. (Bentivogli et al., 2009)
+WNLI Winograd Schema Challenge, aiming to
+predict if the original sentence entails the sentence
+with the pronoun substituted. (Levesque et al.,
+2011)
+G Latency Distribution of Retrieving
+Data from Mmap
+We perform experiments in Docker containers
+with different RAM limitations, including 256GB,
+128GB, 64GB, and 32GB. We evaluate cases with
+different hidden sizes, and the results are shown in
+Fig. 9 and Fig. 10.729973007301

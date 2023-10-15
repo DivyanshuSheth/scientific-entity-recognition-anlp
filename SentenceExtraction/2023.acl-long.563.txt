@@ -1,1 +1,832 @@
-10118 Proceedings of the 61st Annual Meeting of the Association for Computational Linguistics Volume 1 : Long Papers , pages 10118–10133 July 9 - 14 , 2023 © 2023 Association for Computational Linguistics 10119 10120 10121 10122 10123 10124 10125 10126 10127 10128 10129 10130 10131 10132 10133 
+
+Xinyu Wang, Lin Gui, Yulan HeDepartment of Computer Science, University of WarwickDepartment of Informatics, King’s College LondonThe Alan Turing Institute
+Xinyu.Wang.11@warwick.ac.uk
+{lin.1.gui, yulan.he}@kcl.ac.uk
+Abstract
+Document-level multi-event extraction aims
+to extract the structural information from a
+given document automatically. Most recent ap-
+proaches usually involve two steps: (1) model-
+ing entity interactions; (2) decoding entity inter-
+actions into events. However, such approaches
+ignore a global view of inter-dependency of
+multiple events. Moreover, an event is decoded
+by iteratively merging its related entities as ar-
+guments, which might suffer from error prop-
+agation and is computationally inefficient. In
+this paper, we propose an alternative approach
+for document-level multi-event extraction with
+event proxy nodes and Hausdorff distance min-
+imization. The event proxy nodes, representing
+pseudo-events, are able to build connections
+with other event proxy nodes, essentially cap-
+turing global information. The Hausdorff dis-
+tance makes it possible to compare the similar-
+ity between the set of predicted events and the
+set of ground-truth events. By directly mini-
+mizing Hausdorff distance, the model is trained
+towards the global optimum directly, which im-
+proves performance and reduces training time.
+Experimental results show that our model out-
+performs previous state-of-the-art method in
+F1-score on two datasets with only a fraction
+of training time.
+1 Introduction
+Event extraction aims to identify event triggers with
+certain types and extract their corresponding argu-
+ments from text. Much research has been done
+on sentence-level event extraction (Du and Cardie,
+2020; Lin et al., 2020; Lu et al., 2021). In recent
+years, there have been growing interests in tackling
+the more challenging task of document-level multi-
+event extraction, where an event is represented by
+a cluster of arguments, which may scatter across
+multiple sentences in a document. Also, multiple
+events in the same document may share some com-
+mon entities. For example, as shown in Figure 1,Figure 1: An example of a document that contains two
+events. [ ·] denotes the sentence numbering. Words
+highlighted in colors denote different entities.
+the two events, Equity Pledge andEquity Freeze ,
+have their arguments scattered across the document.
+The same entity mentions, Yexiang Investment Man-
+agement Co., Ltd. and13.07% , are involved in both
+events, with the former taking different argument
+roles (‘ Pledger ’ and ‘ Equity Holder ’), while the lat-
+ter having the same argument role (‘ Total Holding
+Ratio ’). In such a setup, an event is not associ-
+ated with a specific event trigger word or phrase,
+as opposed to the common setup in sentence-level
+event extraction. These challenges make it difficult
+to distinguish various events and link entities to
+event-specific argument roles.
+Document-level multi-event extraction can be
+typically formulated as a table-filling task that fills10118the correct entities into a pre-defined event schema
+as shown in Figure 1. Here, an event is essentially
+represented by a cluster of arguments. Existing
+approaches (Zheng et al., 2019; Yang et al., 2021;
+Huang and Jia, 2021; Xu et al., 2021; Liang et al.,
+2022) usually involve two steps: (1) first model
+the entity interactions based on contextual repre-
+sentations; (2) then design a decoding strategy to
+decode the entity interactions into events and argu-
+ments. For example, Zheng et al. (2019) and Xu
+et al. (2021) transformed this task into sequential
+path-expanding sub-tasks. Each sub-task expands
+a path sequentially by gradually merging entities
+in a pre-defined order of event argument roles.
+The aforementioned approaches suffer from the
+following limitations: (1) They decode events
+from entity information and tend to produce lo-
+cal optimal results without considering the inter-
+dependency of multiple events globally in a docu-
+ment. (2) Event decoding by iteratively merging
+entities suffers from error propagation that an event
+type or an entity that has been incorrectly classi-
+fied cannot be corrected later. (3) Every decoding
+decision requires iterating all entity mentions in a
+document, which is computationally inefficient.
+To address the above limitations, we propose
+an alternative approach for document-level multi-
+event extraction with event proxy nodes and Haus-
+dorff distance minimization, named as Proxy
+Nodes Clustering Network ( ProCNet ). The event
+proxy nodes aim to capture the global information
+among events in a document. The Hausdorff dis-
+tance makes it possible to optimize the training
+loss defined as the difference between the gener-
+ated events and the gold standard event annotations
+directly. This is more efficient compared to existing
+decoding approaches.
+Our method involves two main steps: Event Rep-
+resentation Learning andHausdorff Distance Min-
+imization . For Event Representation Learning , we
+create a number of proxy nodes, each of which
+represents a pseudo-event, and build a graph to up-
+date proxy nodes. Entities mentioned in text are
+treated as nodes connecting to the proxy nodes. All
+the proxy nodes are interconnected to allow infor-
+mation exchange among the potential events. We
+employ a Hypernetwork Graph Neural Network
+(GNN) (Ha et al., 2017) for updating proxy node
+representations. After Event Representation Learn-
+ing, each proxy node essentially resides in a new
+event-level metric space by aggregating informa-tion from the entity-level space.
+ForHausdorff Distance Minimization , we regard
+the predicted events as a set and the ground-truth
+events as another set, and compute the Hausdorff
+distance between these two sets, which simultane-
+ously consider all events and all their arguments.
+We then minimize the Hausdorff distance via gradi-
+ent descent, where the model is trained to directly
+produce a globally optimal solution without the
+need of using decoding strategies as in existing
+approaches.
+In this way, our model learns globally and does
+not suffer from the problem of existing approaches
+that decode events based on local entity informa-
+tion. Each entity is linked to every proxy node,
+and the association between an entity and a proxy
+node is updated at each training iteration. As such,
+our model avoids the error propagation problem
+caused by the iterative decoding strategy. In addi-
+tion, our approach naturally addresses the problem
+that the same entity mention may be involved in
+multiple events since the entity will be mapped
+to a different event-level metric space depending
+on its associated proxy node. Moreover, as our
+approach replaces iterative computation in decod-
+ing with parallel computation, it is computationally
+more efficient compared to existing path-expansion
+approaches, as will be shown in our experiments
+section. In summary, our main contributions are:
+•We propose a new framework for document-
+level multi-event extraction by learning event
+proxy nodes in a new event-level metric space
+to better model the interactions among events.
+•We propose to utilize the Hausdorff distance
+in our learning objective function to optimize
+the difference between the generated events
+and the gold standard events directly. The
+proposed mechanism not only simultaneously
+considers all events but also speeds up the
+training process.
+•Experimental results show that our model out-
+performs previous state-of-the-art method in
+F1 on two datasets with only a fraction of
+training time.
+2 Related Work
+Early research on event extraction (EE) largely
+focused on sentence-level event extraction (SEE),
+aiming to classify the event trigger and arguments
+in a sentence. Chen et al. (2015) decomposes SEE10119
+into two sub-tasks: event trigger detection and
+event argument labeling . More work has been done
+on joint-learning of the two sub-tasks (Nguyen and
+Nguyen, 2019; Lin et al., 2020). Recently, multi-
+turn Question-Answer (QA) methods have been
+investigated for EE with hand-designed or automat-
+ically generated questions (Du and Cardie, 2020; Li
+et al., 2020; Wang et al., 2020; Liu et al., 2020; Lyu
+et al., 2021). Apart from QA-based approaches,
+sequence-to-sequence learning has also been ex-
+plored, where the event annotation is flattened as
+a sequence (Paolini et al., 2021; Lu et al., 2021;
+Li et al., 2021; Lu et al., 2022b). More recently,
+prompt-based learning has been explored using the
+knowledge in pre-trained language models (Lin
+et al., 2021; Hsu et al., 2021; Ma et al., 2022).
+Compared to SEE, document-level event extrac-
+tion (DEE) appears to be more challenging. DEE
+requires methods to model long-term dependencies
+among entities across multiple sentences. Simply
+employing SEE approaches for DEE may lead to
+incomplete and uninformative extractions (Li et al.,
+2021). To address the problem, conditional genera-
+tion have been proposed, which are conditioned on
+pre-specified templates or prompts (Du et al., 2021;
+Huang et al., 2021; Ma et al., 2022).DEE can also be formulated as a table-filling
+task where each event is represented as a cluster
+of arguments and an event type. In such a setup,
+it is usually not possible to associate a particular
+event trigger word or phrase with an event. Yang
+et al. (2018) proposed a key-event detection model.
+Zheng et al. (2019) transformed event tables into a
+directed acyclic graph with path expansion. Huang
+and Jia (2021) constructed a graph to build sentence
+communities. Lu et al. (2022a) captured event clues
+as a series of intermediate results. Xu et al. (2021)
+constructed a heterogeneous GNN with a tracker
+mechanism for partially decoded events. Liang
+et al. (2022) modeled the relation between entities
+with Relation-augmented Attention Transformer.
+These methods mainly focus on modeling entity
+inter-relations and rely on carefully-designed event
+decoding strategies. In contrast, we model events
+in the event-level metric space within a more global
+view and with less training time.
+3 Methodology
+3.1 Problem Setup
+Different from the trigger-based event extraction
+task, where an event is represented by a trigger and10120a list of arguments, in our task, an event is defined
+by an event type category c, a list of entities {e}
+and their corresponding argument types {a}as
+shown in Figure 1. Therefore, the target output is
+a list of “entity-argument” pairs {(e, a)}andc
+as/parenleftbig
+c,{(e, a)}/parenrightbig
+. Proxy node is defined as z. An
+overview of ProCNet is shown in Figure 2. In what
+follows, we present each module in detail.
+3.2 Entity Representation Learning
+Given an input document, the first step is to iden-
+tify the entities which might be potential arguments.
+This can be framed as a sequence labeling problem
+that, given a word sequence, the entity recogni-
+tion model outputs a label sequence with the BIO
+(Beginning and Inside of an entity span, and Other
+tokens) tagging. We use BERT (Devlin et al., 2019)
+as a sequence labeler to detect entities at sentence-
+level. As an entity span may contain multiple to-
+kens, we drive its representation by averaging the
+hidden states of its constituent tokens. For a doc-
+ument, a total of |e|entity representations are ex-
+tracted as {h}. The loss of the BIO sequence
+tagging is defined as L.
+In order to make the entity representations en-
+code the knowledge of entity associations, we in-
+troduce a simple auxiliary learning task to pre-
+dict whether two entities belong to the same event,
+where entity representations will be updated during
+learning. Specifically, it is a binary classification
+task, with the predicted output computed as:
+ˆy=ϕ/parenleftbig
+MLP([h;h])/parenrightbig
+, (1)
+where ϕdenotes the sigmoid function, [; ]denotes
+the concatenation, and ˆyindicates the proba-
+bility if entities iandjare from the same event.
+We use the binary cross-entropy (CE) loss here:
+L=−/summationdisplay/summationdisplayCE(y,ˆy)(2)
+where yis the label. The loss for entity repre-
+sentation learning is defined as L=L+L.
+3.3 Event Representation Learning with
+Proxy Nodes
+In this section, we construct a graph to map entity
+representations in the entity-level space into event
+representations in a new event-level metric space.
+We define nproxy nodes, which serve as pseudo-
+events, and randomly initialize their embeddings
+{h}, which are only initialized once beforetraining and will be updated during training. n
+is a hyper-parameter and can be simply set to a
+much larger value than the expected number of ex-
+tracted events, as proxy nodes can also represent
+nullevents (see Section 3.4). We initialize entity
+node embeddings {h}and context node em-
+beddings {h}by their corresponding entity
+and[CLS] representations, respectively.
+We define the graph as G= (V,E), and the node
+setVcontains proxy nodes, entity nodes, and con-
+text nodes as: V={z}∪ {e}∪ {s}
+with their embeddings {h}∪ {h}∪
+{h}. The edge set Eincludes three kinds of
+edges as follows:
+Proxy↔Proxy Edge The bidirectional edge be-
+tween all proxy nodes {z→z: 0< i≤n,0<
+j≤n}allows the information exchange between
+proxy nodes.
+Entity→Proxy Edge The directed edge from all
+entity nodes eto all proxy nodes zas{e→z:
+0< i≤n,0< j≤ |e|}provides the entity
+information for pseudo-events.
+Context →Proxy Edge The directed edge from
+all context node sto all proxy node zas{s→z:
+0< i≤n,0< j≤ |s|}provides the contextual
+information.
+In a typical setup for GNN, each node has its
+embedding updated by aggregating the neighbor-
+hood information. The aggregation weight matrix
+is shared across all nodes. But in our task here, each
+proxy node is expected to represent a distinct event.
+As such, we would like to have a unique aggrega-
+tion function for each proxy node. To this end, we
+use the Graph Neural Network with Feature-wise
+Linear Modulation (GNN-FiLM) (Brockschmidt,
+2020) to update the proxy node embeddings in G.
+It introduces Hypernetwork to enable each proxy
+node to compute a unique aggregation function
+with different parameters. More concretely, given
+a node v∈ V at the (l+ 1) -th layer, its hidden
+representation h is updated as:
+h=σ/parenleftbigg/summationdisplayγ⊙Wh+β/parenrightbigg
+,
+γ=f(h;θ),β=f(h;θ),
+(3)
+where u−→vdenotes a neighboring node ucon-
+nected with node vwith the edge type ε.W∈
+Ris a learnable parameter for edge type ε.σ10121and⊙denote the activation function and Hadamard
+product, respectively. γandβdefine the
+message-passing function of edge type εand node
+vat layer l. They are computed by functions f
+andfgivenhas the input. θandθare
+learnable parameters of fandf, respectively. To
+keep it simple, we only use one-layer GNN-FiLM
+with a single linear layer as the hyper-function in
+our experiments.
+With the above formulation, each proxy node
+zhas its unique message-passing function to ag-
+gregate information from entity nodes and context
+nodes in different ways. In summary, the repre-
+sentations of proxy nodes {/hatwideh}are updated
+through GNN-FiLM learning:
+{/hatwideh}=GNN-FiLM (V,E) (4)
+where zrepresents a pseudo-event. The training
+with proxy nodes is challenging, which will be
+addressed in Section 3.5.
+3.4 Event Decoding
+In this section, each proxy node representation /hatwideh
+is decoded into an event, which is formulated into
+two parallel sub-tasks: event type classification and
+event argument classification .
+Event Type Classification The event type of
+proxy node zis inferred from /hatwidehwith MLP as:
+p=softmax/parenleftig
+MLP(/hatwideh)/parenrightig
+, (5)
+where pdenotes the event type probability distri-
+bution of z. Event type labels includes a nullevent
+type, denoting no correspondence between a proxy
+node and any events. The number of non- nullproxy
+nodes is the number of predicted events.
+Event Argument Classification In this task, we
+need to associate an entity with an event under an
+event-specific argument type. As the same entity
+(e.g., a company name) may have multiple men-
+tions in a document, we aggregate their represen-
+tations by a Multi-Head Attention (MHA) mecha-
+nism using a proxy node as the query. More con-
+cretely, assuming {h}denotes a set of men-
+tions representations for the same entity ¯e, we use
+MHA to derive the aggregated entity representa-
+tion for ¯e. The query, key and value are defined
+asQ=/hatwideh,K={h},V={h}.
+The representation of ¯eis:
+/hatwideh=MHA (Q,K,V), (6)where/hatwidehdenotes the aggregated representation
+for entity ¯eusing the proxy node zas the query.
+Then the probability distribution pof argument
+types of entity ¯ewith respect to proxy node zis:
+p=softmax/parenleftig
+MLP([/hatwideh;/hatwideh])/parenrightig
+,(7)
+where [; ]denotes the concatenation. The argument
+type set includes a null argument type, denoting
+that entity ¯edoes not relate to proxy node z.
+The final event type ˆcfor proxy node zand
+argument type for entity ¯eunder the event encoded
+by proxy node zare determined by:
+ˆc=argmax (p)
+ˆa=argmax (p)(8)
+Each event is represented by an event type ˆcand a
+list of arguments {ˆa}. Any predicted argument
+type which is not in the pre-defined schema for
+its associated event type will be removed. Proxy
+nodes classified as nullevent or entities classified
+asnull arguments will be removed. If there are
+multiple entities predicted as the same argument,
+the one with the highest probability will be kept.
+3.5 Hausdorff Distance Minimization
+In this section, we construct a predicted pseudo-
+event set Urepresented by proxy node and a
+ground-truth event set U. We define µas
+thei-th pseudo-event, represented by z, with/parenleftbig
+ˆc,{(e,ˆa)}/parenrightbig
+, andµdenotes the j-th ground-
+truth event/parenleftbig
+c,{(e, a)}/parenrightbig
+. We further define the
+distance d(µ, µ)between predicted event µ
+and the ground-truth event µas:
+d(µ, µ) =CE(p, c)
++1
+|¯e|/summationdisplayCE(p, a)(9)
+where CE(.)is the cross-entropy loss; |¯e|denotes
+the number of unique entities; kindicates different
+entities. d(µ, µ)is essentially computed by the
+total cross-entropy loss of event type classification
+and argument classification between the i-th proxy
+node and the j-th ground-truth event.
+We aim to minimize the Hausdorff distance be-
+tween sets UandUto learn the model by consid-
+ering all events and their arguments simultaneously.
+As the standard Hausdorff distance is highly sen-
+sitive to outliers, we use the average Hausdorff10122distance (Schütze et al., 2012; Taha and Hanbury,
+2015):
+D(U,U) =1
+|U|/summationdisplaymind(µ, µ)
++1
+|U|/summationdisplaymind(µ, µ)(10)
+However, in our task, the average Hausdorff dis-
+tance could suffer a problem that a predicted event,
+represented by a proxy node, may be guided to
+learn towards more than one different t event at the
+same training iteration when this proxy node is the
+closest neighbor of multiple ground-truth events.
+To address this problem, we add a constraint to
+the average Hausdorff distance that the distance
+computation of d(.)should only be performed no
+more than once on each µandµ, and we modify
+the average Hausdorff distance as:
+/hatwideD(U,U) =min
+
+/summationdisplayd(µ, µ)
+
+
+(11)
+For example, if d(µ, µ)has been computed,
+thend(µ, µ)is no longer allowed to perform,
+asµhas been used in d(.)computation.
+To this end, Eq. (11) with the constraint becomes
+a minimum loss alignment problem. To better
+solve Eq. (11) under the constraint, we construct an
+undirected bipartite graph G= (U,U,T), where
+µ∈ Uandµ∈ Uare nodes of two parts repre-
+senting the predicted events and the ground-truth
+events, respectively. t∈ T denotes edge, which
+only exists between µandµ. The weight of edge
+tbetween nodes µandµis defined as:
+w(t) =d(µ, µ) (12)
+The first step is to find an edge set Tthat achieves
+the minimum value in the following equation:
+/hatwideT=argmin/summationdisplayw(t), (13)
+where the edge t∈ T must meet these conditions:
+(1) each µhas exactly one edge connected to it;
+(2) each µhas no more than one edge connected
+to it. Eq. (13) can be computed efficiently with (Ra-
+makrishnan et al., 1991; Bertsekas, 1981). Then the
+final distance is computed by combining Eq. (11),
+(12), and (13) as:
+/hatwideD(U,U) =/summationdisplayw(t) (14)Finally, we use /hatwideD(U,U)to approximate aver-
+age Hausdorff distance D(U,U).
+Asnhas been set to be a very large number,
+if the number of ground-truth events is less than
+the number of predicted events in a document,
+pseudo nullevents are added to the ground-truth
+event set as negative labels to make the number of
+ground-truth events equals to the number of pre-
+dicted events.
+In summary, /hatwideD(U,U)is the distance be-
+tween the predicted events set and the ground-truth
+events set, which considers all events with all of
+their arguments at the same time, essentially cap-
+turing a global alignment.
+3.6 Objective Function
+The final loss is the sum of approximate Hausdorff
+distance and entity representation loss:
+L=/hatwideD(U,U) +L (15)
+4 Experiments
+In this section, we present performance and run-
+time experiments in comparison with state-of-the-
+art approaches. We also discuss the ablations study.
+Entity and event visualisation results can be found
+in Appendix B.
+4.1 Experimental Setup
+Dataset We evaluate ProCNet on the two
+document-level multi-event extraction datasets:
+(1) ChFinAnn dataset(Zheng et al., 2019) con-
+sists of 32,040 financial documents, with 25,632,
+3,204, and 3,204 in the train, development, and
+test sets, respectively, and includes five event
+types. The dataset contains 71% of single-
+event documents and 29% of multi-event docu-
+ments. (2) DuEE-Fin dataset(Han et al., 2022)
+has around 11,900 financial documents and 13
+event types. As the dataset has not released the
+ground truth annotations for the test set, we fol-
+low the setting of (Liang et al., 2022) and treat the
+original development set as the test set. We also
+set aside 500 documents from the training set as
+the development set. Our final dataset has 6,515,
+500, and 1,171 documents in the train, develop-
+ment, and test set, respectively. There are 67% of
+single-event documents and 33% of multi-event
+documents. More details about the event types and
+their distributions are in Appendix A.1.10123
+Evaluation Metrics We follow the same metrics
+in (Zheng et al., 2019). For a predicted event of a
+specific event type, the most similar ground-truth
+event that is of the same event type is selected with-
+out replacement. Then the micro-averaged role-
+level precision, recall, and F1-score are calculated
+for the predicted event and the selected gold event.
+Implementation Detail To keep it simple, we
+only use one-layer GNN-FiLM (Brockschmidt,
+2020) with a single linear layer as the hyper-
+function. Specifically, we have f(h;θ) =
+Whandf(h;θ) =Whin Eq. (3).
+The number of proxy nodes nis set to 16. More
+implementation details are in Appendix A.2
+Baselines The baselines that we compare with
+are as follows: DCFEE (Yang et al., 2018) uses an
+argument-completion strategy in the table-filling
+task. Two variants of DCFEE are DCFEE-O
+for single-event and DCFEE-M for multi-event.
+Doc2EDAG (Zheng et al., 2019) utilizes a path-
+expansion decoding strategy to extract events like
+hierarchical clustering. Greedy-Dec is a vari-
+ant of Doc2EDAG that decodes events greedily.
+DE-PPN (Yang et al., 2021) uses Transformer to
+encode sentences and entities. GIT (Xu et al.,
+2021) uses a Tracker module to track events in
+the path-expansion decoding. PTPCG (Zhu et al.,
+2022) combines event arguments together in a
+non-autoregressive decoding approach with pruned
+complete graphs, aiming to consume lower com-
+putational resources. ReDEE (Liang et al., 2022)
+is a Relation-augmented Attention Transformer to
+cover multi-scale and multi-amount relations.
+4.2 Overall Results
+Table 1 shows the results on the ChFinAnn and
+the DuEE-Fin datasets. For ChFinAnn, the base-
+line results are reported in (Zheng et al., 2019;
+Yang et al., 2021; Xu et al., 2021; Zhu et al., 2022;
+Liang et al., 2022). For DuEE-Fin, the baseline
+results are either taken from (Liang et al., 2022)
+or by running the published source code of the
+baselines. We can observe that a simple argument
+completion strategy (DCFEE-O and DCFEE-M)
+produces the worst results. Greedy-Dec with the
+greedy decoding strategy improves upon DCEFF
+variants, but it reached an F1-score lower than
+Doc2EDAG by 13.7% on ChFinAnn and 6.3% on
+DuEE-Fin due to only modeling entity-level repre-
+sentations without a global view. DE-PPN which
+uses the Transformer to encode sentences and en-
+tities performs worse compared to Doc2EDAG
+which utilizes a path-expansion decoding strategy.
+Extending DocEDAG with a Track module (GIT)
+or using a relation-augmented attention transformer
+(ReDEE) achieves better results compared to ear-
+lier approaches. ProCNet gives the best overall10124
+F1-score, outperforming the best baseline, ReDEE,
+by 1.1-1.2%, respectively on ChFinAnn and DuEE-
+Fin. It can also be observed that all models have
+better F1-scores for the single-event scenario than
+the multi-event one, verifying the difficulty of ex-
+tracting multiple events from a document. When
+comparing results across the two datasets, we see
+better results achieved on ChFinAnn, possibly due
+to its larger training set and smaller set of event
+types compared to DuEE-Fin.
+4.3 Per-Event-Type Results
+Table 2 and Table 3 show the evaluation results on
+the 5 and 13 event typeson ChFinAnn and DuEE-
+Fin, respectively. On ChFinANN, ReDEE outper-
+forms the others on EO. On DuEE-Fin, ReDEE
+gives the best results on SR and PL, while GIT
+outperforms the others on SI. Some documents of
+these event types contain more than 40 sentences.
+A possible reason for ProCNet not performing well
+on these event types is its limited capability of cap-
+turing long-term dependencies across sentences,
+since ProCNet does not directly model the rela-
+tions between sentences. On the contrary, ReDEE
+and GIT model the inter-relations of sentences di-
+rectly. Nevertheless, ProCNet achieves superior
+results on other event types, resulting in overall
+better performance compared to baselines.
+4.4 Run-Time Comparison
+We compare the training time of the five baselines,
+Doc2EDAG, DE-PPN, PTPCG, GIT, and ReDEE,
+with ProCNet on a GPU server with NVIDIA
+Quadro RTX 6000 and the same setting. We record
+the average per epoch training time and the to-
+tal time to reach convergence in Table 4. DuEE-
+Fin contains fewer data than ChFinANN, as such,
+Doc2EDAGE, GIT, and ProCNet trained faster on
+DuEE-Fin. However, ReDEE took longer time to
+converge on DuEE-Fin, because ReDEE models
+the relations of all argument-argument pairs. As the
+number of event types and argument types in DuEE-
+Fin is more than that in ChFinANN, the training
+time of ReDEE increases exponentially. DE-PPN
+runs faster than Doc2EDAG, GIT, and ReDEE but
+slower than ProCNet . In contrast, ProCNet avoids
+the time-consuming decoding by introducing the
+proxy nodes and HDM. Besides, ProCNet can run
+all proxy nodes and their arguments in parallel,
+which is more GPU-friendly. PTPCG has a shorter
+per-epoch run time, but took a longer time to con-
+verge on ChFinAnn; though it appears to be more
+run time efficient on DuEE-Fin compared to our ap-
+proach. In summary, ProCNet is 0.5x-44.8x times
+faster than baselines per epoch, and is 0.6x-45.4x
+times faster to reach convergence.10125
+4.5 Ablation Study
+Table 5 shows how different components in
+ProCNet contribute to performance:
+−Hypernetwork Hypernetwork is removed by
+replacing GNN-FiLM with RGCN (Schlichtkrull
+et al., 2018), where all proxy nodes in RGCN share
+the same message-passing function. We see a drop
+of about 1% in F1 on both datasets, showing the
+importance of using different entity aggregation
+functions for different event proxy nodes.
+−Proxy Node We replace {h} with
+{h}, where all proxy nodes share the same
+embedding h. In this way, hacts as a common
+start node as in existing baselines. It can be
+observed that F1 drops significantly to 4.4% and
+1.7%, respectively. The model learns almost
+nothing, which verifies the importance of the proxy
+nodes for ProCNet .−HDM Instead of minimizing the Hausdorff dis-
+tance between the predicted set and the ground-
+truth set globally, we randomly initialize the edge
+set/hatwideTwithout employing Eq. (13), where the mini-
+mization is not performed towards the global min-
+imum. We see a drastic decrease in performance.
+Without HDM, it is difficult for the the model to
+learn the alignment between a proxy node and a
+ground-truth event, showing that HDM is an indis-
+pensable component of ProCNet .
+4.6 Case Study
+Figure 3 shows an error case of ProCNet .Event #1
+spans from sentence #9 to sentence #21, and the
+StartDate is too far from the main context of Event
+#1. Moreover, the classification of LaterHolding-
+Shares inEvent #2 requires the model to relate the
+pronoun above-mentioned to the Event #2 . These
+mistakes show that ProCNet still faces a difficulty
+in modeling long-distance dependencies.
+5 Conclusion
+In this paper, we no longer focus on inter-entities
+relation modeling and decoding strategy as in pre-
+vious methods, but directly learns all events glob-
+ally through the use of event proxy nodes and the
+minimization of the Hausdorff distance in our pro-
+posed ProCNet . In our experiments, ProCNet out-
+performs state-of-the-art approaches while only re-
+quiring a fraction of time for training.10126Acknowledgements
+This work was supported in part by the UK En-
+gineering and Physical Sciences Research Coun-
+cil (grant no. EP/T017112/2, EP/V048597/1,
+EP/X019063/1). YH is supported by a Turing AI
+Fellowship funded by the UK Research and Inno-
+vation (grant no. EP/V020579/2).
+Limitations
+In our proposed model, we introduce a hyper-
+parameter nas the number of event proxy nodes.
+The value of nneeds to be pre-set. Setting nto
+a value larger than the actual event number in a
+document would lead to computational redundancy
+as more proxy nodes would be mapped to the null
+event. However, setting nto a small value may miss
+some events in a document. We have experimented
+with automatically learning the value of nbased
+on an input document in ProCNet . But we did not
+observe improved event extraction performance.
+As such, we simply set it to 16. In the ChFinAnn
+dataset, 98% documents have less than 7 events
+annotated. This results in the learning of many
+redundant proxy nodes for such documents. It re-
+mains an open challenge on automatically learning
+a varying number of event proxy nodes based on
+an input document. Reducing the number of redun-
+dant proxy nodes can reduce training time further.
+Another shortcoming is the limited capability of
+ProCNet in capturing the long-term dependencies
+of sentences, as have been discussed in the per-
+event-type results in Section 4.2 and 4.3. We ob-
+served a relatively worse performance of ProCNet
+in dealing with long documents with more than 40
+sentences as it does not explicitly model the inter-
+relations of sentences. One possible direction is to
+explore the use of a heterogeneous graph which ad-
+ditionally models the entity-entity, entity-sentence,
+and sentence-sentence relations. We will leave it as
+the future work to study the trade-off between event
+extraction performance and training efficiency.
+References101271012810129Appendix
+A Experimental Setup
+A.1 Dataset
+Event Type Distribution
+Equity Freeze 4.2%
+Equity Repurchase 9.5%
+Equity Underweight 16.0%
+Equity Overweight 18.3%
+Equity Pledge 52.0%
+Event Type Distribution
+WinBidding 9.5%
+Financial Loss 11.1%
+Business Acquisition 9.7%
+Business Bankruptcy 2.5%
+CCorporate Financing 5.5%
+Companies Listing 5.1%
+Shareholders Holdings Decrease 9.3%
+Shareholders Holdings Increase 3.5%
+Share Repurchase 14.1%
+Regulatory Talk 1.8%
+Pledge Release 7.7%
+Pledge 10.8%
+Executive Change 9.4%
+ChFinAnn ChFinAnn dataset contains 32,040
+financial documents collected from public reports,
+with 25,632 in the train set, 3,204 in the develop-
+ment set and 3,204 in the test set. There are 71%
+of single-event documents and 29% of multi-event
+documents. It includes five event types. The distri-
+bution of event types is shown in Table A1.
+DuEE-Fin DuEE-Fin dataset did not release the
+ground truth publicly available for the test set. We
+follow the setting of Liang et al. (2022), but ad-
+ditionally split 500 documents from train set as
+development set and treat the original development
+set as test set. To this end, there are 6,515, 500, and1,171 documents in train, development, and test set,
+respectively. There are 67% of single-event doc-
+uments and 33% of multi-event documents. The
+DuEE-Fin dataset contains 13 event types. The
+distribution of event types is shown in Table A2.
+A.2 Implementation Detail
+We follow the setting of Liang et al. (2022) using
+the BERT-base (Devlin et al., 2019) in Roberta
+setting (Liu et al., 2019) as the sequence la-
+beling model. We use one-layer GNN-FiLM
+(Brockschmidt, 2020) with a single linear layer
+as the hyper-function and GELU (Hendrycks and
+Gimpel, 2016) as the activation function. Specif-
+ically, we have f(h;θ) =Whand
+f(h;θ) = Whin Eq. (3), where
+W∈RandW∈Rare learnable
+parameters. The hidden size is 512. We employ
+the Adam optimizer (Kingma and Ba, 2015) with
+a batch size 32, a learning rate 1e-5for pretrained
+parameters, a learning rate 1e-4for randomly ini-
+tialized parameters. We run the model 3 times with
+a maximal number of epochs 100 selecting the best
+checkpoint and with one NVIDIA Quadro RTX
+6000 GPU.
+B Visualisation
+We employ t-SNE (van der Maaten and Hinton,
+2008) to visualize in Figure A1 the representations
+of entities and proxy nodes of an example illus-
+trated in Figure A2. The three numbers in Fig-
+ure A1a denote whether an entity belongs to the
+three corresponding events. For example, the (0, 0,
+1)means green entities are arguments of Event #3 ,
+whereas (1, 1, 1) means blue entities are arguments
+of all three events. Blue entities are also separated
+from the other three kinds of entities. It is difficult
+to identify events from the entity-level represen-
+tations. In contrast, after mapping entities to the
+event-level metric space, the three points denoting
+the three proxy nodes are easier to be distinguished
+as shown in Figure A1b.
+Figure A2 shows the example used in Figure A1.
+The three events correspond to three proxy nodes.
+The entity 11,700,000 shares appears two times in
+the document, so there are two points in Figure A1
+representing 11,700,000 shares .1013010131ACL 2023 Responsible NLP Checklist
+A For every submission:
+/squareA1. Did you describe the limitations of your work?
+Limitations
+/squareA2. Did you discuss any potential risks of your work?
+Limitations
+/squareA3. Do the abstract and introduction summarize the paper’s main claims?
+1
+/squareA4. Have you used AI writing assistants when working on this paper?
+Left blank.
+B/squareDid you use or create scientiﬁc artifacts?
+4 A
+/squareB1. Did you cite the creators of artifacts you used?
+4
+/squareB2. Did you discuss the license or terms for use and / or distribution of any artifacts?
+4 A
+/squareB3. Did you discuss if your use of existing artifact(s) was consistent with their intended use, provided
+that it was speciﬁed? For the artifacts you create, do you specify intended use and whether that is
+compatible with the original access conditions (in particular, derivatives of data accessed for research
+purposes should not be used outside of research contexts)?
+4 A
+/squareB4. Did you discuss the steps taken to check whether the data that was collected / used contains any
+information that names or uniquely identiﬁes individual people or offensive content, and the steps
+taken to protect / anonymize it?
+4 A
+/squareB5. Did you provide documentation of the artifacts, e.g., coverage of domains, languages, and
+linguistic phenomena, demographic groups represented, etc.?
+4 A
+/squareB6. Did you report relevant statistics like the number of examples, details of train / test / dev splits,
+etc. for the data that you used / created? Even for commonly-used benchmark datasets, include the
+number of examples in train / validation / test splits, as these provide necessary context for a reader
+to understand experimental results. For example, small differences in accuracy on large test sets may
+be signiﬁcant, while on small test sets they may not be.
+4 A
+C/squareDid you run computational experiments?
+4 A
+/squareC1. Did you report the number of parameters in the models used, the total computational budget
+(e.g., GPU hours), and computing infrastructure used?
+410132/squareC2. Did you discuss the experimental setup, including hyperparameter search and best-found
+hyperparameter values?
+4 A
+/squareC3. Did you report descriptive statistics about your results (e.g., error bars around results, summary
+statistics from sets of experiments), and is it transparent whether you are reporting the max, mean,
+etc. or just a single run?
+4 A
+/squareC4. If you used existing packages (e.g., for preprocessing, for normalization, or for evaluation), did
+you report the implementation, model, and parameter settings used (e.g., NLTK, Spacy, ROUGE,
+etc.)?
+4
+D/squareDid you use human annotators (e.g., crowdworkers) or research with human participants?
+Left blank.
+/squareD1. Did you report the full text of instructions given to participants, including e.g., screenshots,
+disclaimers of any risks to participants or annotators, etc.?
+No response.
+/squareD2. Did you report information about how you recruited (e.g., crowdsourcing platform, students)
+and paid participants, and discuss if such payment is adequate given the participants’ demographic
+(e.g., country of residence)?
+No response.
+/squareD3. Did you discuss whether and how consent was obtained from people whose data you’re
+using/curating? For example, if you collected data via crowdsourcing, did your instructions to
+crowdworkers explain how the data would be used?
+No response.
+/squareD4. Was the data collection protocol approved (or determined exempt) by an ethics review board?
+No response.
+/squareD5. Did you report the basic demographic and geographic characteristics of the annotator population
+that is the source of the data?
+No response.10133

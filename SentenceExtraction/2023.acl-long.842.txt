@@ -1,1 +1,927 @@
-15109 Proceedings of the 61st Annual Meeting of the Association for Computational Linguistics Volume 1 : Long Papers , pages 15109–15126 July 9 - 14 , 2023 © 2023 Association for Computational Linguistics 15110 15111 15112 15113 15114 15115 15116 15117 15118 15119 15120 15121 15122 15123 15124 15125 15126 
+
+Marcos Treviso, Alexis Ross, Nuno M. Guerreiro, André F. T. MartinsInstituto de Telecomunicações, Lisbon, PortugalInstituto Superior Técnico & LUMLIS (Lisbon ELLIS Unit), Lisbon, PortugalMassachusetts Institute of TechnologyUnbabel, Lisbon, Portugal
+Abstract
+Selective rationales and counterfactual exam-
+ples have emerged as two effective, comple-
+mentary classes of interpretability methods for
+analyzing and training NLP models. However,
+prior work has not explored how these meth-
+ods can be integrated to combine their comple-
+mentary advantages. We overcome this limita-
+tion by introducing CREST (ContRastive Edits
+with Sparse raTionalization), a joint framework
+for selective rationalization and counterfactual
+text generation, and show that this framework
+leads to improvements in counterfactual quality,
+model robustness, and interpretability. First,
+CREST generates valid counterfactuals that
+are more natural than those produced by pre-
+vious methods, and subsequently can be used
+for data augmentation at scale, reducing the
+need for human-generated examples. Second,
+we introduce a new loss function that lever-
+ages CREST counterfactuals to regularize se-
+lective rationales and show that this regulariza-
+tion improves both model robustness and ratio-
+nale quality, compared to methods that do not
+leverage CREST counterfactuals. Our results
+demonstrate that CREST successfully bridges
+the gap between selective rationales and coun-
+terfactual examples, addressing the limitations
+of existing methods and providing a more com-
+prehensive view of a model’s predictions.
+1 Introduction
+As NLP models have become larger and less trans-
+parent, there has been a growing interest in devel-
+oping methods for finer-grained interpretation and
+control of their predictions. One class of meth-
+ods leverages selective rationalization (Lei et al.,
+2016; Bastings et al., 2019), which trains models to
+first select rationales , or subsets of relevant input to-
+kens, and then make predictions based only on the
+selected rationales. These methods offer increased
+interpretability, as well as learning benefits, suchFigure 1: Our generation procedure consists of two
+stages: (i) a mask stage that highlights relevant tokens
+in the input through a learnable masker; and (ii) an
+edit stage, which receives a masked input and uses a
+masked language model to infill spans conditioned on a
+prepended label.
+as improved robustness to input perturbations (Jain
+et al., 2020; Chen et al., 2022). Another class of
+methods generates counterfactual examples , or
+modifications to input examples that change their
+labels. By providing localized views of decision
+boundaries, counterfactual examples can be used as
+explanations of model predictions, contrast datasets
+for fine-grained evaluation, or new training data-
+points for learning more robust models (Ross et al.,
+2021; Gardner et al., 2020; Kaushik et al., 2020).
+This paper is motivated by the observation that
+selective rationales and counterfactual examples
+allow for interpreting and controlling model be-
+havior through different means: selective rational-
+ization improves model transparency by weaving
+interpretability into a model’s internal decision-
+making process, while counterfactual examples
+provide external signal more closely aligned with
+human causal reasoning (Wu et al., 2021).
+We propose to combine both methods to lever-
+age their complementary advantages. We introduce
+CREST ( ContRastive Edits with Sparse raTional-
+ization ), a joint framework for rationalization and15109
+counterfactual text generation. CREST first gener-
+ates high-quality counterfactuals (Figure 1), then
+leverages those counterfactuals to encourage con-
+sistency across “flows” for factual and counterfac-
+tual inputs (Figure 2). In doing so, CREST unifies
+two key important dimensions of interpretability
+introduced by Doshi-Velez and Kim (2017, §3.2),
+forward simulation and counterfactual simulation.
+Our main contributions are:
+•We present CREST-Generation (Figure 1), a
+novel approach to generating counterfactual
+examples by combining sparse rationalization
+with span-level masked language modeling (§3),
+which produces valid, fluent, and diverse coun-
+terfactuals (§4, Table 1).
+•We introduce CREST-Rationalization (Fig-
+ure 2), a novel approach to regularizing ratio-
+nalizers. CREST-Rationalization decomposes a
+rationalizer into factual and counterfactual flows
+and encourages agreement between the rationales
+for both (§5).
+•We show that CREST-generated counterfactuals
+can be effectively used to increase model robust-
+ness, leading to larger improvements on contrast
+and out-of-domain datasets than using manual
+counterfactuals (§6.2, Tables 2 and 3).
+•We find that rationales trained with CREST-
+Rationalization not only are more plausible, but
+also achieve higher forward and counterfactual
+simulabilities (§6.3, Table 4).Overall, our experiments show that CREST suc-
+cessfully combines the benefits of counterfactual
+examples and selective rationales to improve the
+quality of each, resulting in a more interpretable
+and robust learned model.
+2 Background
+2.1 Rationalizers
+The traditional framework of rationalization in-
+volves training two components cooperatively: the
+generator —which consists of an encoder and an
+explainer—and the predictor . The generator en-
+codes the input and produces a “rationale” (e.g.,
+word highlights), while the predictor classifies the
+text given only the rationale as input (Lei et al.,
+2016).
+Assume a document xwithntokens as input.
+The encoder module ( enc) converts the input
+tokens into d-dimensional hidden state vectors
+H∈R, which are passed to the explainer
+(expl) to generate a latent mask z∈ {0,1}. The
+latent mask serves as the rationale since it is used
+to select a subset of the input x⊙z, which is then
+passed to the predictor module ( pred) to produce
+a final prediction ˆy∈ Y, where Y={1, ..., k}
+fork-class classification. The full process can be
+summarized as follows:
+z=expl(enc(x;ϕ);γ), (1)
+ˆy=pred(x⊙z;θ), (2)
+where ϕ, γ, θ are trainable parameters. To ensure
+that the explainer does not select all tokens (i.e.,
+z= 1,∀i), sparsity is usually encouraged in the15110rationale extraction. Moreover, explainers can also
+be encouraged to select contiguous words, as there
+is some evidence that it improves readibility (Jain
+et al., 2020). These desired properties may
+be encouraged via regularization terms during
+training (Lei et al., 2016; Bastings et al., 2019), or
+via application of sparse mappings (Treviso and
+Martins, 2020; Guerreiro and Martins, 2021).
+In this work, we will focus specifically on
+the SPECTRA rationalizer (Guerreiro and Mar-
+tins, 2021): this model leverages an explainer
+that extracts a deterministic structured mask z
+by solving a constrained inference problem with
+SparseMAP (Niculae et al., 2018). SPECTRA
+has been shown to achieve comparable perfor-
+mance with other rationalization approaches, in
+terms of end-task performance, plausibility with
+human explanations, and robustness to input per-
+turbation (Chen et al., 2022). Moreover, it is easier
+to train than other stochastic alternatives (Lei et al.,
+2016; Bastings et al., 2019), and, importantly, it
+allows for simple control over the properties of the
+rationales, such as sparsity via its constrained in-
+ference formulation: by setting a budget Bon the
+rationale extraction, SPECTRA ensures that the
+rationale size will not exceed ⌈Bn⌉tokens.
+2.2 Counterfactuals
+In NLP, counterfactuals refer to alternative texts
+that describe a different outcome than what is en-
+coded in a given factual text. Prior works (Verma
+et al., 2020) have focused on developing methods
+for generating counterfactuals that adhere to several
+key properties, including:
+•Validity : the generated counterfactuals should
+encode a different label from the original text.
+•Closeness : the changes made to the text should
+be small, not involving large-scale rewriting of
+the input.
+•Fluency : the generated counterfactuals should
+be coherent and grammatically correct.
+•Diversity : the method should generate a wide
+range of counterfactuals with diverse character-
+istics, rather than only a limited set of variations.
+While many methods for automatic counterfac-
+tual generation exist (Wu et al., 2021; Robeer et al.,
+2021; Dixit et al., 2022), our work is mostly re-
+lated to MiCE (Ross et al., 2021), which generates
+counterfactuals in a two stage process that involvesmasking the top- ktokens with the highest ℓgra-
+dient attribution of a pre-trained classifier, and in-
+filling tokens for masked position with a T5-based
+model (Raffel et al., 2020). MiCE further refines
+the resultant counterfactual with a binary search
+procedure to seek strictly minimal edits. However,
+this process is computationally expensive and, as
+we show in §4.2, directly optimizing for closeness
+can lead to counterfactuals that are less valid, fluent,
+and diverse. Next, we present an alternative method
+that overcomes these limitations while still produc-
+ing counterfactuals that are close to original inputs.
+3 CREST-Generation
+We now introduce CREST (ContRastive Edits with
+Sparse raTionalization), a framework that com-
+bines selective rationalization and counterfactual
+text generation. CREST has two key components:
+(i)CREST-Generation offers a controlled ap-
+proach to generating counterfactuals, which we
+show are valid, fluent, and diverse (§4.2); and
+(ii)CREST-Rationalization leverages these coun-
+terfactuals through a novel regularization technique
+encouraging agreement between rationales for orig-
+inal and counterfactual examples. We demonstrate
+that combining these two components leads to mod-
+els that are more robust (§6.2) and interpretable
+(§6.3). We describe CREST-Generation below and
+CREST-Rationalization in §5.
+Formally, let x=⟨x, ..., x⟩represent a factual
+input text with a label y. We define a counterfac-
+tual as an input ˜x=⟨x, ..., x⟩labeled with y
+such that y̸=y. A counterfactual generator is
+a mapping that transforms the original text xto a
+counterfactual ˜x. Like MiCE, our approach for gen-
+erating counterfactuals consists of two stages, as
+depicted in Figure 1: the mask and the edit stages.
+Mask stage. We aim to find a mask vector z∈
+{0,1}such that tokens xassociated with z=
+1are relevant for the factual prediction ˆyof a
+particular classifier C. To this end, we employ a
+SPECTRA rationalizer as the masker . Concretely,
+we pre-train a SPECTRA rationalizer on the task
+at hand with a budget constraint B, and define the
+mask as the rationale vector z∈ {0,1}(see §2.1).
+Edit stage. Here, we create edits by infilling the
+masked positions using an editor module G, such
+as a masked language model: ˜x∼G(x⊙z).
+In order to infill spans rather than single tokens, we
+follow MiCE and use a T5-based model to infill15111
+spans for masked positions. During training, we
+fine-tune the editor to infill original spans of text by
+prepending gold target labels yto original inputs.
+In order to generate counterfactual edits at test time,
+we prepend a counterfactual label yinstead, and
+sample counterfactuals using beam search.
+Overall, our procedure differs from that of MiCE
+in the mask stage: instead of extracting a mask via
+gradient-based attributions and subsequent binary
+search, we leverage SPECTRA to find an optimal
+mask. Interestingly, by doing so, we not only
+avoid the computationally expensive binary search
+procedure, but we also open up new opportunities:
+as our masking process is differentiable, we can
+optimize our masker to enhance the quality of
+both the counterfactuals (§4.2) and the selected
+rationales (§6.3). We will demonstrate the
+latter with our proposed CREST-Rationalization
+setup (§5). All implementation details for the
+masker and the editor can be found in §B.
+4 Evaluating CREST Counterfactuals
+This section presents an extensive comparison of
+counterfactuals generated by different methods.
+4.1 Experimental Setting
+Data and evaluation. We experiment with
+our counterfactual generation framework on two
+different tasks: sentiment classification using
+IMDB (Maas et al., 2011) and natural language
+inference (NLI) using SNLI (Bowman et al., 2015).
+In sentiment classification, we only have a single
+input to consider, while NLI inputs consist of apremise and a hypothesis, which we concatenate
+to form a single input. To assess the quality of
+our automatic counterfactuals, we compare them
+to manually crafted counterfactuals in the revised
+IMDB and SNLI datasets created by Kaushik et al.
+(2020). More dataset details can be found in §A.
+Training. We employ a SPECTRA rationalizer
+with a T5-small architecture as the masker, and
+train it for 10 epochs on the full IMDB and SNLI
+datasets. We also use a T5-small architecture for
+the editor, and train it for 20 epochs with early stop-
+ping, following the same training recipe as MiCE.
+Full training details can be found in §B.3.
+Generation. As illustrated in Figure 1, at test
+time we generate counterfactuals by prepending
+a contrastive label to the input and passing it to
+the editor. For sentiment classification, this means
+switching between positive and negative labels. For
+NLI, in alignment with Dixit et al. (2022), we adopt
+a refined approach by restricting the generation of
+counterfactuals to entailments and contradictions
+only, therefore ignoring neutral examples, which
+have a subtle semantic meaning. In contrast, our
+predictors were trained using neutral examples, and
+in cases where they predict the neutral class, we
+default to the second-most probable class.
+Baselines. We compare our approach with four
+open-source baselines that generate counterfactu-
+als: PWWS (Ren et al., 2019), PolyJuice (Wu et al.,
+2021), CounterfactualGAN (Robeer et al., 2021),15112
+and MiCE (Ross et al., 2021). In particular, to en-
+sure a fair comparison with MiCE, we apply three
+modifications to the original formulation: (i) we
+replace its RoBERTa classifier with a T5-based
+classifier (as used in SPECTRA); (ii) we disable its
+validity filtering;(iii) we report results with and
+without the binary search procedure by fixing the
+percentage of masked tokens.
+Metrics. To determine the general validity of
+counterfactuals, we report the accuracy of an
+off-the-shelf RoBERTa-base classifier available
+in the HuggingFace Hub.Moreover, we mea-
+sure fluency using perplexity scores from GPT-2
+large (Radford et al., 2019) and diversity with self-
+BLEU (Zhu et al., 2018). Finally, we quantify the
+notion of closeness by computing the normalized
+edit distance to the factual input and the average
+number of tokens in the document.
+4.2 Results
+Results are presented in Table 1. As expected, man-
+ually crafted counterfactuals achieve high validity,
+significantly surpassing the chance baseline and
+establishing a reliable reference point. For IMDB,
+we find that CREST outperforms other methods
+by a wide margin in terms of validity and fluency.
+At the same time, CREST’s validity is comparable
+to the manually crafted counterfactuals, while sur-
+prisingly deemed more fluent by GPT-2. Moreover,
+we note that our modification of disabling MiCE’s
+minimality search leads to counterfactuals that are
+more valid and diverse but less fluent and less close
+to the original inputs.
+For SNLI, this modification allows MiCE to
+achieve the best overall scores, closely followedby CREST. However, when controlling for close-
+ness, we observe that CREST outperforms MiCE:
+at closeness of ∼0.30, CREST (30% mask) outper-
+forms MiCE with binary search in terms of fluency
+and diversity. Similarly, at a closeness of ∼0.40,
+CREST (50% mask) surpasses MiCE (30% mask)
+across the board. As detailed in §C, CREST’s coun-
+terfactuals are more valid than MiCE’s for all close-
+ness bins lower than 38%. We provide examples of
+counterfactuals produced by CREST and MiCE in
+Appendix G. Finally, we note that CREST is highly
+affected by the masking budget, which we explore
+further next.
+Sparsity analysis. We investigate how the num-
+ber of edits affects counterfactual quality by train-
+ing maskers with increasing budget constraints (as
+described in §2.1). The results in Figure 3 show
+that with increasing masking percentage, gener-
+ated counterfactuals become less textually similar
+to original inputs (i.e., less close) but more valid
+and fluent. This inverse relationship demonstrates
+that strict minimality, optimized for in methods like
+MiCE, comes with tradeoffs in counterfactual qual-
+ity, and that the sparsity budget in CREST can be
+used to modulate the trade-off between validity and
+closeness. In Figure 3 we also examine the benefit
+of manually crafted counterfactuals in two ways:
+(i) using these examples as additional training data;
+and (ii) upon having a trained editor, further fine-
+tuning it with these manual counterfactuals. The
+results suggest that at lower budget percentages,
+exploiting a few manually crafted counterfactuals
+to fine-tune CREST can improve the validity of
+counterfactuals without harming fluency.
+Validity filtering. As previously demonstrated
+by Wu et al. (2021) and Ross et al. (2022), it
+is possible to filter out potentially disfluent or
+invalid counterfactuals by passing all examples to15113
+a classifier and discarding the subset with incorrect
+predictions. In our case, we use the predictor
+associated with the masker as the classifier. We
+found find that applying this filtering increases
+the validity of IMDB counterfactuals from 75.82
+to 86.36 with B= 0.3, and from 93.24 to 97.36
+with B= 0.5. For SNLI, validity jumps from
+75.45 to 96.39 with B= 0.3, and from 81.23 to
+96.67 with B= 0.5. These results indicate that
+CREST can rely on its predictor to filter out invalid
+counterfactuals, a useful characteristic for doing
+data augmentation, as we will see in §6.2.
+4.3 Human Study
+We conduct a small-scale human study to evaluate
+the quality of counterfactuals produced by MiCE
+and CREST with 50% masking percentage. An-
+notators were tasked with rating counterfactuals’
+validity andnaturalness (e.g., based on style, tone,
+and grammar), each using a 5-point Likert scale.
+Two fluent English annotators rated 50 examples
+from the IMDB dataset, and two others rated 50
+examples from SNLI. We also evaluate manually
+created counterfactuals to establish a reliable base-
+line. More annotation details can be found in §D.
+The study results, depicted in Figure 4, show that
+humans find manual counterfactuals to be more
+valid and natural compared to automatically gener-
+ated ones. Furthermore, CREST’s counterfactuals
+receive higher ratings for validity and naturalness
+compared to MiCE, aligning with the results ob-
+tained from automatic metrics.
+5 CREST-Rationalization
+Now that we have a method that generates high-
+quality counterfactual examples, a natural step is
+to use these examples for data augmentation. How-
+ever, vanilla data augmentation does not take advan-
+tage of the paired structure of original/contrastive
+examples and instead just treats them as individual
+datapoints. In this section, we present CREST’ssecond component, CREST-Rationalization (illus-
+trated in Figure 2), which leverages the relation-
+ships between factual and counterfactual inputs
+through a SPECTRA rationalizer with an agree-
+ment regularization strategy, described next.
+5.1 Linking Counterfactuals and Rationales
+We propose to incorporate counterfactuals into
+a model’s functionality by taking advantage of
+the fully differentiable rationalization setup. Con-
+cretely, we decompose a rationalizer into two flows,
+as depicted in Figure 2: a factual flow that receives
+factual inputs xand outputs a factual prediction
+ˆy, and a counterfactual flow that receives coun-
+terfactual inputs ˜xand should output a counterfac-
+tual prediction ˜y̸= ˆy. As a by-product of using
+a rationalizer, we also obtain a factual rationale
+z∈ {0,1}forxand a counterfactual rationale
+˜z∈ {0,1}for˜x, where n=|x|andm=|˜x|.
+Training. LetΘ ={ϕ, γ, θ}represent the train-
+able parameters of a rationalizer (defined in §2.1).
+We propose the following loss function:
+L(Θ) = L(y,ˆy(Θ)) + αL(y,˜y(Θ)) (3)
++λΩ(z(Θ),˜z(Θ)),
+where L(·)andL(·)represent cross-entropy
+losses for the factual and counterfactual flows, re-
+spectively, and Ω(·)is a novel penalty term to en-
+courage factual and counterfactual rationales to fo-
+cus on the same positions, as defined next. α∈R
+andλ∈Rare hyperparameters.
+Agreement regularization. To produce paired
+rationales for both the factual and counterfactual
+flows, we incorporate regularization terms into the
+training of a rationalizer to encourage the factual
+explainer to produce rationales similar to those orig-
+inally generated by the masker z, and the counter-
+factual explainer to produce rationales that focus
+on the tokens modified by the editor ˜z. We de-
+rive the ground truth counterfactual rationale ˜z
+by aligning xto˜xand marking tokens that were
+inserted or substituted as 1, and others as 0. The
+regularization terms are defined as:
+Ω(z,˜z) =∥z(Θ)−z∥+∥˜z(Θ)−˜z∥.(4)
+To allow the counterfactual rationale ˜zto focus
+on all important positions in the input, we adjust
+the budget for the counterfactual flow based on the
+length of the synthetic example produced by the
+counterfactual generator. Specifically, we multiply
+the budget by a factor of.15114
+6Exploiting Counterfactuals for Training
+In this section, we evaluate the effects of incorporat-
+ing CREST-generated counterfactuals into training
+by comparing a vanilla data augmentation approach
+with our CREST-Rationalization approach. We
+compare how each affects model robustness (§6.2)
+and interpretability (§6.3).
+6.1 Experimental Setting
+We use the IMDB and SNLI datasets to train
+SPECTRA rationalizers with and without coun-
+terfactual examples, and further evaluate on
+in-domain ,contrast and out-of-domain (OOD)
+datasets. For IMDB, we evaluate on the
+revised IMDB ,contrast IMDB ,RottenTomatoes ,
+SST-2 ,Amazon Polarity , and Yelp. For SNLI, we
+evaluate on the Hard SNLI ,revised SNLI ,break ,
+MultiNLI , and Adversarial NLI . Dataset details
+can be found in §A. To produce CREST counter-
+factuals, which we refer to as “synthetic”, we use
+a 30% masking budget as it provides a good bal-
+ance between validity, fluency, and closeness ( cf.
+Figure 3). We tune the counterfactual loss ( α) and
+agreement regularization ( λ) weights on the dev set.
+We report results with α= 0.01andλ= 0.001for
+IMDB, and α= 0.01andλ= 0.1for SNLI.
+6.2 Robustness Results
+Tables 2 and 3 show results for counterfactual
+data augmentation and agreement regularization
+for IMDB and SNLI, respectively. We compare a
+standard SPECTRA trained on factual examples
+(F) with other SPECTRA models trained on aug-
+mentated data from human-crafted counterfactuals
+(F+C) and synthetic counterfactuals generated
+by CREST ( F+C), which we additionally post-
+process to drop invalid examples ( F+C).
+Discussion. As shown in Table 2, CREST-
+Rationalization ( F&C) consistently outperformsvanilla counterfactual augmentation ( F+C) on
+all sentiment classification datasets. It achieves
+the top results on the full IMDB and on all OOD
+datasets, while also leading to strong results on
+contrastive datasets—competitive with manual
+counterfactuals ( F+C). When analyzing the
+performance of CREST-Rationalization trained
+on a subset of valid examples ( F&C) versus
+the entire dataset ( F&C), the models trained
+on the entire dataset maintain a higher level of
+performance across all datasets. However, when
+using counterfactuals for data augmentation, this
+trend is less pronounced, especially for in-domain
+and contrastive datasets. In §E, we explore the
+impact of the number of augmented examples
+on results and find that, consistent with previous
+research (Huang et al., 2020; Joshi and He, 2022),
+augmenting the training set with a small portion
+of valid and diverse synthetic counterfactuals leads
+to more robust models, and can even outweigh the
+benefits of manual counterfactuals.
+Examining the results for NLI in Table 3, we
+observe that both counterfactual augmentation and
+agreement regularization interchangeably yield top
+results across datasets. Remarkably, in contrast to
+sentiment classification, we achieve more substan-
+tial improvements with agreement regularization
+models when these are trained on valid counterfac-
+tuals, as opposed to the full set.
+Overall, these observations imply that CREST-
+Rationalization is a viable alternative to data aug-
+mentation for improving model robustness, espe-
+cially for learning contrastive behavior for senti-
+ment classification. In the next section, we explore
+the advantages of CREST-Rationalization for im-
+proving model interpretability.
+6.3 Interpretability Analysis
+In our final experiments, we assess the benefits of
+our proposed regularization method on model inter-15115
+pretability. We evaluate effects on rationale quality
+along three dimensions: plausibility, forward simu-
+lability, and counterfactual simulability.
+Plausibility. We use the MovieReviews (DeY-
+oung et al., 2020) and the e-SNLI (Camburu et al.,
+2018) datasets to study the human-likeness of ratio-
+nales by matching them with human-labeled expla-
+nations and measuring their AUC, which automati-
+cally accounts for multiple binarization levels.
+Forward simulability. Simulability measures
+how often a human agrees with a given classifier
+when presented with explanations, and many works
+propose different variants to compute simulability
+scores in an automatic way (Doshi-Velez and Kim,
+2017; Treviso and Martins, 2020; Hase et al., 2020;
+Pruthi et al., 2022). Here, we adopt the framework
+proposed by Treviso and Martins (2020), which
+views explanations as a message between a clas-
+sifier and a linear student model, and determines
+simulability as the fraction of examples for which
+the communication is successful. In our case, we
+cast a SPECTRA rationalizer as the classifier, use
+its rationales as explanations, and train a linear stu-
+dent on factual examples of the IMDB and SNLI
+datasets. High simulability scores indicate more
+understandable and informative explanations.
+Counterfactual simulability. Building on the
+manual simulability setup proposed by Doshi-Velez
+and Kim (2017), we introduce a new approach to
+automatically evaluate explanations that interact
+with counterfactuals. Formally, let Cbe a classifier
+that when given an input xproduces a prediction ˆy
+and a rationale z. Moreover, let Gbe a pre-trained
+counterfactual editor, which receives xandzand
+produces a counterfactual ˜xby infilling spans on
+positions masked according to z(e.g., via masking).We define counterfactual simulability as follows:
+1
+N/summationdisplay[[C(x)̸=C(G(x⊙z))]],(5)
+where [[·]]is the Iverson bracket notation. Intu-
+itively, counterfactual simulability measures the
+ability of a rationale to change the label predicted
+by the classifier when it receives a contrastive edit
+with infilled tokens by a counterfactual generator as
+input. Therefore, a high counterfactual simulability
+indicates that the rationale zfocuses on the highly
+contrastive parts of the input.
+Results. The results of our analysis are shown
+in Table 4. We observe that plausibility can sub-
+stantially benefit from synthetic CREST-generated
+counterfactual examples, especially for a ratio-
+nalizer trained with our agreement regularization,
+which outperforms other approaches by a large
+margin. Additionally, leveraging synthetic counter-
+factuals, either via data augmentation or agreement
+regularization, leads to a high forward simulabil-
+ity score, though by a smaller margin—within the
+standard deviation of other approaches. Finally,
+when looking at counterfactual simulability, we
+note that models that leverage CREST counterfac-
+tuals consistently lead to better rationales. In par-
+ticular, agreement regularization leads to strong re-
+sults on both tasks while also producing more plau-
+sible rationales, showing the efficacy of CREST-
+Rationalization in learning contrastive behavior.
+7 Related Works
+Generating counterfactuals. Existing ap-
+proaches to generating counterfactuals for NLP
+use heuristics (Ren et al., 2019; Ribeiro et al.,
+2020), leverage plug-and-play approaches to
+controlled generation (Madaan et al., 2021), or,
+most relatedly, fine-tune language models to15116
+generate counterfactuals (Wu et al., 2021; Ross
+et al., 2021, 2022; Robeer et al., 2021). For
+instance, PolyJuice (Wu et al., 2021) finetunes a
+GPT-2 model on human-crafted counterfactuals
+to generate counterfactuals following pre-defined
+control codes, while CounterfactualGAN (Robeer
+et al., 2021) adopts a GAN-like setup. We show
+that CREST-Generation outperforms both methods
+in terms of counterfactual quality. Most closely
+related is MiCE (Ross et al., 2021), which also uses
+a two-stage approach based on a masker and an
+editor to generate counterfactuals. Unlike MiCE,
+we propose to relax the minimality constraint and
+generate masks using selective rationales rather
+than gradients, resulting not only in higher-quality
+counterfactuals, but also in a fully-differentiable
+set-up that allows for further optimization of the
+masker. Other recent work includes Tailor (Ross
+et al., 2022), a semantically-controlled generation
+system that requires a human-in-the-loop to
+generate counterfactuals, as well as retrieval-based
+and prompting approaches such as RGF (Paranjape
+et al., 2022) and CORE (Dixit et al., 2022).
+Training with counterfactuals. Existing ap-
+proaches to training with counterfactuals predom-
+inantly leverage data augmentation. Priors works
+have explored how augmenting with both man-
+ual (Kaushik et al., 2020; Khashabi et al., 2020;
+Huang et al., 2020; Joshi and He, 2022) and
+automatically-generated (Wu et al., 2021; Ross
+et al., 2022; Dixit et al., 2022) counterfactuals
+affects model robustness. Unlike these works,
+CREST-Rationalization introduces a new strategy
+for training with counterfactuals that leverages
+the paired structure of original and counterfactual
+examples, improving model robustness and inter-
+pretability compared to data augmentation. Also
+related is the training objective proposed by Guptaet al. (2021) to promote consistency across pairs of
+examples with shared substructures for neural mod-
+ule networks, and the loss term proposed by Teney
+et al. (2020) to model the factual-counterfactual
+paired structured via gradient supervision. In con-
+trast, CREST can be used to generate paired ex-
+amples, can be applied to non-modular tasks, and
+does not require second-order derivatives.
+Rationalization. There have been many modifi-
+cations to the rationalization setup to improve task
+accuracy and rationale quality. Some examples
+include conditioning the rationalization on
+pre-specified labels (Yu et al., 2019), using an
+information-bottleneck formulation to ensure infor-
+mative rationales (Paranjape et al., 2020), training
+with human-created rationales (Lehman et al.,
+2019), and replacing stochastic variables with deter-
+ministic mappings (Guerreiro and Martins, 2021).
+We find that CREST-Rationalization, which is fully
+unsupervised, outperforms standard rationalizers in
+terms of model robustness and quality of rationales.
+8 Conclusions
+We proposed CREST, a joint framework for selec-
+tive rationalization and counterfactual text genera-
+tion that is capable of producing valid, fluent, and
+diverse counterfactuals, while being flexible for
+controlling the amount of perturbations. We have
+shown that counterfactuals can be successfully in-
+corporated into a rationalizer, either via counterfac-
+tual data augmentation or agreement regularization,
+to improve model robustness and rationale quality.
+Our results demonstrate that CREST successfully
+bridges the gap between selective rationales and
+counterfactual examples, addressing the limitations
+of existing methods and providing a more compre-
+hensive view of a model’s predictions.15117Limitations
+Our work shows that CREST is a suitable frame-
+work for generating high-quality counterfactuals
+and producing plausible rationales, and we hope
+that CREST motivates new research to develop
+more robust and interpretable models. We note,
+however, two main limitations in our framework.
+First, our counterfactuals are the result of a large
+language model (T5), and as such, they may carry
+all the limitations within these models. Therefore,
+caution should be exercised when making state-
+ments about the quality of counterfactuals beyond
+the metrics reported in this paper, especially if
+these statements might have societal impacts. Sec-
+ond, CREST relies on a rationalizer to produce
+highlights-based explanations, and therefore it is
+limited in its ability to answer interpretability ques-
+tions that go beyond the tokens of the factual or
+counterfactual input.
+Acknowledgments
+This work was supported by the European Research
+Council (ERC StG DeepSPIN 758969), by EU’s
+Horizon Europe Research and Innovation Actions
+(UTTER, contract 101070631), by P2020 project
+MAIA (LISBOA-01-0247- FEDER045909), by
+the Portuguese Recovery and Resilience Plan
+through project C645008882-00000055 (NextGe-
+nAI, Center for Responsible AI), and by contract
+UIDB/50008/2020. We are grateful to Duarte
+Alves, Haau-Sing Lee, Taisiya Glushkova, and
+Henrico Brum for the participation in human eval-
+uation experiments.
+References151181511915120
+A Datasets
+The revised IMDB and SNLI datasets, which we
+refer to as rIMDB and rSNLI respectively, were cre-
+ated by Kaushik et al. (2020). They contain coun-
+terfactuals consisting of revised versions made by
+humans on the Amazon’s Mechanical Turk crowd-
+sourcing platform. For both datasets, the authors
+ensure that (a) the counterfactuals are valid; (b) the
+edited reviews are coherent; and (c) the counter-
+factuals do not contain unnecessary modifications.
+For SNLI, counterfactuals were created either by
+revising the premise or the hypothesis. We refer to
+(Kaushik et al., 2020) for more details on the data
+generation process. Table 5 presents statistics for
+the datasets used for training models in this work.
+Additionally, we incorporate various contrastive
+and out-of-domain datasets to evaluate our mod-
+els. For IMDB, we use the contrast IMDB (Gardner
+et al., 2020), RottenTomatoes (Pang and Lee, 2005),
+SST-2 (Socher et al., 2013), Amazon Polarity and
+Yelp (Zhang et al., 2015). For SNLI, we evalu-
+ate on the Hard SNLI (Gururangan et al., 2018),
+break (Glockner et al., 2018), MultiNLI (Williams
+et al., 2018), and Adversarial NLI (Nie et al., 2020).
+We refer to the original works for more details.
+B CREST Details
+B.1 Masker
+For all datasets, the masker consists of a SPEC-
+TRA rationalizer that uses a T5-small encoder as
+the backbone for the encoder and predictor (see
+§2.1). Our implementation is derived directly from
+its original source (Guerreiro and Martins, 2021).
+We set the maximum sequence length to 512, trun-
+cating inputs when necessary. We employ a con-tiguity penalty of 10for IMDB and 10for
+SNLI. We train all models for a minimum of 3
+epochs and maximum of 15 epochs along with
+early stopping with a patience of 5 epochs. We
+use AdamW (Loshchilov and Hutter, 2019) with a
+learning rate of 10and weight decay of 10.
+B.2 Editor
+For all datasets, CREST and MiCE editors con-
+sist of a full T5-small model (Raffel et al., 2020),
+which includes both the encoder and the decoder
+modules. We use the T5 implementation available
+in the transformers library (Wolf et al., 2020) for
+our editor. We train all models for a minimum of
+3 epochs and maximum of 20 epochs along with
+early stopping with a patience of 5 epochs. We
+use AdamW (Loshchilov and Hutter, 2019) with
+a learning rate of 10and weight decay of 10.
+For both CREST and MiCE, we generate counter-
+factuals with beam search with a beam of size 15
+and disabling bigram repetitions. We post-process
+the output of the editor to trim spaces and repeti-
+tions of special symbols (e.g., </s> ).
+B.3 SPECTRA rationalizers
+All of our SPECTRA rationalizers share the same
+setup and training hyperparameters as the one used
+by the masker in §4, but were trained with distinct
+random seeds. We tuned the counterfactual loss
+weight αwithin {1.0,0.1,0.01,0.001,0.0001},
+andλwithin {1.0,0.1,0.01,0.001}for models
+trained with agreement rationalization. More
+specifically, we performed hyperparameter tuning
+on the validation set, with the goal of maximiz-
+ing in-domain accuracy. As a result, we obtained
+α= 0.01andλ= 0.001for IMDB, and α= 0.01
+andλ= 0.1for SNLI.
+C Validity vs. Closeness
+To better assess the performance of CREST and
+MiCE by varying closeness, we plot in Figure 5
+binned-validity scores of CREST and MiCE with
+30% masking on the revised SNLI dataset. Al-
+though CREST is deemed less valid than MiCE
+overall ( cf.Table 1), we note that CREST gener-
+ates more valid counterfactuals in lower minimality
+ranges. This provides further evidence that CREST
+remains superior to MiCE on closeness intervals of
+particular interest for generating counterfactuals in
+an automatic way.15121
+D Human Annotation
+The annotation task was conducted by four distinct
+individuals, all of whom are English-fluent PhD stu-
+dents. Two annotators were employed for IMDB
+and two for SNLI. The annotators were not given
+any information regarding the methods used to cre-
+ate each counterfactual, and the documents were
+presented in a random order to maintain source
+anonymity. The annotators were presented with
+the reference text and its corresponding gold label.
+Subsequently, for each method, they were asked
+to assess both the validity and the naturalness of
+the resulting counterfactuals using a 5-point Lik-
+ert scale. We provided a guide page to calibrate
+the annotators’ understating of validity and natu-
+ralness prior the annotation process. We presented
+hypothetical examples with different levels of va-
+lidity and naturalness and provided the following
+instructions regarding both aspects:
+•“If every phrase in the text unequivocally sug-
+gests a counterfactual label, the example is
+deemed fully valid and should receive a top score
+of 5/5.”
+•“If the counterfactual text aligns with the style,
+tone, and grammar of real-world examples, it’s
+considered highly natural and deserves a score of
+5/5.“
+We measure inter-annotator agreement with a
+normalized and inverted Mean Absolute Difference
+(MAD), which computes a “soft” accuracy by aver-
+aging absolute difference ratings and normalizing
+them to a 0-1 range. We present the annotation
+results in Table 6. Our results show that humans
+agreed more on manual examples than on auto-
+matic approaches. On the other hand, for SNLI,
+annotators assigned similar scores across all meth-
+ods. In terms of overall metrics, including validity,
+naturalness, and agreement, the scores were lower
+for IMDB than for SNLI, highlighting the difficulty
+associated with the generation of counterfactuals
+for long movie reviews.
+Annotation interface. Figure 6 shows a snap-
+shot of the interface used for the annotation, which
+is publicly available at .
+E Counterfactual Data Augmentation
+Analysis
+Previous studies on counterfactual data augmen-
+tation have found that model performance highly
+depends on the number and diversity of augmented
+samples (Huang et al., 2020; Joshi and He, 2022).
+To account for this, we investigate the effect of
+adding increasingly larger portions of CREST
+counterfactuals for data augmentation on the IMDB
+dataset. Our findings are summarized in Table 7.
+Discussion. We find that incorporating human-
+crafted counterfactuals ( F+C) improves SPEC-
+TRA performance on all OOD datasets. On top15122
+of that, we note that using a small proportion
+(4% of the full IMDB) of valid CREST coun-
+terfactuals ( F+C) through data augmenta-
+tion also leads to improvements on all datasets
+and outweighs the benefits of manual counterfac-
+tuals. This finding confirms that, as found by
+PolyJuice (Wu et al., 2021), synthetic counterfac-
+tuals can improve model robustness. Conversely,
+as the number of augmented counterfactuals in-
+creases ( 85%), the performance on OOD datasets
+starts to decrease, which is also consistent with
+the findings of Huang et al. (2020). When aug-
+menting the entire training set we obtain an in-
+crease of accuracy, suggesting that the counterfac-
+tual loss weight ( α) was properly adjusted on the
+validation set. Finally, we observe that while ap-
+plying CREST-Rationalization only on valid ex-
+amples ( F&C) degrades performance, apply-
+ing CREST-Rationalization on all paired examples
+(F&C) maintains a high accuracy on OOD
+datasets and concurrently leads to strong results
+on in-domain and contrast datasets (see Table 2).
+F Computing infrastructure
+Our infrastructure consists of four machines with
+the specifications shown in Table 8. The machines
+were used interchangeably and all experiments
+were carried in a single GPU.G Examples of Counterfactuals
+Table 9 shows examples of counterfactuals pro-
+duced by MiCE and CREST with 30% masking.1512315124ACL 2023 Responsible NLP Checklist
+A For every submission:
+/squareA1. Did you describe the limitations of your work?
+Final section (9)
+/squareA2. Did you discuss any potential risks of your work?
+Final section (9)
+/squareA3. Do the abstract and introduction summarize the paper’s main claims?
+Left blank.
+/squareA4. Have you used AI writing assistants when working on this paper?
+ChatGPT, mostly to rephrase some sentences by following the prompt "rewrite this sentence in a
+better, more ﬂuent, way (keep tone)".
+B/squareDid you use or create scientiﬁc artifacts?
+Section 1 (footnote).
+/squareB1. Did you cite the creators of artifacts you used?
+Section 4.1 for datasets, and Appendix B for the model architecture / implementation.
+/squareB2. Did you discuss the license or terms for use and / or distribution of any artifacts?
+Left blank.
+/squareB3. Did you discuss if your use of existing artifact(s) was consistent with their intended use, provided
+that it was speciﬁed? For the artifacts you create, do you specify intended use and whether that is
+compatible with the original access conditions (in particular, derivatives of data accessed for research
+purposes should not be used outside of research contexts)?
+Not applicable. Left blank.
+/squareB4. Did you discuss the steps taken to check whether the data that was collected / used contains any
+information that names or uniquely identiﬁes individual people or offensive content, and the steps
+taken to protect / anonymize it?
+Not applicable. Left blank.
+/squareB5. Did you provide documentation of the artifacts, e.g., coverage of domains, languages, and
+linguistic phenomena, demographic groups represented, etc.?
+Not applicable. Left blank.
+/squareB6. Did you report relevant statistics like the number of examples, details of train / test / dev splits,
+etc. for the data that you used / created? Even for commonly-used benchmark datasets, include the
+number of examples in train / validation / test splits, as these provide necessary context for a reader
+to understand experimental results. For example, small differences in accuracy on large test sets may
+be signiﬁcant, while on small test sets they may not be.
+Appendix A.
+C/squareDid you run computational experiments?
+Sections 4 and 6, and Appendix C.
+/squareC1. Did you report the number of parameters in the models used, the total computational budget
+(e.g., GPU hours), and computing infrastructure used?
+The computing infrastructure is in Appendix D.15125/squareC2. Did you discuss the experimental setup, including hyperparameter search and best-found
+hyperparameter values?
+Sections 4 and 6, and Appendix B.
+/squareC3. Did you report descriptive statistics about your results (e.g., error bars around results, summary
+statistics from sets of experiments), and is it transparent whether you are reporting the max, mean,
+etc. or just a single run?
+Sections 4 and 6, and Appendix C.
+/squareC4. If you used existing packages (e.g., for preprocessing, for normalization, or for evaluation), did
+you report the implementation, model, and parameter settings used (e.g., NLTK, Spacy, ROUGE,
+etc.)?
+For some metrics, yes (simulability in section 6).
+D/squareDid you use human annotators (e.g., crowdworkers) or research with human participants?
+Section 4.3 and Appendix D
+/squareD1. Did you report the full text of instructions given to participants, including e.g., screenshots,
+disclaimers of any risks to participants or annotators, etc.?
+Appendix D
+/squareD2. Did you report information about how you recruited (e.g., crowdsourcing platform, students)
+and paid participants, and discuss if such payment is adequate given the participants’ demographic
+(e.g., country of residence)?
+Considering the simplicity of the study, we found this to be unnecessary.
+/squareD3. Did you discuss whether and how consent was obtained from people whose data you’re
+using/curating? For example, if you collected data via crowdsourcing, did your instructions to
+crowdworkers explain how the data would be used?
+Considering the simplicity of the study, we found this to be unnecessary.
+/squareD4. Was the data collection protocol approved (or determined exempt) by an ethics review board?
+Considering the simplicity of the study, we found this to be unnecessary.
+/squareD5. Did you report the basic demographic and geographic characteristics of the annotator population
+that is the source of the data?
+Considering the simplicity of the study, we found this to be unnecessary.15126

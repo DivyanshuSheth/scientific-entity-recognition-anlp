@@ -1,1 +1,925 @@
-1128 Proceedings of the 2022 Conference of the North American Chapter of the Association for Computational Linguistics : Human Language Technologies , pages 1128 1143 July 10 - 15 , 2022 © 2022 Association for Computational Linguistics 1129 1130 1131 1132 1133 1134 1135 1136 1137 1138 1139 1140 1141 1142 1143 
+
+Rachit BansalMilan AggarwalSumit Bhatia
+Jivat Neet KaurBalaji KrishnamurthyDelhi Technological UniversityMedia and Data Science Research Lab, Adobe, IndiaMicrosoft Research, India
+racbansa@gmail.com, {milaggar, sumbhati, kbalaji}@adobe.com
+jivatneet@gmail.com
+Abstract
+Pre-trained Language Models (PTLMs) have
+been shown to perform well on natural lan-
+guage tasks. Many prior works have lever-
+aged structured commonsense present in the
+form of entities linked through labeled rela-
+tions in Knowledge Graphs (KGs) to assist
+PTLMs. Retrieval approaches use KG as a
+separate static module which limits coverage
+since KGs contain finite knowledge. Gener-
+ative methods train PTLMs on KG triples to
+improve the scale at which knowledge can be
+obtained. However, training on symbolic KG
+entities limits their applicability in tasks in-
+volving natural language text where they ig-
+nore overall context. To mitigate this, we pro-
+pose a Common SenseContextualizer ( CoSe-
+Co) conditioned on sentences as input to make
+it generically usable in tasks for generating
+knowledge relevant to the overall context of
+input text. To train CoSe-Co , we propose a
+novel dataset comprising of sentence and com-
+monsense knowledge pairs. The knowledge
+inferred by CoSe-Co is diverse and contain
+novel entities not present in the underlying KG.
+We augment generated knowledge in Multi-
+Choice QA and Open-ended CommonSense
+Reasoning tasks leading to improvements over
+current best methods on CSQA, ARC, QASC
+and OBQA datasets. We also demonstrate its
+applicability in improving performance of a
+baseline model for paraphrase generation task.
+1 Introduction
+While dealing with natural language text, common-
+sense allows humans to expand salient concepts
+and infer additional information. For example, by
+reading a sign like Men at Work on a road, we
+implicitly know to slow down our vehicles, look
+carefully for workers. This implicit process of us-
+ing common sense to make logical inferences is
+critical to natural language understanding (Xie andPu, 2021). A natural question to ask then is how we
+can incorporate common sense in now-ubiquitous
+language models (LMs) (Devlin et al., 2019; Rad-
+ford et al., 2018a; Raffel et al., 2019).
+There have been various efforts (Bao et al., 2016;
+Feng et al., 2020; Wang et al., 2020b) to lever-
+age structured knowledge present in commonsense
+knowledge graphs - KGs (we use KG as a short-
+hand for Commonsense Knowledge Graph) (Xie
+and Pu, 2021). Such works have primarily focused
+on either retrieving or generating required knowl-
+edge. Retrieval methods rely heavily on structure of
+downstream task like multi-choice question answer-
+ing (QA) to leverage knowledge in a KG (Yasunaga
+et al., 2021) and are not applicable beyond a spe-
+cific task. Further, retrieval can restrict total knowl-
+edge that can be garnered since static KGs lack
+coverage due to sparsity (Bordes et al., 2013; Guu
+et al., 2015). The other body of work addresses this
+comprising of generative methods that learn com-
+monsense through training a LM on symbolic enti-
+ties and relations between them in a KG. They have
+either been designed for KG completion (Bosse-
+lut et al., 2019), i.e. generate tail entity of a KG
+triple given head entity and relation, or to generate
+commonsense paths connecting a pair of entities
+which suffer from two shortcomings. Firstly, ap-
+plying such methods in downstream tasks require
+entity extraction from text as a prerequisite step and
+secondly, they generate knowledge between entity
+pairs ignoring overall context of sentence (Wang
+et al., 2020b). Hence, applying such methods is
+sub-optimal since most NLP tasks comprise of sen-
+tences. Further, being trained on entities, applying
+them directly on sentences is infeasible and lead to
+train-inference input type mismatch.
+To address these limitations, we propose
+Common SenseContextualizer - CoSe-Co , a gen-
+erative framework which generates relevant com-
+monsense knowledge given natural language sen-
+tence as input. We condition it on sentences to1128make it learn to incorporate overall text context
+and enable it to dynamically select entities/phrases
+from an input sentence as well as output novel yet
+relevant entities as part of commonsense inferences
+generated. We consider commonsense knowledge
+in the form of paths, i.e., sequence of entities con-
+nected through relations. We first create sentence-
+path paired dataset by - 1) sampling paths from
+an underlying KG; 2) sampling a subset of entities
+from a path; and 3) retrieving & filtering sentences
+(from a sentence corpus) that are semantically sim-
+ilar to the path. The paired data is then used to
+train a generative language model to generate a
+path given a sentence as input.
+To analyse the usefulness of generated common-
+sense, we augment it in various downstream tasks.
+The reasoning ability of NLP systems is commonly
+analysed using QA. Hence, we choose two such
+tasks: 1) Multi-Choice QA, where given a ques-
+tion and set of choices, the model has to identify
+the most appropriate answer choice. However, of-
+ten more than one choice is a suitable answer. To
+mitigate this, 2) OpenCSR (Open-ended Common-
+Sense Reasoning) (Lin et al., 2021a) was proposed,
+where each question is labeled with a set of answers
+which have to be generated without choices. We
+also show applicability of CoSe-Co in improving
+performance on paraphrase generation task (§4.5).
+Our contributions can be summarised as:
+1.We propose a Common SenseContextualizer
+(CoSe-Co ) to generate knowledge relevant
+to overall context of given natural language
+text. CoSe-Co is conditioned on sentence
+as input to make it generically usable in tasks
+without relying on entity extraction.
+2.We devise a method to extract sentence-
+relevant commonsense knowledge paths and
+create the first sentence-path paired dataset.
+We release the dataset and make it available to
+the community along with the trained models
+and corresponding code.
+3.Since CoSe-Co is based on generative LM,
+it infers relevant and diverse knowledge con-
+taining novel entities not present in the un-
+derlying KG (§4.2). Augmenting generated
+knowledge in Multi-Choice QA (§4.3) and
+OpenCSR (§4.4) tasks leads to improvements
+over current SoTA methods. Further, it is ob-
+served that CoSe-Co helps in generalising
+better in low training data regime.2 Related Work
+Commonsense Knowledge Graphs (KGs) are struc-
+tured knowledge sources comprising of entity
+nodes in the form of symbolic natural language
+phrases connected through relations (Speer et al.,
+2017; Sap et al., 2019a; Ilievski et al., 2021; Zhang
+et al., 2020). The knowledge in KGs is leveraged
+to provide additional context in NLP tasks (Bao
+et al., 2016; Sun et al., 2018; Lin et al., 2019) and
+perform explainable structured reasoning (Ren*
+et al., 2020; Ren and Leskovec, 2020). Addition-
+ally, a variety of Natural Language Inference (NLI)
+and generation tasks requiring commonsense rea-
+soning have been proposed over the years (Zellers
+et al., 2018; Talmor et al., 2019; Sap et al., 2019b;
+Lin et al., 2020, 2021a,b). Pre-trained language
+models (PTLMs) (Devlin et al., 2019) trained over
+large text corpus have been shown to posses tex-
+tual knowledge (Jiang et al., 2020; Petroni et al.,
+2019; Roberts et al., 2020) and semantic under-
+standing (Li et al., 2021). Consequently, they have
+been used for reasoning where they perform well to
+some extent (Bhagavatula et al., 2020; Huang et al.,
+2019). However, it remains unclear whether this
+performance can be genuinely attributed to reason-
+ing capability or if it is due to unknown data cor-
+relation (Mitra et al., 2019; Niven and Kao, 2019;
+Kassner and Schütze, 2020; Zhou et al., 2020).
+Due to this, various LM + KG systems have been
+explored (Feng et al., 2020; Wang et al., 2019; Lv
+et al., 2020) to combine broad textual coverage
+of LMs with KG’s structured reasoning capability.
+Early works on KG guided QA retrieve sub-graph
+relevant to question entities but suffer noise due to
+irrelevant nodes (Bao et al., 2016; Sun et al., 2018).
+Hybrid graph network based methods generate
+missing edges in the retrieved sub-graph while fil-
+tering out irrelevant edges (Yan et al., 2020). Graph
+Neural Networks (GNNs) have been used to model
+embeddings of KG nodes (Wang et al., 2020a).
+More recently, Yasunaga et al. (2021) proposed
+an improved framework (QA-GNN) leveraging a
+static KG by unifying GNN based KG entity em-
+beddings with LM based QA representations. Al-
+though, such frameworks extract relevant evidence
+from a KG, it undesirably restricts knowledge that
+can be garnered since knowledge source is static
+and might lack coverage due to sparsity (Bordes
+et al., 2013; Guu et al., 2015). Contrarily, we train
+a generative model on a given KG to enable it to
+dynamically generate relevant commonsense infer-1129
+ences making it more generalizable and scalable.
+Bosselut et al. (2019) cast commonsense acquisi-
+tion by LMs as KG completion. They propose
+COMET, a GPT (Radford et al., 2018b) based
+framework to generate tail entity given head and
+relation in a KG triple as input. Owing to training
+on symbolic KG nodes, using COMET in down-
+stream tasks involving natural language text is not
+straightforward. Specifically, it requires extract-
+ing entities from text as a prerequisite (Becker
+et al., 2021). Further, training on single triples
+makes its application in tasks requiring multi-hop
+reasoning challenging due to large relation search
+space (Bosselut et al., 2021). To address this, Path
+Generator (PGQA) was proposed to generate com-
+monsense paths between entities pair (Wang et al.,
+2020b). Designed for multi-choice QA, they ex-
+tract question entities and generate paths between
+each question entity and answer choice pair. Even
+though generated paths are multi-hop, training on
+entities limits applying it directly on sentences due
+to train-inference input type mismatch. Further,
+being conditioned only on question-choice entity
+pairs, paths are generated ignoring overall question
+context. To mitigate this, we design CoSe-Co
+as a generic framework to dynamically generate
+multi-hop commonsense inference given natural
+language sentence as input. Separately, retrieval
+methods have been explored to search relevant
+sentences to generate text corresponding to con-
+cepts (Wang et al., 2021). Different from this task,
+we retrieve sentences relevant to paths in a KG to
+create paired sentence-path data.
+3 Proposed CoSe-Co Framework
+Problem Setting Given a commonsense knowl-
+edge graph G= (E,R), where Eis the set of entity
+nodes and Ris the set of labeled directed rela-tional edges between entities, we aim to model a
+Common SenseContextualizer ( CoSe-Co ) which
+generates a set of commonsense inferences in
+the form of paths derived using G, that are rel-
+evant to a natural language text given as input.
+It is desirable that such a generative common-
+sense knowledge model should be generic, task
+agnostic, and takes into account the overall con-
+text of language input while generating common-
+sense. Since most tasks comprise of text in the
+form of sentences, we model the input to CoSe-
+Coas a sentence. In order to train such a model, a
+dataset is required which comprises of mappings of
+the form {(s, p),(s, p), ...,(s, p)}, where
+sandpare relevant sentence-commonsense in-
+ference path pair. However, no existing dataset
+consists of such mappings. To bridge this gap,
+we first devise a methodology to create a dataset
+Dcomprising of sentences paired with relevant
+commonsense inference paths. Broadly, we first
+extract a large corpus Cconstituting sentences
+{s, s, ..., s}. Subsequently, we sample a set of
+pathsP={p, p, ..., p}fromGsuch that each
+p∈ P is of the form p={e, r, e, r, ..., e},
+where e∈ Eandr∈ R. For each p∈ P, a set of
+contextually and semantically relevant sentences
+S⊂ C is retrieved and mapped to p. We then train
+a generative LM based commonsense knowledge
+model using D. During inference, given a sentence
+s, it generates commonsense paths of the form
+p={e, r, e, r, ..., e}such that e∈ E
+andr∈ R. Here, E=E ∪ E where E
+are novel entities not present in G. These include
+phrases present in an input sentence but not in Eas
+well as entirely novel entities which the pre-trained
+LM based backbone enables it to generate through
+transfer learning. The generated commonsense in-
+ference paths from CoSe-Co can then be used to
+augment context in downstream tasks. An overview1130
+of our framework is shown in Figure 1.
+3.1 Sentence-Path Paired Dataset Creation
+In order to train CoSe-Co , we create a
+novel dataset comprising of related sentence-
+commonsense path pairs. To obtain set P, we
+perform random walk in Gto extract multi-hop
+paths of the form p={e, r, e, r, ..., e},
+where the number of hops, denoted as path length
+|p|, is in range [l, l]. To avoid noisy paths which
+do not convey useful information, we employ rela-
+tional heuristics in P(described in appendix E.1).
+Separately, the sentence corpus Cis indexed using
+Apache Solr which is queried to retrieve sentences
+relevant to a path. We now explain this in detail.
+Broadly, we map each path p∈ P to a set of
+sentences S⊂ C based on semantic similarity and
+overlap between entities in pand sentences. For
+this, consider a path p={e, r, e, ..., e}.
+To ensure that retrieved sentences are similar to p,
+we devise two types of query templates - Q1and
+Q2which are used to create multiple queries per
+path while querying Solr. We design Q1to cap-
+ture relation information between entities in pin
+addition to entities themselves. Specifically, we
+extract non-contiguous entity-relation triples of the
+form{(e, r, e)}and{(e, r, e)}. Here,
+we do not query entire path while retrieving sen-
+tences to ensure better coverage since we observed
+that no sentence exists which contains all enti-
+ties and relations present in a given path. In Q2,
+we extract queries comprising of connected enti-
+ties pairs {(e, e)}. For each query qobtained
+from paccording to Q1andQ2, we query Solr
+and select sentences containing entities present
+inq. Subsequently, we rank retrieved sentences
+based on similarity between sentence embedding
+and embedded representation of the corresponding
+query q(including the relation in case of Q1). The
+embeddings are obtained using SBERT (Reimers
+and Gurevych, 2019) since it is trained on siameseobjective to learn semantically meaningful repre-
+sentations. Based on the ranking, we retain a max-
+imum of top K’ (= 10) sentences to ensure most
+semantically relevant sentences-path pairs are ob-
+tained and also to prevent CoSe-Co from getting
+biased towards generating particular paths. One
+thing to notice is that even though sentences are
+retrieved using templated sub-parts within a path,
+the retrieved sentences are finally paired up with
+theentire path and later used to train a generative
+commonsense model that learns to generate the
+path given sentence as input. Figure 2 illustrates
+the entire sentence-path pairing process using an
+example from the dataset.
+Using queries of type Q1templates enables us
+to retrieve sentences that are relatively more seman-
+tically related to the overall path. For instance, con-
+sider a path ‘violin hasproperty strings _hasprequi-
+stite guitar atlocation concert’. Sentences retrieved
+using queries like {strings, atlocation , concert }(of
+the form (e, r, e)) are more likely to be re-
+lated to other entities in the path such as ‘guitar’.
+Further, sentences that contain entities that are not
+directly connected in the corresponding path induce
+an inductive bias in CoSe-Co to generate paths
+that consist of intermediate entities which connect
+them. We perform ablations regarding query tem-
+plates in §4.3.1. We study quality of the generated
+dataset to check for possible data leaks and rele-
+vance between sentence-path pairs
+We determine the extent of n-gram overlap be-
+tween questions in the CSQA test set and sentences
+in our sentence-path training set as indicators of
+any possible data leakage. For this, we obtain the
+set of n-grams in a question, determine the sentence
+in the training set with which the question has max-
+imum matching n-grams and divide the matching
+n-gram count with the total number of n-grams in
+the question. Finally, this fraction is averaged over
+all the questions in the test split of CSQA. Follow-
+ing this scheme, an overlap of 0.15 is observed for11311-grams, 0.07 for 2-grams, 0.002 for 3-grams, and
+0.00 for 4-grams which shows that the extent of
+overlap is very less (on a scale of 0 to 1). Further,
+we noted that 1-gram overlap does not necessarily
+indicate leakage. For instance, consider CSQA test
+question - ‘If a person is tired how can they be re-
+freshed?’. Even though, it has matching 1-grams
+with the sentence- ‘a person may feel tired without
+having engaged in any physical activity’, but it can
+be noted that they have an entirely different context.
+From the low n-gram overlap values, we conclude
+that extent of leakage is negligible.
+To gauge the degree of relevance between the
+final set of sentence-path pairs, we measure the co-
+sine similarity between the S-BERT embeddings of
+the complete path and the corresponding sentence
+in the dataset. We observe a high normalized co-
+sine similarity score of 0.783 when averaged over
+all sentence-path pairs in training dataset which
+shows that sentence and corresponding path pairs
+are semantically related.
+3.2 Sentence →Commonsense Generator
+The sentence-commonsense paired dataset Dob-
+tained in §3.1 is used to train a path generator
+model CoSe-Coto generate commonsense in-
+ference path prelevant to the input sentence s. For
+this, we initialise the parameters θofCoSe-Co
+with weights of a generative pre-trained LM as
+backbone (eg. T5, GPT etc). Consider T5-base
+(Raffel et al., 2019) as backbone, given a sentence
+s={x, x, ..., x}comprising of a sequence of
+tokens, it is processed by T5 encoder Eto give
+a sequence of outputs O={o, o, ..., o}. T5
+decoder Dis trained to sequentially generate the
+corresponding path tokens p={x, x, ..., x}.
+During the decoding phase at time step t,Dis
+jointly conditioned on encoder outputs Oand past
+tokens xin the path pwhile generating current
+path token x.EandD, where θ=θ/uniontextθ,
+are jointly optimized by minimizing loss L:
+L=−/summationtextlogP(x|x, O), where
+P(x|x, O) =CoSe-Co(s, x)
+We design a variant where given a sentence-path
+pair, we randomly select an entity that co-occurs
+in sentence and path and mask it in the sentence.
+Whether a sentence is masked during training is
+controlled by a probability p . The model is
+then trained to generate path containing masked
+entity given masked sentence as input. The intu-
+ition is to enforce CoSe-Co to capture contextbetter through identifying masked entity during
+path generation. We discuss and perform ablations
+to compare masked CoSe-Co with varying values
+ofp in §4.3.1. Separately, we discuss and ob-
+serve that using GPT-2 as backbone LM for CoSe-
+Coperforms similar to T5-base in Appendix B.
+3.3 Path Decoding During Inference
+As in most sequence generation tasks, teacher forc-
+ing is used to train the model, while a decoding
+strategy is used to generate diverse outputs dur-
+ing inference (Vaswani et al., 2017). To max-
+imise contextual knowledge obtained from paths
+for each sentence in a downstream task, we gener-
+ate multiple paths. To improve diversity between
+paths while not losing relevance, we implement a
+path-specific variant of beam search, diverse-path
+search . Diversity is ensured by sampling top- k
+most probable tokens at first generation step fol-
+lowed by decoding most probable sequence for
+each of them, thus returning kpaths. This approach
+is motivated by observation that when generating a
+path, initial entity guide overall decoding of path.
+4 Experiments and Evaluation
+4.1 Implementation Details
+We choose Wikipedia as the sentence corpus C, and
+ConceptNet (Speer et al., 2017) as the knowledge
+graph G. The subset of Wikipedia that we use
+comprises of ∼5M articles, from which we extract
+∼92.6M sentences. ConceptNet comprises of ∼8
+million nodes as concepts linked through 34 unique
+commonsense relations with ∼21 million links in
+total. We sample ∼28M paths that have a length
+|p|in the range l= 2 andl= 5. We obtain a
+total of ∼290K sentence-path pairs. CoSe-Co is
+trained until validation loss across an epoch does
+not increase, with maximum number of epochs
+= 5.p is set to 0.33based on tuning on CSQA
+dev set and number of paths per sentence k= 5
+during inference. AdamW optimizer (Loshchilov
+and Hutter, 2017) is used to train parameters with
+a learning rate of 5e−4, weight decay of 0.01and
+epsilon of 1e−8using a single A-100 GPU with
+batch-size 8and4gradient accumulation steps.
+4.2 Analysing Generated Paths
+We analyse quality of generated paths on three as-
+pects - Relevance ,Diversity andNovelty , evaluated
+on test split of our sentence-path dataset. We esti-
+mate Relevance by treating each triple in generated1132
+and ground truth paths (for a given test sample)
+as one uni-gram followed by determining BLEU
+score (Papineni et al., 2002) between them. To
+estimate Diversity , we extract top- k= 5 paths
+for each sentence, consider each pair combination
+amongst them and estimate fractional overlap (in-
+tersection over union of set of path entities) be-
+tween them. Compliment of overlap ( 1−overlap )
+followed by mean over entire test split conveys how
+diverse paths are. Figure 3 shows corresponding
+results. It is observed that paths generated using
+nucleus sampling are diverse but lack relevance,
+while an opposite trend is observed for top-k sam-
+pling. Diverse-path search provides best balance
+between relevance ( 0.436) and diversity ( 0.43). We
+estimate Novelty as a fraction of total entities in a
+generated path that are not present in any training
+path followed by averaging over test split. CoSe-
+Coattains a novelty of 23.28% which shows that
+good fraction of entities in generated path are novel.
+Further discussion on the quantitative analysis of
+generated paths can be found in appendix F. Ta-
+ble 1 shows a few examples of generated paths.
+CoSe-Co generates paths contextually relevant to
+question in addition to inferring novel entities.
+4.3 Multi-Choice Question Answering
+We perform multiple choice question answering on
+the CSQA dataset (Talmor et al., 2019). Here, aquestion is given with 5 answer choices and the
+model has to predict the correct one. As an ex-
+ample, consider a question ‘Where could you see
+an advertisement while reading news?’ with an-
+swer choices ‘television, bus, email, web page, and
+la villa’. One of the prior works for this task -
+PGQA (Wang et al., 2020b), comprises of a knowl-
+edge module which generates commonsense and a
+QA module which identifies correct choice using
+this knowledge (see appendix D for details). Since
+our aim is not to design an improved QA module
+but a better commonsense generator, for fair com-
+parison with PGQA, we use their QA module with
+CoSe-Co . The QA module embeds the question
++ choices using RoBERTa (Liu et al., 2019) and
+uses the CLS token output to perform attention
+over path embeddings generated using the com-
+monsense module. The output of attention module
+together with embedding of question and answer
+choices is used to predict the correct answer.
+Table 2 shows results on CSQA which are usu-
+ally averaged over 5 runs on this benchmark. We
+compare against several baselines broadly clas-
+sified into ones using static KG such as MH-
+GRN (Feng et al., 2020), QA-GNN (Yasunaga
+et al., 2021) etc. and others which train a dy-
+namic path generator (PGQA) (Wang et al., 2020b)
+as commonsense module. We also compare with
+T5-base since it is backbone LM for CoSe-Co .1133
+When using entire training data, we observe that
+CoSe-Co performs better than all baselineson
+test set. We outperform PGQA with a gain of
+1.68% in accuracy on test split signifying the rele-
+vance and applicability of inferences generated by
+CoSe-Co .CoSe-Co performs better than QA-
+GNN (Yasunaga et al., 2021) also particularly in
+low training data regimes with performance gains
+of∼2%(and∼3%over PGQA) showing that
+while QA-GNN is more sensitive towards amount
+of training data used, CoSe-Co is more robust
+and helps in generalizing better. Qualitatively, con-
+sider the question - ‘Where could you see an ad-
+vertisement while reading news?’ PGQA generates
+the path - ‘read_news hassubevent read relatedto
+news atlocation television’ ignoring the context
+that advertisement is being seen along with read-
+ing news and ends up predicting television as an-
+swer which is wrong. While CoSe-Co generates
+- ‘spread_information _capableof advertisement at-
+location web_page usedfor reading_news’. Here it
+can be seen that CoSe-Co identifies that seeing
+the advertisement and reading news is happening
+together and generates path accordingly to relate
+them with ‘web page’ which is the correct answer.
+We also conduct a thorough qualitative comparison
+(appendix A) where we observe that evaluators find
+CoSe-Co paths to be significantly more contextu-
+ally relevant than PGQA.
+We conduct a human study wherein we pre-sented evaluators with questions from CSQA
+dataset with corresponding commonsense paths
+generated by CoSe-Co and PGQA in an
+anonymized manner to compare the generative
+commonsense methods. We asked them to com-
+pare the paths based on their contextual relevance
+with the complete sentence and classify them into
+one of three categories - 1) ‘ CoSe-Co is better
+than PGQA’, 2) ‘PGQA is better than CoSe-Co ’,
+3) ‘Both are of the similar quality’. A total of 150
+questions samples were randomly sampled from
+the test set and presented to 6 evaluators (25 sam-
+ples each). Following are our observations:
+•Number of samples where CoSe-Co is bet-
+ter: 62 (41.33% of 150 samples)
+•Number of samples where PGQA is better: 38
+(25.33% of 150 samples)
+•Number of samples where both are of similar
+quality: 50 (33.33% of 150 samples)
+This shows that commonsense generated by
+CoSe-Co is found to be more relevant in human
+evaluation. Also, if we exclude neutral samples
+and consider the 100 samples where the common-
+sense paths generated by one of either approach is
+found to be better, CoSe-Co ’s paths are found to
+be more relevant in 62 samples (62% of 100 sam-
+ples) while PGQA’s paths are more relevant in 38
+samples (38% of 100 samples).
+We also study the effect of using a different gen-
+erative LM (GPT-2 as used by PGQA) as back-
+bone for CoSe-Co in appendix B and empirically1134
+establish that performance gains over PGQA are
+independent of which LM is used.
+4.3.1 Ablation Study
+Entity masking during training As described in
+§3.2, a parameter p is used to decide whether
+entities in an input sentence will be masked. We
+tunep over the CSQA IHdev set and deter-
+mine 0.33as optimal value. Table 3 shows com-
+parison where masking during training works bet-
+ter than not masking. We show qualitative anal-
+ysis for different p in appendix C. Further,
+0< p <1ensures trained CoSe-Co can be
+used for both masked and unmasked inputs.
+Path-sentence query templates As described
+in §3.1, we used two query templates— Q1(in-
+cludes relation information) and Q2(does not cap-
+ture relations)—while creating our path-sentence
+paired dataset. Here we study the effect of us-
+ing these different query templates (Table 3). We
+observe that training CoSe-Co on a combined
+dataset, Q1 +Q2, results in the best performance,
+followed by that on using Q1alone, that further
+outperforms Q2. This indicates the influence of in-
+cluding relation information in the training dataset.
+Entity masking during inference Since CoSe-
+Cois given a masked sentence as input during
+training ( p = 0.33), we explore the effect of
+similar type of masking during inference. Specifi-
+cally, certain parts of input sentence can be replaced
+with masked token to enable CoSe-Co to gener-
+ate paths that lead towards filling the mask. As
+reported in Table 3, the variant where no masking
+is done performs marginally better than when Inter-
+rogative orRandom tokens in sentence are masked.
+Thus, by default we do not perform masking during
+inference unless otherwise stated.
+4.4 OpenCSR: Open-Ended CommonSense
+Reasoning
+In CSQA, often multiple choices are appropriate
+and model gets penalised unfairly if it predictssuitable answer which does not match with sin-
+gle ground truth. To mitigate this, Lin et al. (2019)
+re-configured three multi-choice QA datasets for
+OpenCSR as a generative task where interrogative
+tokens are replaced with blanks (“_ _”) and a set
+of singleton tokens is labeled as ground truth. To
+generate a set of paths P, we use inference mask-
+ing variant of CoSe-Co since question contains a
+blank. Given a question q, blank (“_ _”) is replaced
+with mask token. To inject our paths, we devise a
+supervised method where we adapt a separate T5-
+base model for OpenCSR such that concatenation
+ofqand paths is given as input to T5 along with the
+prefix ‘ fill mask to answer question: ’. T5 is trained
+to generate one of the answers in ground truth set.
+During inference, top- Kanswers, determined on
+basis of generation likelihood from T5 decoder, are
+taken as answer candidates.
+Table 4 shows comparison between DrFact(Lin
+et al., 2021a) (current state-of-the-art based on
+BERT-base) and our supervised method which uses
+CoSe-Co ’s paths. Specifically, we evaluate -
+1) ‘Paths from CoSe-Co ’ where generated paths
+are concatenated; and 2) ‘Concepts from CoSe-
+Co’ where only entities in generated paths are
+appended. Since our supervised method is based
+on pre-trained T5, for fair comparison and to probe
+if performance changes are due to T5, we compare
+against another baseline: T5-base fine tuned for
+OpenCSR without paths. We evaluate two metrics
+as used in Lin et al. (2021a): 1) Hits@K : Deter-
+mined on basis of whether generated and ground
+truth answer sets have non-empty intersection; 2)
+Recall@K : Estimates how many predicted answers
+match at least one ground truth answer. We vary
+value of K to be {10, 30, 50}. We evaluate on three
+datasets - ARC (Clark et al., 2018), QASC (Khot
+et al., 2020), and OBQA (Mihaylov et al., 2018).
+CoSe-Co performs significantly better than1135
+both baselines on all datasets uniformly. Specif-
+ically, ‘Concepts from CoSe-Co ’ usually per-
+forms better which shows entities in paths gen-
+erated by CoSe-Co are useful. Our approach
+provides performance gains of upto 8%,6%,10%
+in Hits@50 and 8%,3%,6%in Recall@50 over
+DrFact on ARC, QASC and OBQA respectively.
+Even though T5-base baseline performs better than
+DrFact, commonsense from CoSe-Co augmented
+with T5 achieves new state of the art on this task
+with performance gains upto 2.3%,3.9%,7.5%in
+Hits@50 and 1.2%,2.5%,3.7%in Recall@50 over
+T5-base on ARC, QASC and OBQA respectively.
+4.5 Effect of Concatenating CoSe-Co
+Knowledge in Generation Task
+We explore augmenting CoSe-Co paths for text
+generation where our aim is not to obtain SOTA
+results but to analyse if it improves performance
+of a base model. Specifically, we study Paraphrase
+Generation: given a sentence, generate another
+sentence expressing same meaning using differ-
+ent words where commonsense is usually needed
+while rephrasing. Since T5 (Raffel et al., 2019) is
+designed for generation tasks, we fine-tune T5-base
+to generate annotated paraphrase given a sentence
+as input on MRPC dataset (Dolan and Brockett,
+2005). Generated paths are appended as string to
+input. Please refer to appendix E.4 for elaborated
+implementation details and discussion.Table 5 summarises results evaluated through
+commonly used generation metrics - BLEU (Pap-
+ineni et al., 2002), METEOR (Banerjee and Lavie,
+2005), ROUGE-L (Lin, 2004), CIDEr (Vedantam
+et al., 2015) and SPICE (Anderson et al., 2016).
+Amongst these, SPICE is considered to correlate
+most with human judgement. Using CoSe-Co
+paths results in better paraphrase generation as in-
+dicated by ∼1-1.5% improvement in most metrics.
+5 Conclusion
+We presented CoSe-Co , a framework to gener-
+ate commonsense inferences that are relevant to
+the overall context of a given natural language
+text. We created a novel dataset of <sentence,
+commonsense paths >pairs for training CoSe-Co
+and make it available to the community. Empiri-
+cal evaluation shows that commonsense inferences
+generated by CoSe-Co are relevant, diverse, and
+also contain novel entities not present in KG. We
+augment knowledge generated by CoSe-Co in
+commonsense tasks such as Multi-Choice QA and
+Open-ended CommonSense Reasoning, achieving
+SoTA results for these tasks. Further, we also used
+CoSe-Co for NLP tasks such as paraphrase gen-
+eration achieving improved performance. While,
+using ConceptNet as our base KG allowed us to
+perform an exhaustive fair comparison with a vari-
+ety of benchmark methods—where the motivation
+is to provide more relevant knowledge (in symbolic
+form as in KG) to tasks— CoSe-Co can further
+be enhanced by utilizing other commonsense KGs.
+Our work can be extended to explore better ways
+of integrating the generated knowledge generically
+across a variety of KGs and LMs, and is a potential
+direction for future work.1136References113711381139
+A Qualitative Comparison
+Table 7 shows qualitative comparison between
+CoSe-Co and baselines on the CSQA dataset.
+B Comparison with GPT-2 as backbone
+language model
+We decided to use T5-base as a design choice as we
+were required to train a text-to-text model where
+given a sentence as input, the model has to generate
+the relevant path as output. Since T5-base is a text-
+to-text generation language model, we felt that it is
+a suitable choice.
+To empirically establish that improvements over
+PGQA are not due to using T5-base instead of GPT-
+2, we performed an experiment to replace T5-base
+with GPT-2 as the backbone language model of
+CoSe-Co. We train GPT-2 using the same sentence-
+path dataset as we used for T5-base by providing it
+as input the sentence followed by a [SEP] token andadapting GPT-2 to generate the corresponding path.
+Additionally, we also experiment with replacing
+the language model in PGQA from GPT-2 to T5-
+base. Table 6 summarises the results obtained for
+multi-choice QA on CSQA where it can be seen
+that using GPT-2 vs T5 does not lead to noticeable
+changes in the performance. The test accuracy
+attained by CoSe-Co with T5-base is 72.87% which
+is almost the same as for CoSe-Co with GPT-2:
+72.67%. A similar observation is seen for PGQA
+where using T5-base backbone gives 71.31% and
+using GPT-2 gives 71.19%. Further, we would like
+to highlight that CoSe-Co with GPT-2 backbone
+attains 72.67% accuracy and performs better than
+PGQA with GPT-2 (71.19%).
+Based on these observations, we can conclude
+that performance gains of CoSe-Co over PGQA
+are not due to using different backbone but be-
+cause CoSe-Co is trained over semantically related
+sentence-commonsense pairs that enables it to gen-
+erate contextually more relevant commonsense.
+C Entity masking while training
+CoSe-Co
+Table 8 shows the various kinds of paths obtained
+from CoSe-Co when trained with different val-
+ues of p , across the same original question. A
+number of observations can be made. First, the
+paths obtained from the variant which is trained
+without any masking ( p = 0.0) produces in-
+ferences that enrich the overall context of certain
+entities in question but do not necessarily capture
+the inter-relation between them and thus the overall
+intention of the question. With the configurations
+that are trained with p̸= 0, the various paths
+capture the overall context in an answer-oriented
+manner. These configurations also allow us to mask
+concepts in the original question such that CoSe-
+Cocan exploit the unmasked entities to direct its
+generated paths in a manner that best suit the blank.
+This is evident from the second half of Table 8.
+When the interrogative element is masked in the
+first example, the paths are directed towards actu-
+ally finding the best answer, while when ‘Google
+maps’ is replaced in the third example, the paths
+are clearly focused on predicting concepts related
+to GPS systems.
+D Details of PGQA Baseline
+PGQA (Wang et al., 2020b) leverages the com-
+monsense paths generated by their path generator1140
+module along with the question and candidate an-
+swer choices to perform multi-choice QA on CSQA
+dataset (Talmor et al., 2019). Specifically, given
+a question qwith corresponding candidate answer
+choices set C={c, . . . , c}, the PGQA frame-
+work generates commonsense inferences for each
+pair of answer choice cand entities extracted from
+q. A total of kpaths corresponding to each answer
+choice care obtained to get a resultant set of paths
+-P. Further, an average over the hidden repre-
+sentations corresponding to sequence of decoded
+tokens from the final layer of their path generator
+decoder are used as path embedding and combined
+as -H∈Rto represent the paths in P.
+Following this, they augment the choice into qby
+replacing the interrogative phrase in qwithcto
+obtain q. For instance, given the question ‘Google
+maps and other GPS services have replaced what?’,
+the answer choice ‘atlas’ is augmented into the
+question as: ‘Google maps and other GPS services
+have replaced atlas .’
+To embed the augmented question and corre-
+sponding answer choice, they use a pre-trained LM
+encoder E(such as RoBERTa (Liu et al., 2019))
+to embed the query - ‘[CLS] q[SEP] c’ corre-
+sponding to c. The representation correspondingto [CLS] token is extracted from the final hidden
+layer as h∈R. In order to leverage relevant
+knowledge from the generated commonsense in-
+ferences, the question and choice embeddings are
+used to attend over generated paths as:
+α=Softmax (tanh(HW)h)
+h=/summationdisplayα·h
+where, W∈R,α∈Randh∈
+R. Finally, a linear layer is applied over the
+concatenation of {h, h}to project it as a scalar.
+A softmax is taken over concatenation of scalars
+obtained corresponding to each answer choice to
+obtain their likelihood followed by cross entropy
+loss for training.
+E Further Implementation Details
+E.1 Relation Heuristics
+As mentioned in §3.1, we employ heuristics on
+the basis of contained relations to perform filter-
+ing of ConceptNet paths. Particularly, we use the
+following rules:1141
+1.We discard any path that uses the same two
+relations to connect any three neighbouring
+entities occurring in it. That is, for any sub-
+path{e, r, e, r, e}in a given path
+p, we only consider pas a part of our dataset
+ifr̸=r.
+2.Following (Wang et al., 2020b), we do not
+consider paths that contain any relations
+from the set {HasContext ,RelatedTo ,Syn-
+onym ,Antonym ,DerivedFrom ,FormOf ,Et-
+ymologicallyDerivedFrom ,EtymologicallyRe-
+latedTo }. We observed that entities connected
+through these relations were often largely dis-
+similar and thus not useful for our case.
+E.2 Multi-Choice QA
+In §4.3, we discuss commonsense question an-
+swering task where we use framework developed
+by Wang et al. (2020b) and just replace the com-
+monsense knowledge used by them with the paths
+generated by CoSe-Co . We use the same hyper-
+parameters as used by them and mention them herefor reference. The model is trained on a batch size
+of 16, dropout of 0.1 for 15 epochs. A learning
+rate of 2e-6 is used for encoder LM (Roberta-large)
+used for embedding question and choice context
+and an lr of 1e-3 is used for remaining path at-
+tention and classification layer parameters. We
+perform the evaluation on CSQA (Talmor et al.,
+2019) dataset downloaded from here. The train
+split comprises of 8,500, dev split contains 1,221
+and in-house test split contains 1,241 samples.
+E.3 OpenCSR
+In this section, we discuss the implementation de-
+tails used for OpenCSR in §4.4. The dataset has
+been downloaded from here. The training splits
+of ARC, QASC, and OBQA datasets comprises of
+5355 ,6883 , and 4199 samples respectively while
+the development split comprises of 562,731, and
+463samples respectively. The test set is hidden and
+authors who proposed the task with reformulated
+dataset are yet to set up a leaderboard on the hid-
+den test set. They run their proposed model DrFact
+(which is based on BERT-base and is the current1142state-of-the-art on this task) on a single seed which
+takes about ∼2-3 days to train one model on a
+given dataset. While fine-tuning T5-base (with and
+without CoSe-Co knowledge), we train the model
+for 5 epochs with a learning rate of 5e-4, weight
+decay of 0.01 and batch size 8 using AdamW opti-
+mizer (Loshchilov and Hutter, 2017).
+E.4 Paraphrase Generation
+For paraphrase generation on MRPC (Dolan and
+Brockett, 2005) dataset, we fine-tune T5-base (with
+and without CoSe-Co knowledge) at a learn-
+ing rate of 5e-4 for 5 epochs with weight decay
+of 0.01 and 4 gradient accumulation steps using
+AdamW (Loshchilov and Hutter, 2017) optimizer.
+The training set of MRPC comprises of 2,661 para-
+phrases while the test set comprises of 1,088 para-
+phrases. The dataset has been downloaded from
+here.
+F Further Analysis of Generated Paths
+•Correctness of Novel Triples : Since there
+is no ground truth to check the correctness
+of triple comprising of novel entities, we at-
+tempt to evaluate them by leveraging a com-
+monsense knowledge base completion model -
+Bilinear A VG (Li et al., 2016) which has been
+shown to achieve an accuracy of 92.5% on
+knowledge completion task and is also used
+to score triples. We extract triples compris-
+ing of at least one novel entity from the paths
+generated by CoSe-Co for the test split of
+sentence-path dataset and provide the triple to
+Bilinear A VG to obtain a score. The average
+score over all the triples is 0.414 (on a scale
+of 0 to 1).
+• Further, we perform KG completion (predict-
+ing tail entity given head entity and relation of
+a KG triple) using CoSe-Co since it gen-
+erates paths which essentially comprise of
+triples. We compare the performance with
+COMET (Bosselut et al., 2019). We consider
+test split of sentence-path dataset comprising
+of11,264paths and extract triples. We fil-
+ter out triples appearing in training paths of
+CoSe-Co and train set triples of COMET
+yielding 717test triples in total. CoSe-Co
+achieves an accuracy of 24.12% which is sig-
+nificantly better than COMET which provides
+accuracy of 9.76%. To perform comparisonwith COMET (Bosselut et al., 2019) we take
+their code and pre-trained model from here.
+•In Figure 3(b), greedy decoding cannot be
+compared for diversity with other methods
+since it generates only a single unique path.
+•Since generated paths diversity estimates can
+be affected by path length, we measure the
+standard deviation of the number of entities
+in paths generated corresponding to test split
+sentences and found it to be 0.76 which shows
+that variance in the lengths of generated paths
+is very low (<1) and hence, the diversity of
+0.43 (on a scale 0 to 1) attained by CoSe-Co
+is not due to length bias.
+G Ethics statement
+•The sentence - commonsense dataset created
+to train CoSe-Co has been derived using stan-
+dardized Wikipedia Corpus and ConceptNet
+knowledge graph which are publicly available
+and commonly used without containing any
+info/text that could potentially lead to risk im-
+pacts.
+•We have used open source Wikipedia corpus
+and ConceptNet which are publicly available
+and already standardized for research works.
+•The links to all the previous works, their
+provided open-source github repos, arti-
+facts and datasets have been provided in
+appropriate sections where they are dis-
+cussed/used/compared along with their cita-
+tions (Sections - 2, 4, Appendix E etc.). The
+links to any resources used provide permis-
+sions to use them for our research work.1143

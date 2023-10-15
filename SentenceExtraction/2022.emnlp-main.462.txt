@@ -1,1 +1,748 @@
-6878 Proceedings of the 2022 Conference on Empirical Methods in Natural Language Processing , pages 6878 6890 December 7 - 11 , 2022 © 2022 Association for Computational Linguistics 6879 6880 6881 6882 6883 6884 6885 6886 6887 6888 6889 6890 
+
+Linlin LiuXin LiRuidan HeLidong BingShaﬁq JotyLuo SiDAMO Academy, Alibaba GroupNanyang Technological University, SingaporeSalesforce Research{linlin.liu, xinting.lx, ruidan.he, l.bing, luo.si}@alibaba-inc.comsrjoty@ntu.edu.sg
+Abstract
+Knowledge-enhanced language representation
+learning has shown promising results across
+various knowledge-intensive NLP tasks. How-
+ever, prior methods are limited in efﬁcient
+utilization of multilingual knowledge graph
+(KG) data for language model (LM) pretrain-
+ing. They often train LMs with KGs in indi-
+rect ways, relying on extra entity/relation em-
+beddings to facilitate knowledge injection. In
+this work, we explore methods to make bet-
+ter use of the multilingual annotation and lan-
+guage agnostic property of KG triples, and
+present novel knowledge based multilingual
+language models (KMLMs) trained directly on
+the knowledge triples. We ﬁrst generate a large
+amount of multilingual synthetic sentences us-
+ing the Wikidata KG triples. Then based on
+the intra- and inter-sentence structures of the
+generated data, we design pretraining tasks
+to enable the LMs to not only memorize the
+factual knowledge but also learn useful logi-
+cal patterns. Our pretrained KMLMs demon-
+strate signiﬁcant performance improvements
+on a wide range of knowledge-intensive cross-
+lingual tasks, including named entity recogni-
+tion (NER), factual knowledge retrieval, rela-
+tion classiﬁcation, and a newly designed logi-
+cal reasoning task.
+1 Introduction
+Pretrained Language Models (PLMs) such as
+BERT (Devlin et al., 2019) and RoBERTa (Liu
+et al., 2019) have achieved superior performances
+on a wide range of NLP tasks. Existing PLMs usu-
+ally learn universal language representations from
+general-purpose large-scale corpora but do not con-
+centrate on capturing world’s factual knowledge. It
+has been shown that knowledge graphs (KGs), suchas Wikidata (Vrande ˇci´c and Krötzsch, 2014) and
+Freebase (Bollacker et al., 2008), can provide rich
+factual information for better language understand-
+ing. Many studies have demonstrated the effec-
+tiveness of incorporating such factual knowledge
+into monolingual PLMs (Peters et al., 2019; Zhang
+et al., 2019; Liu et al., 2020a; Poerner et al., 2020;
+Wang et al., 2021a). Following this, a few recent
+attempts have been made to enhance multilingual
+PLMs with Wikipedia or KG triples (Calixto et al.,
+2021; Ri et al., 2022; Jiang et al., 2022). However,
+due to the structural difference between KG and
+texts, existing KG based pretraining often relies on
+extra relation/entity embeddings or additional KG
+encoders for knowledge enhancement. These ex-
+tra embeddings/components may add signiﬁcantly
+more parameters which in turn increase inference
+complexity, or cause inconsistency between pre-
+train and downstream tasks. For example, mLUKE
+(Ri et al., 2022) has to enumerate all possible en-
+tity spans for NER to minimize the inconsistency
+caused by entity and entity position embeddings.
+Other methods (Liu et al., 2020a; Jiang et al., 2022)
+also require KG triples to be combined with rele-
+vant natural sentences as model input during train-
+ing or inference.
+In this work, we propose KMLM, a novel
+Knowledge-based Multilingual Language Model
+pretrained on massive multilingual KG triples. Un-
+like prior knowledge enhanced models (Zhang
+et al., 2019; Peters et al., 2019; Liu et al., 2020a;
+Wang et al., 2021a), our model requires neither a
+separate encoder to encode entities/relations, nor
+heterogeneous information fusion to fuse multiple
+types of embeddings (e.g., entities from KGs and
+words from sentences). The key idea of our method
+is to convert the structured knowledge from KGs
+to sequential data which can be directly fed as in-
+put to the LM during pretraining. Speciﬁcally, we
+generate three types of training data – the parallel
+knowledge data , the code-switched knowledge data6878and the reasoning-based data . The ﬁrst two are
+obtained by generating parallel or code-switched
+sentences from triples of Wikidata (Vrande ˇci´c and
+Krötzsch, 2014), a collaboratively edited multilin-
+gual KG. The reasoning-based data, containing rich
+logical patterns, is constructed by converting cy-
+cles from Wikidata into word sequences in different
+languages. We then design pretraining tasks that
+are operated on the parallel/code-switched data to
+memorize the factual knowledge across languages,
+and on the reasoning-based data to learn the logical
+patterns.
+Compared to existing knowledge-enhanced pre-
+training methods (Zhang et al., 2019; Liu et al.,
+2020a; Peters et al., 2019; Jiang et al., 2022),
+KMLM has the following key advantages. (1)
+KMLM is explicitly trained to derive new knowl-
+edge through logical reasoning. Therefore, in addi-
+tion to memorizing knowledge facts, it also learns
+the logical patterns from the data. (2) KMLM does
+not require a separate encoder for KG encoding,
+and eliminates relation/entity embeddings, which
+enables KMLM to be trained on a larger set of
+entities and relations without adding extra parame-
+ters. The token embeddings are enhanced directly
+with knowledge related training data. (3) KMLM
+does not rely on any entity linker to link the text to
+the corresponding KG entities, as done in existing
+methods (Zhang et al., 2019; Peters et al., 2019;
+Poerner et al., 2020). This ensures KMLM to uti-
+lize more KG triples even if they are not linked
+to any text data, and avoids noise caused by incor-
+rect links. (4) KMLM keeps the model structure
+of the multilingual PLM without introducing any
+additional component during both training and in-
+ference stages. This makes the training much eas-
+ier, and the trained model is directly applicable to
+downstream NLP tasks.
+We evaluate KMLM on a wide range of
+knowledge-intensive cross-lingual tasks, including
+NER, factual knowledge retrieval, relation classi-
+ﬁcation, and logical reasoning which is a novel
+task designed by us to test the reasoning capability
+of the models. Our KMLM achieves consistent
+and signiﬁcant improvements on all knowledge-
+intensive tasks, meanwhile it does not sacriﬁce the
+performance on general NLP tasks.
+2 Related Work
+Knowledge-enhanced language modeling aims to
+incorporate knowledge, concepts and relations intothe PLMs (Devlin et al., 2019; Liu et al., 2019;
+Brown et al., 2020), which proved to be beneﬁcial
+to language understanding (Talmor et al., 2020a).
+The existing approaches mainly focus on mono-
+lingual PLMs, which can be roughly divided into
+two lines: implicit knowledge modeling and ex-
+plicit knowledge injection. Previous attempts on
+implicit knowledge modeling usually consist of
+entity-level masked language modeling (Sun et al.,
+2019; Liu et al., 2020a), entity-based replacement
+prediction (Xiong et al., 2020), knowledge embed-
+ding loss as regularization (Wang et al., 2021b)
+and universal knowledge-text prediction (Sun et al.,
+2021). In contrast to implicit knowledge modeling,
+the methods of explicit knowledge injection sepa-
+rately maintain a group of parameters for represent-
+ing structural knowledge. Such methods (Zhang
+et al., 2019) usually require a heterogeneous infor-
+mation fusion component to fuse multiple types
+of embeddings obtained from the text and KGs.
+Zhang et al. (2019) and Poerner et al. (2020) em-
+ploy external entity linker to discover the entities in
+the text and perform feature interaction between the
+token embeddings and entity embeddings during
+the encoding phase of a transformer model. Peters
+et al. (2019) borrow the pre-computed knowledge
+embeddings as the supporting features of training
+an internal entity linker. Wang et al. (2021a) insert
+an adapter component (Houlsby et al., 2019; He
+et al., 2021) in each transformer layer to store the
+learned factual knowledge.
+Extending knowledge based pretraining methods
+to the multilingual setting has received increasing
+interest recently. Zhou et al. (2022b) propose an
+auto-regressive model trained on knowledge triples
+for multilingual KG completion. Calixto et al.
+(2021); Ri et al. (2022) attempt improving mul-
+tilingual entity representation via Wikipedia hyper-
+link prediction, however, their methods add a large
+amount of parameters due to the reliance on extra
+entity embeddings. For example, the mLUKE
+(Ri et al., 2022) model initialized with XLM-R
+doubles the number of parameters (586M vs 270M).
+Similar to us, Jiang et al. (2022) also utilize KG for
+PLM pretraining. They employ KG and Wikipedia
+entity descriptions to inject knowledge into multi-
+lingual LM, but relation embeddings are also re-
+quired to assist learning.
+Moreover, the above methods only focus on
+memorizing the existing facts but ignore the rea-
+soning over the unseen/implicit knowledge that6879
+is derivable from the existing facts. Such rea-
+soning capability is regarded as a crucial part of
+building consistent and controllable knowledge-
+based models (Talmor et al., 2020b). In this paper,
+our explored methods for multilingual knowledge-
+enhanced pretraining boost the capability of im-
+plicit knowledge reasoning, together with the pur-
+pose of consolidating knowledge modeling and
+multilingual pretraining (Mulcaire et al., 2019;
+Conneau et al., 2020; Liu et al., 2022).
+3 Framework
+In this section, we describe the proposed frame-
+work for knowledge based multilingual language
+model (KMLM) pretraining. We ﬁrst describe the
+process to generate knowledge-intensive multilin-
+gual training data, followed by the pretraining tasks
+to train the language models to memorize factual
+knowledge and learn logical patterns from the gen-
+erated data.
+3.1 Knowledge Intensive Training Data
+In addition to the large-scale plain text corpus that
+is commonly used for language model pretraining,
+we also generate a large amount of knowledge in-
+tensive training data from Wikidata (Vrande ˇci´c and
+Krötzsch, 2014), a publicly accessible knowledge
+base edited collaboratively. Wikidata is composed
+of massive amounts of KG triples (h,r,t ), where
+handtare the head and tail entities respectively, r
+is the relation type. As shown in Table 1, most of
+the entities, as well as the relations in Wikidata, are
+annotated in multiple languages. In each language,
+many aliases are also given though some of them
+are used infrequently.
+Code-Switched Synthetic Sentences Training
+language models on high-quality code-switched
+sentences is one of the most intuitive ways to learn
+language agnostic representation (Winata et al.,
+2019), where the translations of words/phrases can
+be treated in a similar way as their aliases. The code
+mixing techniques have also proved to be helpful
+for improving cross-lingual transfer performance
+in many NLP tasks (Qin et al., 2020; Santy et al.,
+2021). Therefore, we propose a novel method to
+generate code-switched synthetic sentences using
+the multilingual KG triples. See Fig. 1 for some
+generated examples.
+For each triple (h,r,t )in Wikidata, we use h
+to denote the default label of hin language l. For
+the entity Q1420 in Table 1, his “motor car”
+andhis “automóvi”. hdenotes the aliases
+when the integer i > 0. We deﬁne randt
+in the same way for the relation and the tail en-
+tity, respectively. Since English is resource-rich
+and often treated as the source language for cross-
+lingual transfer, we only consider language pairs
+of{(en,l)}for code switching, where lis an ar-
+bitrary non-English language. With such a design,
+English can also work as a bridge for cross-lingual
+transfer between a pair of none English languages.
+Speciﬁcally, the code-switched sentences for
+(h,r,t )can be generated in 4 steps: 1) select
+a language pair (en,l); 2) ﬁnd the English de-
+fault labels (h,r,t); 3) For each item
+in the triple, uniformly sample a value v∈
+{true,false }, ifvistrue and the item has a trans-
+lation (i.e. default label) in l, then replace the item
+with the translation in l; 4) generate the sequence
+of“h [mask] r [mask] t. ” by inserting two mask
+tokens. The alias-replaced sentences can be gen-
+erated in a similar way, except that we randomly
+sample aliases in the desired language to replace
+the default label in steps 2 and 3.
+Parallel Synthetic Sentences Parallel data has
+also been widely exploited to improve cross-lingual6880
+transfer (Aharoni et al., 2019; Conneau and Lam-
+ple, 2019; Chi et al., 2021). However, it is expen-
+sive to obtain a large amount of parallel data for
+LM pretraining. We propose a method to gener-
+ate a large amount of knowledge intensive parallel
+synthetic sentences, with a minor modiﬁcation of
+the method for generating code-switched sentences
+described above. For each triple (h,r,t )extracted
+from Wikidata, the corresponding synthetic sen-
+tences in different languages can be generated by
+ﬁrst ﬁnding the default labels (h,r,t)for
+each language l, and then inserting mask tokens to
+generate sequences in the form “h [mask] r [mask]
+t. ”. Fig. 1 shows an example. More sentences can
+be generated by replacing the default labels with
+their aliases.
+Reasoning-Based Training Data The capabil-
+ity of logical reasoning allows humans to solve
+complex problems with limited information. How-
+ever, this ability did not receive much attention in
+the previous LM pretraining methods. In KGs, we
+can use nodes to represent entities, and edges be-
+tween any two nodes to represent their relations. In
+order to train the model to learn logical patterns, we
+generate a large amount of reasoning-based train-
+ing data by ﬁnding cycles from the Wikidata KG.
+As shown with an example in Fig. 2(a), the cycles
+of length 3 can be viewed as the basic component
+for more complex logical reasoning process. We
+train language models to learn the entity-relation
+co-occurrence patterns so as to infer the best candi-
+date relations for incomplete cycles, i.e. deriving
+the implicit information from the given context.
+Similar to the structure of the parallel/code-
+switched synthetic sentences described above, the
+cycles in Fig. 2(a) is composed of 3 triples, and
+hence can be converted to 3 synthetic sentences
+(the ﬁrst example in Fig. 4). To increase the difﬁ-
+culty, we also extract cycles of length 4 to generate
+the reasoning oriented training data. However, we
+ﬁnd that simply increasing the length of cycles
+makes the samples less logically coherent. Thus,
+we add an extra constraint that each length-4 cycle
+is required to have at least one additional diagonal
+edge. Fig. 2(b) shows such an example. It can
+be converted to a training sample of 5 sentences
+in the same way as above. For the multilingual
+reasoning-based data, we only generate monolin-
+gual sentences, i.e. without applying code mixing.
+We treat Wikidata as an undirected graph when
+extracting cycles. Given an entity, the length-3 cy-
+cles containing this entity can be easily extracted
+by ﬁrst ﬁnding all the neighbouring entities, and
+then iterating through the pairs of neighbouring en-
+tities to check whether they are also connected. The
+length-4 cycles with an additional diagonal edge
+connecting any two neighbours can be extracted
+with a few extra steps. Assuming we have iden-
+tiﬁed a length-3 cycle containing entity Aand its
+two neighbouring entities BandC, we can iterate
+through the neighbours of B(excludingAandC)
+to check whether it is also connected to C. We
+remove the duplicate cycles in data generation.
+3.2 Pretraining Tasks
+Multilingual Knowledge Oriented Pretraining
+In the generated code-switched and parallel syn-
+thetic sentences, the “[mask]” tokens are added
+between entities and relations to denote the linking
+words. For example, the ﬁrst mask token in “mo-
+tor car [mask] designed to carry [mask] passager . ”
+may denote “is”, while the second one may denote
+“certains” (French word “certains” means “some” or
+“certain”). Since the ground truth of such masked
+linking words are not known, we do not compute6881the loss for those corresponding predictions. In-
+stead, we randomly mask the remaining tokens in
+the parallel/code-switched synthetic sentence, and
+compute the cross entropy loss over these masked
+entity and relation tokens (Fig. 3). We use L
+to denote this cross entropy loss for Knowledge
+Oriented Pretraining. Note that our models are
+not trained on the sentence pairs like the Transla-
+tion LM loss or TLM (Conneau and Lample, 2019)
+when utilizing the parallel or code-switched pairs.
+Alternatively, we shufﬂe the data, and feed one sen-
+tence into the model each time (as shown in Fig. 3),
+which makes our model inputs more consistent
+with those of the downstream tasks.
+Logical Reasoning Oriented Pretraining We
+design tasks to train the model to learn logical rea-
+soning patterns from the synthetic sentences gener-
+ated from the length-3 and length-4 cycles. As can
+be seen in Fig. 4, both of the relation prediction and
+entity prediction problems are cast as masked lan-
+guage modeling. For the length-3 cycles, each en-
+tity appears exactly twice in every training sample.
+Formulating the task as a masked entity prediction
+problem may lead to shortcut learning (Geirhos
+et al., 2020) by simply counting the appearance
+numbers of the entities. Therefore, we only mask
+one random relation in each sample for model train-
+ing, and let the model learn to predict the masked
+relation tokens based on the context.
+Two types of tasks are designed to train the
+model to learn reasoning with the length-4 cycles:
+1) For 80% of the time, we train the model to pre-
+dict randomly masked relation and entities. We
+ﬁrst mask one random relation. To increase the
+difﬁculty, we also mask one or two randomly se-
+lected entities at equal chance. The lower half of
+Fig. 4 shows an example where one relation and
+one entity are masked. 2) For the remaining 20%
+of the time, we randomly mask a whole sentence to
+let the model learn to derive new knowledge from
+the remaining context. To provide some hints on
+the expected new knowledge, we keep the relation
+of the selected sentence unmasked, i.e., only mask
+its two entities. The loss LforLogical Reasoning
+Oriented Pretraining can also be computed with the
+cross entropy loss over the masked tokens. Note
+that masked entity prediction is not always non-
+trivial in this task. For example, when we mask
+exactly one entity and the entity Eonly appears
+once in the masked sample, then it is easy to guess
+Eis the masked one. In Fig. 4, a concrete exampleis masking the ﬁrst appearance of “Raj Kapoor” in
+the original sentence of the length-4 cycle. We do
+not deliberately avoid such cases, since they may
+help introduce more diversity to the training data.
+Loss Function In addition to the pretraining
+tasks designed above, we also train the model on
+the plain text data with the original masked lan-
+guage modeling loss L used in previous work
+(Devlin et al., 2019; Conneau et al., 2020). There-
+fore, the ﬁnal loss can be computed as:
+L=L +α(L+L) (1)
+whereαis a hyper-parameter to adjust the weights
+of the original MLM and the losses for modeling
+the multilingual knowledge and logical reasoning.
+4 Experiments
+We ﬁrst describe the pretraining details of our
+KMLMs. Then we verify its effectiveness on the
+knowledge-intensive tasks. Finally, we examine its
+performance on general cross-lingual tasks. In all
+of the tasks except X-FACTR (Jiang et al., 2020),
+the PLMs are ﬁne-tuned on the English training
+set and then evaluated on the target language test
+sets. The evaluation results are averaged over 3
+runs with different random seeds. X-FACTR does
+not require ﬁne-tuning, so the PLMs are directly
+evaluated using the ofﬁcial code. The results of
+the baseline models are reproduced in the same
+environment.
+4.1 Pretraining Details
+Our proposed framework can be conveniently im-
+plemented on top of the existing transformer en-
+coder based models like mBERT (Devlin et al.,
+2019) and XLM-R (Conneau et al., 2020) without
+any modiﬁcation to the model structure. There-
+fore, instead of pretraining the model from scratch,
+it is more time- and cost-efﬁcient to initialize the
+model with the checkpoints of existing pretrained
+models. We build our knowledge intensive training
+data in 10 languages: English, Vietnamese, Dutch,
+German, French, Italian, Spanish, Japanese, Ko-
+rean and Chinese. We only use the 5M entities
+and 822 relations ﬁltered by Wang et al. (2021b),
+and generate 250M code-switched synthetic sen-
+tences, 190M parallel synthetic sentencesand6882
+100M reasoning-based samples following the steps
+in §3.1. In addition, 260M sentences are sampled
+from the CC100 corpus(Wenzek et al., 2020)
+for the 10 languages. Our models KMLM-XLM-
+R and KMLM-XLM-R are initialized
+with XLM-R and XLM-R , respectively.
+Then we continue to pretrain these models with the
+proposed tasks (§3.2). KMLM, KMLM
+and KMLMare used to differentiate the models
+trained on the code-switched data, parallel data and
+the concatenated data of these two, respectively.
+The reasoning-based data is used in all these three
+models, and ablation studies are presented in §4.5
+to verify the effectiveness of logical reasoning task.
+Previous studies showed that the original
+mBERT model outperforms XLM-R on the X-
+FACTR (Jiang et al., 2020) and RELX (Köksal and
+Özgür, 2020) tasks, so we also initialize KMLM-
+mBERT with mBERT, and train it on
+Wikipedia corpus for a more faithful comparison.
+We ﬁnd the KMLMand KMLMmodels ini-
+tialized with the XLM-R checkpoint outper-
+form the corresponding KMLM model in
+most of the tasks, so we only train KMLMand
+KMLMwhen comparing with XLM-R
+and mBERT. See Appendix §A.1 for more
+pretraining details.
+4.2 Cross-lingual Named Entity Recognition
+Named entity recognition (NER) (Lample et al.,
+2016; Liu et al., 2021; Zhou et al., 2022a) in-
+volves identifying and classifying named entities
+from unstructured text data. The elimination of
+entity/relation embeddings allows our models to
+be trained directly on a larger amount of enti-
+ties without adding extra parameters or increas-
+ing computation cost. Direct training on entity-
+intensive synthetic sentences may also help im-
+proving entity representation more efﬁciently. We
+conduct experiments on the CoNLL02/03 (Tjong
+Kim Sang, 2002; Tjong Kim Sang and De Meul-
+der, 2003) and WikiAnn (Pan et al., 2017) NER
+data to verify the effectiveness of our framework.
+The same transformer-based NER model and hyper-
+parameters as Hu et al. (2020) are used in our ex-
+periments.
+The results on CoNLL02/03 data are presented
+in Table 2. Compared with XLM-R , all of our
+corresponding models improve the average F1 on
+target languages by more than 2.13 points. Espe-
+cially on German, all of our models demonstrate at
+least 4.65 absolute gains. Moreover, all of our mod-
+els also outperform XLM-K (Jiang et al., 2022), a
+knowledge-enhanced multilingual LM proposed in
+a recent work. Even when compared with XLM-
+R , our large model still improves the average
+performance by 1.56. The WikiAnn dataset al-
+lows us to evaluate our models on all of the 10 lan-
+guages involved in pretraining. Jiang et al. (2022)
+did not report XLM-K results on WikiAnn, so we
+evaluate their pretrained model on WikiAnn and
+the following knowledge intensive tasks for better
+comparison. As the results shown in Table 3, our
+best base and large models outperform the corre-6883
+sponding XLM-R models by 2.64 and 1.60 respec-
+tively. From both datasets we observe KMLM-
+XLM-R performs better than KMLM -
+XLM-R , which shows the efﬁcacy of the code-
+switching technique for large-scale cross-lingual
+pretraining. Moreover, both KMLM-XLM-
+R and KMLM-XLM-R (i.e. the mod-
+els pretrained on the mixed code-switched and par-
+allel data) surpass all of the compared models in
+terms of F1, suggesting that the mixed data can
+help further generalize the representations across
+languages.
+4.3 Factual Knowledge Retrieval
+X-FACTR (Jiang et al., 2020) is a benchmark for
+assessing the capability of multilingual pretrained
+language model on capturing factual knowledge.
+It provides multilingual cloze-style question tem-
+plates and the underlying idea is to query knowl-
+edge from the models for ﬁlling in the blank of
+these question templates. From (Jiang et al., 2020),
+we notice the performance of XLM-R is much
+worse than mBERT (see Table 4). It is prob-
+ably because mBERT has a much smaller vo-
+cabulary than XLM-R (120k vs 250k) and em-
+ploys Wikipedia corpus instead of the general data
+crawled from the Internet. So we also pretrain
+KMLM-mBERT for more comprehensive
+comparison. As we can see from Table 4, all of the
+models trained with our framework demonstrate
+signiﬁcant improvements on factual knowledge re-
+trieval accuracy, which again indicates the bene-
+ﬁts of our method on factual knowledge acquisi-
+tion. Our model still demonstrates better perfor-
+mance than XLM-K, though it is also trained using
+Wikipedia.
+4.4 Cross-lingual Relation Classiﬁcation
+RELX (Köksal and Özgür, 2020) is developed by
+selecting a subset of KBP-37 (Zhang and Wang,
+2015), a commonly-used English relation classiﬁ-
+cation dataset, and by generating human transla-
+tions and annotations in French, German, Spanish,
+and Turkish. We evaluate the same set of mod-
+els as §4.3, since mBERT also outperforms
+XLM-R on this task. The evaluation script
+provided by Köksal and Özgür (2020) is used to
+ﬁnetune the pretrained models on English training
+set and evaluate on the target language test sets.
+As the results shown in Table 5, all of our models
+achieves consistently higher accuracy than XLM-K
+and XLM-R.
+4.5 Cross-lingual Logical Reasoning
+Dataset To verify the effectiveness of our logical
+reasoning oriented pretraining tasks (§3.2) in an in-
+trinsic way, we propose a cross-lingual logical rea-
+soning (XLR) task in the form of multiple-choice
+questions. An example of such reasoning question
+is given in Fig. 5. The dataset is constructed using
+the cycles extracted from Wikidata. We manually
+annotate 1,050 samples in English and then trans-
+lated them to the other 9 non-English languages
+(see Sec. 4.1) to build the multilingual test sets.
+The 3k train samples and 1k dev samples in En-
+glish are also generated and cleaned automatically.
+The cycles used to build the test set are removed
+from the pretraining data, so our PLMs have never
+seen them beforehand. The detailed dataset con-
+struction steps can be found in Appendix §A.2.6884
+Results We modify the multiple choice evalu-
+ation script implemented by Hugging Facefor
+this experiment. The models are ﬁnetuned on
+the English training set, and evaluated on the
+test sets in different target languages. Results
+are presented in Table 6. All of our models out-
+perform the baselines signiﬁcantly. Unlike on
+the previous tasks, where KMLMoften per-
+forms the best, KMLMshows slightly higher
+accuracy than KMLM. We also conduct ab-
+lation study to verify the effectiveness of our
+proposed logical reasoning oriented pretraining
+task. We pretrain the None-Reasoning mod-
+els, KMLM -XLM-R and KMLM -
+XLM-R on the same data as KMLM-XLM-
+R and KMLM-XLM-R, but without
+the logical reasoning tasks, i.e., with the MLM
+task only on the reasoning-based data. As pre-
+sented in Fig. 6, the none-reasoning models also
+performs better than XLM-R , which shows the
+usefulness of our reasoning-based data. We also
+observe KMLM-XLM-R and KMLM-
+XLM-R , i.e., the models pretrained with logi-
+cal reasoning tasks, consistently perform the best,
+which proves our proposed task can help models
+learn logical patterns more efﬁciently.
+4.6 General Cross-lingual Tasks
+Recall that our models are directly trained on the
+structured KG data. Though we attempt to mini-
+mize its difference from the natural sentences when
+designing the pretraining tasks, it is unknown how
+the difference affects cross-lingual transfer per-
+formance on the general NLP tasks. Therefore,
+we also evaluate our models on the part-of-speech
+(POS) tagging, question answering and classiﬁca-
+tion tasks prepared by XTREME (Hu et al., 2020).
+Experimental results are shown in Table 7. Note
+that many of the languages covered by these tasks
+are not in our pretraining data, but we include
+all their results when computing the average per-
+formance. Overall, the performance of our mod-
+els is comparable with the baselines on all of the
+tasks, except POS. Possibly because the POS task
+is more sensitive to the change of the training sen-
+tence structures. Though some of our models per-
+form slightly better than the baselines on XQuAD
+(Artetxe et al., 2020) and MLQA (Lewis et al.,
+2020), we ﬁnd the performance gain of our mod-
+els on TyDiQA(Clark et al., 2020) is more ob-
+vious, which is a more challenging QA task that6885
+has less lexical overlap between question-answer
+pairs. From these results we can see that, when our
+KMLMs achieve consistent improvements on the
+knowledge-intensive tasks, as shown by the experi-
+mental results in the previous subsections, it does
+not sacriﬁce the performance on the general NLP
+tasks.
+5 Conclusions
+In this paper, we have presented a novel frame-
+work for knowledge-based multilingual language
+pretraining. Our approach ﬁrstly creates a syn-
+thetic multilingual corpus from the existing KG
+and then tailor-makes two pretraining tasks, mul-
+tilingual knowledge oriented pretraining and log-
+ical reasoning oriented pretraining. These multi-
+lingual pretraining tasks not only facilitate factual
+knowledge memorization but also boost the capa-
+bility of implicit knowledge modeling. We evaluate
+the proposed framework on a series of knowledge-
+intensive cross-lingual tasks and the comparison
+results consistently demonstrate its effectiveness.
+Limitations
+The KMLM models proposed in this work are pre-
+trained on 10 languages in our experiments, so it is
+unclear whether scaling up to more languages will
+help further improve its performance on the down-
+stream tasks. Due to the high computation cost, we
+leave it for future work. Despite the promising per-formance improvement on the knowledge intensive
+tasks, we also observe that KMLM do not perform
+well on the part-of-speech tagging tasks (§4.6). It
+is possibly caused by the large amount of synthetic
+sentences used in pretraining, where mask tokens
+are used to replace the linking words. In future, we
+will explore efﬁcient ways to leverage pretrained
+denoising models (Liu et al., 2020b) or graph-to-
+sequence models (Ammanabrolu and Riedl, 2021)
+to convert the synthetic sentences or knowledge
+triples to the form more close to natural sentences.
+Ethical Impact
+Neural models have achieved signiﬁcant success
+in many NLP tasks, especially for the popular lan-
+guages like English, Spanish, etc. However, neural
+models are data hungry, which poses challenges
+for applying them to the low-resource languages
+due to the limited NLP resources. In this work,
+we propose methods to inject knowledge into the
+multilingual pretrained language models, and en-
+hance their logical reasoning ability. Through ex-
+tensive experiments, our methods have been proven
+effective in a wide range of knowledge intensive
+multilingual NLP tasks. Therefore, our proposed
+method could help overcome the resource barrier,
+and enable the advances in NLP to beneﬁt a wider
+range of population.
+Acknowledgements
+This research is partly supported by the Alibaba-
+NTU Singapore Joint Research Institute, Nanyang
+Technological University. Linlin Liu would like to
+thank the support from Interdisciplinary Graduate
+School, Nanyang Technological University.
+References688668876888
+A Appendix
+A.1 Language Model Pretraining Details
+Training Data The statistics of the data used for
+pretraining are shown in Table 8.
+Hyper-Parameters The hyper-parameters used
+for language model pretraining are presented in Ta-
+ble 9. After pretraining, we ﬁnetune the models on
+the plain text data with max sequence length of 512
+for another 600 steps. Due to the high computation
+cost of LM pretraining, we do not run many exper-
+iments for hyper-parameter searching. Instead, the
+learning rate, batch size, mlm probability are deter-
+mined according to those used in the previous LM
+pretraining studies. To determine the knowledge
+task loss weight αfor large scale pretraining, we
+compareα∈ {0.5,0.3,0.1}using the base models
+pretrained on a smaller dataset. Each base model
+takes about 30 days to train with 8 V100 GPUs.
+A.2 Cross-lingual Logical Reasoning Task
+We propose a cross-lingual logical reasoning (XLR)
+task in the form of multiple-choice questions to
+verify the effectiveness of our logical reasoning
+oriented pretraining tasks in an intrinsic way. An
+example of such reasoning question is given in
+Fig. 5. The dataset is constructed using the length-
+3 and length-4 cycles extracted from Wikidata. For
+each cycle, we pick a triplet to create the question
+and answer. The question is created by asking the
+relation between a pair of entities in that triplet.6889
+6 choices are provided for each question (includ-
+ing the correct answer), which contains all of the
+relations appear in the cycle and some sampled
+relations associated with the two entities. The re-
+maining triplets from the cycle are used as the con-
+text, which is in the form of knowledge graph (see
+Fig. 5). The model is required to select the most
+probable choice according to the given context and
+question. We provide correct and incorrect exam-
+ples to the annotators, and manually annotate 1,050
+samples in English to build the test set. The train
+and dev sets are automatically generated, and then
+cleaned by balancing the appearances of entities,
+relations and answers. After cleaning, we randomly
+select 3k train samples and 1k dev samples for the
+experiment. Then the multilingual test data in the
+other 9 non-English languages are generated by
+selecting the entity/relation labels in the desired
+languages from Wikidata. The cycles used to build
+the test set are removed from the pretraining data,
+so our PLMs have never seen them beforehand.
+Statistics of the self-constructed cross-lingual
+logic reasoning (XLR) dataset are presented in Ta-
+ble 10. The multilingual test data in the 9 non-
+English languages are generated by selecting the
+entity/relation labels in the desired languages from
+Wikidata. So the statistics for their test sets are the
+same as English.
+A.3 Impact of the Logical Reasoning Tasks
+As discussed in §4.5, we pretrain the None-
+Reasoning models, KMLM -XLM-R and
+KMLM -XLM-R on the same data
+as KMLM-XLM-R and KMLM-XLM-
+R , but without the logical reasoning tasks. The
+none-reasoning models generally perform worse
+than the corresponding models trained with the log-Description Value
+number of samples in the train set 3,000
+number of samples in the dev set 1,000
+number of samples in the test set 1,050
+train set unique relation combinations 1,419
+dev set unique relation combinations 746
+test set unique relation combinations 444
+ical reasoning tasks, which proves the usefulness of
+the tailored logical reasoning oriented pretraining
+task for logical reasoning.
+In order to explore the impact of the logi-
+cal reasoning oriented pretraining tasks on the
+none-logical reasoning tasks, we also conduct
+ablation studies to compare the performance of
+KMLM -XLM-R and KMLM-XLM-
+R on the CoNLL02/03 (Tjong Kim Sang,
+2002; Tjong Kim Sang and De Meulder, 2003)
+and WikiAnn (Pan et al., 2017) NER data. From
+the results presented in Table 11 and 12 we can
+see that the average performance on the target lan-
+guages are very close, which shows the logical
+reasoning oriented pretraining tasks do not have
+obvious impact on zero-shot cross-lingual NER.6890

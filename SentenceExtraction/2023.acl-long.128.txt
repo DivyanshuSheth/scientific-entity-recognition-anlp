@@ -1,1 +1,832 @@
-2288 Proceedings of the 61st Annual Meeting of the Association for Computational Linguistics Volume 1 : Long Papers , pages 2288–2303 July 9 - 14 , 2023 © 2023 Association for Computational Linguistics 2289 2290 2291 2292 2293 2294 2295 2296 2297 2298 2299 2300 2301 2302 2303 
+
+Jinghui Lu, Dongsheng Zhu, Weidong Han,
+Rui Zhao, Brian Mac Namee, Fei TanSenseTime ResearchFudan UniversitySchool of Computer Science, University College Dublin
+{lujinghui1, zhaorui, tanfei}@sensetime.com
+{dszhu20, wdhan20}@fudan.edu.cn
+{brian.macnamee}@ucd.ie
+Abstract
+Current methods for prompt learning in zero-
+shot scenarios widely rely on a development set
+with sufficient human-annotated data to select
+the best-performing prompt template a poste-
+riori. This is not ideal because in a real-world
+zero-shot scenario of practical relevance, no
+labelled data is available. Thus, we propose
+a simple yet effective method for screening
+reasonable prompt templates in zero-shot text
+classification: Perple xity Sele ction (Perplec-
+tion). We hypothesize that language discrep-
+ancy can be used to measure the efficacy of
+prompt templates, and thereby develop a sub-
+stantiated perplexity-based scheme allowing
+for forecasting the performance of prompt tem-
+plates in advance. Experiments show that our
+method leads to improved prediction perfor-
+mance in a realistic zero-shot setting, eliminat-
+ing the need for any labelled examples.
+1 Introduction
+Prompt learning has been demonstrated to be a
+successful remedy for challenges associated with
+pre-training and fine-tuning paradigm, especially
+in zero/few-shot scenarios (Gao et al., 2021; Schick
+and Schütze, 2021a,b; Tam et al., 2021; Lu et al.,
+2022a).
+Research has repeatedly shown that various
+transformer-based language models can benefit
+from prompt learning. For example, decoder-only
+models, such as those in the GPT family (Brown
+et al., 2020), can better generalise to unseen cases
+by prefixing inputs with a few training examples
+(in natural language). This is known as in-context
+learning (Brown et al., 2020; Xie et al., 2021; Liu
+et al., 2022a). Encoder-decoder models, such as
+T5 (Raffel et al., 2020) or BART (Lewis et al.,
+2020), can leverage prompt learning to train ver-
+satile models for multiple tasks (Khashabi et al.,2020; Lester et al., 2021). Bidirectional encoder-
+only models, such as those in the BERT family (De-
+vlin et al., 2018; Liu et al., 2019), can also manifest
+impressive zero-shot capacity when given proper
+prompts. These prompts often take the form of
+pre-training tasks, such as next sentence predic-
+tion (Sun et al., 2022) or masked language model-
+ing (MLM) (Gao et al., 2021; Schick and Schütze,
+2021a,b; Tam et al., 2021)—also known as cloze-
+style prompt learning.
+Despite its success in encoder-only models,
+cloze-style prompt learning is sensitive to the spe-
+cific involved templates. Multiple studies have
+shown that the design and choice of prompt tem-
+plates greatly affect the effectiveness of zero-shot
+learning (Tam et al., 2021; Zhao et al., 2021; Ru-
+bin et al., 2022). Ideally, they are supposed to be
+as close as possible to the language used in down-
+stream task. For example, in a sentiment analy-
+sis task, a suitable template may be “[very/not]
+pleased. ” that carries emotional information. How-
+ever, other templates can also be used here like
+“[very/not] good. ” .
+As shown in Table 1, the performance of zero-
+shot learning using different sentiment-bearing
+templates can fluctuate significantly with different
+prompt templates. For the ECOMMERCE dataset,
+the template “[very/not] pleased. ” achieves the
+best zero-shot accuracy of 73.12%, while using
+the template “[very/not] good. ” results in an accu-
+racy of only 55.68%—which is only slightly better
+than random guessing. Additionally, if we choose
+a sentiment-irrelevant template “[yellow/green]
+black. ” , the accuracy significantly drops to 50.49%,
+indicating that the model has no classification abil-
+ity. This shows that the performance of the model
+is largely shaped by templates used. Therefore,
+selecting the most appropriate templates for down-
+stream tasks is crucial in zero-shot learning.
+Current prompt learning methods still rely on
+a development set of human-annotated data for2288
+post-hoc template selection (Tam et al., 2021; Sun
+et al., 2022; Gao et al., 2021; Liu et al., 2021a): all
+candidate templates are evaluated using the devel-
+opment set and the best-performing one is chosen.
+This requires human annotators and does not align
+well with realistic zero-shot learning scenarios in
+which no human-annotated data is available. To ad-
+dress this problem, we propose a truly annotation-
+free perplexity-based template selection method for
+zero-shot prompt learning: Perple xity Sele ction
+(Perplection). Experiments show that Perplection
+is highly likely to select the most effective template
+accommodating true zero-shot scenarios.
+In this paper, we first describe cloze-style prompt
+learning and corresponding terminologies in Sec-
+tion 2. Then, in Section 3, we present our hy-
+pothesis that underpins the work. Based on this
+hypothesis, in Section 4 we detail Perplection that
+uses perplexity to select templates a priori without
+the need of any annotated examples. Section 5 de-
+scribes a pilot study and in Section 6, we present re-
+alistic experiments that show that Perplection leads
+to performance on par with other zero-shot prompt
+methods that utilise a development set. Finally,
+Section 7 discusses the underlying rationales and
+the potential impact of the work in a large language
+models (LLM) era.
+To the best of our knowledge, we spearhead the
+performance screening of prompt templates for a
+realistic zero-shot text classification without using
+any human-annotated data.
+2 Preliminaries
+In this section, we describe basic concepts and
+terminologies associated with prompt learning.
+2.1 Prompt Learning
+Note that the prompting settings and terminolo-
+gies used in this work are mainly derived from the
+work that focuses on manual/automatic cloze-style
+discrete templates (Gao et al., 2021; Schick andSchütze, 2021a,b; Tam et al., 2021). As text clas-
+sification is well studied in prompt-based learning
+tasks (Liu et al., 2021a), we use a simple binary
+sentiment analysis task to demonstrate zero-shot
+prompt learning in our work. Specifically, given an
+input text x, for example “I love this movie. ” , we
+are interested in classifying the sentiment polarity,
+y, of this input text, i.e., ++for positive or −−for
+negative. The cloze-style prompt method modifies
+the input xand output yto further exploit the capa-
+bilities of pre-trained language models. Formally,
+we first manipulate input text xto construct a new
+input text, x, by prefixing (or suffixing) xwith a
+template text sequence, t, that includes a “[MASK]”
+token. So, x= [x, t]orx= [t, x]. For example,
+if we have an input x=“I love this movie. ” and we
+decide to prefix a template t=“Overall, it was a
+[MASK] movie. ” ,xwill become “Overall, it was
+a [MASK] movie. I love this movie. ” .
+Next, xis fed into a language model to pre-
+dict the likelihood with which different tokens fill
+“[MASK]” . This can be achieved by applying an
+MLM head. Usually, researchers use prior knowl-
+edge to limit the set of potential filled tokens to
+those relevant to the task of interest. For example,
+in the sentiment classification example only two
+tokens would be considered: “good” and‘bad” .
+We call each of these a label word ,w, (Liu et al.,
+2021a). Finally, we define a mapping function (or
+verbaliser ) (Liu et al., 2021a), v, to reverse the pre-
+dicted label word back to the target y, for example
+{good :++,bad:−−}. In this way the prompting
+method unifies a binary classification objective into
+an MLM objective, reusing a MLM head to per-
+form zero-shot prediction.
+2.2 Language Discrepancy and Objective Gap
+Previous research (Liu et al., 2021a) has shown that
+prompt learning can help pre-trained language mod-
+els better adapt to downstream tasks by bridging
+the gap between pre-training and the downstream
+task. To be specific, prompt learning allows pre-
+trained language models to take on a greater role2289in prediction, rather than just extracting features.
+In light of the above finding, we identify two ob-
+stacles to combining pre-training and a downstream
+task: language discrepancy and the objective gap .
+The objective gap describes the difference in train-
+ing objectives between pre-training (e.g., next sen-
+tence prediction or MLM) and a downstream task
+(e.g., sequence classification or sequence labelling).
+Language discrepancy refers to the linguistic dif-
+ferences between a pre-training corpus and down-
+stream datasets, including different vocabularies,
+word frequencies, syntactic arrangements, etc.
+3 Hypotheses
+This section proposes two hypotheses that under-
+pin our work, and describes the way they interpret
+observations in the literature.
+3.1 Hypothesis I: Cloze-style Prompting
+Offers a Better Feature Space
+Our first hypothesis is that the use of a cloze-style
+prompt in text classification alters the input data
+distribution in a way that encourages the input data
+to be more effectively represented in a new fea-
+ture space. To illustrate this, Figure 2 presents a
+UMAP (McInnes et al., 2018) visualisation of a
+sentiment analysis dataset, WEIBO , with and with-
+out prompt templates. It is obvious that after being
+prompted with a task-specific template, “[very/not]
+pleased. ” , data from different classes is much better
+separated within the resultant feature space (Figure
+2(b)) than when no prompt template is used (Figure
+2(a)). This shows that a pre-trained language model
+can inherit zero-shot capabilities when given ap-
+propriate prompts, even without using any human-
+annotated examples.
+So how do pre-trained language models con-
+struct such effective feature spaces? We conjec-
+ture that this is because some knowledge of down-
+stream tasks has been implicitly encoded into mod-
+els through pre-training (e.g., MLM for encoder-
+only model or Next Word Prediction for decoder-
+only models). Prompt learning finds a method to
+uncover the knowledge obtained in pre-training.
+Therefore, in this paper, we refer to this feature
+space as the “pre-trained feature space”.
+3.2 Hypothesis II: Language Discrepancy
+Measures the Efficacy of Prompting
+Additionally, we aim to understand what makes a
+template effective at forming a useful pre-trained
+feature space. We believe that the difference in
+language between pre-training corpora and down-
+stream datasets after prompting can be used to as-
+sess the effectiveness of templates.
+Figure 2(c) shows an example. When the text in-
+puts are given a prompt that is unlikely to be used in
+sentiment analysis texts, “[yellow/green] black. ” ,
+the data from different classes is not well separated
+in the feature space (as compared to Figure 2(b)).
+We believe that this is because models rarely en-
+counter the text “yellow black” or“green black”
+prefixed in a sentiment-bearing text in the pre-
+training corpora, and that this language discrepancy
+limits the model’s ability to effectively represent
+the data. In contrast, expressions like “[very/not]
+pleased. ” (Figure 2(b)) are often used in context
+related to emotions and therefore appear more fre-
+quently together with sentiment-bearing text in the
+pre-training corpora. This makes it easier for the
+model to form a useful pre-trained feature space.
+Broadly speaking, we suppose that the objective
+gap has been greatly reduced by reformulating
+the downstream task to use a prompt in text clas-
+sification. The inconsistency is largely due to the
+language differences between the pre-training data
+and the downstream data. Using prompt templates
+helps to align the downstream text with the text
+in a pre-training corpus with respect to language
+discrepancy. The smaller the language discrepancy
+between the pre-training data and the downstream
+data that are being prompted, the more likely it is
+that the data will be represented well in the feature
+space, resulting in better zero-shot performance.
+4 Method
+As discussed in Section 3, a heuristic approach can
+be employed to select the most effective templates
+in zero-shot text classification. One way to do this
+is to utilise language discrepancy to “forecast” the
+performance of different prompt templates. Specif-2290
+ically, the prompt template that results in the low-
+est language discrepancy when prefixed to a given
+input text can be considered the most effective.
+However, how can the language discrepancy be-
+tween downstream text and pre-training corpora
+be measured? In this study, we propose using per-
+plexity (Brown et al., 1992) as an approximation
+of language discrepancy.
+Perplexity is one of the most common metrics
+for evaluating language models, and is defined as
+the exponential average negative log-likelihood of
+a sequence:
+where x= [x, x, ..., x]is a tokenised text
+sequence; and logp(x|x < i )is the log-
+likelihood of the itoken conditioned on the pre-
+ceding tokens x < i computed by a language
+model. Intuitively, given a certain language model,
+lower perplexity for a corpus of sentences indicates
+a model is familiar with that corpus. Basically, the
+language model with the lowest perplexity is cho-
+sen as the most reliable proxy for modelling the
+distribution of the pre-training corpus.
+Analogously, we assume that prompt templates
+resulting in low perplexity when prefixed to a given
+input are likely to be effective templates, eliminat-
+ing the need for a human-annotated development
+set, which is required in most previous work (Liu
+et al., 2021a; Lester et al., 2021; Gao et al., 2021).
+Specifically, as shown in Figure 1, we prefix origi-
+nal input xwith various prompt templates to form
+new prompted texts. For each template, since wehave two label words (i.e., “very” and“not” ), one
+original input xwill generate two prompted texts
+(i.e., “Very pleased. Such a bad movie!” and“Not
+pleased. Such a bad movie!” ). Then we compute
+the mean perplexity score of these two prompted
+texts as the score for the template. Finally, the
+template (where the label words will be replaced
+with "[MASK]" token) with lowest score is selected
+to be prefixed to the original input, constructing
+new input x(i.e., “[MASK] pleased. Such a bad
+movie!” ) to perform a zero-shot prediction. This is
+quite different from previous methods with dataset-
+specific (Gao et al., 2021; Sun et al., 2022) or class-
+specific templates (Zhou et al., 2022). We refer to
+the method as Perple xity Sele ction (Perplection).
+5 Pilot Study
+The aim of the pilot study described in this
+section was to qualitatively validate the hypotheses
+proposed in Section 3, and to examine the utility
+of perplexity as a metric for screening prompt
+templates (another study that examines the utility
+of perplexity is presented in Appendix D). To this
+end, we manually curated four prompt templates as
+shown in Table 1. We then analysed the perplexity
+and zero-shot performance of each template,
+seeking to determine whether there is a correlation
+between perplexity and zero-shot performance.
+5.1 Datasets
+We conducted the pilot study using four publicly
+available Chinese sentiment analysis datasets from
+various domains. These datasets are: DOUBAN ,
+a movie review dataset; WEIBO , a social media
+comment dataset; WAIMAI , a takeaway comment2291dataset; ECOMMERCE , an e-commerce dataset.
+5.2 Perplexity
+We use the Chinese RoBERTa modelas the back-
+bone pre-trained model. Given a pre-trained lan-
+guage model, we use it to compute the mean
+perplexity of downstream datasets that are being
+prompted, to approximate the language discrep-
+ancy. That is, lower perplexity indicates smaller
+language discrepancy between the pre-training cor-
+pus and the prompted downstream dataset.
+Note that perplexity, as originally defined,
+applies specifically to causal language models
+(i.e., autoregressive language models). As sug-
+gested in previous work (Liu et al., 2019; Salazar
+et al., 2020), perplexity for bidirectional mod-
+els like BERT/RoBERTa can be made analogous
+to that for causal language models by replacing
+logp(x|x < i )withlogp(x|c)in Equation
+1. Here, crefers to the context text, which is the
+whole sentence except for the itoken. This sug-
+gests that the perplexity of each token is not only
+conditioned on the preceding tokens but also the
+succeeding tokens. We added a template to each
+example, replaced the “[MASK]” with label words
+from the prediction problem, and calculated the
+average perplexity for each example. We then av-
+eraged the perplexity scores of all examples to get
+the overall perplexity of the dataset.
+During preliminary experiments, however, we
+found that this definition of perplexity has the draw-
+back of favouring longer sentences. That is, a sen-
+tence is assigned a lower perplexity, not because the
+pre-trained language model is more able to model
+this sentence (i.e., low language discrepancy), but
+rather because the text is longer. We conjecture that
+this is due to the penalty term in Equation 1 that
+divides the sum of log-likelihood by the sequence
+length t. The detail of our preliminary experiments
+regarding perplexity are provided in Appendix A.
+The focus of this pilot study, however, is to illus-
+trate the impact of language discrepancy rather than
+finding useful measures of perplexity. So, to mit-
+igate against the drawbacks of the perplexity def-
+inition the four datasets used in our experiments
+were subsampled to include only sentences with
+between 14 and 15 words, as well as to enforce
+a 50:50 class balance. Also, all hand-crafted tem-
+plates have similar lengths (in Chinese).5.3 Zero-shot Result Analysis
+The accuracies achieved using different prompt
+templates for four datasets are shown in Table
+1. These results demonstrate that prompt learn-
+ing can equip a pre-trained language model with
+zero-shot capability when proper templates are pro-
+vided. However, the performance of Template 4
+(i.e., “[yellow/green] black” ) demonstrates that
+“unusual” prompting (i.e., texts that models are un-
+likely to see during pre-training) has limited contri-
+bution to zero-shot prediction, which is consistent
+with our expectation.
+To conclude, the results of the pilot study verify
+our hypothesis that in prompt learning, task-related
+templates are more useful in shaping a good pre-
+trained feature space. The big difference between
+zero-shot performance across different prompting
+approaches in the pilot study shows that it is cru-
+cial to search for ideal prompt templates in prompt
+learning. We argue that this problem can be ad-
+dressed by using perplexity as discussed in the
+following subsection.
+5.3.1 Perplexity Analysis
+Table 1 also conveys a very clear message that as
+perplexity goes up, the zero-shot performance be-
+comes worse. For example, the perplexity of Tem-
+plate 1 decreases from 24.61 ( DOUBAN ), to 19.78
+(WEIBO ), to 16.44 ( WAIMAI ), to 13.71 ( ECOM-
+MERCE ); while the zero-shot accuracy consis-
+tently increases from 57.12 ( DOUBAN ), to 61.79
+(WEIBO ), to 67.80 ( WAIMAI ), to 73.12 ( ECOM-
+MERCE ). This pattern can also be observed for
+Templates 2 and 3. Furthermore, when compar-
+ing sentiment-bearing templates (Templates 1-3)
+to the sentiment-irrelevant template (Template 4)
+across datasets, it is evident that the sentiment-
+irrelevant template consistently yields the highest
+perplexity and the lowest accuracy. The experimen-
+tal results can partially verify our hypotheses that
+as the language discrepancy decreases (i.e., lower
+perplexity), it is easier for prompts to align down-
+stream data to a pre-trained feature space. The next
+section describes experiments that show how the
+Perplection approach takes advantage of this.
+6 Experiments
+In this section, we demonstrate the proposed Per-
+plection approach in a more realistic and useful
+experimental setting to verify whether we can use
+language discrepancy to forecast the efficacy of2292
+prompt templates for zero-shot classification .
+6.1 Datasets
+In addition to the datasets mentioned in Section
+5.1, we also utilise four text classification datasets
+from the FewCLUE benchmark (Xu et al., 2021):
+EPRSTMT (e-commerce comment sentiment
+analysis), CSLDCP (scientific literature subject
+classification), TNEWS (news classification), and
+IFLYTEK (APP description topic classification).
+To evaluate whether Perplection can be extended
+to other languages, we also evaluate Perplection
+on three English datasets: SST-2 (sentiment
+analysis) (Wang et al., 2018), TweetEval (hate
+speech detection) (Barbieri et al., 2020), and AG
+News (multi-class topic classification) (Zhanget al., 2015). Note that in contrast to the pilot study,
+in these experiments we did not subsample the
+datasets to make their sentences the same length.
+6.2 Setup
+All manually crafted templates are presented in Ta-
+ble 4. All the verbalisers and manual templates for
+English datasets can be seen in Appendix C. We
+perform Perplection based on these manually de-
+signed templates ( MPerplection ). If perplexity is
+an ideal metric, the performance of this method will
+be better than random template-example matching
+(MRandom ). We then construct a more aggres-
+sive setting where templates are generated auto-
+matically by LM-BFF algorithm (Gao et al., 2021)
+(more detail is included in Appendix B) and ap-2293ply similar template selection procedures to those
+described for manually crafted templates. These
+are dubbed APerplection andARandom . In or-
+der to obtain a robust assessment of the random
+variants, we conduct five independent runs of the
+experiments using different random seeds and re-
+port the average results. Note that both manually
+crafted and automatically generated templates are
+constructed to have similar lengths.
+We report the results based on both RoBERTa
+and BERTto demonstrate the proposed method
+is agnostic to the pre-trained model used. We also
+report the performance of another two state-of-
+the-art zero-shot prompting-based methods: NSP-
+BERT (Sun et al., 2022), and Zero-PET (Schick
+and Schütze, 2021a; Xu et al., 2021). They are
+strong baselines whose settings comply with the
+corresponding work (further implementation de-
+tails are provided in Appendix C).
+6.3 Results
+Comparison to random baselines: The results
+of the Perplection variants and their corresponding
+random counterparts were compared in Table
+2. It can be seen that when using manually
+crafted templates with both BERT and RoBERTa,
+Perplection was able to actively select more useful
+templates compared to the random selection,
+as indicated by the significant improvement in
+performance (MRandomB vs. MPerplectionB
+and MRandomR vs. MPerplectionR). Also, when
+using automatically generated templates, Perplec-
+tion is able to choose more effective templates,
+particularly when using RoBERTa (ARandomR vs.
+APerplectionR). These findings suggest that the
+templates selected by perplexity are more useful
+and deliver better performance. However, results
+also show that Perplection is less effective when
+automatically generated templates are used, which
+will be discussed in the next section.
+Manual templates vs. automatic templates: Ta-
+ble 2 shows that variants using manually generated
+templates outperform their counterparts using auto-
+matically generated templates. We conjecture that
+the poor quality of automatically generated tem-
+plates may hinder the performance of Perplection.
+In other words, the pool of automatically gener-
+ated templates may be insufficient in diversity for
+Perplection to have an impact.
+As illustrated in Table 4, the majority of auto-
+matic template texts display minimal variations
+and lack coherence, which is in stark contrast to
+the manual templates. In this case, templates tend
+to generate similar perplexities, leading to little
+distinction between them based on perplexity. To
+illustrate this, we report the standard deviation of
+perplexity for both manual templates and automatic
+templates in Table 5. It can be observed that for
+all datasets, the standard deviation of perplexity for
+manual templates is higher than that of automatic
+templates, showing that perplexity is more useful
+when the templates are of higher diversity.
+It is suspected that the quality of the automati-
+cally generated templates is constrained by the ca-
+pacity of the pre-trained T5 model. We believe that
+this can be improved by changing the T5 backbone
+or resorting to other methods that automatically
+generate templates using annotation information
+(Lester et al., 2021; Liu et al., 2021b; Li and Liang,
+2021; Liu et al., 2022b). We leave these explo-
+rations for future work.
+Comparison to state-of-the-art approaches:
+We compare our best performing method (MPer-
+plectionR) with other state-of-the-art zero-shot
+methods, results are shown in Table 3. We find
+that the performance of Perplection consistently
+surpasses Zero-PET for all datasets by a large mar-
+gin except for TNEWS , and is competitive with
+NSP-BERT in some datasets such as DOUBAN
+(60.74 vs. 60.85). Note that both Zero-PET and
+NSP-BERT used a human-annotated development
+set to select the most suitable templates while Per-
+plection does not require any annotated data.
+For the IFLYTEK dataset, Perplection seems less
+competitive as compared to Zero-PET and NSP-
+BERT. Specifically, the latter two methods heav-
+ily rely on the post-hoc selected template “This2294is a [MASK] app. ” (see Appendix C) with the
+development set quite close to target domain of
+interest, whereas Perplection has more generic tem-
+plates (in Table 4, those prompts are task-related
+but not domain-relevant). Thus, the suboptimal
+performance of Perplection can also be explained
+by our hypothesis that generic templates are less
+effective at aligning the downstream data into a
+pre-trained feature space compared to those fine-
+grained domain-specific templates. We suspect that
+this can be addressed by providing Perplection with
+several domain-related fine-grained templates to se-
+lect from. We leave these explorations for future
+work. All observations, however, show that it is
+effective to use perplexity to rate templates and
+select desired ones accordingly.
+Results on English datasets: Table 6 compares
+the performance of Perplection to random baselines
+on three English datasets. Perplection consistently
+tops the comparison in almost all cases except for
+SST-2 with RoBERTa. This observation supports
+the supposition that Perplection is agnostic to
+the pre-trained model used, and shows that it is
+promising to extrapolate results to other languages.
+6.4 In-depth Analysis
+We conduct an in-depth analysis based on MPer-
+plectionR. For brevity, we apply each manual
+prompting setting to all examples from the four
+datasets (i.e., DOUBAN ,WEIBO ,WAIMAI ,ECOM-
+MERCE ) and aggregate the accuracy score as a
+post-hoc measurement of template quality. For
+each template, we also compute its frequency of
+being selected. The results are presented in Figure
+3. It shows that templates with lower perplexity
+are more likely to achieve better performance. To
+be specific, there is 60% chance for Perplection
+to select the second best performing template (i.e.,
+“[MASK] fond of it. ” ) and around 10% chance to
+select the best performing template (i.e., “[MASK]
+satisfied. ” ). For templates with no discriminative
+ability e.g., “[MASK] good. ” and“[MASK] ok. ” ,
+our method has almost no chance to select them.
+Most importantly, the selection based on perplexity
+is annotation-agnostic and allows us to “foresee”
+the result to some extent without the need of a
+human-annotated development set. To conclude,
+the results demonstrate that perplexity is a reason-
+able metric for evaluating prompting settings.
+7 Discussion
+What contributes better zero-shot learners?
+This work empirically reveals that the large lan-
+guage discrepancy between the pre-training cor-
+pora and the downstream data may hinder the zero-
+shot generalization. On top of that, we develop a
+perplexity-based scheme that leverages cloze-style
+prompt templates to bridge language discrepancy
+and thus, fully releases the potential of pre-trained
+language models. The significance of this work
+lies in its pioneering study of a feasible objective
+for optimising REALISTIC zero-shot prompting
+templates. The idea may be applied to various
+variations (e.g., continuous prompts) beyond the
+discrete prompts currently being studied.
+Why REALISTIC zero-shot matters? In this
+work, we constantly emphasise a realistic zero-shot
+scenarios (no labelled data), as opposed to the exist-
+ing zero-shot setting in the field of NLP (Xu et al.,
+2021; Sun et al., 2022) or Multi-modality (Radford
+et al., 2021), where a development set is available
+for template selection or hyper-parameter tuning.
+Realistic zero-shot can be quite appealing for in-
+dustrial scenarios and thus, this research opens up
+a new avenue for research in the field of zero-shot
+learning, probably inspiring follow-up studies in
+broader tasks for advancing the zero-shot learn-
+ing in industrial applications (especially in many
+low-resource scenarios).
+Potential impact in the LLM era. In light of
+the advancements in large language models (LLM)
+based on the decoder-only architecture (Zhao et al.,
+2023), searching for effective instructions or in-
+context demonstration examples (Zhang et al.,
+2022) has become an essential challenge. Per-
+plection can be seamlessly applied to decoder-
+only models for searching effective instructions/in-
+context examples for various natural language gen-2295eration (NLG) tasks. We make our code available
+for replication and further extension to NLG tasks
+by the community.
+8 Conclusion
+We developed Perplexity Selection Prompt (Per-
+plection) a method that enables real-world zero-
+shot text classification without the use of any
+human-annotated data. A pilot study demonstrated
+that Perplexity can be an effective measure of the
+efficacy of templates. Experimental results show
+that, for datasets in both English and Chinese, our
+method can boost zero-shot performance of cloze-
+style prompt learning in binary sentiment analysis
+as well as multi-class classification, without using
+a development set. Further in-depth analysis sup-
+ports the observation that Perplection can “foresee”
+the efficacy of prompt templates.
+9 Limitations
+In this study, we mainly utilised the BERT fam-
+ily of models for Chinese text classification tasks.
+Given the similarity with respect to transformer lan-
+guage models and pre-training paradigms, as well
+as the preliminary results on English datasets as dis-
+cussed in Section 6.3, we may be able to extrapolate
+the results to other architectures/tasks/languages.
+For example, Perplection can be seamlessly ap-
+ply to decoder-only models (e.g., GLM (Du et al.,
+2022), LLaMA (Touvron et al., 2023)) to see
+whether it can boost the performance for those
+NLG tasks. But further investigation is needed
+to verify the utility of findings on other model ar-
+chitectures, tasks, and languages. In the future, we
+expect to see Perplection applied to different NLG
+tasks such as seq2seq information extraction (Lu
+et al., 2022b), question answering, arithmetic rea-
+soning, machine translation or even multi-modality
+tasks.
+Also, utilising Perplection may exacerbate the
+inherent limitations of pre-trained language mod-
+els. We suspect that, in instances where the model
+has not been exposed to certain texts or concepts
+during pre-training, reliance on perplexity for tem-
+plate selection may result in subpar performance.
+In the future, we expect to explore whether we can
+alleviate this problem by certain annotation-free
+methods, such as continuous self-supervised train-
+ing with downstream data, or extend our method in
+a few-shot setting where limited label information
+is available.Besides, the use of perplexity as a metric has the
+drawback of favoring long texts, which forces us
+to design templates of the same length. Therefore,
+a length-agnostic metric can be considered as an
+alternative.
+10 Ethics Statement
+We honor the ACL Code of Ethics. No private
+data or non-public information was used in this
+work. We conducted our research in an objective
+and unbiased manner. We take full responsibility
+for the content of this paper and stand behind the
+accuracy and integrity of our work.
+Acknowledgements
+We would like to thank anonymous reviewers for
+their insightful comments to help improve the paper.
+This publication has emanated from research con-
+ducted with the support of SenseTime Research.
+References22962297
+A Issue of Perplexity
+We find that the current perplexity definition has
+the drawback of favouring longer sentences. That
+is, a sentence is assigned a lower perplexity, not
+because the pre-trained language model can more
+easily model this sentence (i.e., lower language dis-
+crepancy), but rather because the text is longer. We
+first use a simple comparison to demonstrate this
+as shown in Table 7. We calculate the perplexity
+of a meaningful sentence “Auntie: Don’t be too
+tired [haha]” which is 17.21. However, if we pre-
+fix this sentence with a long sequence of nonsense
+words, the perplexity even gets lower, i.e., 5.85.
+We then conduct a large scale test to see the cor-
+relation between perplexity and text length. The
+results are presented in Figure 4, it is obvious that
+the avg. perplexity is inversely proportional to avg.
+text length. In other words, a low perplexity of a
+sentence is partially contributed by a low language
+discrepancy but more likely to be contributed by a
+long text, which challenges our use of perplexity
+to measure language discrepency.2298
+B Automatic Template Generation
+Similar to Gao et al. (2021), for the DOUBAN ,
+WEIBO ,WAIMAI , and ECOMMERCE datasets we
+fix the verbaliser to { very:++,not:−−}, and use
+T5-v1.1-base-chineseto automatically generate
+templates. Specifically, Gao et al. (2021) assume afew-shot scenario using ground truth label word as
+well as corresponding examples to generate a num-
+ber templates. They then sort generated templates
+based on the aggregated generation probability (the
+calculation of generation probability also needs la-
+bel information) of the whole training set. However,
+our experiment assumes a zero-shot scenario with
+no labelled data. Thus, for each dataset, we first
+randomly sample 50 examples from the pool. For2299
+each example, we use label words indicating both
+sentiments to generate templates, one for each sen-
+timent, resulting in 100 templates in total. Then we
+remove duplicate templates, leaving around 59-73
+templates remain per dataset respectively.
+For the EPRSTMT ,TNEWS ,CSLDCP , and IFLY-
+TEK datasets, whose automatically generated tem-
+plates have been made available,, we directly use
+those existing generated templates. We remove
+duplicate templates and around 11-22 templates
+remain per dataset. All automatically generated
+templates can be seen at URL masked for anony-
+mous review.C Implementation Details
+In the implementation of Zero-PET, we use the pre-
+trained Chinese-RoBERTa-wwm-ext model, which
+is identical to the model employed in Perplection.
+For NSP-BERT, we use google BERT-Chinese.
+Templates and label words for both baselines fol-
+low the best-performing setting reported in (Sun
+et al., 2022; Xu et al., 2021), as shown in Table 9.
+The manual generated templates (in Chinese) for
+Perplection are also shown in Table 9. A conver-
+sion is conducted to map class names to label words
+following (Xu et al., 2021) to ensure all prefixed
+texts have similar length, as shown in Table 8. For
+theCSLDCP andIFLYTEK datasets we randomly
+subsample 15 classes to facilitate the experiments.
+In the implementation of English Perplection
+and its random counterparts, we use the pre-trained
+BERT-base-uncasedand RoBERTa-basemodels.
+Templates and label words for English experiments
+are shown in Table 10. All experiments are con-
+ducted on a Tesla V100 GPU with 32GB memory.2300D Reverse Label Words
+To briefly verify whether perplexity can be used
+to measure the quality of prompting, we perform
+a very simple experiment where we compute the
+mean perplexity score of prompted input xwith
+“[MASK]” filled by ground truth label words for
+each dataset (called PPL). Then we reverse the
+label words filled in previous input examples (e.g.,
+we change “very pleased. ” to“not pleased. ” in a
+positive sentiment example) and recompute mean
+perplexity score (called PPL). Note that this ex-
+periment is based on RoBERTa. The results of this
+are shown in Table 11.
+First, we notice that in Setting 1 (i.e., “[very/not]
+pleased. ” ), the mean perplexity of PPLis always
+smaller than that of PPLby a clear margin which
+is encouraging. This shows that the pre-trained
+model can perceive the change of semantics in
+texts. When we see the perplexity of Setting 2 (i.e.,
+“[yellow/red] black. ” , we find out the magnitude of
+change is much smaller, which demonstrates that re-
+placing label words makes almost no difference to
+models if domain-irrelevant prompting is applied.2301ACL 2023 Responsible NLP Checklist
+A For every submission:
+/squareA1. Did you describe the limitations of your work?
+Section 9 Limitations
+/squareA2. Did you discuss any potential risks of your work?
+Section 9 Limitations
+/squareA3. Do the abstract and introduction summarize the paper’s main claims?
+Abstract and Section 1 Introduction
+/squareA4. Have you used AI writing assistants when working on this paper?
+Left blank.
+B/squareDid you use or create scientiﬁc artifacts?
+Left blank.
+/squareB1. Did you cite the creators of artifacts you used?
+No response.
+/squareB2. Did you discuss the license or terms for use and / or distribution of any artifacts?
+No response.
+/squareB3. Did you discuss if your use of existing artifact(s) was consistent with their intended use, provided
+that it was speciﬁed? For the artifacts you create, do you specify intended use and whether that is
+compatible with the original access conditions (in particular, derivatives of data accessed for research
+purposes should not be used outside of research contexts)?
+No response.
+/squareB4. Did you discuss the steps taken to check whether the data that was collected / used contains any
+information that names or uniquely identiﬁes individual people or offensive content, and the steps
+taken to protect / anonymize it?
+No response.
+/squareB5. Did you provide documentation of the artifacts, e.g., coverage of domains, languages, and
+linguistic phenomena, demographic groups represented, etc.?
+No response.
+/squareB6. Did you report relevant statistics like the number of examples, details of train / test / dev splits,
+etc. for the data that you used / created? Even for commonly-used benchmark datasets, include the
+number of examples in train / validation / test splits, as these provide necessary context for a reader
+to understand experimental results. For example, small differences in accuracy on large test sets may
+be signiﬁcant, while on small test sets they may not be.
+No response.
+C/squareDid you run computational experiments?
+Left blank.
+/squareC1. Did you report the number of parameters in the models used, the total computational budget
+(e.g., GPU hours), and computing infrastructure used?
+Section 5.2 Issue of Perplexity, Section 6.2 Setup, Appendix C Implementation Details2302/squareC2. Did you discuss the experimental setup, including hyperparameter search and best-found
+hyperparameter values?
+Section 5.2 Issue of Perplexity, Section 6.2 Setup, Appendix A Issue of Perplexity, Appendix B
+Automatic Template Generation, Appendix C Implementation Details,
+/squareC3. Did you report descriptive statistics about your results (e.g., error bars around results, summary
+statistics from sets of experiments), and is it transparent whether you are reporting the max, mean,
+etc. or just a single run?
+Section 6.3 Results, Section 6.4 In-depth Analysis
+/squareC4. If you used existing packages (e.g., for preprocessing, for normalization, or for evaluation), did
+you report the implementation, model, and parameter settings used (e.g., NLTK, Spacy, ROUGE,
+etc.)?
+Section 5.2 Perplexity, Section 6.2 Setup, Appendix A Issue of Perplexity, Appendix B Automatic
+Template Generation, Appendix C Implementation Details,
+D/squareDid you use human annotators (e.g., crowdworkers) or research with human participants?
+Left blank.
+/squareD1. Did you report the full text of instructions given to participants, including e.g., screenshots,
+disclaimers of any risks to participants or annotators, etc.?
+No response.
+/squareD2. Did you report information about how you recruited (e.g., crowdsourcing platform, students)
+and paid participants, and discuss if such payment is adequate given the participants’ demographic
+(e.g., country of residence)?
+No response.
+/squareD3. Did you discuss whether and how consent was obtained from people whose data you’re
+using/curating? For example, if you collected data via crowdsourcing, did your instructions to
+crowdworkers explain how the data would be used?
+No response.
+/squareD4. Was the data collection protocol approved (or determined exempt) by an ethics review board?
+No response.
+/squareD5. Did you report the basic demographic and geographic characteristics of the annotator population
+that is the source of the data?
+No response.2303

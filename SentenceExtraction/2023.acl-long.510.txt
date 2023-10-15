@@ -1,1 +1,995 @@
-9174 Proceedings of the 61st Annual Meeting of the Association for Computational Linguistics Volume 1 : Long Papers , pages 9174–9193 July 9 - 14 , 2023 © 2023 Association for Computational Linguistics 9175 9176 9177 9178 9179 9180 9181 9182 9183 9184 9185 9186 9187 9188 9189 9190 9191 9192 9193 
+
+Yaoyiran LiChing-Yun ChangStephen Rawls
+Ivan Vuli ´cAnna KorhonenLanguage Technology Lab, TAL, University of CambridgeAmazon Alexa AI
+yl711@cam.ac.uk ,{cychang,sterawls}@amazon.com
+{iv250,alk23}@cam.ac.uk
+Abstract
+Research on text-to-image generation (TTI)
+still predominantly focuses on the English lan-
+guage due to the lack of annotated image-
+caption data in other languages; in the long
+run, this might widen inequitable access to
+TTI technology. In this work, we thus investi-
+gate multilingual TTI (termed mTTI ) and the
+current potential of neural machine translation
+(NMT) to bootstrap mTTI systems. We pro-
+vide two key contributions. 1)Relying on
+a multilingual multi-modal encoder, we pro-
+vide a systematic empirical study of standard
+methods used in cross-lingual NLP when ap-
+plied to mTTI: T T ,T - T, and Z-S T .2)
+We propose Ensemble Adapter ( EA), a
+novel parameter-efficient approach that learns
+to weigh and consolidate the multilingual text
+knowledge within the mTTI framework, mit-
+igating the language gap and thus improv-
+ing mTTI performance. Our evaluations on
+standard mTTI datasets COCO-CN, Multi30K
+Task2, and LAION-5B demonstrate the poten-
+tial of translation-enhanced mTTI systems and
+also validate the benefits of the proposed E-Awhich derives consistent gains across all
+datasets. Further investigations on model vari-
+ants, ablation studies, and qualitative analyses
+provide additional insights on the inner work-
+ings of the proposed mTTI approaches.
+1 Introduction and Motivation
+Text-to-Image Generation (TTI) is an emerging yet
+rapidly growing area, owing its recent progress
+to ever-growing deep generative models, larger-
+scale multi-modal datasets, and increasing com-
+putational resources. The success of recent TTI
+work is impressive; e.g., it is possible to synthesise
+not only high-resolution complex scenes (Ramesh
+et al., 2022; Rombach et al., 2022), but also sur-realist and ‘aesthetics-aware’ paintings (Gallego,
+2022).
+However, current models are made and deployed
+almost exclusively for the English language ().
+This is primarily due to the lack of annotated image-
+caption data in other languages, which might result
+in inequitable access to TTI technology in the long
+run, especially for low-resource languages (Blasi
+et al., 2022). Hiring human annotators to write
+high-quality image descriptions is time-consuming
+and expensive; ‘gold standard’ data, if it exists at
+all, is thus typically used for evaluation purposes
+only (Lan et al., 2017; Aggarwal and Kale, 2020).
+Even if we put the crucial concerns of data
+scarcity aside, training state-of-the-art (SotA) TTI
+models from scratch for each language is techni-
+cally infeasible and impractical: it would consume
+massive computational resources, exceeding the
+capabilities of many research labs (Ramesh et al.,
+2021; Saharia et al., 2022) and raising concerns of
+its environmental impact (Schwartz et al., 2020).
+Therefore, in this work, we focus on multilingual
+TTI ( mTTI ) through the optics of NLP’s cross-
+lingual transfer learning methods, leaning on the
+reasonable assumption of having abundant image-
+text pairs in English (and/or a pretrainedTTI
+model), but only limited gold-standard data for
+fine-tuning and evaluation in a target language.
+In particular, we investigate the role of cross-
+lingual transfer and (neural) machine translation
+(MT) in bootstrapping mTTI, and we focus on two
+crucial research questions. (RQ1) Are standard
+MT-based cross-lingual transfer methods feasible
+for mTTI, and how do they compare with standard9174zero-shot cross-lingual transfer methods? (RQ2)
+Is it possible to enhance zero-shot cross-lingual
+transfer relying on (ensembles of) MT-generated
+output for improved mTTI?
+Our experiments and core findings are based
+on several mTTI benchmarks. First, we use the
+standard and publicly available COCO-CN (Li
+et al., 2019) and Multi30K (Elliott et al., 2016),
+and we also build a new dataset for Finnish as a
+lower-resource language from LAION-5B (Schuh-
+mann et al., 2022). Regarding RQ1, we then con-
+duct a systematic empirical study comparing the
+standard cross-lingual transfer methods: T - T ,T T, and Z-S
+T . Our main results indicate that T - T achieves the best performance, fol-
+lowed by Z-S T which outper-
+forms T T.
+Regarding RQ2, we aim to combine MT-based
+and zero-shot cross-lingual transfer via fast and
+parameter-efficient fine-tuning. Inspired by the
+speech processing literature where a list of Auto-
+matic Speech Recognition (ASR) hypotheses can
+bejointly considered for downstream tasks (Gane-
+san et al., 2021; Liu et al., 2021) to alleviate the
+misrecognition of ASR systems, we propose a mod-
+ule within our mTTI framework termed Ensemble
+Adapter ( EA). It fuses the text encodings of
+‘non-English’ text input and a set of its translations
+to English. Additionally inspired by Ponti et al.
+(2021), the idea is to combine the knowledge from
+multiple translations to mitigate potential transla-
+tion errors, and that way boost cross-lingual trans-
+fer for mTTI.
+Our proposed method derives robust gains across
+all evaluation datasets. Besides offering SotA
+mTTI performance, the introduced EAcom-
+ponent also adds only 0.1% dedicated extra pa-
+rameters (relative to the full mTTI model size) per
+each supported target language. Put simply, the use
+ofEAincreases the portability of our mTTI
+framework through quick and parameter-efficient
+adaptation to new languages. The resources of our
+work are available at https://www.amazon.sci
+ence/code-and-datasets/translation-enh
+anced-multilingual-text-to-image-gener
+ation .
+2 Related Work
+Text-to-Image Generation. There are generally
+two categories of standard TTI setups: 1)a super-vised setup, where gold standard training and test
+data are from the same domain (e.g., both from
+MS-COCO); and 2)a zero-shot setup, where there
+is a domain difference between the training data
+(typically large-scale noisy Web-crawled data) and
+the high-quality test data (typically manually con-
+structed). GAN-based models are common in su-
+pervised TTI setups (Reed et al., 2016; Xu et al.,
+2018; Zhu et al., 2019): they still hold the SotA
+results, offering smaller model sizes and faster im-
+age generation speed (Zhang et al., 2021; Tao et al.,
+2022; Zhou et al., 2022). GigaGAN (Kang et al.,
+2023), a recent attempt to scale up GAN models,
+achieves fairly strong and competitive zero-shot
+TTI performance. However, in the zero-shot setup,
+large Vector Quantised Variational Autoencoder
+(VQV AE)-based models (Ramesh et al., 2021;
+Crowson et al., 2022; Gafni et al., 2022) and large
+diffusion models (Nichol et al., 2022; Ramesh
+et al., 2022; Saharia et al., 2022) play the leading
+role and offer the best performance.
+Multilingual and Non-TTI. Research on mTTI
+and non-TTI is currently limited and only in its
+infancy. Cogview is a large VQV AE-based Chinese
+TTI model with training data partly from crawl-
+ing Chinese websites and social media platforms,
+and partly from translatingdata (Ding et al.,
+2021). ruDALL-E is a VQV AE-based Russian TTI
+model recreating DALL-E (Ramesh et al., 2021)
+with training data translated fromdata.
+To the best of our knowledge, there are only two
+existing papers attempting multilingual or cross-
+lingual TTI. Zhang et al. (2022) align two mono-
+lingual text encoders, one for the source and the
+other for the target language, with a fixed image
+generator pretrained on the source language (i.e.,). Jung et al. (2022) take a step further, relying
+on a multilingual text encoder that supports more
+languages simultaneously.
+We note several crucial differences to the prior
+work. 1)The two papers are based on earlier TTI
+models (Xu et al., 2018), which are now largely sur-
+passed by recent SotA models (Zhou et al., 2022).
+2)Their model designs are tied to the model of Xu
+et al. (2018) and cannot be easily adapted to the
+latest SotA TTI models. 3)They use traditional
+LSTM text encoders enhanced by mono-modal
+BERT features, while SotA TTI models (Zhou
+et al., 2022; Saharia et al., 2022; Rombach et al.,91752022) use the multi-modal CLIP model (Radford
+et al., 2021). Therefore, we neither adopt them as
+baselines nor try to adapt them for our use, also
+taking into account the difficulty of replicating
+the prior work as no code has been released to
+date. In contrast, our work relies on the mCLIP
+text encoder (Carlsson et al., 2022), the multilin-
+gual version of CLIP, and is developed based on
+LAFITE (Zhou et al., 2022), a SotA TTI model.
+In fact, as shown later in our work, training an En-
+glish TTI model using mCLIP without any further
+tuning can already realise zero-shot mTTI, similar
+to what has been attempted by Jung et al. (2022).
+Translation-Based Cross-lingual Transfer. Ma-
+chine translation (MT) at both lexical level and
+sentence level has been successfully used for cross-
+lingual transfer learning in NLP, where T - T andT Tusually serve
+as strong baselines for downstream tasks (Conneau
+et al., 2018; Glavaš et al., 2019; Hu et al., 2020;
+Ponti et al., 2021; Li et al., 2022a,b). In addition,
+MT is used to generate sentence pairs for train-
+ing multilingual multi-modal models (Zhou et al.,
+2021; Carlsson et al., 2022). However, MT is still
+largely underexplored and underutilised for mTTI.
+In this work, we analyse the potential of MT to
+enhance multilingual and cross-lingual TTI.
+3 Methodology
+In what follows in this section, we first introduce
+our base mLAFITE model and three baseline ap-
+proaches for mTTI (§3.1). Next, we propose an
+Ensemble Adapter module that can work in synergy
+with the pretrained mLAFITE model to improve
+mTTI performance (§3.2). Finally, we describe
+how we train our Ensemble Adapter and formulate
+our loss functions (§3.3).
+3.1 mLAFITE and Baselines
+For easier deployment and comparison of differ-
+ent cross-lingual transfer methods, our work fo-
+cuses on the relatively lightweight GAN-based
+models, which are faster to train and evaluate com-
+pared with VQV AE-based models and large dif-
+fusion models (see §2). In particular, we adopt
+LAFITE (Zhou et al., 2022), a SotA GAN-based
+English TTI model, as our starting point. To unlock
+its multilingual capabilities, we replace its English-
+only CLIP text encoder (Radford et al., 2021) with
+mCLIP (Carlsson et al., 2022), which is already pre-
+trained to align the sentence representation spacesof68languages.
+There are three common categories of cross-
+lingual transfer approaches which we apply to
+mTTI and adopt as our principal baselines:
+T T . We translate all the captions
+from the English training set (e.g., COCO) into
+a (non-) target language ( L) relying on an MT
+system. We then train a LAFITE TTI model in the
+target language from scratch, relying on mCLIP as
+the text encoder.At inference, an Lsentence is
+directly fed into the target-language TTI model.
+The other two approaches instead rely on a TTI
+model pretrained with English data, and they do not
+require further tuning with captions in the target
+languages. As our first step, we pretrain an mCLIP-
+based LAFITE model (we call it mLAFITE for
+brevity) from scratch.
+T T. At inference, we first trans-
+late a caption in Lintovia MT and the
+translation then serves as mLAFITE’s input.
+Z-S T . Since mCLIP is a mul-
+tilingual sentence encoder, text in Lcan be directly
+fed to our mLAFITE for TTI without any extra
+fine-tuning.
+3.2 mLAFITE with Ensemble Adapter
+We now propose an attention-based Ensemble
+Adapter ( EA) module that aims to improve
+mTTI via leveraging knowledge from multiple
+translations of the same input. The full pipeline and
+how EAextends the base mLAFITE model are
+illustrated in Figure 1. Given an input sentence in
+language L,L̸=, we first use any (N)MT system
+to sample a set oftranslations. We then de-
+ploy the EAmodule between the mCLIP text
+encoder and the TTI generator to fuse the mCLIP-
+extracted embeddings, bridging the-Llanguage
+domain gap. The adapter can be trained with only
+a small set of image- Ltext pairs while mCLIP and
+the TTI generator networks are kept frozen.9176
+Formally, we use xto denote the Linput text,
+while{x, x, ..., x}is a set of mtransla-
+tions of the Linput text. The fixed mCLIP en-
+coder extracts their respective ( l-normalised) d-
+dimensional sentence embeddings, yielding the ma-
+trixH= (h,h, ...,h)∈R. Then, our
+proposed EAlearns to fuse these sentence en-
+codings from H. We define the query ( q), key
+(K), and value ( V) inputs of our attention as:
+q=h, (1)
+K= (h,h, ...,h), (2)
+V= (h−h,h−h, ...,h−h).(3)
+Note that {h,h, ...,h}are all close to each
+other in the mCLIP representation space. There-
+fore, to focus on the ‘additional information’ con-
+tained in thetranslations, we take the difference
+between h, i > 0andhas in Eq. (3).The cal-
+culation of attention scores is then based on the
+standard additive attention (Bahdanau et al., 2015):
+A=Wq1+WK+WV+b1,(4)
+s=softmax (W(tanh(A))). (5)
+EA’s hidden size is d;W,W,W∈
+Rare respective mappings for query, key,
+and value inputs; b∈Ris the bias, and W∈
+Ris a final projection matrix for deriving
+the attention scores. Then, the context vector is an
+attention-guided summarisation of V.EA’sfinal output is the linear combination of hand the
+context vector, computed as follows:
+V= (1−α)V+α·tanh(WV), (6)
+c=Vs, (7)
+˜h=EA(H) = (1 −α)q+α·c,(8)
+whereW∈Ris the output mapping, and
+αis an interpolation hyperparameter. We also l-
+normalise the outputs of Eqs. (3),(7),(8), as well
+as the tanh (WV)term in Eq. (6).
+3.3 Contrastive Adversarial Training
+Our Generator ( G) and Discriminator ( D) network
+structures and the pretraining process of the base
+mLAFITE model all follow LAFITE’s original im-
+plementation for supervised TTI. As illustrated in
+Figure 1, we take the pretrained mLAFITE and
+insert the EAbetween mCLIP and G. We then
+adversarially train EAandDiteratively while
+mCLIP and Gare kept frozen.Additionally, we
+propose to optimise a novel contrastive objective
+aligning the D-extracted real image and fake (syn-
+thesised) image features in adversarial training.
+The (m)LAFITE GAN framework is adapted
+from the popular unconditional StyleGAN2 frame-
+work (Karras et al., 2020b) which features a re-
+designed adaptive instance normalization mecha-
+nism (Huang and Belongie, 2017) in G: it enables
+the unconditional channel-wise ‘style information’
+(e.g., pose, lighting, background style) to control
+G’s image synthesis backbone (convolution and up-
+sampling layers). The ‘style information’ is derived9177as follows: a random noise zis sampled from the
+standard Gaussian distribution N(0,I)and trans-
+formed into a so-called unconditional StyleSpace ,
+which is proven to be a well-disentangled interme-
+diate latent space (Wu et al., 2021).LAFITE fur-
+ther proposes to inject text-conditioning informa-
+tion into the StyleSpace via a series of non-linear
+and affine mappings. In our pipeline, Gtakes our
+EA-gathered feature ˜hand noise z, and it then
+outputs a fake image: I=G(˜h,z).
+The discriminator has a characteristic ‘two-
+branch’ design: 1)Dis in essence a convolutional
+image encoder , producing f(I), ad-dim image
+feature for any real or fake (i.e., synthesised) input
+imageI;2)Dalso predicts if Iis real or fake based
+on both Iand˜h, where the prediction (a scalar out-
+put) is denoted as D(I,˜h) =D(I) +˜hf(I).
+This is realised via adding two affine transforma-
+tions on top of a shared visual backbone for de-
+riving f(I)andD(I), respectively. We then
+define the adversarial (AD) losses for EAand
+Dfollowing LAFITE:
+L =−1
+n/summationdisplaylogσ(D(I,˜h)), (9)
+L=−1
+n/summationdisplaylogσ(D(I,˜h))
+−1
+n/summationdisplaylog(1−σ(D(I,˜h))).(10)
+nis the batch size, and σ(·)is the sigmoid function.
+We propose an auxiliary contrastive loss, align-
+ing the discriminator-extracted IandIfea-
+tures, computed as follows:
+s=cos(f(I), f(I)), (11)
+L=−1
+n/summationdisplaylogexp(s/τ)/summationtextexp(s/τ).(12)
+cos(·)calculates the cosine similarity, and τis the
+temperature.
+In the original LAFITE paper, there are already
+two auxiliary contrastive losses: 1)Laligns
+CLIP-extracted image features of Iand the
+input text embedding, i.e., ˜hin our case; 2)L
+aligns f(I)with its associated ˜h.In our pre-
+liminary experiments, we found that Lwas notuseful for EA, so we completely remove it.
+Our final losses for training EAandDare
+as follows, with two hyperparameters λandλ
+controlling the weights of contrastive losses:
+L=L +λ· L+λ· L,(13)
+L=L+λ· L+λ· L. (14)
+The full training process is also summarised in
+Algorithm 1, available in Appendix C. Note that
+the use of EAintroduces only up to 0.1% extra
+parameters per each target language relative to the
+full model size. This parameter efficiency boosts
+the portability of our mTTI framework, enabling
+quick and efficient adaptation to new languages.
+4 Datasets
+mLAFITE pretraining is based on the MS-
+COCO (Chen et al., 2015) training set comprising
+82,783images, where each image is associated
+with 5captions. 10% of the training set is held
+out as our dev set, and the rest is used for training.
+MS-COCO also provides a validation set ( 40,504
+images), frequently used for TTI evaluation.
+For mTTI, we choose evaluation datasets that sat-
+isfy the following criteria: a)no overlap between
+images in the test set and images used in pretrain-
+ing;b)the test set includes at least 5Kimages;
+c)the captions are human-written descriptions and
+not (manual or MT-derived) translations from
+captions.Based on these requirements, we select
+three ‘non-’ datasets, outlined in what follows.
+COCO-CN (Li et al., 2019) provides Chinese ()
+captions (i.e., human descriptions) for 20,341MS-
+COCO images. 6,748of them are from the COCO
+validation set not seen during mLAFITE pretrain-
+ing; we thus use them as our test set. We randomly
+sample 20% of the rest as our dev set ( 2,718), and
+the training set has 10,875images. Each image has9178only onecaption. COCO-CN additionally of-
+fers5,000sentences manually translated fromcaptions; we only use the corresponding-sentence pairs to calculate BLEU scores for
+comparing different MT systems.
+Multi30K Task2 (Elliott et al., 2016, 2017) has
+5German () captions (human descriptions) for
+each of 31,014Flickr30K (Young et al., 2014) im-
+ages. We randomly sample and keep one caption
+per each image.We randomly split the data into
+train, dev, and test sets spanning 10,000,2,000,
+and19,014images, respectively.
+LAION-5B (Schuhmann et al., 2022) is a large-
+scale Web-crawled vision-language dataset with 5
+billion image-text pairs covering 100+ languages.
+We focus on Finnish () as a lower-resource lan-
+guage for our evaluation. Unlike carefully anno-
+tated COCO-CN and Multi30K, LAION-5B’s data
+are noisy, so we rely on massive filtering to select
+relatively high-quality data. The full data creation
+process foris provided in Appendix D.
+The final dataset comprises training, develop-
+ment and test portions with 10,000,2,000, and
+18,000image-text pairs, respectively. Our manual
+inspection of the final dataset indicates that it is of
+acceptable quality although having its own charac-
+teristics (Appendix D) but the quality in general
+still cannot match COCO-CN or Multi30K. We use
+the data in our main experiments 1)as an initial
+trial to extend TTI evaluation to ‘non-COCO-style’
+captions and another language and 2)for compara-
+tive analyses with COCO-CN and Multi30K.
+Supplementary Dataset: IGLUE. In order to fur-
+ther widen the set of target languages, we also
+experiment with IGLUE xFlickr &CO(Bugliarello
+et al., 2022). It provides 2Kimages, where one
+half comes from the MS-COCO validation set and
+the other half from Multi30K with associated hu-
+man descriptions in 5additional languages: Span-
+ish (), Indonesian (), Japanese (), Russian
+(), and Turkish (). Since IGLUE does not
+offer a training set, we use it only for RQ1-related
+experiments. Although IGLUE does not comply
+with our criterion b)above, we use it to extend our
+empirical analyses to more languages.
+Table 6 in Appendix A provides a full and sys-tematic overview of languages and data statistics
+used in this work.
+5 Experimental Setup
+In what follows, we outline our experimental setups
+and choices related to the two core RQs from §1.
+We also show details concerning our mLAFITE pre-
+training, side experiments (most are RQ2-related),
+and evaluation metric.
+mLAFITE Pretraining. All methods for mTTI are
+implemented based on our pretrained mLAFITE
+model, which is trained with 8×16GB V100 GPUs
+for75hours (i.e., 40million data points sampled
+from the training set). Contrastive loss weights and
+other hyper-parameters follow the original LAFITE
+setup (Zhou et al., 2022).For fair comparisons,
+we use the same mCLIP text encoder for all our
+RQ1 and RQ2 experiments.
+RQ1 Experiments. On COCO-CN, we compare
+four widely used MT systems: Amazon Translate,
+a SotA commercial MT software, and three SotA
+Transformer-based NMT models developed in an
+academic context including Marian (Tiedemann
+and Thottingal, 2020; Junczys-Dowmunt et al.,
+2018), mBART50 (Liu et al., 2020; Tang et al.,
+2021), and M2M100 (Fan et al., 2021). We lever-
+age them to generate the 1-best translations for
+T T andT T, and
+we also compare the BLEU scores of the MT sys-
+tems against the TTI performance. Note that train-
+ing a T T TTI model from scratch
+for each of the MT systems also takes 75hours;
+ourT T experiments thus do not
+extend to other datasets beyond COCO-CN due to
+the high computational cost.
+Given the considerations above along with pre-
+liminary evaluations on COCO-CN which showed
+that Marian outperforms mBART50 and M2M100,
+for the other datasets we focus on comparing
+the Marian-based T Twith Z-
+S T .
+RQ2 Experiments. RQ2 further studies the effec-
+tiveness of the proposed EAmodule; see §3
+and Figure 1. We select Marian as the NMT back-9179boneand sample mtranslations per each input
+sentence in the input language L.To compare
+with EA(with the frozen mLAFITE genera-
+tor), we also propose and experiment with several
+insightful and simple baselines (without the use
+ofEA) in addition to the RQ1 baselines: 1)
+we try standard mean-pooling as a simple ensem-
+bling baseline directly on mLAFITE; 2)we fine-
+tuneGusing the original non-captions;3)we
+fine-tune Gusing mean-pooled text features. Fi-
+nally, we also investigate variants which combine
+EAwith the tunable generator Gto check if
+further gains can be achieved.
+Training for RQ2 experiments is conducted on
+8×V100 GPUs with a batch size per GPU of 16for
+about 7hours (i.e., a total of 2million data points
+sampled from the respective training sets). We use
+Adam optimiser (Kingma and Ba, 2014) with a
+learning rate of 5e-4and betas of (0,0.99). For the
+generator-tuning baselines, their contrastive loss se-
+tups completely follow the original LAFITE (Zhou
+et al., 2022). In our EAexperiments, λ=4
+andλ=2. Other hyper-parameters are as follows:
+the NMT beam size is 12, NMT temperature is 2.0,
+images are scaled to resolution 256×256,m=12,
+d=512 ,d=256, andτ=0.5. In addition, we fuse
+10% and1%standard Gaussian noise into hand
+h(1≤i≤m) respectively as a data augmenta-
+tion ‘trick’. The hyper-parameters are tuned on our
+dev split of COCO-CN with details in Appendix G.
+The same set of hyper-parameters is also adopted
+for the other two datasets.
+Side Experiments. Besides the main RQ1 and
+RQ2 experiments, we also conduct a series of side
+analyses focused on EA. They span 1)the
+impact of the number oftranslations m,2)the
+impact of the interpolation hyperparameter α, and
+3)robustness tests. We also conduct 4)ablation
+studies to validate the effectiveness of different
+components, and 5)present generated images and
+EAattention scores.Evaluation Metric. Following Zhou et al. (2022)
+and Ramesh et al. (2021), we report the Fréchet
+Inception Distance (FID) (Heusel et al., 2017) com-
+puted with 30,000synthesised images generated
+using randomly sampled test set texts against test
+set ground-truth images, which is the most authori-
+tative machine evaluation metric for TTI so far.
+6 Results and Discussion
+The main results are structured around the two cen-
+tral RQs from §1, discussed in §6.1 and §6.2.
+6.1 RQ1: Results and Analyses
+Comparison of Three Baselines. The results
+ofT T ,T T, and
+Z-S T on COCO-CN are sum-
+marised in Table 1. While all three methods
+use mCLIP, T TandZ-S
+T are based on a pretrainedmLAFITE
+and do not require any further tuning. T
+T achieves the best FID scores; however, it
+requires training from scratch with translated L
+captions (see §3.1 and §5). Since MS-COCO pro-
+vides ground-truth human-writtencaptions for
+COCO-CN images, and Multi30K Task2 also pro-
+videshuman descriptions, we directly feed thecaptions to mLAFITE and report the FID scores
+as an upper bound (see the first row of each of Ta-
+bles 1 and 2).
+The scores in Tables 1 and 2 show that Z-
+S T outperforms T T,
+demonstrating the strong capability of the multilin-
+gual mCLIP text encoder. T Tcom-
+pares unfavourably to other methods, revealing the
+gap betweentranslations and the ground-truthhuman descriptions (e.g., translation errors,
+‘translationese’ bias). We further extend the com-
+parison to five more languages from the IGLUE
+dataset, and the results from Table 7 in Appendix E
+corroborate the finding that Z-S T -generally outperforms T T.
+Comparison of MT Systems. We compare the per-
+formance of the four MT systems on COCO-CN
+and also report their BLEU scores on the additional9180
+5Ksentence pairs. Table 1, as expected, reveals
+that the commercial Amazon Translate system of-
+fers much stronger MT performance than the three
+academic NMT systems in terms of BLEU. Con-
+cerning mTTI, Amazon Translate is the best system
+with the T Tapproach category and
+ranks second with T T . Interest-
+ingly, there are some salient discrepancies between
+BLEU-based versus TTI-based system rankings.
+For example, Marian ranks second in T
+T and is the best system with T
+T , although its MT performance underper-
+forms both Amazon Translate and mBART50. We
+speculate that this might be due to the pretrain-
+ing specifics of mCLIP, where Marian-generated
+pseudo-parallel sentence pairs were used (Carlsson
+et al., 2022).
+InT T, M2M100 obtains the
+lowest→BLEU score and also achieves
+the worst TTI performance. However, mBART50
+and M2M100 have close→BLEU scores in
+T T , and a small edge in BLEU
+cannot guarantee a better TTI performance. We
+additionally compare Marian and Amazon Trans-
+late for T Tin Tables 2 and 7 (Ap-
+pendix E) on other languages and datasets, which
+further validate the core findings.
+6.2 RQ2: Results and Analyses
+Effectiveness of EA.The main results are
+summarised in Table 3. For all methods except
+‘Ground-TruthCaptions’, the language gap
+(withcaptions for mLAFITE pretraining) al-
+ways exists since the text input is in language
+L. When there is no image domain gap (i.e., for
+COCO-CN), EAwithout tuning Gachieves
+the best score, surpassing also the T
+T baseline (cf. Table 1), and the absolute
+score also mitigates the gap to the upper-bound
+set by ‘Ground-TruthCaptions’. With image
+domain gap present (i.e.,and), training E-A(with frozen G) still shows a small edge over
+fine-tuning G(without EA) for; however,
+for the noisier LAION-5B data, fine-tuning Gis
+more useful. However, for bothand, the
+best results are always achieved when EAis
+leveraged, validating its usefulness combined with
+parameter efficiency. For example, EAwith
+Gfrozen consistently outperforms Z-S
+T while introducing only 0.1% extra pa-
+rameters. Our robustness tests repeating EA
+(Frozen G) experiments on COCO-CN with differ-
+ent random seeds further corroborate these findings
+(the deviation of FID is 0.04), with a short sum-
+mary in Appendix F.
+Variants of EA.We further investigate the im-
+pact of crucial design choices and hyper-parameters
+inEAsuch as m,α, andV(see Eq. (3)) re-
+spectively on the final TTI performance. The re-
+sults of different variants are provided in Table 4.
+They indicate that increasing the number of trans-
+lations mseems to be conducive to downstream
+TTI performance. In addition, when V=K, the
+FID score worsens, demonstrating the usefulness
+of theVvariant as formulated by Eq. (3). Finally,
+the TTI performance deteriorates when α > 0.2,
+showing that hshould still be the main component
+of˜h, and EAprovides auxiliary information
+(i.e., a translation-based enhancement).9181
+Ablation Study. We now study the usefulness of
+two used contrastive losses: 1)our proposed L
+and2)Linherited from LAFITE. The results in
+Table 5 show that removing Lcauses a notice-
+able performance drop (increased FID). However,
+removing Lhas only a minor impact on the FID
+score. When removing both CL losses, the adver-
+sarial losses alone produce an FID score of 14.82.
+We also additionally try the CL loss setup of the
+original LAFITE and find that the setup is detrimen-
+tal to the training of EA, producing a worse
+FID score than using the adversarial losses alone.
+TTI Examples and Attention Scores. Finally, we
+refer the reader to Appendix H where we present
+images synthesised with T T,Z-
+S T , and our EAmodels and
+where we also show the EAattention scores.
+The differences between images are subtle and we
+were unable to find a clear pattern that links high
+attention scores with particular translations.
+7 Conclusion
+This work is one of the first investigations of mul-
+tilingual and cross-lingual text-to-image genera-
+tion (TTI), with a particular focus on investigating
+the use of machine translation (MT) for the task.
+We systematically compared standard cross-lingual
+transfer approaches T T ,T - T andZ-S T in the
+context of TTI and also studied the differences
+over MT systems. We then proposed a novel En-
+semble Adapter ( EA) method that leverages
+multiple translations to further improve the TTIperformance, with strong and consistent gains re-
+ported across a series of standard TTI benchmarks
+in different languages.
+Limitations
+First, we again emphasise that the lack of high-
+quality non-English image-caption pairs is a pri-
+mary obstacle to wider-scale multilingual and
+cross-lingual TTI investigations. We hope that re-
+searchers in the future can construct and release
+more high-quality vision-language data for differ-
+ent languages, especially for low-resource ones.
+Second, our work uses 512-dim ‘XLM-R Large
+Vit-B/32’ mCLIPand is based on the Style-
+GAN2 framework (Karras et al., 2020b). Since the
+main focus of our work is to realise multilingual
+and cross-lingual TTI and enable fair comparisons
+across different models and approaches, we com-
+pare all proposed and baseline methods with the
+same mCLIP text encoder and the GAN framework.
+However, for readers and potential users interested
+in ‘chasing’ stronger absolute FID scores, we spec-
+ulate that the larger 640-dim ‘XLM-R Large Vit-
+B/16+’ mCLIP text encoder and the more recent
+StyleGAN3 (Karras et al., 2021) can be helpful.
+Third, we notice that in addition to LAFITE, sev-
+eral state-of-the-art large diffusion models such as
+those from Saharia et al. (2022) and Rombach et al.
+(2022) also use CLIP to condition image generation
+on text input. This means that we could be able
+to derive multilingual diffusion models for mTTI
+also by replacing CLIP with mCLIP and enhance
+the mTTI performance with our proposed EA
+(of course, we would need to redesign our loss
+functions). However, due to limited computational
+resources, we leave it to future work.
+Fourth, the EAboosts cross-lingual transfer
+for TTI by combining the knowledge from multi-
+ple translations, which can mitigate potential trans-
+lation errors. Our work does not demonstrate if
+EAis applicable and adaptable to downstream
+cross-lingual tasks besides TTI. It is because 1)
+downstream tasks other than TTI are out of the
+scope of this work and 2)adapting EAto dif-
+ferent tasks will require redesign of model struc-
+tures and losses catering to the characteristics of
+each downstream task, making us believe it is not
+proper to expand the topic and include everything
+in a single piece of work. Therefore, we also leave
+this to future work.9182Ethics Statement
+The datasets involved in our experiments are pub-
+licly available and widely used, and it is quite com-
+mon to train text-to-image generation models on
+publicly available data. To the best of our knowl-
+edge, the ethical risk is minimal. For privacy con-
+cerns, we do not present images with human faces
+and captions with real human names in the paper,
+and we will not release material that may contain
+any sensitive information.
+Acknowledgements
+We would like to thank 1)all members of the
+Amazon Alexa Translations Science Team for help-
+ful discussions and valuable comments during the
+weekly group meetings, 2)Yufan Zhou, the author
+of LAFITE, who kindly responded to our questions
+concerning LAFITE’s technical details on Github,
+and3)the anonymous reviewers for their feedback.
+Ivan Vuli ´c is supported by a personal Royal So-
+ciety University Research Fellowship ‘Inclusive
+and Sustainable Language Technology for a Truly
+Multilingual World’ (no 221137; 2022–).
+References9183918491859186A Data Statistics and Languages
+In Table 6, we summarise the data statistics and
+languages covered in our experiments.
+B Additional Discussion on Data Sources
+Even without human-annotated image descriptions,
+there are two possible ways to derive captions for a
+target language L.
+First, we could translatecaptions into L
+manually (still costly) or via machine translation.
+OurT T baseline (see §3) derives
+training data via machine translation and trains an
+LTTI model from scratch. One main disadvan-
+tage of this approach is that it incurs huge training
+costs. While translations can be used as training
+data, we are conservative about using translated
+captions for TTI evaluation which can cause un-
+expected bias (Elliott et al., 2016; van Miltenburg
+et al., 2017; Bugliarello et al., 2022).
+Second, it is possible to use cheaper but noisy
+Web-crawled visual-language data. For example,
+the recently released LAION-5B dataset (Schuh-
+mann et al., 2022) has 5 billion image-text pairs
+for100+ languages. There are previous examples
+that successfully trained SotATTI models with
+Web-crawled data, such as large VQV AE-based
+models and diffusion models. The models de-
+scribed in Ramesh et al. (2021), Nichol et al. (2022)
+and Ramesh et al. (2022) are trained onlarge-
+scale Web-crawled data, but are eventually also
+tested on the gold-standard MS-COCO validation
+set. In our work, in addition to two gold-standard
+datasets, we also try to build on our own a small-
+scale dataset for both training and evaluation by fil-
+tering relatively good-quality image-text pairs from
+a subset of the noisy LAION-5B data (details in §4).
+Training non-TTI models from scratch with
+large-scale Web-crawled data such as LAION-5B is
+out of the scope of our work, and we focus on cross-
+lingual transfer learning setups with limited Ldata.
+As mentioned in §1, this is to a large extent due to
+concerns about huge computational costs for train-
+ing TTI models. Moreover, there are circa 7,000
+languages worldwide (Lewis, 2009), and for low-
+resource languages not covered in LAION-5B’s
+100+ languages, cross-lingual transfer learning ap-
+proaches would still be the first choice. Further-
+more, the number oftexts in LAION-5B is more
+than the total amount of texts from its 100+ non-
+texts. Making full use of the huge amount of
+image-text pairs via cross-lingual transfer learningAlgorithm 1
+might be beneficial for other languages. Therefore,
+we think that cross-lingual transfer learning in rela-
+tively low-resource setups for multilingual TTI is a
+critical and valuable research topic.
+C The Detailed Training Process of
+EA
+We summarise the training process of our EA
+method (see §3) in Algorithm 1.
+D Deriving LAION-5B Dataset for
+Finnish
+We download circa 5.1million image-caption pairs
+from thecategory of LAION-5B. Since the Web-
+crawled data are noisy, we apply several filtering
+steps: 1)since our images will be scaled to resolu-
+tion256×256, to avoid distortion we keep only
+images with their width-height ratio between 0.5
+and2;2)we keep captions with a minimum length
+of8words, which is also a requirement of MS-
+COCO (Chen et al., 2015) in its data annotation;
+3)we use the langdetect libraryto remove texts
+misclassified into the LAION-5Bcategory and
+make sure the texts left are actually in Finnish;
+4)we keep captions with one ending period ‘.’.
+After these steps, 239Kpairs are left, and we cal-
+culate mCLIP scores (cosine similarities between
+mCLIP-extracted text and image features) for all
+the pairs and keep the 30Khighest-ranking pairs
+as the final dataset. We randomly split the data
+into training, development and test portions with
+10,000,2,000, and 18,000pairs, respectively.
+We ‘sanity-check’ 50randomly sampled in-
+stances from our filtered data and find that, in most
+cases, the text matches the image content. But there
+are a small number of exceptional cases where the9187
+text contains extra information beyond the image
+content itself (e.g., event descriptions). Overall, the
+quality of ourdata still cannot match MS-COCO
+or Multi30K. Another interesting finding is that
+LAION-5B captions often use real and concrete
+names such as ‘Messi’ and ‘the national stadium’
+to describe the image content, while MS-COCO
+and Multi30K tend to use general words such as ‘a
+man’/‘a football player’ and ‘a stadium’/‘a build-
+ing’.
+E RQ1: Results on IGLUE
+Table 7 shows additional TTI results on five
+languages from IGLUE, comparing T
+T (with Marian and Amazon Translate) and
+Z-S T baselines.
+F Robustness of EA
+We train the ‘ EA(Frozen G)’ model on COCO-
+CN6more times ( 7times in total) with different
+random seeds, and for each saved model we run
+TTI evaluation three times.Finally, we get 21
+FID results, with min 14.47, max 14.62, mean
+14.55, and standard deviation 0.04. Even the worst
+score of 14.62outperforms all other baselines on
+COCO-CN.
+G Reproducibility Checklist
+•TTI Data : the datasets used in our work are
+all publicly available including MS-COCO,
+COCO-CN, Multi30K Task2, LAION-5B, and IGLUE.
+•Parameter Counts : the number of param-
+eters is 655,873 for our ensemble adapter
+network, 44,997,026for the generator net-
+work, 29,126,785for the discriminator net-
+work, 560,415,232for the mCLIP text en-
+coder ‘M-CLIP/XLM-Roberta-Large-Vit-B-
+32’, and 87,849,216for the CLIP visual
+encoder ‘ViT-B/32’.
+•Computing Infrastructure : we run our code
+on an Amazon EC2 P3.16xlarge Instance
+with8×16GB NvidiaTeslaV100 GPUs,
+64×2.30GHz IntelXeonE5-2686 v4
+CPU cores, and 488GB RAM.
+•Software : Python 3.7.0, PyTorch 1.12.1, and
+Transformers 4.21.0.
+•Hyperparameter Search : our hyper-
+parameters are tuned on our dev split of
+COCO-CN. The same hyper-parameters
+are used for Multi30K and LAION-5B
+(we also conduct minimal tuning on
+their dev sets and find that the hyper-
+parameters tuned on COCO-CN are already
+(near-)optimal in our initial investiga-
+tion). The learning rate is selected from
+{5e−5,2.5e−4,5e−4,2.5e−3,5e−3},
+λandλwhich are weights for con-
+trastive losses from {0.5,1,2,4,5,10},
+αthe interpolation hyperparameter from
+{0.05,0.1,0.15,0.2,0.25,0.3,0.35,0.4,0.5},
+anddfrom{32,64,128,256,512}.9188
+•Runtime : it takes 75hours to train an
+mLAFITE TTI model or a T
+T model from scratch, 7hours to train an
+EAbased on a pretrained mLAFITE, 7.5
+hours to fine-tune G(without EA) based
+on a pretrained mLAFITE, and about 4 min-
+utes to run FID evaluation for our TTI model
+with EA(data preprocessing, NMT, and
+mCLIP feature extraction excluded). All ex-
+periments and measurements were conducted
+on8×16GB V100 GPUs.
+•Other Technical Details : we adopt the ‘expo-
+nential sharpening’ for all contrastive losses
+as specified in LAFITE’s supplementary ma-
+terial.
+•Carbon Footprint : we estimate that 1)train-
+ing an mLAFITE TTI model or a T - T model from scratch can cause
+the emission of circa 56∼67-kg COequiva-
+lents; 2)training an EAmodel would re-
+sult in about 5∼6-kg COequivalents. These
+estimations are based on our computational in-
+frastructure and a publicly available ‘machine
+learning emissions calculator’ (Luccioni et al.,
+2019).
+H TTI Examples and Attention Scores
+H.1 TTI Examples
+We compare images generated with T
+T,Z-S T , and our best E-Amodel in Figure 2, where for each TTI method
+we present two images generated with different ran-
+dom noise inputs as introduced in §3. The ‘Best’
+model here refer to our EAmodel that achieve
+the best FID scores ( bold numbers) in Table 3 re-
+spectively for each language, i.e., ‘ EA(Frozen
+G)’ forand ‘ EA+ Fine-Tune G(LText)’
+forand. The differences between images gen-
+erated with different TTI methods are very subtle.H.2 Attention Scores
+Table 8 includes the original Linput text,
+translations, and their associated EAattention
+scores (in descending order) corresponding to the
+images in Figure 2. We did not identify any salient
+pattern concerning the type oftranslations to
+which higher EAattention scores are attached.
+H.3 Can EAIncorporate Manually
+Added Information from Translations?
+To better understand what kind of information
+EAextracts fromtranslations, we also try
+to manually add additional information totrans-
+lations (the additional information does not appear
+in and is not added to the original Linput). Of
+course, this section is for probing purposes only
+since MT systems are not likely to produce the
+same translations. We found that when the addi-
+tional information is added to only several of the
+12translations, it can hardly get reflected in the
+generated image. Here, we show two COCO-CN
+test set examples in Figure 3 where we add the new
+information into 12translations simultaneously.
+In its first and second rows, the original Linput is
+‘An open laptop is on the table.’ and ‘It’s a clean,
+but crowded kitchen.’ respectively (translated from
+the original Chinese captions). We manually add
+new objects ‘roses’ and ‘fruits’ respectively to all
+theirtranslations as in Table 9. As seen in Fig-
+ure 3, the roses and fruits do appear in the generated
+images.918991909191ACL 2023 Responsible NLP Checklist
+A For every submission:
+/squareA1. Did you describe the limitations of your work?
+The Limitations section.
+/squareA2. Did you discuss any potential risks of your work?
+The Ethics Statement section.
+/squareA3. Do the abstract and introduction summarize the paper’s main claims?
+Section 1 Introduction and Motivation.
+/squareA4. Have you used AI writing assistants when working on this paper?
+Left blank.
+B/squareDid you use or create scientiﬁc artifacts?
+Section 3 Methodology, Section 4 Datasets, Section 5 Experimental Setup, and Appendix G Repro-
+ducibility Checklist
+/squareB1. Did you cite the creators of artifacts you used?
+Section 4 Datasets, Section 5 Experimental Setup, and Appendix G Reproducibility Checklist
+/squareB2. Did you discuss the license or terms for use and / or distribution of any artifacts?
+Section 4 Datasets, Section 5 Experimental Setup, the Ethics Statement section, and Appendix G
+Reproducibility Checklist.
+/squareB3. Did you discuss if your use of existing artifact(s) was consistent with their intended use, provided
+that it was speciﬁed? For the artifacts you create, do you specify intended use and whether that is
+compatible with the original access conditions (in particular, derivatives of data accessed for research
+purposes should not be used outside of research contexts)?
+Section 4 Datasets, Section 5 Experimental Setup, the Ethics Statement section, and Appendix G
+Reproducibility Checklist.
+/squareB4. Did you discuss the steps taken to check whether the data that was collected / used contains any
+information that names or uniquely identiﬁes individual people or offensive content, and the steps
+taken to protect / anonymize it?
+The Ethics Statement section.
+/squareB5. Did you provide documentation of the artifacts, e.g., coverage of domains, languages, and
+linguistic phenomena, demographic groups represented, etc.?
+Section 4 Datasets, Section 5 Experimental Setup, Appendix A Data Statistics and Languages, and
+Appendix G Reproducibility Checklist.
+/squareB6. Did you report relevant statistics like the number of examples, details of train / test / dev splits,
+etc. for the data that you used / created? Even for commonly-used benchmark datasets, include the
+number of examples in train / validation / test splits, as these provide necessary context for a reader
+to understand experimental results. For example, small differences in accuracy on large test sets may
+be signiﬁcant, while on small test sets they may not be.
+Section 4 Datasets, Section 5 Experimental Setup, and Appendix A Data Statistics and Languages9192C/squareDid you run computational experiments?
+Section 5 Experimental Setup, and Section 6 Results and Discussion
+/squareC1. Did you report the number of parameters in the models used, the total computational budget
+(e.g., GPU hours), and computing infrastructure used?
+Appendix G Reproducibility Checklist
+/squareC2. Did you discuss the experimental setup, including hyperparameter search and best-found
+hyperparameter values?
+Section 5 Experimental Setup, Appendix G Reproducibility Checklist
+/squareC3. Did you report descriptive statistics about your results (e.g., error bars around results, summary
+statistics from sets of experiments), and is it transparent whether you are reporting the max, mean,
+etc. or just a single run?
+Section 6 Results and Discussion, Appendix F Robustness of ENSAD
+/squareC4. If you used existing packages (e.g., for preprocessing, for normalization, or for evaluation), did
+you report the implementation, model, and parameter settings used (e.g., NLTK, Spacy, ROUGE,
+etc.)?
+Section 5 Experimental Setup, Appendix G Reproducibility Checklist
+D/squareDid you use human annotators (e.g., crowdworkers) or research with human participants?
+Left blank.
+/squareD1. Did you report the full text of instructions given to participants, including e.g., screenshots,
+disclaimers of any risks to participants or annotators, etc.?
+Not applicable. Left blank.
+/squareD2. Did you report information about how you recruited (e.g., crowdsourcing platform, students)
+and paid participants, and discuss if such payment is adequate given the participants’ demographic
+(e.g., country of residence)?
+Not applicable. Left blank.
+/squareD3. Did you discuss whether and how consent was obtained from people whose data you’re
+using/curating? For example, if you collected data via crowdsourcing, did your instructions to
+crowdworkers explain how the data would be used?
+Not applicable. Left blank.
+/squareD4. Was the data collection protocol approved (or determined exempt) by an ethics review board?
+Not applicable. Left blank.
+/squareD5. Did you report the basic demographic and geographic characteristics of the annotator population
+that is the source of the data?
+Not applicable. Left blank.9193

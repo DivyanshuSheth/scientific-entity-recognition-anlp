@@ -1,1 +1,750 @@
-1237 Proceedings of the 60th Annual Meeting of the Association for Computational Linguistics Volume 1 : Long Papers , pages 1237 1252 May 22 - 27 , 2022 c(cid:13)2022 Association for Computational Linguistics 1238 1239 1240 1241 1242 1243 1244 1245 1246 1247 1248 1249 1250 1251 1252 
+
+Pei ZhouKarthik GopalakrishnanBehnam HedayatniaSeokhwan Kim
+Jay PujaraXiang RenYang LiuDilek Hakkani-TurDepartment of Computer Science, University of Southern CaliforniaAmazon Alexa AI
+Abstract
+Implicit knowledge, such as common sense,
+is key to fluid human conversations. Current
+neural response generation (RG) models are
+trained to generate responses directly, omit-
+ting unstated implicit knowledge. In this paper,
+we present Think-Before-Speaking (TBS), a
+generative approach to first externalize implicit
+commonsense knowledge ( think ) and use this
+knowledge to generate responses ( speak ). We
+expect that externalizing implicit knowledge
+allows more efficient learning, produces more
+informative responses, and enables more ex-
+plainable models. We analyze different choices
+to collect knowledge-aligned dialogues, repre-
+sent implicit knowledge, and transition between
+knowledge and dialogues. Empirical results
+show TBS models outperform end-to-end and
+knowledge-augmented RG baselines on most
+automatic metrics and generate more informa-
+tive, specific, and commonsense-following re-
+sponses, as evaluated by human annotators.
+TBS also generates knowledge that makes sense
+and is relevant to the dialogue around 85% of
+the time.
+1 Introduction
+Human communication strives to achieve common
+ground , consisting of mutual beliefs and common
+knowledge (Stalnaker, 1978; Clark and Schaefer,
+1989). Such common ground depends not only on
+utterances, but also implicit knowledge. For exam-
+ple, in Figure 1, this common ground includes the
+relevant implicit background knowledge “ rose is a
+type of flower ”. Integrating such common ground
+in utterances is an implicit process often referred
+to as knowledge grounding (Clark and Brennan,
+1991). Recent state-of-the-art neural response gen-
+eration (RG) models based on pre-trained language
+models (LM) mostly produce responses in an end-
+to-end manner (Vaswani et al., 2017; Zhang et al.,Figure 1:
+2020a; Lewis et al., 2020), i.e., models are trained
+to take history and produce a response. Since im-
+plicit knowledge is unstated in dialogue history, RG
+models do not explicitly learn knowledge ground-
+ing and may generate uninformative and halluci-
+nated responses (Serban et al., 2017; Welleck et al.,
+2019; Roller et al., 2021). Knowledge-grounded
+RG (Ghazvininejad et al., 2018; Dinan et al., 2019;
+Gopalakrishnan et al., 2019) addresses this issue,
+however, most approaches require a knowledge
+base (KB) to retrieve knowledge for RG (Zhou
+et al., 2018; Zhao et al., 2020; Eric et al., 2021),
+which may suffer from the limited knowledge cov-
+erage of the used KBs. Some work also casts
+knowledge as a latent factor in generation (Tuan
+et al., 2020; Xu et al., 2021), which makes it hard
+to examine the quality of knowledge generation
+and how exactly RG uses the implicit knowledge,
+posing interpretability concerns.
+We propose Think-Before-Speaking (TBS), an
+RG framework that trains the RG model to ex-
+plicitly generate the implicit knowledge and use
+this knowledge to generate a response, inspired by
+inquiry-based discovery learning (Bruner, 1961).1237We argue that this decomposition brings three ma-
+jor benefits: 1) compared with end-to-end RG, gen-
+erated knowledge augments and/or constrains RG
+to produce more informative responses; 2) com-
+pared with knowledge-retrieval models, explicitly
+generating intermediate groundings can potentially
+generalize to knowledge not included in KBs and
+synergize with the RG process; 3) explicitly gen-
+erated implicit knowledge used in RG provides a
+faithful explanation of the response intent.
+This new RG paradigm poses three main chal-
+lenges: (1) how to identify implicit commonsense
+knowledge associated with dialogue turns for train-
+ing the knowledge generation module; (2) how to
+represent structured knowledge in natural language
+(NL) for neural generative models; and (3) how
+tointegrate knowledge and dialogues while distin-
+guishing implicit and explicit parts in responses.
+To collect knowledge associated with each dia-
+logue instance for training the TBS generative
+model, we propose weak supervision procedures
+to automatically align knowledge with each dia-
+logue turn, rather than manually collecting human-
+annotations, which is expensive and unscalable.
+This is achieved by using ConceptNet (Speer et al.,
+2017) as our knowledge base and different match-
+ing approaches to identify the implicit knowledge.
+We explore several ways to format knowledge orig-
+inally represented as structured triples into natural
+language so that RG models can adapt to the knowl-
+edge+response generation task easily. We exper-
+iment with structured triples, triples converted to
+natural language, and a more colloquial question
+answering format. To ensure a smooth transition
+between knowledge and dialogues, we consider
+using special symbols or prompts as separators.
+To evaluate the TBS framework, we introduce
+new evaluation protocols to cover different aspects
+of the system, including response quality, knowl-
+edge quality, and how TBS models leverage gen-
+erated knowledge. We conduct extensive human
+evaluations for different variants of our training
+procedure. Our experimental results show that our
+models produce more informative, specific, and re-
+sponses that make more common sense compared
+to end-to-end RG models and other knowledge-
+augmented models such as knowledge-selection.
+Knowledge quality analysis shows that at least 85%
+of generated knowledge makes sense and is rele-
+vant, and the generated novel knowledge (not in
+ConceptNet) also has high quality. Furthermore,our TBS model even outperforms an RG model that
+takes in knowledge obtained using ground-truth re-
+sponses, showing that explicitly generating implicit
+knowledge is a promising direction for response
+generation in open domain dialogue systems.
+2 Problem Formulation
+Our TBS RG paradigm extends the traditional RG
+setting by incorporating an additional component
+ofimplicit knowledge in the generation process to
+externalize the knowledge grounding step in RG.
+2.1 Response Generation
+We follow the common dialogue response gen-
+eration setup (Weizenbaum, 1966; Ritter et al.,
+2011; Sordoni et al., 2015): given a dialogue his-
+toryH(a sequence of dialogue utterances), gen-
+erate an appropriate response R. Current neural
+RG models often frame this task as a conditional
+language modeling problem. Specifically, given
+ahistory ( H)consisting of a sequence of ndia-
+logue turns: X, X, ..., X(each turn refers to
+an utterance containing a sequence of ttokens:
+x, x, ..., x) and a response ( R)sentence Y
+comprised of a sequence of mtokens y, y, ..., y,
+RG models aim to learn the conditional probability
+distribution by training on human dialogues:
+P(R|H) =YP(y|y, X, ..., X).(1)
+2.2 Implicit Knowledge Generation
+To make the implicit knowledge grounding step
+explicit, we introduce a new component to RG –
+implicit knowledge that is conditioned on the dia-
+logue history H. We use Ito denote the implicit
+knowledge for brevity, which contains multiple
+natural language (NL) statements I=Z, Z, ...
+(each containing a sequence of tokens: z, z, ...)
+expressing commonsense knowledge. For example,
+in Figure 1, “ rose is a type of flower ” and “ rose is a
+symbol of love ” are two NL statements expressing
+the implicit commonsense knowledge. To emu-
+late realistic conversation scenario, we also fuse
+dialogue history Hin traditional RG with implicit
+knowledge Ifor each turn and denote it with H.
+i.e.H=X, I, X, I..., X, where Iindicates
+the implicit knowledge statements for the i-th turn
+in the dialogue history.
+To externalize the knowledge grounding step,
+inspired by how humans communicate and inquiry-1238based learning (Bruner, 1961; Shwartz et al.,
+2020a), our TBS RG paradigm requires models
+to first generate implicit knowledge Iconditioned
+onH,i.e.P(I|H=X, I, X, I..., X).
+3 Learning to Generate Implicit
+Knowledge by Self-Talk
+This section introduces our proposed TBS method
+to train a generative model that can both talk with
+itself to explicitly generate background common-
+sense knowledge ( P(I|H)) and then generate
+response afterwards, P(R|H, I). Figure 2 illus-
+trates the process to train the TBS models. To pair
+each dialogue with appropriate implicit knowledge,
+we first define a matching process and use Concept-
+Net (Speer et al., 2017) as the implicit knowledge
+source (Section 3.1). Then, to construct training
+instances, we face two key method design choices:
+how to represent knowledge (3.2) and how to con-
+nect the knowledge with the dialogue (3.3). Finally,
+we train TBS RG models to learn P(I|H)and
+P(R|H, I)with the same parameters θ. The fol-
+lowing sections explain these components in de-
+tails.
+3.1 Knowledge-Aligned Dialogues
+To train TBS models we need dialogue datasets
+consisting of a dialogue history, a response, and
+the knowledge statement connecting them. We fo-
+cus on two methods that create weakly-supervised
+knowledge labels for dialogues as they are more
+scalable and cost less than human annotations.
+Hard-Matching The hard-matching process first
+lemmatizes all the non-stop words in each utter-
+ance, then it identifies knowledge triples whose
+two concepts appear in an utterance and the next
+turn respectively. This is the same as the filtering
+process in Zhou et al. (2021a) and is closely related
+to distant supervision methods for relation extrac-
+tion (Craven et al., 1999; Mintz et al., 2009). For
+more details, refer to Appendix A.1.
+Soft-Matching Using Embedding Similarity
+Hard-matching only captures the surface form and
+neglects many important semantic relations be-
+tween words. We thus develop a soft-matching
+procedure using embedding similarity from Sen-
+tenceBERT (Reimers and Gurevych, 2019) to mea-
+sure semantic relations between dialogue turns and
+triples in ConceptNet. Specifically, we first extract
+candidate triples from ConceptNet with one con-cept appearing in the iturn. Next, we form a
+query by concatenating the iturn and the next
+(i+ 1)turn response. Finally, we encode the
+query and all triple candidates using Sentence-
+BERT and use cosine similarity to find the seman-
+tically closest triples as matched knowledge. More
+details are presented in Appendix A.1.
+3.2 Knowledge Representation
+Implicit commonsense knowledge Istored in Con-
+ceptNet is in the form of (subject s, relation r, ob-
+jecto)triples, such as (rose, TypeOf, flower) , which
+is not compatible with RG models, which operate
+on NL sentences and may not include relation to-
+kens in their trained vocabulary. Here we design
+two alternatives to represent the grounded knowl-
+edge and use the implicit knowledge in Figure 1 as
+a running example.
+Map Relations to Natural Language (NL) To
+convert ConceptNet triples into NL, we follow a
+common practice and map every relation rin the
+triple to its NL template, and fill in sandoin the
+template (Levy et al., 2017). We use the same
+mapping as that used in COMET (Bosselut et al.,
+2019), covering all standard types of relations in
+ConceptNet. For example, rose is a type of flower;
+rose is a symbol of love .
+Information-Seeking Question-Answer Pairs
+Another format to convert triples to NL sentences is
+through asking and answering information-seeking
+questions. Shwartz et al. (2020b) designed tem-
+plates of information-seeking questions and an-
+swers to provide background knowledge for LMs.
+We adopt a similar strategy and design a template
+for each relation in ConceptNet. For example,
+What is a type of flower? Rose is a type of flower.
+Rose is a symbol of what? Rose is a symbol of
+love. The mappings we use for these two types of
+representations are shown in Appendix A.2.
+3.3 Knowledge-Dialogue Transition
+To help our RG models learn the TBS paradigm and
+generate outputs structured similarly, i.e., implicit
+knowledge first and then responses, we need to
+properly connect knowledge and dialogues in our
+data. Here we consider two alternatives for creating
+such a transition.
+Special symbols . Following the common prac-
+tice of separating sequences in neural LMs (Rad-
+ford et al., 2018; Devlin et al., 2019), we use a1239
+special symbol to serve as the separator. We en-
+close the implicit knowledge Iwith special sym-
+bols “ <implicit >” and “ </implicit >” and add it
+between HandR, for example, “ <speaker1 >I
+need to buy some flowers for my wife. <implicit >
+rose is a type of flower </implicit > <speaker2 >
+Perhaps you’d be interested in red roses. ”
+Natural language prompts . More recent work
+has found that NL prompts help LMs to perform
+better on various downstream tasks, including natu-
+ral language generation (NLG) (Brown et al., 2020;
+Liu et al., 2021; Zheng and Huang, 2021). Here
+we use the NL prompts to prompt RG models to
+generate implicit knowledge and responses. We
+use “ The following background knowledge is help-
+ful for generating the response: ” to elicit knowl-
+edge and “ Grounded on the background knowledge,
+what does the speaker probably say in the next
+response? ” to elicit response.
+3.4 Model Training
+After constructing knowledge-aligned dialogues,
+each of our data instances is a sequence of to-
+kens with three components: a dialogue history
+Hfused with potential implicit knowledge af-
+ter each turn, implicit knowledge (empty or non-
+empty) I, and a response R. We split each instance
+d(H, R, I )∈Dto first train the model to generate
+just the knowledge Ibased on H,P(I|H), and
+then train it to generate Rbased on both IandH,
+P(R|H, I).
+Formally, we follow standard way of modeling
+Pin auto-regressive neural RG models and use
+Maximum Likelihood Estimation (MLE) to train
+our model to maximize P(I|H)(knowledge gen-
+eration KG) by minimizing the conditional negativelog-likelihood loss (NLL):
+L=−XlogP(Z|Z, X, ..., X),
+where Zis the i-th statement in I. And to model
+P(R|H, I)we minimize:
+L=−XlogP(y|y, X, I..., X).
+We train one generative model on these losses in
+one-pass with splitted instances for KG and RG in-
+stead of multiple training phases. During inference,
+we only provide dialogue history as input and the
+model has to generate knowledge and responses.
+4 Experiment Setup
+4.1 Dataset
+We consider dialogues from four datasets: Dai-
+lyDialog (Li et al., 2017), EmpatheticDia-
+logues (Rashkin et al., 2019), MuTual (Cui et al.,
+2020), and SocialIQA-prompted Commonsense-
+Dialogues (Zhou et al., 2021a). For training,
+we use the filtered version of the four datasets
+from Zhou et al. (2021a), which ensures each di-
+alogue contains at least one commonsense knowl-
+edge triple from ConceptNet. In total, the train-
+ing data contains 31k dialogues with 159k utter-
+ances. We reserve 10% of data as a development set
+for evaluating model training and selecting hyper-
+parameters. Table 1 shows the number of instances
+resulted from applying our hard- and soft-matching
+procedures to our training data in order to construct
+knowledge-aligned dialogues.
+For testing dialogues, to not bias our evaluation
+toward where common sense is crucial in making1240
+the response, we use the test data from the original
+data distribution of the 4 datasets mentioned above.
+The testing data consists of around 3k dialogues.
+4.2 Compared Methods
+We use DialoGPT-medium (Zhang et al., 2020a) as
+our base model, which is a commonly-used end-
+to-end RG model. We fine-tune DialoGPT using
+all of the 159K dialogue instances. We also use
+DialoGPT to serve as the backbone model and con-
+sider three variables in our TBS model configu-
+ration introduced from Sections 3.1 to 3.3: hard -
+matching or soft-matching, special symbol as sep-
+arator or NL prompt , and triple-converted- NLto
+represent knowledge or information seeking QA
+pairs. To justify our choice of using one model to
+do both KG and RG, we also compare with TBS-
+Two Model where we train separate models for
+knowledge generation (KG) and RG using the same
+training data. Our default model configuration is
+hard-symbol-NL .
+We also compare several knowledge-grounded
+RG baselines that retrieve external knowledge or
+generate knowledge with another model. For re-
+trieval, we follow most common approaches in
+knowledge-selection (Zhao et al., 2017; Wolf et al.,
+2020; Eric et al., 2021) and train RoBERTa (Liu
+et al., 2019) to classify triples using our knowledge-
+aligned data (matched or not matched), and use
+it to label candidate triples during testing ( KS-
+RoBERTa ). For the generative model, we use
+COMET (Bosselut et al., 2019) as a commonsense
+knowledge generator ( KG-COMET ).
+Furthermore, we consider RG models that take
+the hard-matched or soft-matched knowledge ob-
+tained from the ground-truth response (Hard-GT
+andSoft-GT ). Note that though there is noise in
+hard-matching or soft-matching procedure, this set-
+ting uses the next turn response and is likely to
+provide relevant knowledge. Implementation de-
+tails for all the models are shown in Appendix B.1.
+4.3 Evaluation Protocol
+Automatic Evaluation We use standard natural
+language generation metrics such as BLEU (Pap-
+ineni et al., 2002), METEOR (Banerjee and Lavie,2005), ROUGE (Lin, 2004), CIDEr (Vedantam
+et al., 2015) and SkipThoughts (Kiros et al., 2015).
+We also use GRADE (Huang et al., 2020), a
+reference-free metric shown to have consistent cor-
+relation with human judgements (Yeh et al., 2021)
+to ensure the validity of experimental results.
+Human Evaluation We conduct extensive hu-
+man evaluation using 300 randomly sampled in-
+stances from unseen test dialogues described above.
+Forresponse quality , we conduct pairwise com-
+parison where we present a dialogue history and
+two responses made by two different models and
+ask them to choose one or select “ not sure ” based
+on different criteria (Zhou et al., 2018; Zhang
+et al., 2020b). We evaluate on sixdimensions:
+which response is more grammatical ,coherent ,en-
+gaging ,informative ,specific , and makes common
+sense (Zhang et al., 2020b; Roller et al., 2021).
+More details of the instructions for annotators on
+each dimension with examples are included in Ap-
+pendix B.2. For knowledge quality , we evaluate
+the generated knowledge in isolation (“ does this
+knowledge make sense ”) and in conjunction with
+the context for relevance. We perform majority
+voting per instance using three annotators from
+Amazon Mechnical Turk (AMT). We use Fleiss’
+Kappa ( κ) (Fleiss, 1971) to measure agreement
+among the annotators.
+5 Results
+By evaluating our TBS model variants with other
+baselines, we aim to address the following ques-
+tions: 1) do TBS models produce better responses
+than standard end-to-end RG models? 2) compared
+with other approaches to retrieve or generate addi-
+tional knowledge, is TBS more helpful for RG? 3)
+do TBS RG models generate knowledge that makes
+sense and is relevant to the dialogue context? 4)
+do TBS models faithfully leverage the generated
+knowledge?
+5.1 Performance of Response Generation
+Model variant analysis To find the best-
+performing configuration of our TBS method, we
+consider alternatives as discussed in Sections 3.1
+to 3.3, and conduct 4 pairwise comparisons: softvs.1241
+hard,prompt vs.symbol , and QA vs. relation-
+converted NL format . From Table 2, we find
+that using soft-matching to create knowledge-
+aligned dialogue dataset produces more gram-
+matical responses and responses that make more
+common sense, with κ=0.64-0.73, indicating sub-
+stantial agreement according to one interpretation
+from Landis and Koch (1977). Using QA to
+represent knowledge makes the responses more
+grammatical, coherent, commonsensical, and also
+achieves the best performance on average on six
+dimensions. We also compare results that com-
+bine these alternatives, e.g., soft-symbol-QA (due
+to space constraints, results are shown in Ap-
+pendix C.1), however, we do not observe significant
+improvements after combining these alternatives
+and our best configuration in terms of average im-
+provement is still hard-symbol-QA . We thus use
+hard-symbol-QA as our final configuration and re-
+fer to it as TBS throughout this section.
+Does TBS produce better responses vs. end-
+to-end RG? By comparing TBS and end-to-end
+DialoGPT-ft model in Table 3 and Figure 3, we
+find that TBS models produce better-quality re-
+sponses using both automatic and human evalua-
+tions. Specifically, even though hard-matching only
+annotates about 33% of the training instances, TBS
+outperforms end-to-end RG model significantly on
+most automatic metrics. From human evaluation
+(κ=0.62-0.69), we find our TBS model performs on
+par with DialoGPT trained on more data in gram-
+mar, coherence, and engagingness, and achieves
+statistically-significant (p <0.05) improvement oninformativeness, specificity, and the common sense
+aspects of generated responses. We argue that by
+providing weakly-supervised knowledge labels and
+TBS training, RG models require less data and can
+generate quality responses with improvement in
+the informativeness, specificity, and common sense
+aspects of the responses.
+Is TBS knowledge generation better than other
+knowledge-augmented RG? We compare TBS
+models with other knowledge-augmented baselines
+that retrieve knowledge from ConceptNet using em-
+bedding scores (KS-SBERT) or a trained selector
+(KS-RoBERTa), or generate from another model
+(KG-COMET). From Table 3, we find that these
+models perform similarly to the end-to-end Di-
+aloGPT model and are outperformed by TBS mod-
+els on most automatic metrics. Figure 3 shows that
+while TBS methods have significant improvements
+on all dimensions against knowledge-selection
+baselines, COMET as a knowledge generator has
+smaller gaps on informativeness, specificity, and
+common sense, but is outperformed significantly
+on grammar, coherence, and engagingness.
+Next we compare against the setup where we
+feed the model the knowledge that is derived us-
+ing the ground-truth response (Hard/Soft-GT), i.e.,
+the provided knowledge is obtained using concepts
+appearing in the ground-truth response. From Ta-
+ble 3, we surprisingly find that even though our1242
+proposed TBS model has no access to response-
+leaking knowledge labels and is trained on much
+less data, the TBS RG model still achieves statis-
+tically significant improvement on GRADE and
+BLEU-4. And from human evaluation results in
+Figure 4, TBS model significantly improves the
+specificity and common sense aspect of responses
+while stays on par on other evaluation dimensions
+compared with the hard-GT model and improves
+even more compared with soft-GT. We find that
+one potential explanation is that only around 55%
+of Hard-GT knowledge is labeled as used in re-
+sponse whereas it is 77% in our TBS model (see
+Section 5.3). This is also related to how the RG
+model leverages the knowledge in training. Further
+analysis is needed to understand the effect of knowl-
+edge and the relationship between knowledge and
+responses.
+5.2 Quality of Generated Knowledge
+We then examine how well TBS RG models learn
+to generate knowledge on unseen dialogues. We
+use human evaluation and focus on three dimen-
+sions: does the model generate novel knowledge
+that does not appear in ConceptNet? does the gen-
+erated knowledge statement make sense as a stan-
+dalone fact? and is the generated knowledge rele-
+vant to the dialogue context? For the first question
+we directly query from ConceptNet and show per-
+centages. For the latter two we follow Section 4.3
+and show the percentages that MTurkers think the
+knowledge makes sense and is relevant from the
+300 sampled test instances (the same used in re-
+sponse quality). We test our TBS model, the two-
+model variant, and other knowledge-augmented
+baselines introduced in Section 4.2.
+Around 85% of knowledge generated from TBS
+makes sense and is relevant Table 4 shows that
+TBS models can generate implicit knowledge that
+makes sense and is relevant to the context for
+around 85% of the time as judged by human anno-
+tators ( κ=0.73-0.80). Compared with knowledge-
+selection models that retrieve knowledge from Con-
+ceptNet, TBS generates knowledge that is similar
+in terms of common sense and has better relevance
+to the dialogue history. Compared with COMET
+that also generates knowledge, we find TBS mod-
+els generate more knowledge that follows common
+sense and is relevant to the dialogue. Comparing
+two-model and one-model TBS, we find that two-
+model generates more knowledge that makes sense
+and is relevant, although its response quality is
+poorer (Table 3 and Figure 3). This might be due1243
+to model synergies when learning both knowledge
+generation and response generation.
+Model generates novel knowledge We find a sig-
+nificant portion of novel knowledge generated from
+the COMET and TBS models that is not present
+in the training data. Furthermore, the quality of
+the generated novel knowledge is similar to that of
+knowledge existing in ConceptNet. COMET gen-
+erates more new knowledge but the quality (both
+common sense and relevance) is significantly lower
+than TBS models. We include some examples of
+novel knowledge generated in Appendix C. In gen-
+eral we find that the new knowledge is complimen-
+tary to ConceptNet, not just a paraphrased version
+of existing triples (since in those cases the model
+will directly generate the ConceptNet triple). This
+shows a promising sign that TBS RG models can
+potentially generate good-quality novel knowledge
+labels for unseen dialogues.
+5.3 Performance Analysis
+Most responses are knowledge grounded To
+examine how TBS methods leverage knowledge for
+RG, we also present annotators a history, generated
+knowledge, and generated response, and ask them
+whether the knowledge is used in response . We
+find that around 77% of generated knowledge is
+used in the generated response, i.e., the response is
+grounded in the knowledge generated from TBS.
+Noisy knowledge heavily impacts quality To
+better showcase the connection between knowl-
+edge and response, we examine how knowledge
+quality generated from TBS methods can affect
+response quality. During inference, we randomly
+sample noisy knowledge from another dialogue,
+feed it to the model to generate a response condi-
+tioned on irrelevant knowledge, and compare the
+response quality with response generated from TBSknowledge. Fig 5 shows that there is a statistically
+significant (p ≤0.05) drop in response quality in
+four dimensions. This indicates that the quality of
+knowledge input heavily influences response qual-
+ity and that TBS models generate better responses
+because of its decent knowledge quality.
+Qualitative examples and limitations We show
+several qualitative examples from different mod-
+els and human responses in Table 5. We find that
+TBS generates relevant knowledge and responses
+grounded properly in that knowledge, whereas
+KS/KG models retrieve noisy knowledge and Hard-
+GT generates response not grounded in knowledge.
+Here we present a summary of error patterns
+of TBS models and discuss potential directions
+to improve. More examples can be found in Ta-
+ble 6. First, our matching procedures do not
+concern multi-hop triples that might be needed
+for complex reasoning chains. Second, Concept-
+Net mostly contains taxonomic and lexical knowl-
+edge (“ RelatedTo, IsA, etc ”), limiting the diversity
+of generated knowledge from TBS models. We
+plan to explore other knowledge resources such as
+ATOMIC2020 (Hwang et al., 2021) in the future.
+Third, currently the model always generates im-
+plicit knowledge. In future work, we are interested
+in training RG models that understand when im-
+plicit knowledge is needed based on the dialogue
+context.
+6 Related Work
+Open-Domain Dialogue Generation Recent
+work focused on fine-tuning large pre-trained trans-
+former models (Radford et al., 2019; Zhang et al.,
+2020a; Roller et al., 2021) on massive dialogue
+data. Knowledge-augmented RG has been studied
+extensively to alleviate the issue of generic or hal-
+lucinated responses (Serban et al., 2017; Welleck
+et al., 2019; Roller et al., 2021). Most work re-
+trieves relevant knowledge from knowledge candi-
+dates (wikipedia or KBs) and generates responses
+after incorporating additional knowledge in dia-
+logue context (Ghazvininejad et al., 2018; Zhou
+et al., 2018; Wu et al., 2020). More recent work
+also explored other ways of constructing knowl-
+edge, such as by considering knowledge as a latent
+variable (Tuan et al., 2020; Li et al., 2020) and gen-
+erating it implicitly. Our TBS framework differs
+from these two lines of work in that it explicitly gen-
+erates knowledge in text and uses one generative
+model for both knowledge generation and RG.1244
+Generating Knowledge for Natural Language
+Understanding (NLU) Although explicit knowl-
+edge generation (KG) for RG has not been ex-
+plored, similar methods have been proposed for
+NLU tasks such as question answering (Shwartz
+et al., 2020b). Previous work has also explicitly
+generated rationales that can be seen as helpful
+additional knowledge (Rajani et al., 2019). TBS
+differs from such work in that we consider a gener-
+ative task and use the same generative model to do
+both KG and RG.
+7 Conclusion
+Inspired by how humans contribute to the com-
+mon ground during communication, We propose
+to train RG models that explicitly generate implicit
+knowledge and then respond (TBS). This brings
+us three main benefits compared with prior end-to-
+end RG models: 1) more informative and coherent
+responses by augmenting with knowledge; 2) gen-
+erated knowledge provides faithful explanations
+of RG model’s inner-workings; 3) models do not
+rely on external knowledge bases in response gen-eration time. We first identify implicit knowledge
+in dialogues, explore different knowledge repre-
+sentation and transition choices, and demonstrate
+promising results compared with end-to-end and
+knowledge-grounded RG models from extensive
+evaluations. We find strong and promising results
+for TBS RG model compared with end-to-end RG.
+In particular, TBS can produce good quality and
+novel knowledge, outperform end-to-end RG mod-
+els despite training on less data, and even produce
+better responses than RG models that take ground-
+truth knowledge. We hope our findings encourage
+more future studies on making RG models better
+emulate human communication process and pro-
+duce better-quality responses.
+Ethics and Broader Impact
+Our work aims to train RG models that explic-
+itly generate implicit knowledge before responding.
+Sheng et al. (2021) have found biases in DialoGPT
+(our base model) responses and Mehrabi et al.
+(2021) have found representational harms in com-
+mon sense resources. We acknowledge that the1245generated responses from our models might con-
+tain biases. All of the dialogue datasets and models
+are in English, which benefits English speakers
+more. We have conducted human evaluation using
+Amazon Mechanical Turks. We pay turkers around
+$15 per hour, well above the highest state minimum
+wage and engage in constructive discussions if they
+have concerns about the process. We also give each
+annotation instance enough time so that we do not
+pressure annotators.
+References1246124712481249A TBS Framework Details
+A.1 Matching Detail
+Hard-Matching This process follows that used
+in Zhou et al. (2021a). We first identify poten-
+tial candidates for concepts in ConceptNet (Speer
+et al., 2017). For each utterance, we use a part-
+of-speech (POS) tagger to find the nouns, verbs,
+and adjectives that are not stopwords and then con-
+struct a set of potential concepts by including the
+lemmatized version of these words. The POS tag-
+ger, lemmatizer, and stopword list are from the
+Natural Language Toolkit (NLTK) package (Bird
+et al., 2009). This step results in a set of concept
+words for each turn of a dialogue.
+With a set of concepts we extract for every di-
+alogue turn, we then identify a list of candidate
+triples (e, r, e). We use the ConceptNet contain-
+ing single-word concepts pre-processed by Zhou
+et al. (2018). For each concept we identified in a
+turn, we store all triples in ConceptNet that contain
+this concept, either as subject or object.
+After getting a list of commonsense triples
+(e, r, e)containing concepts in a particular turn
+using ConceptNet, we next examine if any of the
+other entity in the triples appears in the concept
+set of the next turn. If we find such a match, we
+record this triple to be a commonsense assertion
+that might be implied in the response.
+Soft-Matching We reuse the first several steps
+of hard-matching to find a set of candidate triples
+for each dialogue turn, then instead of searching
+for the exact words in the next turn, we use embed-
+ding similarity from SentenceBERT (Reimers and
+Gurevych, 2019) (specifically the “ all-MiniLM-L6-
+v2” variant, which is claimed to be a “All-round
+model tuned for many use-cases. Trained on a
+large and diverse dataset of over 1 billion training
+pairs”).
+To select the final matched knowledge, we
+choose the top 3 triples from ConceptNet with the
+highest similarity. After examining the distribution
+of embedding similarities from SBERT, we also
+require the similarity to be above 0.4 to be matched
+to ensure quality matching.
+A.2 Mappings
+We show complete mappings of relations from
+ConceptNet for both relation-converted NL and
+information-seeking QA pairs in Table 7.
+B Experimental Details
+B.1 Implementation Details
+We use base models from HuggingFaceand im-
+plement TBS based on TransferTransfo (Wolf et al.,
+2019). We fine-tune the model for 3 epochs with
+batch size 4 and set the learning rate to be 6.25e-5.
+We perform gradient accumulation for 8 steps and
+gradient clipping with a max norm of 1.0 and opti-
+mize using the Adam optimizer. For decoding, we
+use top-p nucleus sampling (Holtzman et al., 2019)
+with temperature T (p = 0.9 and T = 0.7), and a
+maximum decoding length of 300 tokens. Note
+that since we are also generating knowledge, this
+maximum length is larger than normal RG models.
+Our TBS models are mostly trained on 4 Quadro
+RTX 8000 GPUs and take around 5 hours. For
+automatic metrics, we use the nlg-eval package
+and the GRADE repo.
+B.2 Evaluation Detail
+We present the MTurk interface we use for response
+quality and knowledge quality evaluation in Fig-
+ures 7, 8, and 9 including instructions and examples.
+We require turkers to have at least 500 numbers of
+HITs approved, with approval rate higher than 95%,
+and from either Canada, UK, or US since our data
+is in English.1250
+C Additional Results
+C.1 Models Combining Variants
+Table 8 presents the complete results considering
+all of our models’ variants. We find that the best
+overall configuration is hard-symbol-QA.
+C.2 CEDAR Probing: Do TBS models
+understand why a response makes sense?
+We follow the CEDAR probing framework
+from Zhou et al. (2021b) that analyzes if RG mod-
+els assign a higher probability to the response when
+provided with valid common sense in the form of
+explanations compared to corrupted explanations.
+Results comparing to an end-to-end RG model anda knowledge-selection model are shown in Table 9.
+We find that by TBS training, RG models become
+much more sensitive to commonsense explanations
+against complete corruptions but still fall short
+against more subtle logical corruptions that require
+deeper reasoning.12511252

@@ -1,1 +1,776 @@
-142 Proceedings of the 60th Annual Meeting of the Association for Computational Linguistics Volume 1 : Long Papers , pages 142 157 May 22 - 27 , 2022 c(cid:13)2022 Association for Computational Linguistics 143 144 145 146 147 148 149 150 151 152 153 154 155 156 157 
+
+Guanhua Chen, Shuming Ma, Yun Chen,
+Dongdong Zhang, Jia Pan, Wenping Wang, Furu WeiThe University of Hong Kong;Microsoft ResearchShanghai University of Finance and Economics;Texas A&M University
+{ghchen,jpan,wenping}@cs.hku.hk, yunchen@sufe.edu.cn,
+{shumma, dozhang, fuwei}@microsoft.com
+Abstract
+This paper demonstrates that multilingual pre-
+training and multilingual fine-tuning are both
+critical for facilitating cross-lingual transfer in
+zero-shot translation, where the neural machine
+translation (NMT) model is tested on source
+languages unseen during supervised training.
+Following this idea, we present SixT+, a strong
+many-to-English NMT model that supports 100
+source languages but is trained with a parallel
+dataset in only six source languages. SixT+
+initializes the decoder embedding and the full
+encoder with XLM-R large and then trains the
+encoder and decoder layers with a simple two-
+stage training strategy. SixT+ achieves impres-
+sive performance on many-to-English transla-
+tion. It significantly outperforms CRISS and
+m2m-100, two strong multilingual NMT sys-
+tems, with an average gain of 7.2 and 5.0 BLEU
+respectively. Additionally, SixT+ offers a set
+of model parameters that can be further fine-
+tuned to other unsupervised tasks. We demon-
+strate that adding SixT+ initialization outper-
+forms state-of-the-art explicitly designed unsu-
+pervised NMT models on Si ↔En and Ne ↔En
+by over 1.2 average BLEU. When applied to
+zero-shot cross-lingual abstractive summariza-
+tion, it produces an average performance gain
+of 12.3 ROUGE-L over mBART-ft. We conduct
+detailed analyses to understand the key ingredi-
+ents of SixT+, including multilinguality of the
+auxiliary parallel data, positional disentangled
+encoder, and the cross-lingual transferability of
+its encoder.
+1 Introduction
+Neural machine translation (NMT) sys-
+tems (Sutskever et al., 2014; Bahdanau et al., 2015;
+Vaswani et al., 2017) have demonstrated superior
+performance with large amounts of parallel data.
+However, the performance of most existing NMT
+systems will degrade when the labeled data islimited (Koehn and Knowles, 2017; Goyal et al.,
+2021). To address this problem, unsupervised
+NMT, in which no parallel corpora are available, is
+drawing increasing attention.
+Some prior work (Johnson et al., 2017; Chen
+et al., 2017; Gu et al., 2019; Zhang et al., 2020)
+use pivot-based methods for zero-shot translation
+between unseen language pairs. In this setting,
+both source and target languages have parallel data
+with a pivot language. However, these approaches
+are infeasible for rare languages where a paral-
+lel dataset of any kind is hard to collect. An-
+other line of work (Guzmán et al., 2019; Ko et al.,
+2021; Garcia et al., 2021) build unsupervised NMT
+through back-translation and further enhance its
+performance by cross-lingual transfer from auxil-
+iary languages. These methods are usually compli-
+cated with multiple iterations of back-translation
+and a combination of various training objectives.
+Moreover, their models can only support one or sev-
+eral pre-specified translation directions. Recently,
+Chen et al. (2021) propose SixT, a transferability-
+enhanced fine-tuning method that better adapts
+XLM-R (Conneau et al., 2020) for translating un-
+seen source languages. SixT is trained once to
+support all languages involved in the XLM-R pre-
+training as the source language. However, they fo-
+cus on exploring a proper fine-tuning approach and
+build SixT with the parallel dataset from one aux-
+iliary language, which heavily limits the model’s
+zero-shot translation performance.
+In this paper, we present SixT+, a strong many-
+to-English NMT model that can support as many
+as 100 source languages with parallel datasets from
+only six language pairs. SixT+ is trained by ap-
+plying SixT to multilingual fine-tuning with large-
+scale data. We first initialize the encoder and em-
+beddings of SixT+ with XLM-R and then train it
+with a two-stage training method. At the first stage,
+we only train the decoder layers, while at the sec-
+ond stage, we disentangle the positional informa-142tion of the encoder and jointly optimize all parame-
+ters except the embeddings. SixT+ improves over
+SixT by keeping the decoder embeddings frozen
+during the whole training process, which speeds
+up the model training while reducing the model
+size. SixT+ is trained once to support all source
+languages and can be further extended to many-to-
+many NMT that can support multiple target lan-
+guages. It is not only a strong multilingual NMT
+model but can also be fine-tuned for other unsu-
+pervised tasks, including unsupervised NMT, zero-
+shot cross-lingual transfer for natural language un-
+derstanding (NLU), and natural language genera-
+tion (NLG) tasks.
+Extensive experiments demonstrate that SixT+
+works remarkably well. For translating to En-
+glish, SixT+ significantly outperforms all base-
+lines across 17 languages, including CRISS and
+m2m-100, two strong unsupervised and supervised
+multilingual NMT models trained with 1.8B and
+7.5B sentence pairs. The many-to-many SixT+
+gets better performance than m2m-100 in 6 out of
+7 target languages on the Flores101 testset. When
+serving as a pretrained model, SixT+ also per-
+forms impressively well. For unsupervised NMT
+of rare languages, SixT+ initialization achieves bet-
+ter unsupervised performance than various explic-
+itly designed unsupervised NMT models with an
+average gain over 1.2 BLEU. For zero-shot cross-
+lingual transfer for NLU, it significantly outper-
+forms XLM-R on sentence retrieval tasks, while
+maintaining the performance on most other tasks.
+On the zero-shot cross-lingual abstractive summa-
+rization task, SixT+ improves mBART-ft by 12.3
+average ROUGE-L across 5 zero-shot directions.
+Finally, we conduct detailed analyses to understand
+the key ingredients of SixT+, including multilin-
+guality of the auxiliary parallel data, positional
+disentangled encoder, and the cross-lingual trans-
+ferability of its encoder.
+2 SixT+
+SixT+ aims at building a strong many-to-English
+NMT model, especially for the zero-shot directions.
+We argue that multilingual pretraining and multi-
+lingual fine-tuning are both critical for this goal.
+Therefore, we initialize SixT+ with XLM-R large
+and fine-tune SixT+ on the multilingual parallel
+dataset with a simple two-stage training method.2.1 Data: AUX6 corpus
+We utilize De, Es, Fi, Hi, Ru, and Zh as the aux-
+iliary source languages, which are high-resource
+languages from different language families. We
+do not add more auxiliary languages to limit the
+computation cost and the training data size. The
+training data is from the WMT and CCAligned
+dataset, consisting of 120 million sentence pairs.
+We concatenate the validation sets of auxiliary lan-
+guages for model selection. We denote this dataset
+asAUX6 . More dataset details are in the appendix.
+Following Conneau and Lample (2019), sentences
+of the ilanguage pair are sampled according to
+the multinomial distribution calculated as follows:
+q=pPp, (1)
+where pis the percentage of each language in the
+training dataset and we set the hyper-parameter
+αto be 0.2. In all experiments, all texts are tok-
+enized with the same sentencepiece (Kudo, 2018)
+tokenizer as XLM-R.
+2.2 Model
+Architecture SixT+ is a Transformer-based
+NMT model with ∼0.7B model parameters. To ini-
+tialize the encoder with XLM-R large, our encoder
+has the same configuration as XLM-R large, i.e.,
+24 encoder layers, hidden state dimension of 1024,
+feed-forward dimension of 4096, and head number
+of 16. For the decoder, we follow the suggestion
+in Chen et al. (2021), which has 12 decoder layers,
+a hidden state dimension of 1024, feed-forward
+dimension of 3072, and head number of 16. We
+use the same vocabulary as XLM-R and tie the
+encoder embeddings, decoder embeddings, and de-
+coder output projection to reduce the model size.
+Learning We first initialize the encoder and em-
+beddings with XLM-R large and then fine-tune the
+model on the auxiliary parallel dataset. Compared
+with fine-tuning XLM-R for NLU tasks like text
+classification, the prediction space for SixT+ is
+much larger and it has to learn much more ran-
+domly initialized parameters. Directly fine-tuning
+all parameters may degrade the cross-lingual trans-
+ferability which is learned in XLM-R. Therefore,
+following Chen et al. (2021), we train SixT+ with
+a two-stage training framework, as shown in Fig-
+ure 1.143
+Stage 1: Decoder Training. To preserve the
+cross-lingual transferability of XLM-R, we first
+train the decoder by keeping the encoder frozen:
+L=XXlogP(y|x;,θ),(2)
+where D={D;...;D}is a collection of par-
+allel dataset in Kauxiliary languages, ⟨x,y⟩is a
+parallel sentence pair with source language iand
+θis the parameter set of the decoder layers.
+Stage 2: Fine-tuning. Freezing the encoder pa-
+rameters limits the NMT model capacity, especially
+for the large-scale training data. Therefore, we
+jointly train the full model in another stage:
+L=XXlogP(y|x;θ), (3)
+where θis the parameter set of both encoder and
+decoder layers.
+Different from SixT which fine-tunes the de-
+coder embedding, we keep the embeddings fixed
+during the whole training process (see Figure 1).
+Our preliminary experiments find that this strategy
+leads to higher computational efficiency without
+degrading the performance.
+Positional Disentangled Encoder Positional
+Disentangled Encoder (PDE) is reported to improve
+zero-shot NMT in the previous work (Liu et al.,
+2021; Chen et al., 2021). The positional correspon-
+dence between the input tokens and the encoder
+representations is one of the factors that makes the
+encoder representations language-specific. PDE
+relaxes such correspondence by removing resid-
+ual connections in an encoder layer. We refer thereaders to Liu et al. (2021); Chen et al. (2021) for
+more details. In SixT+, we remove the residual con-
+nection after the self-attention sublayer of the 23
+(penultimate) encoder layer at the second training
+stage, as suggested by Chen et al. (2021). For sim-
+plicity, we denote the two-stage training method
+with PDE as TransF in the following sections.
+3 Zero-Shot Neural Machine Translation
+3.1 Experiment Settings
+For the many-to-English translation task, we evalu-
+ate the performance of SixT+ on the test sets of 23
+language pairs from 9 various language groups:
+German group (De, Nl), Romance group (Es, Ro,
+It), Uralic and Baltic group (Fi, Lv, Et), Slavic
+group (Ru, Pl), Arabic group (Ar, Ps), Indo-Aryan
+group (Hi, Ne, Si, Gu), Turkic group (Tr, Kk), East
+Asian group (Zh, Ja, Ko) and Khmer group (My,
+Km). The dataset details are in the appendix. For
+decoding, we use beam-search with beam size 5
+for all translation directions and do not tune length
+penalty. We report detokenized BLEU for all direc-
+tions using sacrebleu.
+We compare SixT+ with SixT and four other
+baselines. Among the four baselines, XLM-R ft-
+all and mBART-ft use the same training data as
+SixT+, while CRISS and m2m-100 are trained on
+1.8B and 7.5B sentence pairs. As SixT+, CRISS,
+and m2m-100 have different model sizes, support
+different numbers of languages and are trained with
+different training datasets, the comparisons are not
+completely fair, but the results can still demonstrate144
+the strong performance of SixT+.
+•CRISS (Tran et al., 2020). This model is the state-
+of-the-art unsupervised many-to-many multilingual
+NMT model. It is initialized with mBART and fine-
+tuned on 180 translation directions from CCMatrix.
+It only supports 25 input languages.
+•m2m-100 (Fan et al., 2020). This model is
+a strong supervised many-to-many multilingual
+NMT model. It is a large Transformer trained on
+huge parallel data across 2200 translation direc-
+tions and with 7.5B parallel sentences from CC-
+Matrix and CCAligned as well as additional back-
+translations. The official 1.2B model is evaluated.
+•SixT (Chen et al., 2021). This model motivates
+SixT+. The SixT model trained with XLM-R large
+on WMT19 De-En is evaluated and compared.
+•mBART-ft (Liu et al., 2020; Tang et al.,
+2020). mBARTis a strong pretrained multilin-
+gual seq2seq model. We follow their setting and di-
+rectly fine-tune all model parameters on the AUX6
+corpus.
+•XLM-R ft-all (Conneau and Lample, 2019). This
+method is the same as SixT+ but utilizes a differ-
+ent fine-tuning method that directly optimizes all
+model parameters.3.2 Main Results
+As shown in Table 1, SixT+ outperforms all base-
+lines with an average gain of 5.0-7.2 BLEU. The
+performance of SixT+ is impressive given that
+it does not use any other monolingual or paral-
+lel texts except the 0.12B parallel sentence pairs.
+First, the significant improvement over mBART-ft
+demonstrates that the multilingual pretrained en-
+coder XLM-R can also build a strong zero-shot
+many-to-one translation model if fine-tuned prop-
+erly. Second, SixT+ is significantly better than
+XLM-R ft-all and SixT+ (1st), proving that a proper
+fine-tuning method is important for zero-shot trans-
+lation. Finally, the gain of SixT+ over SixT shows
+that adding more auxiliary languages and more par-
+allel data benefits the performance.
+SixT+ achieves new state-of-the-art performance
+on unsupervised many-to-English translation. It
+is significantly better than CRISS in all 14unsu-
+pervised directions. When comparing with super-
+vised models, SixT+ improves over m2m-100 on 17
+out of 23translation directions. Although CRISS
+and m2m-100 are many-to-many NMT models that
+may face the insufficient modeling capacity prob-
+lem (Zhang et al., 2020), they are strong many-to-
+English baselines trained with much more data (1.8145
+billion for CRISS and 7.5 billion for m2m-100)
+and computation cost. Moreover, the model size of
+m2m-100 is much larger than SixT+.
+Different from previous unsupervised NMT
+models built with back-translation on monolingual
+data (Lample et al., 2018a,b) or parallel data min-
+ing (Tran et al., 2020), SixT+ illustrates that bet-
+ter unsupervised NMT can be achieved by cross-
+lingual transfer from auxiliary languages. It im-
+proves on the test sets whose languages are in the
+same family as the auxiliary languages. For lan-
+guages that are not in the same family of auxiliary
+languages, SixT+ also works well. For instance, it
+improves My →En from 6.7 to 15.3 BLEU, Ps →En
+from 10.9 to 14.9 BLEU, and Kk →En from 20.7
+to 27.3 BLEU.
+3.3 Analysis
+Many-to-Many SixT+ The SixT+ can be ex-
+tended to support other or multiple target languages.
+Following Zhang et al. (2020), we build a many-
+to-many SixT+ (SixT+ m2m) model and switch
+between different target languages by a target-
+language-aware linear projection layer between the
+encoder and the decoder. The linear layers are
+randomly initialized and trained in both training
+stages. The model is also trained on AUX6, but ad-
+ditionally includes the En →{De,Es,Fi,Hi,Ru,Zh}
+translation directions during supervised training
+and validation. All the other training details are
+the same. We evaluate the performance of SixT+
+m2m on the Flores 101 testset (Goyal et al., 2021),
+which is a multilingual aligned benchmark that
+covers 101 different languages. Following previ-
+ous work (Fan et al., 2020), we report tokenized
+BLEU when Hindiand Chineseare the target
+language and the detokenized BLEU for other tar-
+get languages. We compare it with the m2m-100
+(1.2B) model, as shown in Table 2. Detailed re-
+sults on each source language are in Table 12 of
+the appendix.
+Overall, our model outperforms m2m-100 in 6
+out of 7 target languages. This is impressive given
+that our model is unsupervised. The SixT+ m2m
+performs more evenly in different source languages
+(see Table 12 in the appendix). In contrast, the per-
+formance of m2m-100 varies across languages. Our
+model learns to translate through effective cross-
+lingual transfer, while m2m-100 relies heavily on
+the scale and quality of the direct parallel dataset.
+We also compare SixT+ m2En and SixT+ m2m
+for translating to English on this testset and get an
+average BLEU of 30.5 and 29.8, respectively (see
+Table 12 in the appendix). The results demonstrate
+that SixT+ m2m successfully supports seven target
+languages while keeping most of the performance
+of SixT+ m2En on the many-to-English testset.
+Effect of the Multilinguality of Auxiliary Lan-
+guages Previous studies report that adding more
+parallel data and more auxiliary languages im-
+proves performance for unsupervised NMT (García
+et al., 2020; Bai et al., 2020; Garcia et al., 2021).
+In this experiment, we examine whether increasing
+multilinguality under a fixed data budget improves
+the zero-shot performance of SixT+. We fix the
+amount of auxiliary parallel sentence pairs to 8 mil-146
+lion and vary the number of auxiliary languages.
+We report the results in Table 3. It is observed that
+the model trained with four auxiliary languages
+(De, Es, Fi, Ru, each has the same data size) out-
+performs that of one auxiliary language (De), with
+an average gain of 3.7 BLEU. Note that for both
+cases, we use auxiliary languages which are not in
+the Indo-Aryan group to remove the impact of lan-
+guage similarity. This observation demonstrates the
+necessity of utilizing multiple auxiliary languages
+in the training dataset.
+Effect of Positional Disentangled Encoder In
+this part, we conduct a comprehensive study on
+the effect of the positional disentangled encoder
+(PDE) (Liu et al., 2021; Chen et al., 2021). Ta-
+ble 4 presents the results. We find that on the
+small-scale Europarl dataset, PDE improves the
+zero-shot performance with an average gain of 1.0
+BLEU. However, when the training data goes large
+or/and becomes more multilingual, the gain de-
+creases (see results on WMT19 and AUX6). To
+confirm this, we also conduct experiments on SixT+
+m2m (see Table 12 in the appendix). For translat-
+ing to English, the models with and without PDE
+perform comparably well. However, for translating
+to other languages, PDE improves in 5 out of 6
+directions, with an average gain of 0.4 BLEU. This
+is expected as these directions include only one
+source language (En) and much less training data
+(7M∼41M) than translating to English (120M). In
+summary, when large-scale multilingual training
+data are available for all target languages, it is fine
+to remove PDE. We suspect the model has already
+learned language-agnostic encoder representations
+in this case. Otherwise, PDE benefits zero-shot
+performance.
+Performance on Cross-lingual NLU Tasks To
+better understand the encoder representation pro-
+duced by SixT+, we evaluate the zero-shot cross-lingual transfer performance of the SixT+ encoder
+on the XTREME benchmark (Hu et al., 2020). The
+XTREME includes 9 target tasks of natural lan-
+guage understanding. We do not report results on
+XQuAD and MLQA as they have no held-out test
+data (Phang et al., 2020). For all other XTREME
+tasks, we follow the training and evaluation proto-
+col in Hu et al. (2020) and implement with the jiant
+toolkit (Phang et al., 2020). As NMT training can
+be regarded as an intermediate task (Pruksachatkun
+et al., 2020), we include previous results on using
+English intermediate NLU tasks to improve XLM-
+R on XTREME as a reference (Phang et al., 2020).
+Table 5 provides the average results for each task.
+The detailed results are in the appendix.
+Overall, SixT+ encoders achieve 8.3% and
+31.6% performance gain over XLM-R and XLM-R
+ft-all across the seven tasks, which verifies that
+our model learns a more language-agnostic en-
+coder representations. Our encoder may learn bet-
+ter sentence-level representation and capture bet-
+ter semantic alignments among parallel sentences
+through multilingual NMT training, therefore it
+generally performs better on sentence pair (XNLI
+and PAWS-X) and sentence retrieval tasks (BUCC
+and Tatoeba). The results show the potential of
+leveraging NLG task as the intermediate task for
+improving performance on XTREME. We leave a
+more detailed exploration of why NMT training
+as well as other NLG intermediate tasks could be
+beneficial for a given NLU task as future work.
+4 SixT+ as a Pretrained Model
+SixT+ learns language-agnostic encoder representa-
+tion and performs impressively well on translating
+various source languages. In this part, we extend
+SixT+ to two cross-lingual NLG tasks where the
+direct labeled data is scarce, namely unsupervised
+NMT for low-resource languages and zero-shot
+cross-lingual abstractive summarization.1474.1 Unsupervised NMT for Low-resource
+Language
+Given a low-resource language pair where the par-
+allel dataset is unavailable, early work on unsuper-
+vised NMT build the translation model by training
+denoising autoencoding and back-translation con-
+currently (Lample et al., 2018b,a; Artetxe et al.,
+2018). However, these methods may lack robust-
+ness when languages are distant (Kim et al., 2020;
+Marchisio et al., 2020). For example, Guzmán
+et al. (2019) report BLEU scores of less than 1.0
+on distant language pair Nepali-English using the
+method in Lample et al. (2018b). Recent work
+improves by better initializing the unsupervised
+NMT model either with a multilingual pretrained
+language model (Liu et al., 2020; Song et al., 2019;
+Ko et al., 2021, MulPLM) or a multilingual NMT
+model (Lin et al., 2020). In this part, we follow this
+line and offer an alternative initialization option for
+building strong unsupervised NMT models.
+We first initialize the L→En model with
+SixT+. As SixT+ only supports En as the tar-
+get language, we initialize the En →Lmodel
+with XLM-R following how SixT+ is initialized.
+Then we iteratively improve these two models with
+back-translation. For simplicity, we do not update
+theL→En model and only train the reverse
+model once. We train it with a synthetic back-
+translation dataset from Lmonolingual data us-
+ing the two-stage training method. We do not
+apply other unsupervised NMT techniques, such
+as iterative back-translation (Lample et al., 2018b),
+cross-translation (Garcia et al., 2021) or iterative
+mining of sentence pairs (Tran et al., 2020). These
+methods could be complementary to our method.
+We leave the in-depth exploration as future work.
+Experimental Settings We evaluate our method
+on Ne and Si, two commonly used benchmark lan-
+guages for evaluating low-resource language trans-
+lation. The monolingual dataset of Ne and Si con-
+sists of 7 million sentences that are sampled from
+CC100 and CCNet dataset. The test sets are from
+the Flores dataset (Guzmán et al., 2019). We set the
+beam size to 5 during the offline back-translation
+and select the model with unsupervised criterion
+in Lample et al. (2018a). We compared with state-
+of-the-art supervised and unsupervised baselines.
+Please refer to the appendix for more details.
+Results The results are illustrated in Table 6. Our
+model outperforms all unsupervised baselines for
+all translation directions, improving the best per-
+forming unsupervised baseline with an average
+gain of 1.2 BLEU. In addition, it even outperforms
+all supervised baselines and achieves new state-
+of-the-art performance on Ne →En and En →Ne
+translations. It is impressive given that the super-
+vised baselines Guzmán et al. (2019) and Liu et al.
+(2020) are very strong. Both methods are trained
+on around 600k parallel corpus and more than 70M
+monolingual corpora with supervised translation
+and iterative back-translation. Our method is also
+computationally efficient and easy to implement.
+As SixT+ offers a ready-to-use L→En NMT
+model, we only run back-translation once for build-
+ing the reverse model. However, for the baselines
+(ID 2-3, 5-7), they run iterative back-translation
+for no less than two rounds and involve cross-
+translation, denoising autoencoding, or adversarial
+loss. They are much more complex and computa-
+tional costly compared with our method.
+4.2 Zero-shot Cross-lingual Generation
+In zero-shot generation with the source-side trans-
+fer, the NLG model is directly tested on unseen
+source languages during supervised training. As
+cross-lingual labeled data are scarce, such zero-
+shot generation is useful in the cross-lingual gen-
+eration where the languages of input and output
+text are different. In this experiment, we focus
+on utilizing SixT+ for zero-shot cross-lingual ab-
+stractive summarization (ZS-XSUM). We believe
+such a framework can be easily extended to other148
+zero-shot cross-lingual generation tasks.
+The ZS-XSUM task is challenging, as we re-
+quire the model to summarize (from document to
+abstract), translate (from input language to output
+language) and transfer (from auxiliary input lan-
+guage to target input language) at the same time.
+SixT+ already has the ability to translate and trans-
+fer, thus it offers a set of initialization parameters
+that can ease the learning of the ZS-XSUM model.
+Specifically, we initialize the ZS-XSUM model
+with SixT+ (1st)and then train on labeled data of
+abstractive summarization with the TransF method.
+The trained model is tested on the cross-lingual
+summarization in a zero-shot manner where the
+source language is unseen during training.
+Experiment Settings To build a strong ZS-
+XSUM model, we collect 1.2 million public
+document-summary pairs to form the training
+dataset, where the document is in the languages
+among En/De/Es/Fr/It/Pt/Ru and the summary is in
+En. We evaluate the performance on the Wikilingua
+dataset with Hi/Zh/Cs/Nl/Tr as source languages
+and English as the target language. All the test
+languages are unseen during training and valida-
+tion. The dataset details are in the appendix. We
+compare the proposed method with the mBART-
+ft method which directly fine-tunes all mBART
+parameters and our proposed method in building
+SixT+ which is denoted as ‘Ours w/o NMT pre-
+training’.
+Results As shown in Table 7, both of our meth-
+ods outperform mBART-ft on all zero-shot direc-
+tions by an average gain of 8.1 and 12.3 ROUGE-L.
+This is impressive given that mBART is a widely
+used MulPLM for the cross-lingual generation. Wealso observe that initializing with SixT+ is much
+better than XLM-R with the same TranF training
+method, demonstrating that the NMT pretraining
+is beneficial for the ZS-XSUM task. To build
+a cross-lingual generation model without labeled
+data, previous works usually resort to the translate-
+and-train or translate-and-test approaches or their
+extensions (Shen et al., 2018; Duan et al., 2019).
+For these approaches, an NMT system is required
+to translate either at the training or testing time.
+However, translate-and-train can only develop mod-
+els for a few pre-specified source languages, while
+the decoding speed of translate-and-test is slow,
+especially for summarization where the input text
+is long. Besides, both approaches rely heavily on
+the performance of the NMT system. SixT+ shows
+that it is possible to build a strong universal cross-
+lingual NLG model that can support 100 source
+languages. This is promising, especially for low-
+resource languages which the NMT system trans-
+lates poorly. Our model can also serve as a start
+point which can be further improved by fine-tuning
+on genuine or synthesized (produced by an NMT
+system) cross-lingual corpus. We leave more in-
+depth exploration as future work.
+5 Related Work
+5.1 Multilingual Neural Machine Translation
+Early works on multilingual NMT show its zero-
+shot translation capability, where the tested trans-
+lation direction is unseen during supervised train-
+ing (Johnson et al., 2017; Ha et al., 2016). To fur-
+ther improve the zero-shot performance, one direc-
+tion is to learn language-agnostic encoder represen-
+tations and make the most of cross-lingual transfer.
+Some approaches modify the encoder architecture
+to facilitate language-independent representations.149Lu et al. (2018) incorporate an explicit neural in-
+terlingua after the encoder. Liu et al. (2021); Chen
+et al. (2021) remove the residual connection at an
+encoder layers to relax the positional correspon-
+dence. Some other works introduce auxiliary train-
+ing objectives to encourage similarity between the
+representations of different languages (Arivazha-
+gan et al., 2019; Al-Shedivat and Parikh, 2019;
+Pham et al., 2019; Pan et al., 2021). For example,
+Pan et al. (2021) utilize contrastive loss to explic-
+itly align representations of a bilingual sentence
+pair. Recently, multilingual pretraining has demon-
+strated to implicitly learn language-agnostic repre-
+sentation (Liu et al., 2020; Conneau et al., 2020;
+Hu et al., 2020). Inspired by this, some studies
+initialize multilingual NMT with the MulPLM or
+introducing the training objectives of MulPLM to
+multilingual NMT (Gu et al., 2019; Ji et al., 2020;
+Liu et al., 2020; Chen et al., 2021; Garcia et al.,
+2021). Our work follows the last line but improves
+over them by making the most of MulPLM with a
+simple yet effective fine-tuning method and large-
+scale multilingual parallel dataset.
+5.2 Zero-shot Translation with Multilingual
+Pretrained Language Model
+For NLG tasks like neural machine translation,
+most work leverage multilingual pretrained seq2seq
+language models such as mBART (Liu et al., 2020),
+mT5 (Xue et al., 2021) and ProphetNet-X (Qi et al.,
+2021) for cross-lingual transfer. For example, Liu
+et al. (2020) fine-tune mBART with the parallel
+dataset of one language pair and test on unseen
+source languages. Considering the great success of
+the multilingual pretrained encoder (MulPE) such
+as XLM-R (Conneau et al., 2020) and mBART (Wu
+and Dredze, 2019) in zero-shot cross-lingual trans-
+fer for NLU tasks (Hu et al., 2020), their use for
+cross-lingual transfer in NLG tasks is still under-
+explored. Wei et al. (2021) fine-tunes their pro-
+posed MulPE to conduct zero-shot translation but
+use the [CLS] representation as the encoder out-
+put.
+Our work is most similar to SixT (Chen et al.,
+2021), as indicated by the name itself. However,
+since SixT focuses on designing a novel fine-tuning
+method, it conducts experiments with one auxiliary
+language, which heavily limits the model’s perfor-
+mance. In addition, SixT only works on NMT,
+while SixT+ can not only perform translation but
+also serve as a pretrained model for various zero-shot cross-lingual generation tasks, such as low-
+resource NMT and cross-lingual abstractive sum-
+marization.
+6 Conclusion
+In this paper, we introduce SixT+, a strong many-
+to-English NMT model that supports 100 source
+languages but is trained once with the parallel
+dataset from only six source languages. Our model
+makes the most of cross-lingual transfer by initial-
+izing with XLM-R and conducting multilingual
+fine-tuning on the large-scale dataset with a simple
+yet effective two-stage training method. Extensive
+experiments demonstrate that SixT+ outperforms
+all baselines on many-to-English translation. When
+serving as a pretrained model, adding SixT+ initial-
+ization achieves new state-of-the-art performance
+for unsupervised NMT of low-resource and sig-
+nificantly outperforms mBART and XLM-R on
+zero-shot cross-lingual summarization.
+Acknowledgements
+This project was supported by National Natural
+Science Foundation of China (No. 62106138) and
+Shanghai Sailing Program (No. 21YF1412100).
+Wenping Wang and Jia Pan acknowledge the sup-
+port from Centre for Transformative Garment Pro-
+duction. We thank the anonymous reviewers for
+their insightful feedbacks on this work.
+References150151152
+A Dataset
+A.1 Machine Translation Dataset
+The AUX6 dataset is from WMT translation task
+and CCAligned corpus. The validation and test
+sets are from newstest, WAT21 translation task,
+IWSLT17 testset, Flores Testsetand Tatoeba
+test sets. We use the first 20M sentence pairs of
+the CCAligned corpus for Es-En and Ru-En lan-
+guage pairs as training data. The Europarl De-En
+dataset is only used in the experiment of Table 4.
+All texts are tokenized by the same XLM-R senten-
+cepiece (Kudo, 2018) model. The source sentence
+length is limited to 512, which is the maximum
+source sentence length supported by XLM-R. More
+details are shown in Table 8 and Table 9.
+A.2 Unsupervised NMT dataset
+The monolingual dataset of Ne and Si consists of
+7 million sentences that are sampled from CC100
+(Conneau et al., 2020) and CCNet (Wenzek et al.,
+2020) datasets. We select the best model with an
+unsupervised criterion based on the BLEU score of
+a ‘round-trip’ translation following (Lample et al.,
+2018a) by using 3000 monolingual Ne/Si sentences
+sampled from CC100 and CCNet datasets. The test-
+sets of Ne and Si are from Flores testset (Guzmán
+et al., 2019).
+A.3 Abstractive Summarization Dataset
+The training data of abstractive summarization task
+is from CNN/DailyMail,XSum,Wikihow
+and WikiLinguadataset. In total, the training
+set contains 1189k document-summary pairs. The
+average context length after performing sentence-
+piece is 669 tokens. We randomly sample 2000
+Fr-En pairs and 3000 pairs for each test language
+from the WikiLingua dataset as the validation and
+test sets. As the maximum length of input tokens
+for XLM-R is 512, we just keep the first 512 to-153kens of context input if it is longer than 512. The
+model is evaluated on many-to-English abstractive
+summarization, where we summarize documents
+of various languages to English abstracts. More
+details are shown in Table 10.
+B Language Code
+We refer to the language information in Table 1 of
+Fan et al. (2020). The languages used in this paper
+are shown in Table 11.
+C Model and Training Details
+Since the SixT+ embeddings are initialized with
+XLM-R, all texts are tokenized with the same sen-
+tencepiece (Kudo, 2018, SPM) tokenizer as XLM-
+R. The tokenizer is learned on the full CommonCrawl data that includes 250k sentencepiece tokens.
+We do not apply additional preprocessing, such as
+true-casing or normalizing punctuation/characters.
+Following XLM-R, we add the [BOS] and[EOS]
+tokens at the head and tail of the input sentence,
+respectively.
+SixT+ is trained on 128 Nvidia V100 GPUs
+(32GB) with 100k and 10k steps for the first and
+second training stage. The batch size is 4096 for
+each GPU. We use the Adam optimizer (Kingma
+and Ba, 2015) with β= 0.9andβ= 0.98. At
+the first stage, the learning rate is 0.0005 and the
+warmup step is 4000, while at the second stage,
+we set the learning rate as 0.0001 and do not use
+warmup. The dropout probabilities are set to be
+0.1. All experiments are done with the fairseq
+toolkit (Ott et al., 2019).
+D Comparison on the Many-to-many
+Translation
+The many-to-many SixT+ model is trained with
+AUX6 dataset using supervision from 12 transla-
+tion directions. The m2m-100 model is the official
+1.2B modelfrom Fan et al. (2020). The results
+are shown in Table 12.
+E Effect of Positional Disentangled
+Encoder
+We compare the SixT+ with and without (w/o) po-
+sitional disentangled encoder (PDE) on different
+training datasets: Europarl (1.9M), WMT19 (41M),
+and AUX6 (120M). The results are shown in Ta-
+ble 13. We also conduct experiments on SixT+
+m2m, as shown in Table 12.
+F Unsupervised NMT with SixT+
+In addition to CRISS and m2m-100, we compare
+with the state-of-the-art unsupervised and super-
+vised baselines from the literature on these two
+languages. Most of these additional baselines are
+not multilingual and are explicitly designed for
+low-resource language translation.
+•Unsupervised baselines. We include the results
+of three unsupervised methods. Guzmán et al.
+(2019) utilize Hi as auxiliary language and train
+with auxiliary supervised translation and iterative
+back-translation. Garcia et al. (2021) utilize six
+languages as auxiliary languages and present a154
+three-stage method with various loss functions, in-
+cluding auxiliary supervised translation, iterative
+back-translation, denoising autoencoding and cross
+translation. Ko et al. (2021) fine-tune mBART on
+the parallel dataset from Hi and monolingual data
+in an iterative manner with auxiliary supervised
+translation, back-translation, denoising autoencod-
+ing and adversarial objective. Note that these meth-
+ods utilize much more monolingual data than ours.
+•Supervised baselines. We report the supervised
+results in mBART (Liu et al., 2020) and the FLoRes
+dataset benchmarks (Guzmán et al., 2019) for ref-
+erence. These two methods are very strong. Both
+methods are trained on around 600k parallel corpus
+and more than 70M monolingual corpora with su-
+pervised translation and iterative back-translation.
+Liu et al. (2020) initialize the model with mBART
+while Guzmán et al. (2019) use auxiliary paral-
+lel corpus from related language for the Ne↔En
+translations.G XTREME benchmark results
+All models are evaluated on the XTREME bench-
+mark (Hu et al., 2020) with jiant toolkit. We
+follow the same settings with Phang et al. (2020)
+for fine-tuning and testing. The detailed results for
+each languages on each task are shown in Table 14
+to Table 20.155156157

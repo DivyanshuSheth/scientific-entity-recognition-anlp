@@ -1,1 +1,662 @@
-5588 Proceedings of the 2022 Conference on Empirical Methods in Natural Language Processing , pages 5588 5597 December 7 - 11 , 2022 © 2022 Association for Computational Linguistics 5589 5590 5591 5592 5593 5594 5595 5596 5597 
+
+Jie Cao
+Polytechnic Institute
+Zhejiang University
+caojie@zju.edu.cnYin Zhang
+College of Computer Science and Technology
+Zhejiang University
+yinzh@zju.edu.cn
+Abstract
+Extreme multi-label text classification (XMTC)
+is the task of finding the most relevant subset
+labels from an extremely large-scale label col-
+lection. Recently, some deep learning models
+have achieved state-of-the-art results in XMTC
+tasks. These models commonly predict scores
+for all labels by a fully connected layer as the
+last layer of the model. However, such models
+can’t predict a relatively complete and variable-
+length label subset for each document, because
+they select positive labels relevant to the docu-
+ment by a fixed threshold or take top k labels
+in descending order of scores. A less popular
+type of deep learning models called sequence-
+to-sequence (Seq2Seq) focus on predicting
+variable-length positive labels in sequence style.
+However, the labels in XMTC tasks are es-
+sentially an unordered set rather than an or-
+dered sequence, the default order of labels re-
+strains Seq2Seq models in training. To address
+this limitation in Seq2Seq, we propose an au-
+toregressive sequence-to-set model for XMTC
+tasks named OTSeq2Set. Our model gen-
+erates predictions in student-forcing scheme
+and is trained by a loss function based on bi-
+partite matching which enables permutation-
+invariance. Meanwhile, we use the optimal
+transport distance as a measurement to force
+the model to focus on the closest labels in se-
+mantic label space. Experiments show that OT-
+Seq2Set outperforms other competitive base-
+lines on 4 benchmark datasets. Especially, on
+the Wikipedia dataset with 31k labels, it outper-
+forms the state-of-the-art Seq2Seq method by
+16.34% in micro-F1 score. The code is avail-
+able at https://github.com/caojie54/OTSeq2Set.
+1 Introduction
+Extreme multi-label text classification (XMTC) is a
+Natural Language Processing (NLP) task of finding
+the most relevant subset labels from an extremely
+large-scale label set. It has a lot of usage scenar-
+ios, such as item categorization in e-commerce andtagging Wikipedia articles. XMTC become more
+important with the fast growth of big data.
+As in many other NLP tasks, deep learning
+based models also achieve the state-of-the-art per-
+formance in XTMC. For example, AttentionXML
+(You et al., 2019), X-Transformer (Chang et al.,
+2020) and LightXML (Jiang et al., 2021) have
+achieved remarkable improvements in evaluating
+metrics relative to the current state-of-the-art meth-
+ods. These models are both composed of three
+parts (Jiang et al., 2021): text representing, label
+recalling, and label ranking. The first part converts
+the raw text to text representation vectors, then the
+label recalling part gives scores for all cluster or
+tree nodes including portion labels, and finally, the
+label ranking part predicts scores for all labels in
+descending order. Notice that, the label recalling
+and label ranking part both use fully connected
+layers. Although the fully connected layer based
+models have excellent performance, there exists a
+drawback which is these models can’t generate a
+variable-length and relatively complete label set for
+each document. Because the fully connected layer
+based models select positive labels relevant to the
+document by a fixed threshold or take top k labels in
+descending order of label scores, which depends on
+human’s decision. Another type of deep learning
+based models is Seq2seq learning based methods
+which focus on predicting variable-length positive
+labels only, such as MLC2Seq (Nam et al., 2017),
+SGM (Yang et al., 2018). MLC2Seq and SGM
+enhance Seq2Seq model for Multi-label classifica-
+tion (MLC) tasks by changing label permutations
+according to the frequency of labels. However,
+a pre-defined label order can’t solve the problem
+of Seq2Seq based models which is the labels in
+XMTC tasks are essentially an unordered set rather
+than an ordered sequence. Yang et al. (2019) solves
+this problem on MLC tasks via reinforcement learn-
+ing by designing a reward function to reduce the
+dependence of the model on the label order, but5588it needs to pretrain the model via Maximum Like-
+lihood Estimate (MLE) method. The two-stage
+training is not efficient for XMTC tasks that have
+large-scale labels.
+To address the above problems, we propose an
+autoregressive sequence-to-set model, OTSeq2Set,
+which generates a subset of labels for each doc-
+ument and ignores the order of ground truth in
+training. OTSeq2Set is based on the Seq2Seq (Bah-
+danau et al., 2015), which consists of an encoder
+and a decoder with the attention mechanism. The
+bipartite matching method has been successfully
+applied in Named entity recognition task (Tan et al.,
+2021) and keyphrase generation task (Ye et al.,
+2021) to allievate the impact of order in targets.
+Chen et al. (2019) and Li et al. (2020) have suc-
+cessfully applied the optimal transport algorithm to
+enable sequence-level training for Seq2Seq learn-
+ing. Both methods can achieve optimal matching
+between two sequences, but the difference is the
+former matches two sequences one to one, and the
+latter gives a matrix containing regularized scores
+of all connections. We combine the two methods
+in our model.
+Our contributions of this paper are summarized
+as follows: (1) We propose two schemes to use
+the bipartite matching in XMTC tasks, which are
+suitable for datasets with different label distribu-
+tions. (2) We combine the bipartite matching and
+the optimal transport distance to compute the over-
+all training loss, with the student-forcing scheme
+when generating predictions in the training stage.
+Our model can avoid the exposure bias; besides,
+the optimal transport distance as a measurement
+forces the model to focus on the closest labels in
+semantic label space. (3) We add a lightweight con-
+volution module into the Seq2Seq models, which
+achieves a stable improvement and requires only
+a few parameters. (4) Experimental results show
+that our model achieves significant improvements
+on four benchmark datasets. For example, on the
+Wikipedia dataset with 31k labels, it outperforms
+the state-of-the-art method by 16.34% in micro-
+F1 score, and on Amazon-670K, it outperforms
+the state-of-the-art model by 14.86% in micro-F1
+score.
+2 Methodology
+2.1 Overview
+Here we define necessary notations and describe
+the Sequence-to-Set XMTC task. Given a textsequence xcontaining lwords, the task aims to
+assign a subset ycontaining nlabels in the to-
+tal label set Ltox. Unlike fully connected layer
+based methods which give scores to all labels, the
+Seq2Set XMTC task is modeled as finding an opti-
+mal positive label sequence ythat maximizes the
+joint probability P(ˆy|x), which is as follows:
+P(ˆy|x) =/productdisplayP(y|y, y, . . . , y,x),(1)
+where yis the sequence generated by the greedy
+search, yis the ground truth sequence with default
+order, ˆyis the most matched reordered sequence
+computed by bipartite matching. As described in
+Eq.(1), we use the student-forcing scheme to avoid
+exposure bias (Ranzato et al., 2016) between the
+generation stage and the training stage. Further-
+more, combining the scheme with bipartite match-
+ing enables the model to eliminate the influence of
+the default order of labels.
+2.2 Sequence-to-Set Model
+Our proposed Seq2Set model is based on the
+Seq2Seq (Bahdanau et al., 2015) model, and the
+model consists of an encoder and a set decoder with
+the attention mechanism and an extra lightweight
+convolution layer (Wu et al., 2019), which are in-
+troduced in detail below.
+Encoder We implement the encoder by a bidirec-
+tional GRU to read the text sequence xfrom both
+directions and compute the hidden states for each
+word as follows:
+− →h=− − − →GRU(− →h,e(x)) (2)
+← −h=← − − −GRU(← −h,e(x)) (3)
+where e(x)is the embedding of x. The final
+representation of the i-th word is h= [− →h;← −h]
+which is the concatenation of hidden states from
+both directions.
+Attention with lightweight convolution After
+the encoder computes hfor all elements in x, we
+compute a context vector cto focus on different
+portions of the text sequence when the decoder
+generates the hidden state sat time step t,
+c=/summationdisplayαh (4)5589The attention score αof each representation his
+computed by
+α=exp (e)/summationtextexp (e)(5)
+e=vtanh (Ws+Uh) (6)
+where W,U,vare weight parameters. For
+simplicity, all bias terms are omitted in this paper.
+To maximally utilize hidden vectors {h}
+in the encoder, we use the lightweight convolu-
+tion layer to compute "label" level hidden vectors
+{ˆh}, then compute another context vector
+ˆcwhich uses the same parameters as c,
+{ˆh}= LightConv( {h}).(7)
+Thelightweight convolutions are depth-wise sep-
+arable (Wu et al., 2019), softmax-normalized and
+share weights over the channel dimension. Readers
+can refer to Wu et al. (2019) for more details.
+Decoder The hidden state sof decoder at time-
+steptis computed as follows:
+s= GRU( s,[e(p);c;ˆc]) (8)
+where e(p)is the embedding of the label which
+has the highest probability under the distribution
+p.pis the probability distribution over the
+total label set Lat time-step t−1and is computed
+by a fully connected layer:
+p= softmax( W[s;c;ˆc;e(p)]) (9)
+where W∈ Ris weight parameters.
+The overall label size Vof the total label set L
+is usually huge in XMTC. In order to let the model
+fit into limited GPU memory, we use the hidden
+bottleneck layer like XML-CNN (Liu et al., 2017)
+to replace the fully connected layer. The bottleneck
+layer is described as follows:
+p= softmax( W
+tanh (W[s;c;ˆc;e(p)])) (10)
+where W∈ R,W∈ Rare weight
+parameters, and the hyper-parameter bis the bot-
+tleneck size. The size of the parameters in this
+part reduces from a vast size O(V×z)to a much
+smaller O((V+z)×b). According to the size of
+labels for different datasets, we can set different b
+to make use of GPU memory.
+2.3 Loss Function
+2.3.1 Bipartite Matching
+After generating N predictions in student-forcing
+scheme, we need to find the most matched re-
+ordered ground truth sequence ˆyby bipartite match-
+ing between ground truth sequence ywith default
+order and the sequence pof generated distribution.
+To find the optimal matching we search for a per-
+mutation ˆρwith the lowest cost:
+ˆρ= arg min/summationdisplayC(y,p),(11)
+where Ois the space of all permutations with
+length N,C(y,p)is a pair matching cost
+between the ground truth label with index ρ(i)and
+generated distribution pat time step i. We use
+the Hungarian method (Kuhn, 1955) to solve this
+optimal assignment problem. The matching cost
+considers the generated distributions and is defined
+as follows:
+C(y,p) =− 1p(y),(12)
+where p(y)is the probability of label y.
+y̸=∅means that the distributions only match
+with non- ∅ground truth labels.
+In practice, we design two assignment schemes
+for bipartite matching. The first scheme is to get
+the optimal matching between non- ∅ground truth
+labels and all generated distributions, then assign ∅
+labels to the rest generated distributions one-to-one.5590
+The second scheme is to get the optimal matching
+between non- ∅ground truth labels and first-n gen-
+erated distributions, then assign ∅labels to the rest
+generated distributions one-to-one. Figure 1 shows
+the two assignment schemes.
+Finally, we get the bipartite matching loss based
+on the reordered sequence ˆy={y} to
+train model, which is defined as follows:
+L(ˆy,p) =−/summationdisplay[ 1logp(y)
++ 1λlogp(y)](13)
+where λis a scale factor less than 1that forces
+the model concentrate more on non- ∅labels.
+2.3.2 Semantic Optimal Transport Distance
+In XMTC, semantic similar labels commonly ap-
+pear together in each sample. The bipartite match-
+ing loss described in Eq.(13) only utilizes one value
+in each predictions. We completely utilize the pre-
+dictions in training, and take the optimal transport
+(OT) distance in embedding space as a regulariza-
+tion term to make all predictions close to positive
+labels, as the shown in Figure 2.
+OT distance on discrete domain The OT dis-
+tance is also known as Wasserstein distance on a
+discrete domain X(the sequence space), which is
+defined as follows:
+L(p,y) = min⟨C,Γ⟩
+= min/summationdisplay/summationdisplayΓ·c(p, y),(14)
+where µ∈ R,ν∈ Rare two discrete dis-
+tributions on X,∥µ∥=∥ν∥= 1. In our case,
+given realizations {p}and{y}ofµand
+ν, we can approximate them by empirical dis-
+tributions /hatwideµ=/summationtextδand/hatwideν=/summationtextδ.
+The supports of /hatwideµand/hatwideνare finite, so finally we
+haveµ=1andν=1.Σ(µ,ν)
+is the set of joint distributions whose marginals
+areµandν, which is described as Σ(µ,ν) =
+{Γ∈ R|Γ1=µ,Γ1=ν}, where 1
+represents n-dimensional vector of ones. Matrix
+C= [c(p, y)]∈ R is the cost matrix, whose
+element c(p, y)denotes the distance between the
+i-th support point p∈ Xofµand the j-th support
+point y∈ Xofν. Notation ⟨·,·⟩represents the
+Frobenius dot-product. With the optimal solution
+Γ,L(p,y)is the minimum cost that transport
+from distribution µtoν.
+We use a robust and efficient iterative algorithm
+to compute the OT distance, which is the recently
+introduced Inexact Proximal point method for exact
+Optimal Transport (IPOT) (Xie et al., 2020).
+Semantic Cost Function in OT In XMTC learn-
+ing, it’s intractable to directly compute the cost
+distance between predictions and ground-truth one-
+hot vector because of the huge label space. A more
+natural choice for computing cost distance is to
+use the label embeddings. Based on the rich se-
+mantics of embedding space, we can compute the
+semantic OT distance between model predictions
+and ground-truth. The details of computing the
+cosine distance are described as follows:
+c(p, y) =cosine _distance (Ep,E1)
+(15)
+cosine _distance (x,y) = 1−xy
+∥x∥∥y∥(16)
+where E∈ Ris the label embedding matrix,
+Vis the vocabulary size and dis the dimension for
+the embedding vector. 1is the one-hot vector
+whose value is 0 in all positions except at position
+yis 1.
+In practice, we compute the semantic opti-
+mal transport distance L(p,y)between non- ∅5591ground-truth labels and all predictions, which is
+shown in 3.
+2.3.3 Complete Seq2Set Training with OT
+regularization
+The bipartite matching gives the optimal matching
+between ground truth and predictions, which en-
+ables the Seq2Set model to train with Maximum
+likelihood estimation (MLE). In addition, the OT
+distance provides a measurement in semantic la-
+bel embedding space. We propose to combine the
+OT distance and the bipartite matching loss, which
+gives us the final training objective:
+L=L(ˆy,p) +λL(p,y) (17)
+where λis a hyper-parameter to be tuned.
+3 Experiments
+3.1 Datasets
+We use four benchmark datasets, including three
+large-scale datasets Eurlex-4K (Loza Mencía and
+Fürnkranz, 2008) and AmazonCat-13K (McAuley
+and Leskovec, 2013) and Wiki10-31K (Zubiaga,
+2012), one extreme-scale dataset Amazon-670K
+(McAuley and Leskovec, 2013). We follow the
+training and test split of AttentionXML (You et al.,
+2019) and we set aside 10% of the training in-
+stances as the validation set for hyperparameter
+tuning. The dataset statistics are summarized in
+Table 1.
+3.2 Evaluation Metrics
+Following the previous work (Yang et al., 2018,
+Nam et al., 2017, Yang et al., 2019), we evalu-
+ate all methods in terms of micro-F1 score, micro-
+precision and micro-recall are also reported for
+analysis.
+3.3 Baselines
+We compare our proposed methods with the follow-
+ing competitive baselines:
+Seq2Seq (Bahdanau et al., 2015) is a classic
+Seq2Seq model with attention mechanism, which
+is also a strong baseline for XMTC tasks.
+MLC2Seq (Nam et al., 2017) is based on
+Seq2Seq (Bahdanau et al., 2015), which enhances
+Seq2Seq model for MLC tasks by changing label
+permutations according to the frequency of labels.
+We take the descending order from frequent to rare
+in our experiments.SGM (Yang et al., 2018) is based on previews
+Seq2Seq (Bahdanau et al., 2015) and MLC2Seq
+(Nam et al., 2017), which views the MLC task as
+a sequence generation problem to take the correla-
+tions between labels into account.
+In order to extend the above three models to
+large-scale dataset Wiki10-31K and extreme-scale
+dataset Amazon-670K, we use the bottleneck layer
+to replace the fully connected layer. The bottleneck
+sizes are same as our proposed model and they are
+shown in Table 2.
+3.4 Experiment Settings
+For each dataset, the vocabulary size of input text
+is limited to 500,000 words according to the word
+frequency in the dataset.
+The number of GRU layers of the encoder is 2,
+and for the decoder is 1. The hidden sizes of the
+encoder and the decoder both are 512. We set the
+max length of generated predictions Nto the max
+length of labels in each dataset are shown in Table
+1 asL.
+For LightConv, we set the kernel sizes to
+3,7,15,30 for each layer respectively. To reduce
+the memory consumption of GPU, we set the stride
+of convolution to 3 in the last layer for all datasets
+except that Wiki10-31K is 4.
+We set the hyperparameter λof bipartite match-
+ing loss to 0.2 in Eq.(13) following Ye et al. (2021),
+andλof final loss to 8 in Eq.(17).
+For word embeddings in three baseline mod-
+els and our proposed models, we use pre-trained
+300-dimensional Glove vectors (Pennington et al.,
+2014) to all datasets for input text, and use the
+mean value of embeddings of words in labels for all
+datasets except for Amazon-670K, because the la-
+bels in Amazon-670K are corresponding item num-
+bers and we randomly initialize 100-dimensional
+embeddings for Amazon-670K.
+All models are trained by the Adam optimizer
+(Kingma and Ba, 2014) with a cosine annealing
+schedule. Besides, we use dropout (Srivastava et al.,
+2014) to avoid overfitting, the dropout rate is 0.2,
+and clip the gradients (Pascanu et al., 2013) to the
+maximum norm of 8.
+All models are trained on one Nvidia TITAN V
+and one Nvidia GeForce RTX 3090, for the small
+dataset Eurlex-4K, we use TITAN V , and for others,
+we use RTX 3090.
+Other hyperparameters are given in Table 2.5592Dataset N N D L L LˆLW W
+Eurlex-4K 15,449 3,865 186,104 3,956 5.30 24 20.79 1248.58 1230.40
+Wiki10-31K 14,146 6,616 101,938 30,938 18.64 30 8.52 2484.30 2425.45
+AmazonCat-13K 1,186,239 306,782 203,882 13,330 5.04 57 448.57 246.61 245.98
+Amazon-670K 490,449 153,025 135,909 670,091 5.45 7 3.99 247.33 241.22
+Datasets E B lr b L
+Eurlex-4K 20 32 0.001 - 1000
+Wiki-31K 15 32 0.001 300 2000
+AmazonCat-13K 5 64 0.0005 - 500
+Amazon-670K 20 64 0.0005 512 500
+3.5 Main Results
+Table 3 compares the proposed methods with three
+baselines on four benchmark datasets. We focus
+on micro-F1 score following previous works based
+on Seq2Seq. The best score of each metric is in
+boldface. Our models outperform all baselines
+in micro-F1 score. We find that the two assign-
+ment scheme of bipartite matching each excel on
+different datasets. BMdenotes the Seq2Seq
+model with the first scheme of bipartite matching,
+BMdenotes the Seq2Seq model with the
+second one. BMhas the better performance on
+Eurlex-4K and Amazon-670K, rather BM
+is better on Wiki10-31K and AmazonCat-13K. Our
+complete method achieves a large improvement
+of 16.34% micro-F1 score over the second best
+baseline model which is SGM on Wiki10-31K, and
+14.86%, 7.26%, 1.01% on other datasets respec-
+tively, the relative impovements are shown in Table
+4.
+3.6BMvsBM
+We find that the different performance of
+BMandBMare related to the distribu-
+tion of label size on the dataset. Table 5 compares
+BMwith BMin micro-F1 score on all
+datasets. The performance difference on Eurlex-4K
+is very small since the two proportions which are
+shown in Figure 4 are nearly equal. Wiki10-31K is
+the same case. However, the two proportions have
+a big difference on AmanzonCat-13K and Amazon-
+670K, which leads to the large performance differ-
+ence between BMandBM. The propor-
+tion of samples whose label size is smaller than the
+average is less than 50%, then the performance of
+BMis better than BM. The proportion
+of samples whose label size is greater than average
+number is greater than 50%, then the performance
+ofBMis better than BM.
+3.7 Effect of Lightweight Convolution and
+Semantic Optimal Transport Distance
+To examine the effect of LightConv and OT, we add
+LightConv to the Seq2seq model and BMmodel,
+and add OT to BM model. The details of results
+are shown in Table 3. The semantic optimal trans-
+port distance and LigntConv achieve improvements
+against origin models on all datasets except for
+Amazon-670K, but it’s not beyond our imagination,
+because Amazon-670K has an extremely large la-
+bel set which is item numbers. The item numbers
+don’t have semantic information leading to OT hav-5593Methods P R F1
+Eurlex-4K
+Seq2Seq 60.83 54.76 57.64
+MLC2Seq 59.80 56.70 58.21
+SGM 59.99 56.56 58.23
+Seq2Seq + LC 61.36 55.03 58.02
+BM 61.72 57.63 59.61
+BM+ LC 63.38 58.10 60.63
+BM+ OT 65.95 58.54 62.03
+BM+ OT + LC 64.82 60.26 62.46Methods P R F1
+Wiki10-31K
+Seq2Seq 29.87 26.96 28.34
+MLC2Seq 28.69 28.03 28.36
+SGM 28.89 27.93 28.40
+Seq2Seq + LC 30.06 27.14 28.53
+BM 33.23 29.43 31.22
+BM+ LC 33.58 29.94 31.66
+BM+ OT 37.26 29.08 32.67
+BM+ OT + LC 36.70 30.05 33.04
+Amazon-670K
+Seq2Seq 32.16 32.04 32.10
+MLC2Seq 30.27 32.32 31.26
+SGM 30.12 31.42 30.76
+Seq2Seq + LC 31.15 31.32 31.24
+BM 55.23 27.33 36.56
+BM+ LC 52.70 26.30 35.09
+BM+ OT 58.36 26.46 36.42
+BM+ OT + LC 61.16 26.39 36.87AmazonCat-13K
+Seq2Seq 74.26 68.24 71.12
+MLC2Seq 70.93 69.66 70.29
+SGM 71.27 69.36 70.30
+Seq2Seq + LC 74.60 68.49 71.41
+BM 70.26 72.51 71.37
+BM+ LC 70.46 72.95 71.68
+BM+ OT 71.80 71.57 71.69
+BM+ OT + LC 71.98 71.71 71.84
+Methods Eurlex-4K Wiki10-31K Amazon-670K AmazonCat-13K
+BM 2.37% 9.93% 13.89% 0.35%
+BM + OT 6.53% 15.04% 13.46% 0.8%
+BM+ OT + LC 7.26% 16.34% 14.86% 1.01%
+Datasets BM BM
+Eurlex-4K 59.61 59.12( ↓0.82%)
+Wiki10-31K 31.38 31.22( ↓0.51%)
+AmazonCat-13K 67.09 71.37( ↑6.38%)
+Amazon-670K 36.87 34.45( ↓6.56%)
+ing no effect. At the same time Amazon-670K has
+the lowest average number of samples per label,
+it’s very hard to learn a proper context vector by
+the LightConv. However, the combination of OT
+and LightConv still has a small improvement over
+BMmethods on Amazon-670K.3.8 Comprehensive Comparison
+To realize the performance of our method on tail
+labels, we use the macro-averaged F1 (maF1) score
+which treats all labels equally regardless of their
+support values. To more comprehensively compare
+our model with baselines, we also use the weighted-
+averaged F1 (weF1) which considers each label’s
+support, and the example-based F1 (ebF1) which
+calculates F1 score for each instance and finds their
+average. We show the results in Table 6.
+3.9 Performance over different λ
+We conduct experiments on Eurlex4K dataset to
+evaluate performance with different hyperparame-
+terλin complete loss function L. The results are
+shown in Figure 5. The figure shows that when
+λ= 8, the performance reaches its best and is
+stable.5594Methods maF1 weF1 ebF1
+Eurlex-4K
+Seq2Seq 23.26 55.36 57.10
+MLC2Seq 24.16 56.24 58.00
+SGM 24.32 56.28 57.96
+OTSeq2Set 27.34 60.45 61.04Methods maF1 weF1 ebF1
+Wiki10-31K
+Seq2Seq 3.51 24.55 27.97
+MLC2Seq 4.85 26.15 28.14
+SGM 4.29 26.00 28.19
+OTSeq2Set 3.50 26.55 32.65
+Amazon-670K
+Seq2Seq 11.57 30.29 29.62
+MLC2Seq 11.55 30.36 29.62
+SGM 11.14 29.53 28.85
+OTSeq2Set 9.91 28.83 25.65AmazonCat-13K
+Seq2Seq 41.28 69.37 74.03
+MLC2Seq 39.79 68.78 73.57
+SGM 40.44 68.96 73.68
+OTSeq2Set43.42 70.95 75.18
+3.10 Computation Time and Model Size
+Table 7 shows the overall training time of all mod-
+els compared in our experiments. The MLC2Seq
+has the same model size and training time as
+Seq2Seq. The model size of OTSeq2Set is almost
+the same as that of Seq2Seq, but the overall training
+time is much longer than other models, because the
+bipartite matching loss and the optimal transport
+distance need to compute for each sample individu-
+ally.
+4 Related Work
+The most popular deep learning models in XMTC
+are fully connected layer based models. XML-
+CNN (Liu et al., 2017) uses a convolutional neu-
+ral network (CNN) and a dynamic max pooling
+scheme to learn the text representation, and adds
+an hidden bottleneck layer to reduce model size as
+well as boost model performance. AttentionXML
+(You et al., 2019) utilizes a probabilistic label
+tree (PLT) to handle millions of labels. In At-Datasets Seq2Seq SGM OTSeq2Set
+Eurlex-
+4KT 0.85 0.85 1.52
+M 34.8 35.0 40.5
+Wiki10-
+31KT 1.55 1.56 1.78
+M 45.5 45.7 47.5
+AmazonCat-
+13KT 3.70 3.75 17.88
+M 54.8 55.0 70.1
+Amazon-
+670KT 12.9 16.0 18.5
+M 437.7 437.7 439.8
+tentionXML, a BiLSTM is used to capture long-
+distane dependency among words and a multi-label
+attention is used to capture the most relevant parts
+of texts to each label. CorNet (Xun et al., 2020)
+proposes a correlation network (CorNet) capable
+of ulilizing label correlations. X-Transformers
+(Chang et al., 2020) proposes a scalable approach
+to fine-tuning deep transformer models for XMTC
+tasks, which is also the first method using deep
+transformer models in XMTC. LightXML (Jiang
+et al., 2021) combines the transformer model with
+generative cooperative networks to fine-tune trans-
+former model.
+Another type of deep learning-based method is
+Seq2Seq learning based methods. MLC2Seq (Nam
+et al., 2017) is based on the classic Seq2Seq (Bah-
+danau et al., 2015) architecture which uses a bidi-
+rectional RNN to encode raw text and an RNN
+with an attention mechanism to generate predic-
+tions sequentially. MLC2Seq enhances the model
+performance by determining label permutations be-
+fore training. SGM (Yang et al., 2018) proposes a5595novel decoder structure to capture the correlations
+between labels. Yang et al. (2019) proposes a two-
+stage training method, which is trained with MLE
+then is trained with a self-critical policy gradient
+training algorithm.
+About bipartite matching, Tan et al. (2021)
+considers named entity recognition as a Seq2Set
+task, the model generates an entity set by a non-
+autoregressive decoder and is trained by a loss
+function based on bipartite matching. ONE2SET
+(Ye et al., 2021) proposes a K-step target assign-
+ment mechanism via bipartite matching on the task
+of keyphrases generation, which also uses a non-
+autoregressive decoder.
+Xie et al. (2020) proposes a fast proximal point
+method to compute the optimal transport distance,
+which is named as IPOT. Chen et al. (2019) adds
+the OT distance as a regularization term to the MLE
+training loss. The OT distance aims to find an op-
+timal matching of similar words/phrases between
+two sequences which promotes their semantic sim-
+ilarity. Li et al. (2020) introduce a method that
+combines the student-forcing scheme with the OT
+distance in text generation tasks, this method can al-
+leviate the exposure bias in Seq2Seq learning. The
+above two methods both use the IPOT to compute
+the OT distance.
+5 Conclusion
+In this paper, we propose an autoregressive Seq2Set
+model for XMTC, OTSeq2Set, which combines the
+bipartite matching and the optimal transport dis-
+tance to compute overall training loss and uses the
+student-forcing scheme in the training state. OT-
+Seq2Set not only eliminates the influence of order
+in labels, but also avoids the exposure bias. Besides,
+we design two schemes for the bipartite matching
+which are suitable for datasets with different label
+distributions. The semantic optimal transport dis-
+tance can enhance the performance by the semantic
+similarity of labels. To take full advantage of the
+raw text information, we add a lightweight convolu-
+tion module which achieves a stable improvement
+and requires only a few parameters. Experiments
+show that our method gains significant performance
+improvements against strong baselines on XMTC.
+Limitations
+For better effect, we compute the bipartite matching
+and the optimal transport distance between non- ∅
+targets and predictions. We can’t use batch com-putation to improve efficiency so that the training
+time of OTSeq2Set is longer than other baseline
+models.
+Acknowledgement
+This study is supported by China Knowledge Cen-
+tre for Engineering Sciences and Technology (CK-
+CEST).
+References55965597

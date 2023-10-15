@@ -1,1 +1,806 @@
-5980 Proceedings of the 61st Annual Meeting of the Association for Computational Linguistics Volume 1 : Long Papers , pages 5980–5994 July 9 - 14 , 2023 © 2023 Association for Computational Linguistics 5981 5982 5983 5984 5985 5986 5987 5988 5989 5990 5991 5992 5993 5994 
+
+Hao Fei, Qian Liu, Meishan Zhang, Min Zhang, Tat-Seng ChuaSea-NExT Joint Lab, School of Computing, National University of SingaporeNanyang Technological UniversityHarbin Institute of Technology (Shenzhen)
+{haofei37, dcscts}@nus.edu.sg liu.qian@ntu.edu.sg
+mason.zms@gmail.com zhangmin2021@hit.edu.cn
+Abstract
+In this work, we investigate a more realis-
+tic unsupervised multimodal machine transla-
+tion (UMMT) setup, inference-time image-free
+UMMT, where the model is trained with source-
+text image pairs, and tested with only source-
+text inputs. First, we represent the input images
+and texts with the visual and language scene
+graphs (SG), where such fine-grained vision-
+language features ensure a holistic understand-
+ing of the semantics. To enable pure-text input
+during inference, we devise a visual scene hal-
+lucination mechanism that dynamically gener-
+ates pseudo visual SG from the given textual
+SG. Several SG-pivoting based learning objec-
+tives are introduced for unsupervised transla-
+tion training. On the benchmark Multi30K
+data, our SG-based method outperforms the
+best-performing baseline by significant BLEU
+scores on the task and setup, helping yield trans-
+lations with better completeness, relevance and
+fluency without relying on paired images. Fur-
+ther in-depth analyses reveal how our model
+advances in the task setting.
+1 Introduction
+Current neural machine translation (NMT) has
+achieved great triumph (Sutskever et al., 2014; Bah-
+danau et al., 2015; Zhu et al., 2020), however in
+the cost of creating large-scale parallel sentences,
+which obstructs the development of NMT for the
+minor languages. Unsupervised NMT (UMT) has
+thus been proposed to relieve the reliance of paral-
+lel corpora (Artetxe et al., 2018; Chen et al., 2018).
+The core idea of UMT is to align the represen-
+tation spaces between two languages with alter-
+native pivot signals rather than parallel sentences,
+such as bilingual lexicons (Lample et al., 2018),
+multilingual language models (LM) (Conneau and
+Lample, 2019) and back-translation technique (Sen-
+nrich et al., 2016). Recent trends have considered
+Table 1: Practical unsupervised MMT requires the avoid-
+ance of not only parallel sentences during training, but
+also the paired image during inference (testing).
+the incorporation of visual information, i.e., mul-
+timodal machine translation (MMT) (Specia et al.,
+2016; Huang et al., 2016). Intuitively, visual modal-
+ity can serve as language-agnostic signals, pivoting
+different languages by grounding the same textual
+semantics into the common visual space. Therefore,
+solving UMT with visual contents as pivot becomes
+a promising solution, a.k.a., unsupervised MMT
+(UMMT) (Huang et al., 2020; Su et al., 2019).
+UMMT systems are trained with only the text-
+image pairs (< text-img >), which can be easier to
+collect than the parallel source-target sentence pairs
+(<src-tgt >) (Huang et al., 2020). Although exempt-
+ing the parallel sentences for training, UMMT still
+requires such text-image pairs as inputs for testing.
+Yet such assumption might be unrealistic, because
+in most of the real-world scenarios such as online
+translation systems, paired images are not available
+during inference. Especially for some scarce lan-
+guages, the < text-img > pairs have difficult access.
+In other words, practical UMMT systems should
+not only avoid the parallel sentences during train-
+ing, but also the text-image pairs during inference .
+As summarized in Table 1, although some existing
+MMT researches exempt the testing-time visual
+inputs (Zhang et al., 2020; Li et al., 2022), they all
+unfortunately are supervised methods, relying on
+large-scale parallel sentences for training.5980
+As emphasized above, the visual information is
+vital to UMMT. However, for both the existing su-
+pervised and unsupervised MMT studies, they may
+suffer from ineffective and insufficient modeling of
+visual pivot features. For example, most of MMT
+models perform vision-language (VL) grounding
+over the whole image and text (Huang et al., 2019;
+Zhang et al., 2020), where such coarse-grained rep-
+resentation learning can cause mismatching and
+sacrifice the subtle VL semantics. Fang and Feng
+(2022) recently introduce a fine-grained VL align-
+ment learning via phrase-level grounding, while
+without a holistic understanding of the visual scene,
+such local-level method may lead to incomplete or
+missing alignments.
+In this work, we present a novel UMMT method
+that solves all aforementioned challenges. First of
+all, to better represent the visual (also the textual)
+inputs, we consider incorporating the visual scene
+graph (VSG) (Johnson et al., 2015) and language
+scene graph (LSG) (Wang et al., 2018). The scene
+graphs (SG) advance in intrinsically depicting the
+semantic structures of texts or images with rich
+details (cf. Fig. 1), which offers a holistic view-
+point for more effective pivoting learning. Then,
+we build the UMMT framework as illustrated in
+Fig. 2. The input src text and paired image are first
+transformed into LSG and VSG, which are further
+fused into a mixed SG, and then translated into the
+tgt-side LSG. And the tgt sentence will be finally
+produced conditioned on the tgt LSG. Several SG-
+based pivoting learning strategies are proposed for
+unsupervised training of UMMT system. In addi-
+tion, to support pure-text (image-free) input during
+inference, we devise a novel visual scene hallu-
+cination module, which dynamically generates a
+hallucinated VSG from the LSG compensatively.
+Our system is evaluated on the standard MMT
+Multi30K and NMT WMT data. Extensive exper-
+imental results verify that the proposed method
+outperforms strong baselines on unsupervised mul-
+timodal translation by above 5 BLEU score on av-
+erage. We further reveal the efficacy of the vi-
+sual scene hallucination mechanism in relieving
+the reliance on image inputs during inference. Our
+SG-pivoting based UMMT helps yield translations
+with higher completeness, relevance and fluency,
+and especially obtains improvements on the longer
+sentences.
+Overall, we make the following contributions:
+▶1) We are the first to study the inference-
+time image-free unsupervised multimodal machine
+translation, solved with a novel visual scene hal-
+lucination mechanism. ▶2) We leverage the SGs
+to better represent the visual and language inputs.
+Moreover, we design SG-based graph pivoting
+learning strategies for UMMT training. ▶3) Our
+model achieves huge boosts over strong baselines
+on benchmark data. Code is available at https:
+//github.com/scofield7419/UMMT-VSH .
+2 Related Work
+Neural machine translation has achieved notable
+development in the era of deep learning (Sutskever
+et al., 2014; Bahdanau et al., 2015; Luong et al.,
+2015). The constructions of powerful neural mod-
+els and training paradigms as well as the collec-
+tion of large-scale parallel corpora are the driving
+forces to NMT’s success (Vaswani et al., 2017; De-
+vlin et al., 2019). The key of NMT is to learn a
+good mapping between two (or more) languages.
+In recent years, visual information has been intro-5981duced for stronger NMT (i.e., multimodal machine
+translation), by enhancing the alignments of lan-
+guage latent spaces with visual grounding (Specia
+et al., 2016; Huang et al., 2016). Intuitively, people
+speaking different languages can actually refer to
+the same physical visual contents and conceptions.
+Unsupervised machine translation aims to learn
+cross-lingual mapping without the use of large-
+scale parallel corpora. The setting is practically
+meaningful to those minor languages with hard
+data accessibility. The basic idea is to leverage
+alternative pivoting contents to compensate the par-
+allel signals based on the back-translation method
+(Sennrich et al., 2016), such as third-languages
+(Li et al., 2020), bilingual lexicons (Lample et al.,
+2018) or multilingual LM (Conneau and Lample,
+2019). The visual information can also serve as
+pivot signals for UMT, i.e., unsupervised multi-
+modal machine translation. Comparing to the stan-
+dard MMT that trains with < src-img-tgt > triples,
+UMMT takes as input only the < src-img >. So far,
+few studies have explored the UMMT setting, most
+of which try to enhance the back-translation with
+multimodal alignment mechanism (Nakayama and
+Nishida, 2017; Chen et al., 2018; Su et al., 2019;
+Huang et al., 2020).
+Scene graph describes a scene of an image or
+text into a structure layout, by connecting discrete
+objects with attributes and with other objects via
+pairwise relations (Krishna et al., 2017; Wang et al.,
+2018). As the SGs carry rich contextual and se-
+mantic information, they are widely integrated into
+downstream tasks for enhancements, e.g., image
+retrieval (Johnson et al., 2015), image generation
+(Johnson et al., 2018) and image captioning (Yang
+et al., 2019). This work inherits wisdom, incorpo-
+rating both the visual scene graph and language
+scene graph as pivots for UMMT.
+All the UMMT researches assume that the < src-
+img> pairs are required during inference, yet we
+notice that this can be actually unrealistic. We thus
+propose a visual hallucination mechanism, achiev-
+ing the inference-time image-free goal. There are
+relevant studies on supervised MMT that manage
+to avoid image inputs (with text only) during in-
+ference. The visual retrieval-base methods (Zhang
+et al., 2020; Fang and Feng, 2022), which main-
+tain an image lookup-table in advance, such that
+a text can retrieve the corresponding visual source
+from the lookup-table. Li et al. (2022) directly
+build pseudo image representations from the input
+sentence. Differently, we consider generating the
+visual scene graph with richer and holistic visual
+structural information.
+3Scene Graph-based Translation System
+3.1 Problem Definition
+In UMMT, no parallel translation pairs are avail-
+able. This work considers an inference-time image-
+free UMMT. During training, the data availabil-
+ity is < x, z>∈<X,Z> and the corresponding src-
+side LSGand VSG, where Xare the src-side
+sentences, and Zare the paired images. During
+inference, the model generates tgt-side sentences
+y∈ Y based on the inputs of only x∈ X and the
+corresponding LSG, while the visual scene VSG
+is hallucinated from LSG. In both training and
+inference, ywill be generated from the intermedi-
+ate tgt-side language scene graph LSG, which is
+produced from LSGand VSG (or VSG).
+3.2 Framework
+As shown in Fig. 2, the system first represents the
+src-side LSGand VSG features with two GCN
+graph encoders, respectively. Then the SG fus-
+ing&mapping module integrates and transforms
+two SG representations into a unified one as tgt-
+side LSG, i.e., LSG. Another GSN model further
+encodes the LSG, where the representations are
+used to generate the tgt sentence (i.e., translation).
+Scene Graph Generating and Encoding We
+first employ two off-the-shelf SG parsers to obtain
+the LSG and VSG, separately (detailed in the ex-
+periment part). For simplicity, here we unify the
+notations of LSG and VSG as SG. We denote a
+SG as G=(V, E ), where Vare the nodes (including
+object o, attribute aand relation rtypes), and Eare
+the edges ebetween any pair of nodes v∈V.
+We then encode both the VSG and LSG with5982
+two spatial Graph Convolution Networks (GCN)
+(Marcheggiani and Titov, 2017) respectively, which
+is formulated as:
+r,···,r=GCN (G), (1)
+where ris the representation of node v. We here
+denote ras LSG’s node representation, and r
+as VSG’s node representation.
+Visual Scene Hallucinating During inference,
+the visual scene hallucination (VSH) module is
+activated to perform two-step inference to generate
+the hallucinated VSG, as illustrated in Fig. 3.
+Step1: sketching skeleton aims to build the
+skeleton VSG. We copy all the nodes from the raw
+LSGto the target VSG, and transform the textual
+entity nodes into the visual object nodes.
+Step2: completing vision aims to enrich and aug-
+ment the skeleton VSG into a more realistic one.
+It is indispensable to add new nodes and edges
+in the skeleton VSG, since in real scenarios, vi-
+sual scenes are much more concrete and vivid than
+textual scenes. Specifically, we develop a node aug-
+mentor and a relation augmentor, where the former
+decides whether to attach a new node to an existing
+one, and the later decides whether to create an edge
+between two disjoint nodes. To ensure the fidelity
+of the hallucinated VSG, during training, the node
+augmentor and relation augmentor will be updated
+(i.e., with the learning target L) with the input
+LSG and VSG supervisions. Appendix §A.1 details
+the VSH module.
+SG Fusing&Mapping Now we fuse the hetero-
+geneous LSGand VSG into one unified scene
+graph with a mixed view. The key idea is to merge
+the information from two SGs serving similar roles.In particular, we first measure the representation
+similarity of each pair of < text-img > nodes from
+two GCNs. For those pairs with high alignment
+scores, we merge them as one by averaging their
+representations, and for those not, we take the
+union structures from two SGs. This results in
+a pseudo tgt-side LSG. We then use another GCN
+model for further representation propagation. Fi-
+nally, we employ a graph-to-text generator to trans-
+form the LSGrepresentations to the tgt sentence
+y. Appendix §A.2 presents all the technical details
+in this part.
+4 Learning with Scene Graph Pivoting
+In this part, based on the SG pivot we introduce
+several learning strategies to accomplish the un-
+supervised training of machine translation. We
+mainly consider 1) cross-SG visual-language learn-
+ing, and 2) SG-pivoted back-translation training.
+Fig. 4 illustrates these learning strategies.
+4.1 Cross-SG Visual-language Learning
+The visual-language SG cross-learning aims to en-
+hance the structural correspondence between the
+LSG and VSG. Via cross-learning we also teach
+the SG encoders to automatically learn to highlight
+those shared visual-language information while de-
+activating those trivial substructures, i.e., denois-
+ing.
+Cross-modal SG Aligning The idea is to encour-
+age the text and visual nodes that serve a similar
+role in VSG and LSG to be closer. To align the
+fine-grained structures between SGs, we adopt the
+contrastive learning (CL) technique (Logeswaran
+and Lee, 2018; Yan et al., 2021; Fei et al., 2022;
+Huang et al., 2022). In particular, CL learns effec-5983tive representation by pulling semantically close
+content pairs together, while pushing apart those
+different ones. Technically, we measure the simi-
+larities between pairs of nodes from two VSG and
+LSG:
+A threshold value αis pre-defined to decide the
+alignment confidence, i.e., pairs with s> α are
+considered similar. Then we put on the CL loss:
+where τ>0 is an annealing factor. jmeans a posi-
+tive pair with i, i.e., s>α.
+Cross-modal Cross-reconstruction We further
+strengthen the correspondence between VSG and
+LSG via cross-modal cross-reconstruction. Specifi-
+cally, we try to reconstruct the input sentence from
+the VSG, and the image representations from the
+LSG. In this way we force both two SGs to focus
+on the VL-shared parts. To realize VSG →xwe
+employ the aforementioned graph-to-text generator.
+For LSG →z, we use the graph-to-image generator
+(Johnson et al., 2018). The learning loss can be
+marked as L.
+4.2 SG-pivoted Back-translation Training
+Back-translation is a key method to realize unsuper-
+vised machine translation (Sennrich et al., 2016).
+In this work, we further aid the back-translation
+with structural SG pivoting.
+Visual-concomitant Back-translation We per-
+form the back-translation with the SG pivot-
+ing. We denote the X→Y translation direction
+asy=F(x, z), and Y→Z asx=F(y, z).
+As we only have src-side sentences, the back-
+translation is uni-directional, i.e., x→¯y→x.
+L=E[−logp(x|F(x, z), z)].(5)
+Captioning-pivoted Back-translation Image
+captioning is partially similar to MMT besides
+the non-text part of the input. Inspired by Huang
+et al. (2020), based on the SG pivoting, we incorpo-
+rate two captioning procedures, Z→X andZ→Y ,
+to generate pseudo parallel sentences < ¯x-¯y> for
+back-translation and better align the language latent
+spaces. We denote Z→X as¯x=C(z),Z→Y as
+¯y=C(z). The back-translation loss will be:
+L=E[−logp(¯x|F(¯x, z), z)]
++E[−logp(¯y|F(¯y, z), z)].(6)⋆Remarks In the initial stage, each of the above
+learning objectives will be executed separately, in
+a certain order, so as to maintain a stable and ef-
+fective UMMT system. We first perform L
+andL, because the cross-SG visual-language
+learning is responsible for aligning the VL SGs,
+based on which the high-level translation can hap-
+pen. Then we perform back-translation training
+LandL, together with VSH updating L.
+Once the system tends to converge, we put them all
+together for further fine-tuning:
+L=L+L+L+L+L.(7)
+5 Experiments
+5.1 Setups
+The experiments are carried out on Multi30K data
+(Elliott et al., 2016), a benchmark for MMT, where
+each image comes with three parallel descriptions
+in English/German/French. Following Huang et al.
+(2020), we mainly consider the English-French
+(En↔Fr) and English-German (En ↔De). For each
+translation direction, we only use the src sentence
+& img for training, and only the src sentence for
+testing. We also test on the WMT16 En →Ro and
+WMT14 En →De, En →Fr. WMT (Bojar et al.,
+2014, 2016) is widely-used text-only translation
+corpora, where following Li et al. (2022), we use
+CLIP (Radford et al., 2021) to retrieve images from
+Multi30K for sentences.
+Following prior research, we employ the Faster-
+RCNN (Ren et al., 2015) as an object detector, and
+MOTIFS (Zellers et al., 2018) as a relation clas-
+sifier and an attribute classifier, where these three
+together form a VSG generator. For LSG gener-
+ation, we convert the sentences into dependency
+trees with a parser (Anderson et al., 2018), which
+is then transformed into the scene graph based on
+certain rules (Schuster et al., 2015). For text prepro-
+cessing, we use Moses (Koehn et al., 2007) for tok-
+enization and apply the byte pair encoding (BPE)
+technique. We use Transformer (Vaswani et al.,
+2017) as the underlying text-encoder to offer rep-
+resentations for GCN, and use the FasterRCNN to
+encode visual feature representations. All GCN
+encoders and other feature embeddings have the
+same dimension of 1,024, and all GCN encoders
+are with two layers.
+We mainly compare with the existing UMMT
+models: Game-MMT (Chen et al., 2018), UMMT
+(Su et al., 2019) and PVP (Huang et al., 2020).
+To achieve a fair comparison on the inference-time5984
+image-free setup, we also re-implement the UMMT
+and PVP by integrating the phrase-level retrieval-
+based visual hallucination method (Fang and Feng,
+2022). All models use the same fair configurations,
+and we do not use pre-trained LM. On WMT we
+also test the supervised MMT setup, where we use
+these baselines: UVR (Zhang et al., 2020), RMMT
+(Wu et al., 2021b), PUVR (Fang and Feng, 2022)
+and V ALHALLA (Li et al., 2022). We report the
+BLEU and METEOR scores for model evaluation.
+Our results are computed with a model averaging
+over 5 latest checkpoints with significance test. Our
+experiments are based on the NVIDIA A100 Tensor
+Core GPUs.
+5.2 Main Results
+Results on Multi30K In Table 2 we show the
+overall results on Multi30K data. First, we in-
+spect the performance where gold-paired images
+are given as inputs for testing. We see that our
+method ( Ours), by integrating the LSG and VSG
+information, shows clear superiority over baselines
+on all translation jobs, while ablating the SGs, the
+performance drops rapidly. This shows the impor-
+tance of leveraging scene graphs for more effective
+multimodal feature representations. Then, we look
+at the results where no paired images are given, i.e.,
+an inference-time image-free setup. By comparing
+UMMT/PVP with UMMT/PVPwe understand
+that without images unsupervised MMT fails dra-
+matically. Notably, our system shows significant
+improvements over the best baseline PVP, by av-
+erage 5.75=(3.9+6.5+6.6+6.0)/4 BLEU score. Al-
+though UMMTandPVPacquire visual signals
+via the phrase-level retrieval technique, our SG-
+based visual hallucination method succeeds much
+more prominently. Besides, there are compara-
+bly small gaps between Ours andOurs, which
+indicates that the proposed SG-based visual halluci-
+nation is highly effective. The above observations
+prove the efficacy of our overall system for UMMT.
+Ablation Study In Table 3 we quantify the con-
+tribution of each objective of scene graph piv-
+oting learning via ablation study. Each learn-
+ing strategy exhibits considerable impacts on the
+overall performance, where the captioning-pivoted5985
+back-translation influences the results the biggest,
+with an average 4.3 BLEU score. Overall, two
+SG-pivoted back-translation training targets show
+much higher influences than the two cross-SG
+visual-language learning objectives. When re-
+moving both two back-translation targets, we wit-
+ness the most dramatic decrease, i.e., average -5.7
+BLEU. This validates the long-standing finding
+that the back-translation mechanism is key to unsu-
+pervised translation (Sennrich et al., 2016; Huang
+et al., 2020).
+Results on WMT Table 4 further compares the
+translation results on WMT corpora under super-
+vised/unsupervised MMT. It is unsurprising to see
+that MMT models trained with supervision from
+parallel sentences are overall better than the unsu-
+pervised ones. However, our UMMT system ef-
+fectively narrows the gap between supervised and
+unsupervised MMT. We can find that our unsuper-
+vised method only loses within 1 BLEU score to
+supervised models, e.g., UVR andPUVR .
+5.3 Further Analyses and Discussions
+In this part we try to dive deep into the model, pre-
+senting in-depth analyses to reveal what and how
+our proposed method really works and improves.
+•Integration of the vision and language SGs
+helps gain a holistic understanding of input.
+Both VSG and LSG advance in comprehensively
+depicting the intrinsic structure of the content se-
+mantics, which ensures a holistic understanding of
+the input texts and images. By encoding the vision
+and language SGs, it is expected to completely cap-
+ture the key components from src inputs, and thus
+achieve better translations. However, without such
+structural features, some information may be lost
+during the translation. In Table 5 via human evalua-5986
+tion we can see that our system obtains significantly
+higher scores in terms of the completeness , com-
+paring to those baselines without considering SGs.
+Also in Fig. 5, we can find that the baseline system
+PVP(PR) , with only the local-level phrase-level
+visual retrieval, has frequently missed the key enti-
+ties during the translation, e.g., the object ‘ tee’ in
+case#2.
+•SG-based multimodal feature modeling helps
+achieve more accurate alignment between vi-
+sion and language. Another merit to integrating
+the SGs is that the fine-grained graph modeling of
+visual and language scenes obviously aids more
+precise multimodal feature alignment. In this way,
+the translated texts have higher fidelity to the origi-
+nal texts. Inaccurate multimodal alignment without
+considering the SG modeling will otherwise lead
+to worse ambiguity. Observing the ambiguity in
+Table 5, we see that our model exhibits the lowest
+ambiguity. In Fig. 5 for the case#3, PVP(PR)
+confuses the verb ‘ saw’ as ‘ see’ as it fails to accu-
+rately refer ‘ saw’ toa certain lumbering tool , while
+ours gives a correct prediction. Besides, accurate
+multimodal alignment greatly enhances the utility
+of visual information. In Table 6 we compare the
+relevance of vision-language counterparts by dif-
+ferent models, where our model gives the highest
+performance on both the overall text-image match-
+ing and the regional phrase-object matching. In
+addition, two proposed cross-SG learning targets
+display big impacts on the VL-aligning ability.
+•The longer and more complex the sentences,
+the higher the translation quality benefiting
+from the SGs features. In this work, we investi-
+gate the SG structures to model the input texts.
+Graph modeling of the texts has proven effec-
+tive for resolving the long-range dependency issue
+(Marcheggiani and Titov, 2017; Li et al., 2022). In
+Fig. 6 we group the translation performance based
+on the lengths of source sentences. We see that
+our SG-based model gives very considerable gains
+over the two non-SG baselines, where the longer
+the sentences the higher the improvements.
+•Incorporating SGs into MMT advances in
+more fluent translation. Also, modeling the se-
+mantic scene graph of the input features contributes
+a lot to the language fluency of the translation texts.
+Looking at the Fluency item in Table 5, we find that
+our system gives the best fluency with the lowest
+grammar errors.
+•SG-based visual scene hallucination mecha-
+nism helps gain rich and correct visual features.
+Different from the baseline retrieval-based meth-
+ods that directly obtain the whole images (or local
+regions), our proposed VSH mechanism instead
+compensatively generates the VSGs from the given
+LSGs. In this way, the hallucinated visual features
+enjoy two-fold advantages. On the one hand, the
+pseudo VSG has high correspondence with the tex-
+tual one, both of which will enhance the shared
+feature learning between the two modalities. On
+the other hand, the hallucinated VSG will produce
+some vision-specific scene components and struc-
+tures, providing additional clues to facilitate back
+to the textual features for overall better semantic
+understanding. Fig. 7 illustrates the node increas-
+ing rate during the vision scene graph hallucination.
+We see that the numbers of all three types of nodes
+increase, to different extents, where object nodes
+grow rapidest. Also, during the two transition steps
+of the VSH mechanism we get two VSGs, skele-
+ton VSG and hallucinated VSG. From Fig. 8 we
+see that after two full hallucination steps, we can5987obtain high-fidelity vision features, demonstrating
+the necessity of the second completing-vision step.
+6 Conclusion
+We investigate an inference-time image-free setup
+in unsupervised multimodal machine translation.
+In specific, we integrate the visual and language
+scene graph to learn the fine-grained vision-
+language representations. Moreover, we present
+a visual scene hallucination mechanism to gener-
+ate pseudo visual features during inference. We
+then propose several SG-pivoting learning objec-
+tives for unsupervised translation training. Ex-
+periments demonstrate the effectiveness of our
+SG-pivoting based UMMT. Further experimental
+analyses present a deep understanding of how our
+method advances the task and setup.
+Acknowledgments
+This research is supported by the National Natural
+Science Foundation of China (No. 62176180), and
+also the Sea-NExT Joint Lab.
+Limitations
+Our paper has the following potential limitations.
+First of all, we take advantage of the external scene
+graph structures to achieve the inference-time vi-
+sual hallucination and secure significant improve-
+ments of the target task, while it could be a double-
+edged sword. This makes our method subject to
+the quality of the external structure parsers. When
+the parsed structures of visual scene graphs and
+language scene graphs are with much noise, it will
+deteriorate our methods. Fortunately, the existing
+scene graph parsers have already achieved satisfac-
+tory performance for the majority language (e.g.,
+English), which can meet our demands. Second,
+the effectiveness of our approach depends on the
+availability of good-quality images, which how-
+ever shares the pitfalls associated with the standard
+unsupervised multimodal translation setup.
+References59885989
+A Appendix
+In§3.2 we give a brief induction to the overall
+model framework. Here we extend the details of
+each module of the scene graph-based multimodal
+translation backbone. In Fig. 9 we outline our
+framework.
+A.1 Visual Scene Hallucination Learning
+Module
+First of all, we note that VSH only will be acti-
+vated to produce VSG hallucination at inference
+time. During the training phase, we construct the
+VSG vocabularies of different VSG nodes. We de-
+note the object vocabulary as D, which caches
+the object nodes from parsed VSG of training im-
+ages; denote the attribute vocabulary as D, which
+caches the attribute nodes; and denote the relation
+vocabulary as D, which caches the relation nodes.
+Those vocabularies will be used to provide basic
+ingredients for VSG hallucination.
+At inference time, VSH is activated to perform
+two-step inference to generate the hallucinated
+VSG. The process is illustrated in Fig. 3.
+Step1: Sketching Skeleton This step builds the
+skeleton VSG from the raw LSG. Specifically, we
+only need to transform the textual entity nodes into
+the visual object nodes, while keeping unchanged
+the whole graph topology. As for the attribute
+nodes and the relation nodes, we directly copy them
+into the VSG, as they are all text-based labels that
+are applicable in VSG. Then we transform the tex-
+tual entity nodes into the visual object nodes. For
+each textual entity node in LSG, we employ the5990
+CLIP toolto search for the best matching visual
+node (proposal) in Das the counterpart visual ob-
+ject, resulting in the skeleton VSG. After this step,
+we obtain the sketch structure of the target VSG.
+Step2: Completing Vision This step completes
+the skeleton VSG into a more realistic one, i.e., the
+final hallucinated VSG. With the skeleton VSG at
+hand, we aim to further enrich skeleton VSG. Be-
+cause intuitively, in actual world the visual scenes
+are always much more concrete and vivid than tex-
+tual scenes. For example, given a caption text ‘ boys
+are playing baseball on playground ’, the LSG only
+mentions ‘ boys’, ‘baseball ’ and ‘ playground ’ ob-
+jects. But imaginarily, there must be a ‘ baseball
+bat’ in the scene of vision, and also both the pairs of
+‘boys’-‘playground ’ and ‘ baseball ’-‘playground ’
+has ‘on’ relation. Thus it is indispensable to add
+new nodes and more edges, i.e., scene graph aug-
+mentation. To reach the goal, we propose a node
+augmentor and a relation augmentor , as shown
+in Fig. 10. First of all, we downgrade all the rela-
+tion nodes as the edge itself, i.e., an edge with a
+relation label. By this, we obtain a VSG that only
+contains object and attribute nodes, and labeled
+edges, which is illustrated in Fig. 11.
+▶For the node augmentor, we first traverse all
+the object nodes in the skeleton VSG. For each
+object node v, we then perform k-order routing
+over its neighbor nodes. We denote its neighbor
+nodes as V={···, v,···}. Then we use the
+attention to learn the neighbor influence to v, and
+obtain the k-order feature representation hofv:
+α=expr·r/summationtextexpr·r
+h=r+/summationdisplayα·r.
+where randris the node representations of v5991andv, which are obtained from GCN encoder.
+Then we use a classifier to make prediction over
+the total vocabularies of DandD, to determine
+which node ˆv(either an object or an attribute node)
+should be attached to v, if any:
+ˆv←Softmax(FFN(h)),
+where D=D∪D∪ {ϵ}, including an addi-
+tional dummy token ϵindicating no new node to
+be attached to v. And if the predicted node is an
+object node, an additional relation classifier will
+determine what is the relation label ˆebetween ˆv
+andv:
+ˆe←Softmax(FFN([h;r)).
+▶For the relation augmentor, we first traverse all
+the node-pairs (object or attribute nodes, excluding
+the relation nodes) in the VSG, i.e., v&v. Then,
+for each node in the pair we use a triaffine attention
+(Wang et al., 2019; Wu et al., 2021a) to directly
+determine which new relation type ˆeshould be
+built between them, if exists:
+h=Sigmoid (/bracketleftbiggr
+1/bracketrightbigg
+(r)W/bracketleftbiggr
+1/bracketrightbigg
+),
+ˆe←Softmax(FFN(h)),
+where D=D∪ {ϵ}, where the dummy token ϵ
+indicates no new edge should be created between
+two nodes. The new edge ˆehas a relation label.
+ris the representation of the path from vtov,
+which is obtained by the pooling function over all
+the nodes in the path:
+h=Pool(r,···,r).
+Note that the triaffine scorer is effective in mod-
+eling the high-order ternary relations, which will
+provide a precise determination on whether to add
+a new edge.
+During training, the node augmentor and the
+relation augmentor are trained and updated based
+on the gold LSG and VSG, to learn the correct
+mapping between LSG and VSG.
+L=/summationdisplay
+[logp(ˆv|V SG←LSG )
++ log p(ˆe|V SG←LSG )],
+L=/summationdisplay
+logp(ˆe|V SG←LSG ),
+L=L+L.
+Such supervised learning is also important for en-
+suring that the final generated hallucinated visual
+scenes are basically coincident with the caption
+text, instead of random or groundless vision scenes.A.2 SG Fusing&Mapping Module
+Here we extend the contents in §3.2. As shown in
+Fig. 9, first of all, the SG fusing module merges
+the LSGand VSG into a mixed cross-modal scene
+graph, such that the merged scene graph are highly
+compact with less redundant. Before the merging,
+we first measure the similarity of each pair of < text-
+img> node representations via cosine distance:
+s=(r)·r
+||r||||r||.
+This is a similar process as in Eq. (2). For those
+pairs with high alignment scores, i.e., s> α
+(we use the same pre-defined threshold as in cross-
+modal alignment learning), we consider them as
+serving a similar role. Since we will perform the
+cross-modal SG aligning learning L, the accu-
+racy of the alignment between LSGand VSG can
+be guaranteed. Then, we average the representa-
+tions of the image-text node pair from their GCNs.
+And for the rest of nodes in LSGand VSG, we
+take the union structures of them. The resulting
+mixed SG fully inherits the semantic-rich scene
+nodes from both the textual SG and the visual SG,
+which will benefit the following text generation.
+Now we treat the mixed SG as a pseudo tgt-side
+LSG. We use another GCN to model LSGfor
+further feature propagation:
+r,···,r=GCN (V SG).
+The initial node representations of GCN are from
+the GCNs of VSG and LSG, i.e., randras
+in Eq. (1). Based on the node representation rof
+VSG, we finally employ a graph-to-text modelto
+generate the final tgt-side sentence. Specifically, all
+the node representation rwill be first summarized
+into one unified graph-level feature via pooling:
+r=Pool(r,···,r).
+Then, an autoregressive sequential decoder (Se-
+qDec) will take rto generate tgt-side token over
+the tgt-side vocabulary at each setp, sequentially:
+e=SeqDec (e,r),
+ˆy←Softmax (e).5992ACL 2023 Responsible NLP Checklist
+A For every submission:
+/squareA1. Did you describe the limitations of your work?
+7
+/squareA2. Did you discuss any potential risks of your work?
+7
+/squareA3. Do the abstract and introduction summarize the paper’s main claims?
+1
+/squareA4. Have you used AI writing assistants when working on this paper?
+Left blank.
+B/squareDid you use or create scientiﬁc artifacts?
+5
+/squareB1. Did you cite the creators of artifacts you used?
+5
+/squareB2. Did you discuss the license or terms for use and / or distribution of any artifacts?
+Left blank.
+/squareB3. Did you discuss if your use of existing artifact(s) was consistent with their intended use, provided
+that it was speciﬁed? For the artifacts you create, do you specify intended use and whether that is
+compatible with the original access conditions (in particular, derivatives of data accessed for research
+purposes should not be used outside of research contexts)?
+No response.
+/squareB4. Did you discuss the steps taken to check whether the data that was collected / used contains any
+information that names or uniquely identiﬁes individual people or offensive content, and the steps
+taken to protect / anonymize it?
+Appendix B
+/squareB5. Did you provide documentation of the artifacts, e.g., coverage of domains, languages, and
+linguistic phenomena, demographic groups represented, etc.?
+Appendix B
+/squareB6. Did you report relevant statistics like the number of examples, details of train / test / dev splits,
+etc. for the data that you used / created? Even for commonly-used benchmark datasets, include the
+number of examples in train / validation / test splits, as these provide necessary context for a reader
+to understand experimental results. For example, small differences in accuracy on large test sets may
+be signiﬁcant, while on small test sets they may not be.
+Appendix B
+C/squareDid you run computational experiments?
+Appendix B
+/squareC1. Did you report the number of parameters in the models used, the total computational budget
+(e.g., GPU hours), and computing infrastructure used?
+Appendix B5993/squareC2. Did you discuss the experimental setup, including hyperparameter search and best-found
+hyperparameter values?
+Appendix B
+/squareC3. Did you report descriptive statistics about your results (e.g., error bars around results, summary
+statistics from sets of experiments), and is it transparent whether you are reporting the max, mean,
+etc. or just a single run?
+5
+/squareC4. If you used existing packages (e.g., for preprocessing, for normalization, or for evaluation), did
+you report the implementation, model, and parameter settings used (e.g., NLTK, Spacy, ROUGE,
+etc.)?
+Appendix B
+D/squareDid you use human annotators (e.g., crowdworkers) or research with human participants?
+5
+/squareD1. Did you report the full text of instructions given to participants, including e.g., screenshots,
+disclaimers of any risks to participants or annotators, etc.?
+Appendix B
+/squareD2. Did you report information about how you recruited (e.g., crowdsourcing platform, students)
+and paid participants, and discuss if such payment is adequate given the participants’ demographic
+(e.g., country of residence)?
+Appendix B
+/squareD3. Did you discuss whether and how consent was obtained from people whose data you’re
+using/curating? For example, if you collected data via crowdsourcing, did your instructions to
+crowdworkers explain how the data would be used?
+Appendix B
+/squareD4. Was the data collection protocol approved (or determined exempt) by an ethics review board?
+Not applicable. Left blank.
+/squareD5. Did you report the basic demographic and geographic characteristics of the annotator population
+that is the source of the data?
+Not applicable. Left blank.5994

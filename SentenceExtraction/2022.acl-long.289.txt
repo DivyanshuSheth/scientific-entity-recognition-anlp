@@ -1,1 +1,626 @@
-4205 Proceedings of the 60th Annual Meeting of the Association for Computational Linguistics Volume 1 : Long Papers , pages 4205 4219 May 22 - 27 , 2022 c(cid:13)2022 Association for Computational Linguistics 4206 4207 4208 4209 4210 4211 4212 4213 4214 4215 4216 4217 4218 4219 
+
+Sanket Vaibhav MehtaJinfeng RaoYi Tay
+Mihir KaleAnkur P. ParikhEmma StrubellCarnegie Mellon University,Google,Google Research
+{svmehta, estrubel}@cs.cmu.edu
+{jinfeng, yitay, mihirkale, aparikh}@google.com
+Abstract
+Data-to-text generation focuses on generating
+ﬂuent natural language responses from struc-
+tured meaning representations (MRs). Such
+representations are compositional and it is
+costly to collect responses for all possible
+combinations of atomic meaning schemata,
+thereby necessitating few-shot generalization
+to novel MRs. In this work, we systematically
+study the compositional generalization of the
+state-of-the-art T5 models in few-shot data-to-
+text tasks. We show that T5 models fail to
+generalize to unseen MRs, and we propose a
+template-based input representation that con-
+siderably improves the model’s generalization
+capability. To further improve the model’s
+performance, we propose an approach based
+on self-training using ﬁne-tuned BLEURT for
+pseudo-response selection. On the commonly-
+used SGD and Weather benchmarks, the pro-
+posed self-training approach improves tree ac-
+curacy by 46%+ and reduces the slot error
+rates by 73%+ over the strong T5 baselines
+in few-shot settings.
+1 Introduction
+Data-to-text generation (Dušek et al., 2020; Shen
+et al., 2020) is a critical component in today’s task-
+oriented dialog systems for producing ﬂuent natu-
+ral language responses to users’ requests. The task
+takes structured meaning representations (MRs) as
+input for natural language text response generation.
+Such representations are compositional, which al-
+lows for the combination of atomic meaning units
+in various ways to express the rich semantics en-
+coded in languages. Recently, large pre-trained lan-
+guage models (LMs) have shown impressive results
+on many language understanding and generationFigure 1: Performance comparison (tree accuracy) be-
+tween different few-shot splits and semantic representa-
+tions. T5-small undergoes a signiﬁcant drop in perfor-
+mance on the unseen split and our template-guided rep-
+resentation improves generalization, reducing the gap.
+tasks (Howard and Ruder, 2018; Peters et al., 2018;
+Devlin et al., 2019; Raffel et al., 2020), however
+it remains unclear how well these LMs generalize
+compositionally to novel semantic representations.
+There have been many studies revealing that
+large LMs often memorize the patterns from train-
+ing data, while generalizing poorly to novel pat-
+terns. Compositionality in languages (Banarescu
+et al., 2013; Konstas et al., 2017) further aggravates
+such issues as the number of novel structural combi-
+nations exponentially increases with the number of
+atomic semantic units. In recent years, we have
+seen progress on benchmarking and measuring
+compositional generalization for languages (An-
+dreas, 2019), from perspectives including special-
+ized architectures (Lake, 2019; Rao et al., 2019)
+and learning strategies (Andreas, 2020; Akyürek
+et al., 2021). However, most of these works study
+the generalization for NLU tasks like question an-
+swering (Keysers et al., 2020) and semantic pars-4205
+ing (Kim and Linzen, 2020). To the best of our
+knowledge, compositional generalization for natu-
+ral language generation is still an under-explored
+problem, which is the focus of this work.
+To answer the question of whether pre-trained
+LMs still suffer from lack of compositional gener-
+alization, we start with an empirical evaluation of
+T5 (Raffel et al., 2020), the state-of-the-art model
+on data-to-text generation tasks (Kale and Ras-
+togi, 2020b). In our study, we use the Weather
+dataset (Balakrishnan et al., 2019) consisting of
+tree-structured compositional MRs along with tree-
+structured output responses (see Figure 2 for (a)
+naive MR and (c) target response). For evalua-
+tion, we compute the tree accuracy (Balakrishnan
+et al., 2019) which measures exact match between
+input and generated tree-structures. In this study
+we observe 47%-80% (across different few-shot
+train splits) drop in the tree accuracy when eval-
+uated on validation splits containing unseen tree-
+structures in comparison to splits containing seen
+tree-structures (Figure 1). Furthermore, simply in-
+creasing the model size from T5- small to T5- large
+does not close the generalization gap (Table 2), af-
+ﬁrming our hypothesis that even strong seq-to-seq
+LMs fail to generalize compositionally.
+Inspired by Kale and Rastogi (2020a), we ex-
+amine whether template-guided MRs are effective
+over naive MRs for tackling compositional general-
+ization in data-to-text tasks. We introduce a simple
+template engine that traverses the compositional
+MR in a top-down manner and converts it to a text
+representation (Figure 2(b)). We hypothesize thatsuch a template-guided setup reduces the change in
+representation between LM pre-training and ﬁne-
+tuning. With template-guided MRs, we report up to
+2x increase in the tree accuracy over naive MRs on
+the validation split with unseen structures, demon-
+strating improved model generalization.
+We also propose to self-train the generation
+model to further boost performance by mitigating
+data sparsity in the low-data regime without requir-
+ing additional manual annotation. Concretely, we
+augment the limited labeled MRs with unlabeled
+novel MRs to iteratively bootstrap the model. To ﬁl-
+ter out noisy pseudo responses during self-training,
+we repurpose BLEURT (Sellam et al., 2020), a
+learned metric, to be a quality estimator. We syn-
+thetically generate datasets for ﬁnetuning BLEURT
+with the goal of identifying hallucinations, miss-
+ing slot-values, and ungrammatical responses. In
+sum, our overall approach improves the tree accu-
+racy on unseen structures of the FewShotWeather
+dataset by 12:3%-46:4%over strong T5 baselines.
+On unseen schemata of the FewShotSGD dataset,
+we reduce the slot error rate by 54:4%-73:0%.
+2 Case Study: Compositional
+Generalization in Data-to-Text Tasks
+In this section, we are interested in investigating
+the following with respect to data-to-text tasks:
+(Q1) Do current state-of-the-art generation mod-
+els compositionally generalize?
+(Q2) What is an effective semantic representation
+for tackling compositional generalization?4206
+(Q3) Does scaling model size (and training data)
+trivially solve compositional generalization?
+Problem Setup Data-to-text generation is the
+task of generating natural language text yfrom
+meaning representation (MR) x. In the context
+of task-oriented dialog systems, the choice of MR
+ranges from a ﬂat list of slot-value pairs (Dušek
+et al., 2018) to a more expressive tree structure.
+Balakrishnan et al. (2019) deﬁnes tree-structured
+MRs consisting of arguments, dialog acts, and dis-
+course relations, which we use in this work. They
+report signiﬁcant gains in the naturalness of the
+generated responses with tree-structured MRs on
+the Weather domain dataset. Figure 2 (a) visual-
+izes an instantiation of such a tree-structured MR
+where the argument is made up of a sub-
+argument ( ), the dialog act con-
+sists of three arguments ( _, , _ ), and the discourse relation
+captures the relationship between two dialog acts
+( , ).
+We consider linearized versions of tree-
+structured MR xand output response y. Gener-
+ating the tree structure in the output enables us to
+compute the tree accuracy which helps to assess
+the structural correctness of the predicted response.
+FewShotWeather Dataset Due to the composi-
+tional nature of MRs, it is costly to collect re-
+sponses for all combinations of discourse relations,
+dialog acts and arguments. In order to keep data la-
+beling costs under control, we simulate a more real-
+istic few-shot (or limited labeled data) setup. In the
+original Weather dataset, we have 25;390training
+examples spanning 4;690unique tree-structured
+MRs. An unique tree-structured MR is deﬁned as
+a novel composition of discourse relations, dialogacts and argument names. Basically, they consti-
+tute non-terminals of a tree (Figure 2(a) without
+terminals or argument values like extremely humid,
+light rain, today, Palo Alto, jacket, and cold).
+For the Weather dataset (Balakrishnan et al.,
+2019), we construct 4few-shot splits: 1shot-250,
+1shot-500, 1shot-750, and 1shot-1000, where 1shot-
+Xdenotes training split to include one example per
+unique tree-structured MR and in total Xunique
+tree-structured MRs. Further, all Xexamples in
+1shot-Xare included while constructing 1shot-
+Ysplits, where X < Y . We also make sure
+each discourse relation, dialog act and argument
+name is represented at least once in our few-shot
+splits. However, all combinations of these may
+not exist, thus allowing us to simulate structural
+shifts and evaluate compositional generalization.
+Based upon these splits, we construct two evalu-
+ation sets: seen tree-structures (overlapping with
+tree-structured MRs from 1shot-250) and unseen
+tree-structures (disjoint with tree-structured MRs
+from 1shot-1000) (see Section 4.1 for more details).
+Henceforth, all of the above splits constitute the
+FewShotWeather dataset. We release these splits
+for future studies.
+2.1 Semantic Representation
+To answer (Q2), we use linearized tree structures
+as input to the T5 model ( naive representation ).
+However, T5 based models are pre-trained on nor-
+mal text as input, thereby creating a representation
+discrepancy between pre-training and ﬁne-tuning.
+To alleviate this discrepancy, we introduce a sim-
+ple template engine that recursively traverses the
+compositional MR in a top-down manner to gener-
+ate a structure-aware text representation ( template
+guided representation ). Some example templates4207to convert naive representation (Figure 2(a)) to tem-
+plate guided representation (Figure 2(b)) are listed
+in Table 1. Each template, consisting of a name
+and a body, is invoked if a node in the MR (e.g.,
+DG_INFORM) matches its name. A template can
+also invoke other templates or some utility func-
+tions. For example, template 3 could invoke tem-
+plates 4 or 5 based on the returned value of the
+utility function IsSet($condition) (namely, whether
+the argument $condition is set or not). Such a
+template engine requires developing only a linear
+number of templates with respect to the number of
+meaning units to convert a compositional MR to a
+text representation, without writing a template for
+each unique MR (4,690 unique MRs in the dataset).
+In our study, we ﬁne-tune the T5-small model
+using different few-shot train splits and report tree
+accuracy on validation splits. We observe that cur-
+rent state-of-the-art generation models undergo a
+signiﬁcant drop in performance when evaluated on
+unseen tree structures. Speciﬁcally, with naive in-
+put representation, we observe 47%-80% (across
+different few-shot train splits) drop in tree accuracy,
+thus, providing evidence to answer (Q1) that the
+current model does not generalize to novel MRs.
+On experimentation with template guided MRs
+and 1shot-250 train split, the tree accuracy on vali-
+dation unseen split increases from 8.77 to 26.3 ( 2x
+increase over naive MRs), thus, answering (Q2)
+favorably (Figure 1). However, across different
+few-shot train splits, template-guided MRs still un-
+dergo a signiﬁcant 41%-65% drop in tree accuracy
+on the unseen split compared to the seen split.
+2.2 Model scale
+Recent studies (Kaplan et al., 2020; Tay et al.,
+2021) show that model scale can affect the per-
+formance on several pre-training and downstream
+tasks. To understand how model scale affects
+the generalization to unseen structures, we con-
+sider three T5 variants: T5-small (77M), T5-base
+(120M), and T5-large (800M). We ﬁne-tune each of
+these models on the full training data (16,816 exam-
+ples corresponding to 1000 unique tree-structured
+MRs from 1shot-1000 split) and convincingly an-
+swer (Q3): Increasing the model (and dataset) size
+does not close the performance gap between seen
+and unseen splits (Table 2). Surprisingly, we ob-
+serve that the T5-small model performs similarly or
+better than its larger counterparts. We use T5-small
+for the remaining experiments.
+3 Self-training
+As discussed earlier, the compositional nature of
+MRs makes it difﬁcult to collect responses for all
+combinations. However, with access to data simula-
+tors (Rastogi et al., 2020), it is feasible to automat-
+ically generate large amounts of unlabeled MRs.
+Given limited labeled MRs, S=fx;yg, and
+assuming access to unlabeled MRs, U=fxg,
+we investigate self-training (Scudder, 1965), a semi-
+supervised learning approach to effectively use U
+to improve compositional generalization.
+Self-training starts from a model trained on la-
+beled dataS, iteratively applies the current model
+to generate pseudo-labels on unlabeled data U, and
+then re-trains the current model on the augmented
+version ofSand (subset of) U. For self-training to
+be effective, one needs to carefully select conﬁdent
+pseudo labels to alleviate the risk of reinforcing the
+model’s mistakes (He et al., 2020). This issue gets
+further exacerbated in the context of generation
+tasks, where neural models are prone to halluci-
+nate additional content not supported by the input
+(Maynez et al., 2020).
+With recent developments in learned evaluation
+metrics that penalize the model for hallucination,
+ﬂuency, etc., we pose the question: Can we repur-
+pose those metrics to assess the quality of pseudo-
+responses during self-training? Formally, given a
+pair of template guided MR (source) and model pre-
+dicted response (candidate), we want a model that
+estimates the response quality by looking for hal-
+lucinations, ﬂuency, coverage of argument value-
+pairs. Ideally, to learn such a model we require a
+large amount of positive and negative text pairs. To
+alleviate this requirement, we propose synthesizing
+the examples using the limited labeled task dataset.
+Furthermore, we initialize our quality estimation
+model using a pre-trained BLEURT (Sellam et al.,
+2020), which is shown to be sample efﬁcient and
+robust to data shifts as a learned evaluation metric.4208
+Once we have a ﬁne-tuned BLEURT model, we
+use it to select pseudo-responses using a selection
+threshold for self-training.
+3.1 Fine-tuning BLEURT
+We synthetically generate the dataset for ﬁne-
+tuning BLEURT using the labeled dataset available
+for each of our experiments. Template guided in-
+puts and ground truth target responses are paired
+as positive examples (rating: 1:0). We use the fol-
+lowing transformations on the target responses to
+create negative examples (rating: 0:0):
+Retrieving similar examples: For every input x,
+we rank all other inputs from the dataset using the
+BLEU score and select top-k examples below a
+certain threshold ( 90:0). Target responses corre-
+sponding to these top-k examples are paired with x
+to construct negative examples. Intuitively, these
+responses partially overlap with input xin terms
+of the content and inform a ﬁne-tuned model to
+handle hallucinations.
+Pairing with reference: Template guided inputs
+need not be grammatically correct. Pairing the
+inputxwith itself as a response provides grammat-
+ically incorrect negative examples.
+Swapping, repeating and dropping phrases,
+ﬂipping digits: Using these methods, we prepare
+a ﬁne-tuned BLEURT for structurally inconsistent
+behaviors of the NLG system. Figure 3 visualizes
+an instantiation of different transformations to con-
+struct negative examples.
+4 Experimentation
+4.1 Datasets and Metrics
+FewShotWeather The original Weather dataset
+(Balakrishnan et al., 2019) has 25;390training ex-
+amples. Each example consists of a user query, the
+tree-structured MR, the tree-structured annotatedresponse and metadata. As discussed in Section 2,
+we create new canonical subsets for compositional
+generalization experiments, FewShotWeather with
+1shot-250 (approx. 1%of original training data),
+1shot-500, 1shot-750, and 1shot-1000 splits. We
+repurpose all the remaining 24k training examples
+as unlabeled examples for self-training. Our eval-
+uation splits have 1;087=1;121 (val/test) exam-
+ples with seen tree-structures, and 1;095=1;170
+(val/test) examples with novel tree-structures. We
+report tree accuracy and BLEU-4 (Papineni et al.,
+2002) for the FewShotWeather dataset.
+FewShotSGD The original multi-domain
+Schema Guided Dialogue (SGD) dataset (Rastogi
+et al., 2020) has 160k examples spanning across
+20domains (e.g., Banks, Travel, Weather, etc.).
+For each of these domains, there are different
+services with a total of 45different schemata.
+Schema here refers to the combination of intents
+and slots, which change with services and domains.
+Further, not all domains and services are observed
+during training. Therefore, we use this dataset
+to study generalization to unseen schemata.
+Speciﬁcally, we use the few-shot variant of the
+dataset, FewShotSGD, as introduced by Kale and
+Rastogi (2020a). The FewShotSGD benchmark
+consists of k-shot splits (5/10/20/40), where k
+denotes the number of dialogues selected per
+train domain. The few-shot train splits have
+558/1,075/2,140/4,312 (5/10/20/40-shot) examples.
+Evaluation splits have 13,748/10,216 (val/test)
+examples with seen schema, and 10,386/26,568
+(val/test) examples with novel schema. Following
+Kale and Rastogi (2020a), we report BLEU-4 and
+slot error rate (SER) (Dušek and Jurcicek, 2019).
+SER measures the fraction of examples where at
+least one slot was incorrectly copied from the input
+(lower SER is better).4209
+4.2 Implementation
+For each of the experiments we ﬁne-tune the off-
+the shelf T5.1.1.small checkpoint. It has 6 layers
+each in encoder and decoder with a total of 77M
+parameters. We set the maximum sequence length
+to512, batch size to 16and a constant learning
+rate of 0:001for Adafactor optimizer (Shazeer and
+Stern, 2018). All models are ﬁne-tuned on a 4x4
+TPU slice, each taking around 2-3 hours to ﬁn-
+ish5000 steps. We evaluate models after every
+200steps and retain the checkpoint yielding best
+tree accuracy (for FewShotWeather) or BLEU (for
+FewShotSGD) on the held-out validation seen split.
+During inference, we set the beam size to 4and
+length penalty = 0:6.
+While constructing the ﬁne-tuning dataset for
+BLEURT, we generate up to 4different negative
+candidates for each of the 6transformations. We
+upsample the positive examples to be half the total
+number of negative examples and retain random
+10% of total examples for validation set. For ﬁne-
+tuning the BLEURT model, we start with publicly
+available BLEURT-20-D12 (Sellam et al., 2020).
+We set the maximum sequence length to 512, batch
+size to 32, a learning rate 1e-6, and ﬁne-tune for
+100k steps. We use the held-out validation set to
+select the best checkpoint for self-training.4.3 Self-Training
+In this section, we compare the performance of
+BLEURT based pseudo-response selection strategy
+with that of vanilla self-training. For each exper-
+iment, we randomly sample an equal number of
+examples for vanilla self-training and the BLEURT
+model to explicitly control for the sample com-
+plexity. We run 3iterations of the self-training
+unless explicitly speciﬁed and set the BLEURT
+score selection threshold to 0:99. We study the
+performance on a dataset (FewShotWeather) with
+tree-structured outputs as well as show the gener-
+ality of our method on a dataset (FewShotSGD)
+without explicit tree-structured outputs. Note that
+naive T5 ﬁne-tuning with template guided input
+representation constitutes a strong baseline for few-
+shot experiments as shown by Kale and Rastogi
+(2020a). We include results from this baseline un-
+derNone pseudo-response selection strategy as it
+does not involve self-training.
+Unseen tree structures (FewShotWeather) Ta-
+ble 3 reports the performance of different methods
+as a function of the number of labeled examples.
+We observe that the performance for all methods
+improves with more training data. Across all few-
+shot splits, we observe that BLEURT based self-
+training improves over vanilla self-training both in
+terms of tree accuracy and BLEU. Empirically, we
+see that relative gains in tree accuracy (over the4210
+T5-small baseline) from vanilla self-training are
+comparable on both unseen and seen splits (e.g.,
+7:15% v.s.6:72%, 1shot-500). On the other hand,
+BLEURT based self-training signiﬁcantly improves
+the relative performance on the unseen split in com-
+parison to seen splits (e.g., 18:72% vs. 10:5%,
+1shot-500), thus showcasing the effectiveness of
+selecting quality pseudo-responses for improving
+performance on unseen tree-structures.
+Unseen schema (FewShotSGD) Table 3 reports
+the performance on the FewShotSGD dataset. Sim-
+ilar to results on the FewShotWeather dataset, we
+observe that the performance improves with more
+training data. Further, the performance of the base-
+line T5-small model is comparable to seen and
+unseen schemata. These gains can be attributed
+to the beneﬁts of using template guided MRs. In
+comparison to vanilla self-training, BLEURT based
+approach improves the overall performance across
+all few-shot splits on both seen and unseen schema.
+For example, with 5-shot experiments, BLEURT
+based selection strategy reduces the SER on unseen
+schema from 19.93 to 5.39 ( 73% improvement)
+in comparison to the baseline T5 model. On the
+other hand, vanilla self-training reduces the SER
+only by 3.97 ( 20%), thus showcasing the effective-
+ness of the proposed approach in ﬁltering pseudo-
+responses with missing slot-value pairs. These re-
+sults conﬁrm that BLEURT based self-training is a
+generic method and can be plugged in to existing
+methods to improve the few-shot generalization
+capabilities of existing SOTA generation models.
+Performance with respect to self-training itera-
+tions We iteratively self-train the model starting
+from a T5-small baseline and continue adding unla-
+beled examples up to 3iterations. From Table 4 and
+9, we see that model performance improves acrossthe self-training iterations. However, the number
+of additional examples added decreases over itera-
+tions, thus suggesting that 2-3iterations might be
+enough to obtain beneﬁts from self-training.
+Quality of ﬁne-tuned BLEURT models For
+all our experiments, we use the few-shot la-
+beled datasets for ﬁne-tuning the BLEURT model.
+To investigate self-training performance with a
+BLEURT model ﬁne-tuned on a large dataset,
+we set up an experiment on the FewShotWeather
+dataset, where we ﬁne-tune the BLEURT model on
+a 1shot-1000 train split (BLEURT-1000) and use it
+for self-training with 1shot-250. From Table 4, we
+see that self-training with BLEURT-1000 performs
+signiﬁcantly better than BLEURT-250, especially
+on unseen structures, thereby conﬁrming the intu-
+ition that self-training is sensitive to the quality of
+the BLEURT model.
+4.4 Human evaluation
+Aside from automatic metrics-based evaluation, we
+also perform a human evaluation study by asking
+annotators to assess the quality of the generated re-
+sponses from different models. For each example,
+human annotators are shown user query, generated
+response and the ground truth response. They are
+asked to provide ratings on a scale of 1 (bad), 2
+(slightly bad) to 3 (good) along two dimensions:
+grammaticality ,naturalness , rating on a scale of
+0 (less) to 1 (adequate) for informativeness , and
+binary rating for accuracy . Similar to (Balakrish-
+nan et al., 2019), grammaticality evaluates the re-
+sponse for subject-verb agreement, repetitions, and
+grammatical completeness. Naturalness measures
+whether the response sounds coherent and natural
+by the response itself. Informativeness measures
+whether the response contains the right amount4211
+of relevant information to the user query and ac-
+curacy evaluates the response for hallucinations
+(incorrectly added slots), missing slots by compar-
+ing it against the reference. For each evaluation
+split (seen/unseen), we randomly select 200exam-
+ples and collect ratings from 3different annotators.
+For the FewShotWeather/SGD datasets, we con-
+sider models trained with 1shot-250/5-shot splits
+and compare them with models ﬁne-tuned on the
+full dataset. In total, we collect 7;200annotations,
+each with 3ratings. Table 5 reports results for
+human evaluation study.
+FewShotWeather Similar to automatic metrics,
+we see a drop in human ratings on the unseen split
+(compared to seen split), conﬁrming the model’s
+lack of generalization to novel MRs. On both the
+evaluation splits, our approach outperforms the
+baseline model with signiﬁcant results on gram-
+maticality and naturalness ratings. Moreover, the
+responses from the self-trained model are compara-
+ble (in terms of the human ratings) with that of the
+model ﬁne-tuned with the full dataset, demonstrat-
+ing the effectiveness of our approach.
+FewShotSGD Apart from generating natural re-
+sponses, model responses must be factually
+grounded in the input data and address user queries.
+On FewShotSGD, we see that our approach sig-niﬁcantly improves informativeness and accuracy
+rating over the baseline model. Surprisingly, we
+see a drop on naturalness when evaluated on seen
+schemata.
+4.5 Qualitative Analysis
+In Table 6 (and Tables 7, 8 in Appendix A) we
+visualize the sample responses generated using dif-
+ferent models for unseen test splits. We consider
+three models: T5-small baseline, BLEURT based
+self-training, and model trained with full data. For
+the FewShotWeather/ FewShotSGD datasets, we
+consider models trained with 1shot-250/ 5-shot
+train splits. We see that the baseline model fails
+to generate responses that are coherent and factu-
+ally grounded in the input. They hallucinate to
+generate novel concepts like cloudy hail , drop rele-
+vant details like cafe located in Emeryville , and are
+repetitive in nature. We also report the BLEURT
+score along with human ratings per sample and see
+that they are reﬂective of the response quality.
+5 Related Work
+Data-to-Text Generation While early research
+focused on rule-based methods (Reiter and Dale,
+2000), more recent work has relied heavily on neu-
+ral methods (Wen et al., 2015; Marcheggiani and
+Perez-Beltrachini, 2018). Some recent works (Kale
+and Rastogi (2020b), Peng et al. (2020), Kale and
+Roy (2020)) showed that transfer learning from
+pre-trained language models can improve general-
+ization capabilities and sample efﬁciency. In other
+lines of work, Ferreira et al. (2019); Moryossef
+et al. (2019) ﬁnd that pipelined neural approaches
+with explicit planning steps can outperform their
+end-to-end counterparts, while Kale and Rastogi
+(2020a) and Du et al. (2020) showed the beneﬁts of
+schema and template guided input representations.
+Inspired by Kale and Rastogi (2020a) we propose
+a simple and generic way to produce text-to-text
+representation, and study how it impacts composi-
+tional generalization.
+Self-training for NLG He et al. (2020) revisits
+the problem of self-training for NLG. They found
+that noise (from perturbing the input space) helps
+in self-training and propose a “noisy” version of
+self-training by augmenting vanilla training with
+the inputs from a reconstruction model. Build-
+ing on this idea, the contemporary work (Heidari
+et al., 2021) on few-shot data-to-text generation
+proposes to self-train the model and shows efﬁcacy4212
+on the Weather dataset. Another contemporary
+work (Li et al., 2021) proposes to use constrained
+decoding to generate valid pseudo-responses for
+self-training and show convincing beneﬁts. How-
+ever, our work focuses on compositional general-
+ization, rather than the pure few-shot learning setup.
+We propose a BLEURT-based self-training method,
+which is more generic than pseudo-response selec-
+tion methods that rely on output structures.
+6 Conclusion and Future Work
+We systematically study the problem of compo-
+sitional generalization for data-to-text generation
+and show that existing state-of-the-art generation
+models do not generalize to unseen structures. We
+propose a simple and generic way to produce tem-
+plate guided text representation for response gen-
+eration, and demonstrate its effectiveness on both
+seen and unseen structures. Further, we introduce
+a generic self-training approach that leverages ﬁne-
+tuned BLEURT for pseudo response selection and
+show signiﬁcant improvements over vanilla self-
+training on existing few-shot data-to-text genera-tion benchmarks.
+While our method requires only a small number
+of templates to start with, we still need to manually
+generate them for every unseen MR. Automatically
+generating templates by priming GPT-style mod-
+els is an interesting line of future work. Further-
+more, the effectiveness of our self-training method
+is highly dependent on the quality of the underly-
+ing BLEURT model (see Table 4). Given BLEURT
+based quality estimator is a learned model, it may
+be susceptible to data distribution shifts. We leave
+such analysis to future work. Another interesting
+future direction is to investigate the effectiveness
+of our approach to languages other than English.
+Ethics Statement
+To study compositional generalization for data-to-
+text tasks, we introduce data splits based on the
+already existing, publicly available, and widely
+used compositional weather dataset (Balakrishnan
+et al., 2019). We release our data splits to facili-
+tate the development of new methods and consis-
+tent evaluation of them in comparison with exist-4213ing works. In terms of use-case scenarios, we fo-
+cus on task-oriented dialogue generation by using
+large pre-trained language models. These models
+are known to exhibit and potentially amplify so-
+cial biases found in the training data, such as gen-
+der biases (Dinan et al., 2020), and are capable of
+generating toxic or otherwise unsafe content (Wei-
+dinger et al., 2021). Our method helps these models
+generate higher quality responses than considered
+baselines when evaluated in terms of grammati-
+cality, naturalness, informativeness, and accuracy.
+However, our work does not explicitly focus on
+mitigating social biases, unsafe content, or other
+potential ethical or social harms that might result
+from dialogue generation. Therefore, we caution
+against the deployment of our system in environ-
+ments where any such biases can negatively impact
+the individuals interacting with our system without
+further assessment of the safety of this system in
+that environment.
+References421442154216A Appendix421742184219

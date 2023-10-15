@@ -1,1 +1,894 @@
-7533 Proceedings of the 60th Annual Meeting of the Association for Computational Linguistics Volume 1 : Long Papers , pages 7533 7549 May 22 - 27 , 2022 c(cid:13)2022 Association for Computational Linguistics 7534 7535 7536 7537 7538 7539 7540 7541 7542 7543 7544 7545 7546 7547 7548 7549 
+
+Michelle YuanPatrick XiaChandler May
+Benjamin Van DurmeJordan Boyd-Graber
+Human Language Technology Center of ExcellenceUniversity of MarylandJohns Hopkins University
+myuan@cs.umd.edu paxia@cs.jhu.edu jbg@umiacs.umd.edu
+Abstract
+Neural coreference resolution models trained
+on one dataset may not transfer to new, low-
+resource domains. Active learning mitigates
+this problem by sampling a small subset of
+data for annotators to label. While active learn-
+ing is well-defined for classification tasks, its
+application to coreference resolution is neither
+well-defined nor fully understood. This pa-
+per explores how to actively label coreference,
+examining sources of model uncertainty and
+document reading costs. We compare uncer-
+tainty sampling strategies and their advantages
+through thorough error analysis. In both syn-
+thetic and human experiments, labeling spans
+within the same document is more effective
+than annotating spans across documents. The
+findings contribute to a more realistic develop-
+ment of coreference resolution models.
+1 Introduction
+Linguistic expressions are coreferent if they refer
+to the same entity. The computational task of dis-
+covering coreferent mentions is coreference resolu-
+tion (). Neural models (Lee et al., 2018; Joshi
+et al., 2020) are on(Pradhan
+et al., 2013) but cannot immediately generalize
+to other datasets. Generalization is difficult be-
+cause domains differ in content, writing style, and
+annotation guidelines. To overcome these chal-
+lenges, models need copiously labeled, in-domain
+data (Bamman et al., 2020).
+Despite expensive labeling costs, adapting
+is crucial for applications like uncovering infor-
+mation about proteins in biomedicine (Kim et al.,
+2012) and distinguishing entities in legal docu-
+ments (Gupta et al., 2018). Ideally, we would like
+to quickly and cheaply adapt the model without
+repeatedly relying on an excessive amount of an-
+notations to retrain the model. To reduce labeling
+cost, we investigate active learning (Settles, 2009)
+for. Active learning aims to reduce annotationcosts by intelligently selecting examples to label.
+Prior approaches use active learning to improve the
+model within the same domain (Gasperin, 2009;
+Sachan et al., 2015) without considering adapting
+to new data distributions. For domain adaptation
+in, Zhao and Ng (2014) motivate the use of
+active learning to select out-of-distribution exam-
+ples. A word like “the bonds” refers to municipal
+bonds in but links to “chemical bonds”
+in another domain (Figure 1). If users annotate
+the antecedents of “the bonds” and other ambigu-
+ous entity mentions, then these labels help adapt a
+model trained on to new domains.
+Active learning foradaptation is well-
+motivated, but the implementation is neither
+straightforward nor well-studied. First,is a span
+detection and clustering task, so selecting which
+spans to label is more complicated than choos-
+ing independent examples for text classification.
+Second,labeling involves closely reading the
+documents. Labeling more spans within the same
+context is more efficient. However, labeling more
+spans across different documents increases data
+diversity and may improve model transfer. How
+should we balance these competing objectives?
+Our paper extends prior work in active learn-
+ing forto the problem of coreference model
+transfer (Xia and Van Durme, 2021):
+1.We generalize the clustered entropy sampling
+strategy (Li et al., 2020) to include uncertainty
+in mention detection. We analyze the effect of
+each strategy on coreference model transfer.
+2.We investigate the trade-off between labeling
+and reading through simulations and a real-
+time user study. Limiting annotations to the
+same document increases labeling throughput
+and decreases volatility in model training.
+Taken together, these contributions offer a blueprint
+for faster creation ofmodels across domains.7533
+2 Problem: Adapting Coreference
+Lee et al. (2018) introduce- , a neural
+model that outperforms prior rule-based systems.
+It assigns an antecedent yto mention span x. The
+setY(x)of possible antecedent spans include a
+dummy antecedent ϵand all spans preceding x. If
+spanxhas no antecedent, then xshould be assigned
+toϵ. Given entity mention x, the model learns a
+distribution over its candidate antecedents in Y(x),
+P(Y=y) =exp{s(x, y)}∑︁exp{s(x, y)}.(1)
+The scores s(x, y)are computed by the model’s
+pairwise scorer (Appendix A.1).models like- are typically trained
+on. Recent work inimproves
+upon- and has results on (Wu et al., 2020; Joshi et al., 2020).
+However, annotation guidelines and the underly-
+ing text differ across domains. As a result, thesemodels cannot immediately transfer to other
+datasets. For different domains, spans could hold
+different meanings or link to different entities. Xia
+and Van Durme (2021) show the benefits of contin-
+ued training where a model trained on
+is further trained on the target dataset. For severaltarget domains, continued training from
+is stronger than training the model from scratch,
+especially when the training dataset is small.
+Their experiments use an incremental variant of- called (Xia et al., 2020). While- requires Θ(n)memory to simultane-
+ously access all spans in the document and infer
+a span’s antecedent, only needs constant
+memory to predict a span’s entity cluster. Despite
+using less space, retains the same accu-
+racy as- . Rather than assigning xto
+antecedent y, assigns xto cluster cwhere c
+is from a set of observed entity clusters C,
+P(C=c) =exp{s(x, c)}∑︁exp{s(x, c)}. (2)
+As the algorithm processes spans in the document,
+each span is either placed in a cluster from Cor
+added to a new cluster. To learn the distribution
+over clusters (Equation 2), the algorithm first cre-
+ates a cluster representation that is an aggregate
+of span representations over spans that currently
+exist in the cluster. With cluster and span repre-
+sentations, individual spans and entity clusters are
+mapped into a shared space. Then, we can compute
+s(x, c)using the same pairwise scorer as before.
+Xia and Van Durme (2021) show that continued
+training is useful for domain adaptation but assume7534that labeled data already exist in the target domain.
+However, model transfer is more critical when an-
+notations are scarce. Thus, the question becomes:
+how can we adaptmodels without requiring a
+large, labeled dataset? Our paper investigates ac-
+tive learning as a potential solution. Through active
+learning, we reduce labeling costs by sampling and
+annotating a small subset of ambiguous spans.
+3 Method: Active Learning
+Neural models achieve high accuracy for but cannot quickly adapt to new
+datasets because of shifts in domain or annotation
+standards (Poot and van Cranenburgh, 2020). To
+transfer to new domains, models need substantial
+in-domain, labeled data. In low-resource situations,is infeasible for real-time applications. To
+reduce the labeling burden, active learning may
+target spans that most confuse the model. Active
+learning for domain adaptation (Rai et al., 2010)
+typically proceeds as follows: begin with a model
+trained on source data, sample and label kspans
+from documents in the target domain based on a
+strategy, and train the model on labeled data.
+This labeling setup may appear straightforward
+to apply to, but there are some tricky de-
+tails. The first complication is that—unlike text
+classification—is aclustering task. Early ap-
+proaches in active learning forusepairwise an-
+notations (Miller et al., 2012; Sachan et al., 2015).
+Pairs of spans are sampled and the annotator labels
+whether each pair is coreferent. The downside to
+pairwise annotations is that it requires many labels.
+To label the antecedent of entity mention x,xmust
+be compared to every candidate span in the docu-
+ment. Li et al. (2020) propose a new scheme called
+discrete annotations . Instead of sampling pairs of
+spans, the active learning strategy samples individ-
+ual spans. Then, the annotator only has to find and
+label first antecedent of xin the document, which
+bypasses the multiple pairwise comparisons. Thus,
+we use discrete annotations to minimize labeling.
+To further improve active learning for, we
+consider the following issues. First, themodel
+has different scores for mention detection and link-
+ing, but prior active learning methods only consid-
+ers linking. Second, labelingrequires time to
+read the document context. Therefore, we explore
+important aspects of active learning for adapting: model uncertainty (Section 3.1), and the bal-
+ance between reading and labeling (Section 3.2).3.1 Uncertainty Sampling
+A well-known active learning strategy is uncer-
+tainty sampling. A common measure of uncertainty
+is the entropy in the distribution of the model’s
+predictions for a given example (Lewis and Gale,
+1994). Labeling uncertain examples improves accu-
+racy for tasks like text classification (Settles, 2009).
+For, models have multiple components, and
+computing uncertainty is not as straightforward. Is
+uncertainty over where mentions are located more
+important than linking spans? Or the other way
+around? Thus, we investigate different sources ofmodel uncertainty.
+3.1.1 Clustered Entropy
+To sample spans for learning, Li et al. (2020)
+propose a strategy called clustered entropy . This
+metric scores the uncertainty in the entity cluster
+assignment of a mention span x. Ifxhashigh clus-
+tered entropy, then it should be labeled to help the
+model learn its antecedents. Computing clustered
+entropy requires the probability that xis assigned
+to an entity cluster. Li et al. (2020) use- ,
+which only gives probability of xbeing assigned
+to antecedent y. So, they define P(C=c)as the
+sum of antecedent probabilities P(Y=y),
+P(C=c) =∑︂P(Y=y). (3)
+Then, they define clustered entropy as,
+H(x) =−∑︂P(C=c) logP(C=c).(4)
+The computation of clustered entropy in Equation 4
+poses two issues. First, summing the probabilities
+may not accurately represent the model’s proba-
+bility of linking xtoc. There are other ways to
+aggregate the probabilities (e.g. taking the maxi-
+mum).- never computes cluster prob-
+abilities to make predictions, so it is not obvious
+howP(C=c)should be computed for clustered
+entropy. Second, Equation 4 does not consider
+mention detection. For, this is not an
+issue because singletons (clusters of size 1) are not
+annotated and mention detection score is implicitly
+included in P(Y=y). For other datasets con-
+taining singletons, the model should disambiguate
+singleton clusters from non-mention spans.
+To resolve these issues, we make the following
+changes. First, we use to obtain cluster prob-
+abilities. is a mention clustering model so it7535already has probabilities over entity clusters (Equa-
+tion 2). Second, we explore other forms of max-
+imum entropy sampling. Neuralmodels have
+scorers for mention detection and clustering. Both
+scores should be considered to sample spans that
+confuse the model. Thus, we propose more strate-
+gies to target uncertainty in mention detection.
+3.1.2 Generalizing Entropy in Coreference
+To generalize entropy sampling, we first formal-
+ize mention detection and clustering. Given span
+x, assume Xis the random variable encoding
+whether xis an entity mention (1) or not (0). In
+Section 2, we assume that the cluster distribution
+P(C)is independent of X:P(C) =P(C|X).
+In other words, Equation 2 is actually computing
+P(C=c|X= 1) . We sample top- kspans with
+the following strategies.
+ment-ent Highest mention detection entropy:
+H(x) =H(X) (5)
+=−∑︂P(X=i) logP(X=i).
+The probability P(X)is computed from normal-
+ized mention scores s(Equation 10). Ment-ent
+may sample spans that challenge mention detec-
+tion (e.g. class-ambiguous words like “park”). The
+annotator can clarify whether spans are entity men-
+tions to improve mention detection.
+clust-ent Highest mention clustering entropy:
+H (x) =H(C|X= 1) (6)
+=−∑︂P(C=c|X= 1) log
+P(C=c|X= 1).
+Clust-ent looks at clustering scores without ex-
+plicitly addressing mention detection. Like in, all spans are assumed to be entity men-
+tions. The likelihood P(C=c|X= 1) is given
+by (Equation 2).
+cond-ent Highest conditional entropy:
+H(x) =H(C|X)
+=∑︂P(X=i)H(C|X=i)
+=P(X= 1) H(C|X= 1)
+=P(X= 1) H (x).(7)We reach the last equation because there is no un-
+certainty in clustering xifxis not an entity mention
+andH(C|X= 0) = 0 .Cond-ent takes the un-
+certainty of mention detection into account. So,
+we may sample more pronouns because they are
+obviously mentions but difficult to cluster.
+joint-ent Highest joint entropy:
+H(x) =H(X, C) =H(X) +H(C|X)
+=H(x) +H(x). (8)
+Joint-ent may sample spans that are difficult to de-
+tect as entity mentions andtoo confusing to cluster.
+This sampling strategy most closely aligns with the
+uncertainty of the training objective. It may also
+fix any imbalance between mention detection and
+linking (Wu and Gardner, 2021).
+3.2 Trade-off between Reading and Labeling
+For, the annotator reads the document context
+to label the antecedent of a mention span. An-
+notating and reading spans from different docu-
+ments may slow down labeling, but restricting sam-
+pling to the same document may cause redundant
+labeling (Miller et al., 2012). To better understand
+this trade-off, we explore different configurations
+withk, the number of annotated spans, and m, the
+maximum number of documents being read. Given
+source model halready fine-tuned on,
+we adapt hto a target domain through active learn-
+ing (Algorithm 1):
+Scoring To sample kspans from unlabeled
+dataUof the target domain, we score spans with
+an active learning strategy S. Assume Sscores
+each span through an acquisition model (Lowell
+et al., 2019). For the acquisition model, we use
+h, the model fine-tuned from the last cycle. The
+acquisition score quantifies the span’s importance
+given Sand the acquisition model.
+Reading Typically, active learning samples k
+spans with the highest acquisition scores. To con-
+strain m, the number of documents read, we find
+the documents of the mspans with highest acquisi-
+tion scores and only sample spans from those docu-
+ments. Then, the ksampled spans will belong to at
+mostmdocuments. If mis set to “unconstrained”,
+then we simply sample the khighest-scoring spans,
+irrespective of the document boundaries.
+Our approach resembles Miller et al. (2012)
+where they sample spans based on highest uncer-7536Algorithm 1 Active Learning for Coreference
+Require: Source model h, Unlabeled data U, Ac-
+tive learning strategy S, No. of cycles T, No. of
+labeled spans k, Max. no. of read docs mLabeled data L={}forcycles t= 1, . . . , T do a←Score span x∈ U byS(h, x)Q ← Sort (↓)x∈ U by scores aQ←Top-mspans in QD ← { d|x∈ Q}where dis doc of x˜︁Q ← FilterQs.t. spans belong to d∈ D˜︁Q←Top-kspans in ˜︁QL←Label antecedents for ˜︁Q L ← L ∪ L h←Continue train honL
+return h
+tainty and continue sampling from the same doc-
+ument until uncertainty falls below a threshold.
+Then, they sample the most uncertain span from a
+new document. We modify their method because
+the uncertainty threshold will vary for different
+datasets and models. Instead, we use the number
+of documents read to control context switching.
+Labeling An oracle (e.g., human annotator or
+gold data) labels the antecedents of sampled spans
+with discrete annotations (Section 3).
+Continued Training We combine data labeled
+from current and past cycles. We train the source
+model h(which is already trained on)
+on the labeled target data. We do not continue
+training a model from a past active learning cycle
+because it may be biased from only training on
+scarce target data (Ash and Adams, 2020).
+4 Active Learning forthrough
+Simulations and Humans
+We run experiments to understand two important
+factors of active learning for: sources of model
+uncertainty (Section 3.1) and balancing reading
+against labeling (Sections 3.2). First, we simu-
+late active learning onto compare sampling
+strategies based on various forms of uncertainty
+(Section 4.1). Then, we set up a user study to inves-
+tigate how humans perform when labeling spans
+from fewer or more documents from(Sec-
+tion 4.2). Specifically, we analyze their annotation
+time and throughput. Finally, we run large-scale
+simulations onand (Section 4.3).We explore different combinations of sampling
+strategies and labeling configurations.
+Models In all experiments, the source model
+is the best checkpoint of model trained
+on (Xia et al., 2020) with - - (Joshi et al., 2020) encoder. For
+continued training on the target dataset, we op-
+timize with a fixed parameter configuration (Ap-
+pendix A.2). We evaluate models on AF, the
+averaged Fscores of (Vilain et al., 1995),(Bagga and Baldwin, 1998), and(Luo,
+2005). For all synthetic experiments, we simulate
+active learning with gold data substituting as an an-
+notator. However, gold mention boundaries are not
+used when sampling data. The model scores spans
+that are likely to be entity mentions for inference,
+so we limit the active learning candidates to this
+pool of high-scoring spans. For each active learn-
+ing simulation, we repeat five runs with different
+random seed initializations.
+Baselines We compare the proposed sampling
+strategies (Section 3.1.2) along with li-clust-ent ,
+which is clustered entropy from Li et al. (2020)
+(Equation 4). Active learning is frustratingly
+less effective than random sampling in many set-
+tings (Lowell et al., 2019), so we include two ran-
+dom baselines in our simulation. Random samples
+from all spans in the documents. Random-ment ,
+as well as other strategies, samples only from the
+pool of likely (high-scoring) spans. Thus, random-
+ment should be a stronger baseline than random .
+Datasetsis the most common
+dataset for training and evaluating(Pradhan
+et al., 2013). The dataset contains news articles
+and telephone conversations. Only non-singletons
+are annotated. Our experiments transfer a model
+trained on to two target datasets:
+and.is a large corpus of grade-
+school reading comprehension texts (Chen et al.,
+2018). Unlike,has annotated
+singletons. There are 37K training, 500 validation,
+and 500 test documents. Because the training set is
+so large, Chen et al. (2018) only analyze subsets of
+2.5K documents. Likewise, we reduce the training
+set to a subset of 2.5K documents, comparable to
+the size of.
+The dataset (Guha et al., 2015) con-
+tains trivia questions from Quizbowl tournaments
+that are densely packed with entities from academic
+topics. Like, singletons are annotated. Un-7537like other datasets, the syntax is idiosyncratic and
+world knowledge is needed to solve coreference.
+Examples are pronouns before the first mention
+of named entities and oblique references like “this
+polity” for “the Hanseatic League”. These compli-
+cated structures rarely occur in everyday text but
+serve as challenging examples for. There are
+240 training, 80 validation, and 80 test documents.
+4.1 Simulation: Uncertainty Sampling
+To compare different sampling strategies, we first
+run experiments on. We sample fifty spans
+from one document for each cycle. By the end
+of a simulation run, 300 spans are sampled from
+six documents. For this configuration, uncertainty
+sampling strategies generally reach higher accuracy
+than the random baselines (Figure 2), but cond-ent
+andli-clust-ent are worse than random-ment .
+4.1.1 Distribution of Sampled Span Types
+To understand the type of spans being sampled,
+we count entity mentions, non-entities, pronouns,
+and singletons that are sampled by each strategy
+(Figure 3). Random samples very few entities,
+while other strategies sample more entity mentions.
+Clust-ent andcond-ent sample more entity men-
+tions and pronouns because the sampling objec-
+tive prioritizes mentions that are difficult to link.
+Clust-ent ,joint-ent , and ment-ent sample more
+singleton mentions. These strategies also show
+higher AF(Figure 2). For transferring from to, annotating singletons is use-
+ful because only non-singleton mentions are la-
+beled in. We notice ment-ent sampling
+pronouns, which should obviously be entity men-
+tions, only in the first cycle. Many pronouns in are singletons, so the mention detector
+has trouble distinguishing them initially in.
+4.1.2 Error Analysis
+Kummerfeld and Klein (2013) enumerate the waysmodels can go wrong: missing entity ,extra en-
+tity,missing mention ,extra mention ,divided entity ,
+andconflated entity .Missing entity means a gold
+entity cluster is missing. Missing mention means
+a mention span for a gold entity cluster is missing.
+The same definitions apply for extra entity andex-
+tra mention .Divided entity occurs when the model
+splits a gold entity cluster into multiple ones. Con-
+flated entity happens when the model merges gold
+entity clusters. For each strategy, we analyze the
+errors of its final model from the simulation’s last7538
+cycle (Figure 4). We compare against the source
+model that is only trained on.
+The source model makes many missing entity
+andmissing mention errors. It does not detect sev-
+eral entity spans in, like locations (“Long
+Island”) or ones spanning multiple words (“his kind
+acts of providing everything that I needed”). These
+spans are detected by uncertainty sampling strate-
+gies and rand-ment .Ment-ent is most effective
+at reducing “missing” errors. It detects gold entity
+clusters like “constant communication” and “the
+best educated guess about the storm”. By train-
+ing on spans that confuse the mention detector, the
+model adapts to the new domain by understanding
+what constitutes as an entity mention.
+Surprisingly, li-clust-ent makes at least twice as
+many extra entity andextra mention errors than
+any other strategy. For the sentence, “Living in a
+large building with only 10 bedrooms”, the gold
+data identifies two entities: “a large building with
+only 10 bedrooms” and “10 bedrooms”. In both and, the guidelines only allow
+the longest noun phrase to be annotated. Yet, theli-clust-ent model predicts additional mentions, “a
+large building” and “only 10 bedrooms”. We find
+thatli-clust-ent tends to sample nested spans (Ta-
+ble 4). Due to the summed entropy computation,
+nested spans share similar values for clustered en-
+tropy as they share similar antecedent-linking prob-
+abilities. This causes the extra entity andextra
+mention errors because the model predicts there are
+additional entity mentions within a mention span.
+Finally, we see a stark difference between
+random-ment andrandom . Out of all the sam-
+pling strategies, random is least effective at pre-
+venting missing entity andmissing mention errors.
+We are more likely to sample non-entities if we
+randomly sample from all spans in the document
+(Appendix A.7). By limiting the sampling pool
+to only spans that are likely to be entity mentions,
+we sample more spans that are useful to label for. Thus, the mention detector from neural models
+should be deployed during active learning.
+4.2 User Study: Reading and Labeling
+We hold a user study to observe the trade-off be-
+tween reading and labeling. Three annotators, with
+minimalknowledge, label spans sampled from. We use ment-ent to sample spans because
+the strategy shows highest AF(Figure 2). First,
+the users read instructions (Appendix A.6) and
+practice labeling for ten minutes. Then, they com-
+plete two sessions: FewDocs andManyDocs . In
+each session, they label as much as possible for at
+least twenty-five minutes. In FewDocs , they read
+fewer documents and label roughly seven spans per
+document. In ManyDocs , they read more docu-
+ments and label about one span per document.
+For labeling coreference, we develop a user in-
+terface that is open-sourced (Figure 8). To label the
+antecedent of the highlighted span, the user clicks
+on a contiguous span of tokens. The interface sug-
+gests overlapping candidates based on the spans
+that are retained by themodel.
+In the user study, participants label at least
+twice as much in FewDocs compared to Many-
+Docs (Figure 5). By labeling more spans in Few-
+Docs , the mean AFscore is also slightly higher.
+Our findings show that the number of read docu-
+ments should be constrained to increase labeling
+throughput. Difference in number of labeled spans
+between FewDocs and ManyDocs is more pro-
+nounced when two annotators volunteer to continue
+labeling after required duration (Appendix A.6).7539
+4.3 Simulation: Uncertainty Sampling and
+Reading-Labeling Trade-off
+We finally run simulations to explore both sources
+of model uncertainty and the trade-off between
+reading and labeling. The earlier experiments have
+individually looked at each aspect. Now, we an-
+alyze the interaction between both factors to un-
+derstand which combination works best for adapt-
+ingto new domains. We run simulations onand that trade-off the number of
+documents read mwith the number of annotated
+spans k(Figure 6). We vary mbetween one, five,
+and an unconstrained number of documents. For, we set kto twenty and fifty. For,
+we set kto twenty and forty. These results are also
+presented in numerical form (Appendix A.5).For, the test AFof
+trained on the full training dataset is 0.860. When
+mis constrained to one or five, AFcan reach
+around 0.707 from training the model on only 300
+spans sampled by ment-ent . Asmincreases, fewer
+spans are sampled per document and all sampling
+strategies deteriorate. After training on sparsely an-
+notated documents, the model tends to predict sin-
+gletons rather than cluster coreferent spans. Like
+in the user study, we see benefits when labeling7540more spans within a document. Interestingly, li-
+clust-ent performs better when document reading
+is not constrained to one document. The issue with
+li-clust-ent is that it samples nested mention spans
+(Section 4.1.2). Duplicate sampling is less severe if
+spans can be sampled across more documents. An-
+other strategy that suffers from duplicate sampling
+iscond-ent because it mainly samples pronouns.
+For some documents, the pronouns all link to the
+same entity cluster. As a result, the model trains on
+a less diverse set of entity mentions and cond-ent
+drops in AFas the simulation continues. For, the test AFof trained on the full training dataset is 0.795.
+When we constrain mto one or five, li-clust-
+ent,clust-ent ,cond-ent , and joint-ent have high
+AF. Clustering entity mentions in
+questions is difficult, so these strategies help tar-
+get ambiguous mentions (Table 5). Ment-ent is
+less useful because demonstratives are abundant in and make mention detection easier. Li-
+clust-ent still samples nested entity mentions, but
+annotations for these spans help clarify interwo-
+ven entities in Quizbowl questions. Unlike,
+li-clust-ent does not sample duplicate entities be-
+cause nested entity mentions belong to different
+clusters and need to be distinguished.
+Overall, the most helpful strategy depends on
+the domain. For domains likethat contain
+long documents with many singletons, ment-ent is
+useful. For domains like where resolving
+coreference is difficult, we need to target linking
+uncertainty. Regardless of the dataset, random
+performs worst. Random-ment has much higher
+AF, which shows the importance of the men-
+tion detector in active learning. Future work should
+determine the appropriate strategy for a given do-
+main and annotation setup.
+5 Related Work
+Gasperin (2009) present the first work on active
+learning foryet observe negative results: active
+learning is not more effective than random sam-
+pling. Miller et al. (2012) explore different settings
+for labeling. First, they label the most uncertain
+pairs of spans in the corpus. Second, they label
+all pairs in the most uncertain documents. The
+first approach beats random sampling but requires
+the annotator to infeasibly read many documents.
+The second approach is more realistic but loses
+to random sampling. Zhao and Ng (2014) arguethat active learning helps domain adaptation of.
+Sachan et al. (2015) treat pairwise annotations as
+optimization constraints. Li et al. (2020) replace
+pairwise annotations with discrete annotations and
+experiment active learning with neural models.
+Active learning has been exhaustively studied
+for text classification (Lewis and Gale, 1994; Zhu
+et al., 2008; Zhang et al., 2017). Text classification
+is a much simpler task, so researchers investigate
+strategies beyond uncertainty sampling. Yuan et al.
+(2020) use language model surprisal to cluster doc-
+uments and then sample representative points for
+each cluster. Margatina et al. (2021) search for con-
+strastive examples, which are documents that are
+similar in the feature space yet differ in predictive
+likelihood. Active learning is also applied to tasks
+like machine translation (Liu et al., 2018), visual
+question answering (Karamcheti et al., 2021), and
+entity alignment (Liu et al., 2021).
+Rather than solely running simulations, other
+papers have also ran user studies or developed user-
+friendly interfaces. Wei et al. (2019) hold a user
+study for active learning to observe the time to
+annotate clinical named entities. Lee et al. (2020)
+develop active learning for language learning that
+adjusts labeling difficulty based on user skills. Klie
+et al. (2020) create a human-in-the-loop pipeline to
+improve entity linking for low-resource domains.
+6 Conclusion
+Neuralmodels desparately depend on large,
+labeled data. We use active learning to transfer a
+model trained on, the “de facto” dataset,
+to new domains. Active learning foris diffi-
+cult because the problem does not only concern
+sampling examples. We must consider different
+aspects, like sources of model uncertainty and cost
+of reading documents. Our work explores these
+factors through exhaustive simulations. Addition-
+ally, we develop a user interface to run a user study
+from which we observe human annotation time and
+throughput. In both simulations and the user study,improves from continued training on spans sam-
+pled from the same document rather than different
+contexts. Surprisingly, sampling by entropy in men-
+tion detection, rather than linking, is most helpful
+for domains like. This opposes the assump-
+tion that the uncertainty strategy must be directly
+tied to the training objective. Future work may ex-
+tend our contributions to multilingual transfer or
+multi-component tasks, like open-domain.75417 Ethical Considerations
+This paper involves a user study to observe the
+trade-off between reading and labeling costs for an-
+notating coreference. The study has been approved
+byto collect data about human behavior. Any
+personal information will be anonymized prior to
+paper submission or publication. All participants
+are fully aware of the labeling task and the infor-
+mation that will be collected from them. They
+are appropriately compensated for their labeling
+efforts.
+Acknowledgements
+We thank Ani Nenkova, Jonathan Kummerfeld,
+Matthew Shu, Chen Zhao, and the anonymous re-
+viewers for their insightful feedback. We thank
+the user study participants for supporting this work
+through annotating data. Michelle Yuan and Jordan
+Boyd-Graber are supported in part by Adobe Inc.
+Any opinions, findings, conclusions, or recommen-
+dations expressed here are those of the authors and
+do not necessarily reflect the view of the sponsors.
+References75427543A Appendix
+A.1 Coreference Resolution Models- In- , a pairwise scorer
+computes s(x, y)to learn antecedent distribution
+P(Y)(Equation 1). The model’s pairwise scorer
+judges whether span xand span yare coreferent
+based on their antecedent score sand individual
+mention scores s,
+s(x, y) ={︄
+0 y=ϵ
+s(x) +s(y) +s(x, y)y̸=ϵ,
+(9)
+Suppose gandgare the span representations
+ofxandy, respectively. Mention scores and an-
+tecedent scores are then computed with feedfor-
+ward networks FFNNandFFNN,
+s(x) =FFNN(g) (10)
+s(x, y) =FFNN(g,g, ϕ(x, y)).(11)
+The input ϕ(x, y)includes features like the distance
+between spans. The unary mention score scan be
+viewed as the likelihood that the span is an entity
+mention. For computational purposes, the- model only retains top- kspans with the
+highest unary mention scores. Lee et al. (2018)
+provide more details about the pairwise scorer and
+span pruning.
+Incremental Clustering We elaborate upon the
+clustering algorithm of here. As the algo-
+rithm processes spans in the document, each span
+is either placed in a cluster from Cor added to a
+new cluster. To learn the distribution over clus-
+ters (Equation 2), the algorithm first creates a clus-
+ter representation gthat is an aggregate of span
+representation that is an aggregate of span repre-
+sentations over spans that currently exist in the
+cluster. (Equation 12). With cluster and span repre-
+sentations, individual spans and entity clusters are
+mapped into a shared space. Then, we can compute
+s(x, c)using the same pairwise scorer as Lee et al.
+(2018). Suppose that model predicts cas most
+likely cluster: c= arg maxs(x, c). Now, the
+algorithm makes one of two decisions:
+1.Ifs(x, c)>0, then xis assigned to cand
+update gsuch that
+g=s(c, x)g+ (1−s(c, x))g,
+(12)
+where sis a learned weight.Strategy
+random 2 <1
+random-ment 4 <1
+ment-ent 5 <1
+li-clust-ent 12 <1
+clust-ent 12 1
+cond-ent 14 1
+joint-ent 16 1
+2.Ifs(x, c)≤0, then a new entity cluster c=
+{x}is added to C.
+The algorithm repeats for each span in the docu-
+ment.
+Like- , the model only retains
+top-kspans with highest unary mention score. All
+of our active learning baselines (Section 4), ex-
+cept random , sample spans from this top- kpool
+of spans.
+A.2 Training Configuration
+The - - encoder has 334M pa-
+rameters and has 373M parameters in total.
+For model fine-tuning, we train for a maximum of
+fifty epochs and implement early stopping with a
+patience of ten epochs. We set top span pruning
+to 0.4, dropout to 0.4, gradient clipping to 10.0,
+and learning rate to 1e-4 for Adam optimizer. The
+hyperparameter configuration is based on results
+from prior work (Lee et al., 2017; Xia et al., 2020).
+All experiments in the paper are ran on NVIDIA
+Tesla V100 GPU and 2.2 GHz Intel Xeon Silver
+4114 CPU processor.
+A.3 Simulation Time
+We compare the time to sample fifty spans between
+different active learning strategies forand (Table 1). For,clust-ent ,cond-
+ent, and joint-ent are slower because they need
+to run documents through and get span-
+cluster likelihood. On the other hand, ment-ent
+only needs unary scores s, which is much faster
+to compute. Thus, for both datasets, running ment-
+enttakes about the same time as random-ment .7544For, fine-tuning on fifty spans
+takes three minutes and fine-tuning on full train-
+ing set takes thirty-four minutes. For, fine-
+tuning on fifty spans takes nine minutes and
+fine-tuning on full training set takes five hours and
+22 minutes.
+A.4 Mention Detection Accuracy
+For the annotation simulation in Section 4, we also
+record mention detection accuracy. As ment-ent
+targets ambiguity in mention detection, it is the
+most effective strategy for improving mention de-
+tection (Figure 7). The strategy is unaffected by
+labeling setup parameters, like the number of spans
+labeled per cycle or the number of documents read
+per cycle. For strategies like cond-ent andjoint-
+ent, mention detection accuracy is stagnant or de-
+creases as more spans are sampled (Figure 7a). Due
+to deteriorating mention detection, the AFof
+models also drop.
+A.5 Numerical Results
+The results for AFand mention detection accu-
+racy are presented as graphs throughout the paper.
+To concretely understand the differences between
+the methods, we provide results in numerical form
+(Tables 2,3). We show results from theand simulations where twenty spans are la-
+beled each cycle and the number of documents read
+is either one or an unconstrained amount. The val-
+ues in the tables show the mean and variance of
+AFand mention detection accuracy over five
+different runs.
+A.6 User Study
+Instructions to Participants We give the follow-
+ing instructions to user study participants:
+You will be shown several sentences
+from a document. We have highlighted a
+mention (a word or phrase) of an entity
+(a person, place, or thing). This entity
+mention may be a pronoun (such as “she”
+or “their”) or something else.
+We need your help to find an earlier men-
+tion of the same entity, whether in the
+same sentence or in an earlier sentence.
+The mention does not have to be the im-
+mediately previous one.
+If the span is not an entity mention or
+does not have an antecedent, please make
+note of it on the interface.7545Total No. of Labeled Spans m Strategy AF Mention Accuracy
+100 1 clust-ent 0.64 ±0.02 0.71 ±0.03
+cond-ent 0.57 ±0.02 0.66 ±0.02
+joint-ent 0.64 ±0.03 0.76 ±0.02
+ment-ent 0.70±0.01 0.80 ±0.00
+random 0.43 ±0.09 0.49 ±0.11
+random-ment 0.65 ±0.04 0.78 ±0.02
+li-clust-ent 0.56 ±0.02 0.65 ±0.03
+unconstrained clust-ent 0.62 ±0.03 0.70 ±0.03
+cond-ent 0.43 ±0.09 0.67 ±0.04
+joint-ent 0.55 ±0.06 0.71 ±0.05
+ment-ent 0.65 ±0.03 0.76 ±0.03
+random 0.48 ±0.07 0.54 ±0.07
+random-ment 0.69±0.01 0.80 ±0.01
+li-clust-ent 0.62 ±0.01 0.73 ±0.01
+200 1 clust-ent 0.68 ±0.01 0.77 ±0.01
+cond-ent 0.62 ±0.02 0.70 ±0.03
+joint-ent 0.68 ±0.03 0.80 ±0.02
+ment-ent 0.71±0.01 0.82 ±0.00
+random 0.48 ±0.18 0.55 ±0.21
+random-ment 0.65 ±0.05 0.77 ±0.07
+li-clust-ent 0.57 ±0.05 0.67 ±0.04
+unconstrained clust-ent 0.65 ±0.02 0.73 ±0.03
+cond-ent 0.36 ±0.08 0.63 ±0.07
+joint-ent 0.40 ±0.12 0.67 ±0.12
+ment-ent 0.67 ±0.03 0.81±0.01
+random 0.49 ±0.08 0.61 ±0.07
+random-ment 0.69±0.01 0.81 ±0.00
+li-clust-ent 0.65 ±0.03 0.75 ±0.03
+300 1 clust-ent 0.68 ±0.02 0.78 ±0.01
+cond-ent 0.61 ±0.03 0.70 ±0.04
+joint-ent 0.69±0.02 0.81±0.01
+ment-ent 0.69±0.02 0.82 ±0.00
+random 0.50 ±0.09 0.58 ±0.10
+random-ment 0.61 ±0.10 0.81 ±0.01
+li-clust-ent 0.63 ±0.05 0.73 ±0.05
+unconstrained clust-ent 0.51 ±0.12 0.70 ±0.04
+cond-ent 0.33 ±0.07 0.57 ±0.04
+joint-ent 0.41 ±0.05 0.69 ±0.04
+ment-ent 0.54 ±0.07 0.80 ±0.02
+random 0.40 ±0.04 0.60 ±0.13
+random-ment 0.65 ±0.05 0.80±0.04
+li-clust-ent 0.67±0.02 0.78±0.017546Total No. of Labeled Spans m Strategy AF Mention Accuracy
+100 1 clust-ent 0.47 ±0.06 0.62 ±0.06
+cond-ent 0.47 ±0.03 0.61 ±0.03
+joint-ent 0.50±0.03 0.65 ±0.02
+ment-ent 0.50±0.01 0.66±0.03
+random 0.40 ±0.07 0.53 ±0.07
+random-ment 0.44 ±0.06 0.63 ±0.04
+li-clust-ent 0.45 ±0.02 0.59 ±0.03
+unconstrained clust-ent 0.41 ±0.05 0.59 ±0.07
+cond-ent 0.39 ±0.10 0.57 ±0.05
+joint-ent 0.50 ±0.01 0.66 ±0.02
+ment-ent 0.51±0.02 0.69 ±0.01
+random 0.36 ±0.08 0.48 ±0.10
+random-ment 0.48 ±0.02 0.65 ±0.01
+li-clust-ent 0.47 ±0.01 0.62 ±0.02
+200 1 clust-ent 0.52 ±0.01 0.67 ±0.01
+cond-ent 0.52 ±0.02 0.66 ±0.02
+joint-ent 0.53±0.03 0.70±0.03
+ment-ent 0.51 ±0.02 0.71±0.02
+random 0.40 ±0.06 0.53 ±0.08
+random-ment 0.48 ±0.05 0.68 ±0.01
+li-clust-ent 0.49 ±0.01 0.64 ±0.02
+unconstrained clust-ent 0.45 ±0.04 0.64 ±0.06
+cond-ent 0.39 ±0.06 0.55 ±0.06
+joint-ent 0.48 ±0.05 0.70±0.03
+ment-ent 0.49 ±0.08 0.68 ±0.13
+random 0.34 ±0.08 0.50 ±0.11
+random-ment 0.49 ±0.04 0.70±0.01
+li-clust-ent 0.50±0.03 0.68±0.02
+300 1 clust-ent 0.54 ±0.02 0.70 ±0.02
+cond-ent 0.55±0.02 0.70±0.02
+joint-ent 0.55±0.02 0.74±0.01
+ment-ent 0.53 ±0.02 0.75±0.02
+random 0.42 ±0.05 0.55 ±0.06
+random-ment 0.49 ±0.03 0.69 ±0.03
+li-clust-ent 0.53 ±0.04 0.71 ±0.02
+unconstrained clust-ent 0.46 ±0.04 0.67 ±0.06
+cond-ent 0.42 ±0.07 0.58 ±0.12
+joint-ent 0.43 ±0.11 0.68 ±0.08
+ment-ent 0.50 ±0.06 0.74 ±0.04
+random 0.34 ±0.18 0.45 ±0.23
+random-ment 0.47 ±0.08 0.75±0.02
+li-clust-ent 0.52±0.03 0.71±0.017547
+User Interface We design a user interface for
+annotators to label coreference (Figure 8). The
+user interface takes the sampled spans from active
+learning as input. Afterward, it will present the
+document and highlight the sampled spans in the
+document. The user the proceeds to go through
+the list of “Queries”. For the “Active query”, they
+need to either: find its antecedent, mark there is
+“no previous mention”, or indicate that “query is
+not an entity”. The interface will suggest some
+overlapping candidates to help narrow down the
+user’s search. The candidates are spans that the
+model scores as likely entity mentions. Users may
+use keyboard shortcuts to minimize labeling time.The code for the user interface is released along
+with the code for the simulations.
+Extending Annotation Time User study partic-
+ipants are asked to annotate at least twenty-five
+minutes (Section 4.2). During the study, two par-
+ticipants continue to label after the minimum dura-
+tion. Figure 9 shows full results from the user study.
+Over a longer duration, the differences between the
+FewDocs andManyDocs sessions are clearer.
+A.7 Examples of Sampled Spans
+We provide examples of spans that are sampled
+from the experiments. For these examples, we look
+at the simulation where document reading is con-
+strained to one document and twenty spans are
+sampled per cycle. We compare the spans sam-
+pled by each strategy for both(Table 4) and (Table 5). Across domains, the strategies
+behave similarly, but we notice some differences
+inment-ent andjoint-ent . In, those strate-
+gies tend to sample a mix of spans that are and are
+not entity mentions (Section 4.1.1). In,
+they sample more entity mentions. This could be
+due to more entity mentions present in a Quizbowl
+question, which makes it more likely to sample
+something that should belong to an entity cluster.
+For other strategies, we notice some issues. As
+mentioned in Section 4.1.2, li-clust-ent tends to
+sample nested entity mentions, which may become
+redundant for annotators to label. In fact, AF
+forli-clust-ent tends to be lower if document read-
+ing is constrained to one document. Cond-ent suf-
+fers from redundant labeling because pronouns are
+repeatedly sampled and they tend to link to the
+same entity cluster.75487549

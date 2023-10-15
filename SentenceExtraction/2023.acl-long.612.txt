@@ -1,1 +1,731 @@
-10933 Proceedings of the 61st Annual Meeting of the Association for Computational Linguistics Volume 1 : Long Papers , pages 10933–10946 July 9 - 14 , 2023 © 2023 Association for Computational Linguistics 10934 10935 10936 10937 10938 10939 10940 10941 10942 10943 10944 10945 10946 
+
+Zhicheng Wang, Yufang Liu, Tao Ji, Xiaoling Wang, Yuanbin Wu
+Congcong Jiang, Ye Chao, Zhencong Han, Ling Wang, Xu Shao, Wenqiu ZengSchool of Computer Science and Technology, East China Normal UniversityInformation Technology Department, Huatai Securities
+zcwang@stu.ecnu.edu.cn ybwu@cs.ecnu.edu.cn
+Abstract
+We study the problem of defying catastrophic
+forgetting when learning a series of language
+processing tasks. Compared with previous
+methods, we emphasize the importance of
+not caching history tasks’ data, which makes
+the problem more challenging. Our proposed
+method applies the parameter isolation strategy.
+For each task, it allocates a small portion of pri-
+vate parameters and learns them with a shared
+pre-trained model. To load correct parameters
+at testing time, we introduce a simple yet effec-
+tive non-parametric method. Experiments on
+continual language learning benchmarks show
+that our method is significantly better than all
+existing no-data-cache methods, and is compa-
+rable (or even better) than those using historical
+data.
+1 Introduction
+Deployment of NLP models could be dynamic in
+real-world scenarios: models need to evolve con-
+tinually when coming in new tasks or new domains
+(updating an event detection model to handle new
+event types, for example). Recent studies on con-
+tinual (language) learning (Biesialska et al., 2020;
+De Lange et al., 2021) show that, compared with
+sticking with one single unchanging task, incre-
+mentally updating a model for a series of tasks is
+challenging: learning a new task will make our
+model perform poorly on previously learned tasks.
+The so-called catastrophic forgetting phenomenon
+is the central research topic in continual learning
+(Kirkpatrick et al., 2017).
+One method for mitigating forgetting is through
+data replay ( rehearsal ). The model caches some
+previous tasks’ training data along the sequential
+learning process. When learning a new task, all pre-
+vious tasks are re-learned with the current task. The
+vanilla rehearsal-based approach performs well onmany continual learning problems (Rebuffi et al.,
+2017; Rolnick et al., 2019; de Masson d’Autume
+et al., 2019), but access to previous tasks’ data
+could conflict with the original intention of con-
+tinual learning. In fact, if previous tasks’ data
+are given, it approaches multi-task learning where
+all tasks are given at once and forgetting is not a
+problem. Meanwhile, in some situations, previous
+datasets are not available due to regulation or pri-
+vacy considerations. Therefore, it is essential to
+look into rehearsal-free methods.
+In this work, we study parameter isolation strate-
+gies for rehearsal-free continual language learning.
+Basically, each time a new task comes in, such a
+strategy allocates a new set of model parameters
+for that task, which aims to prevent potential in-
+terference with already learned knowledge, so that
+forgetting could be alleviated (Rusu et al., 2016;
+Mallya and Lazebnik, 2018). Three cruxes of mak-
+ing the idea work in practice are,
+•for a possibly large number of tasks, we need to
+control the storage budget for each task.
+•given a set of learned models, we need to identify
+the right model to query for a test sample.
+•besides alleviating forgetting, we also would like
+to facilitate information sharing among tasks.
+We give a solution for the above cruxes under
+the framework of parameter efficient tuning (PET)
+of pre-trained language models (PLMs). For each
+task in the continual learning sequence, we build
+a model for it using two sets of parameters: one is
+from a frozen PLM, another is an additional small
+set of new parameters (namely, delta parameters
+(Ding et al., 2022)). PET methods (Li and Liang,
+2021; Hu et al., 2022; Liu et al., 2022a) show that
+by only fine-tuning delta parameters, performances
+of downstream language learning tasks could be
+competitive with (or even better than) the full-scale
+fine-tuning of the PLM. Therefore, we can share10933the PLM among all tasks in continual learning,
+while keeping a private delta parameter for each
+task, which is usually negligible compared with the
+PLM (less than 0.3%of the PLM’s parameters in
+our experiments).
+Second, to determine which model to query in
+testing time, we propose using a nonparametric
+task identification method. Specifically, for each
+task, we record the first and the second moment
+of its training samples, and approximate the task’s
+input distribution with a Gaussian. Given a sam-
+ple, we test whether it belongs to a task using its
+Mahalanobis distance to the task’s Gaussian (Lee
+et al., 2018; Ren et al., 2021). We show that, com-
+pared with state-of-the-art parametric task iden-
+tifiers (Wang et al., 2022b,a), the nonparametric
+method significantly boosts the accuracy of getting
+the correct model (and performances of continual
+learning) despite its simplicity.
+Third, to enhance knowledge transfer among
+continually learned tasks, we investigate informa-
+tion sharing methods among delta parameters of
+each task. We show that, by simply initializing the
+current task’s delta parameters with those of pre-
+vious tasks (either by directly copying from them
+or soft selecting via attention mechanisms), the
+transfer of knowledge from learned tasks could be
+improved, especially in few-shot situations.
+We conduct extensive evaluations on standard
+continual language learning benchmarks. The re-
+sults show that our algorithm not only outperforms
+all existing rehearsal-free methods by a large mar-
+gin (40% F1), but also is competitive with (or even
+better than) state-of-the-art rehearsal-based meth-
+ods with the standard setting of data cache size.
+2 Problem Definition
+Continual learning aims to solve problems in
+streams: a model no longer faces a single un-
+changing task but a series of tasks arrived sequen-
+tially. Following previous works, we focus on
+task streams containing text classification prob-
+lems, while the algorithm could be extended to
+other language learning problems.
+Denote T={T, T,···, T}as a sequence
+of tasks, and the training set of the t-th task Tis
+{(x, y)}, where x∈ Xis an input text, y∈
+Yis its class label. At timestamp t, a continual
+learning model learns a mapping f:∪X∝⇕⊣√∫⊔≀→
+∪Y. The key property is that the model can
+only query the training data of T, and aims toupdate the model parameter θto not only predict
+thet-th task, but also keep performances on all
+previous tasks (even without using their data). In
+the testing phase, the model predicts a sample’s
+label from all seen labels ∪Ywithout knowing
+which task it belongs to ( class incremental ).
+In this work, we will focus on the above
+rehearsal-free setting of continual learning. Sev-
+eral relaxations of this setting could be applied to
+upper-bound its performances,
+•rehearsal-based continual learning, where some
+previous tasks’ data can be used when training
+the current task. If all previous data are given,
+the problem is reduced to multi-task learning.
+•task incremental continual learning, where task
+labels are given in testing time. It provides ad-
+ditional information about samples and makes
+prediction easier than the class incremental set-
+ting.
+3 Approaches
+Our method is summarized in Figure 1. In the train-
+ing stage, for a new task, we assign (and save) a
+new private delta parameter for it and train the pa-
+rameter (jointly with a shared frozen PLM) on the
+task’s dataset. We also save some statistics about
+the training set to model the task as a Gaussian dis-
+tribution (e.g., the averaged vector representations
+of samples). In the testing stage, for a given sam-
+ple, we fetch a proper learned delta parameter for
+predicting its label by consulting the Mahalanobis
+distance between the sample and the distributions
+of all previously encountered tasks. In the follow-
+ing, we start by describing the parameter isolation
+strategy with PET methods (Section 3.1). Then, we
+illustrate the task identification method used in the
+testing stage (Section 3.2) and knowledge sharing
+methods (Section 3.3).
+3.1 Parameter Isolation with PET
+One reason that causes catastrophic forgetting in
+continual learning is the interference among tasks:
+different tasks may guide the model to move to-
+wards different directions. Therefore, a simple way
+to alleviate forgetting is to use different parameters
+for different tasks. On the other side, a sufficient
+model capacity for each task is crucial to get high-
+performance models. Directly separating models
+could make large storage costs. Here, we adopt the
+parameter-efficient tuning framework which is able10934
+to take advantage of a fixed powerful pre-trained
+model while keeping individual tasks moderately
+separated. In the following, we briefly review pre-
+fix tuning (Li and Liang, 2021) (the main PET
+method used in our experiments).
+Denote a Transformer-based pre-trained model
+with multi-head attention blocks to be MHA( X).
+It maps an input sentence X∈Rto a hidden
+semantic space H∈R, where nis the sentence
+length, dis the dimension of token embeddings and
+hidden vectors. For the t-th task in continual learn-
+ing, we prepare a set of task-specific parameters
+by prepending psoft virtual tokens to the input of
+multi-head attention blocks at each layer. Denote
+parameters in the prefix as P∈R, where
+Lis the number of MHA layers in the pre-trained
+model.
+Besides prefixes P, another set of task-specific
+parameters are classification heads (we apply soft-
+max activation for the multi-class classification).During the training process, parameters of the
+PLM are frozen (thus, shared among all tasks), andonly private prefixes and classification heads are
+trained.
+Private parameters are saved after training. One
+key property of PET methods is that one can train
+well enough models for tasks with a small size
+ofPand a powerful PLM. It facilitates reducing
+the storage cost for parameter isolation methods.
+while retaining high-performance models for indi-
+vidual tasks (e.g., decrease by 1.34% in a bench-
+mark dataset). In our experiments, the size of Pis
+0.27% of the PLM. Hence, the same storage budget
+for two tasks with full PLM fine-tuning can support
+370tasks with prefix tuning.
+3.2 Task Identification
+As we use different prefixes for different tasks,
+when a test sample comes, it is necessary to de-
+termine which prefix should be applied. One ap-
+proach is to try all learned prefixes, and choose one
+with the largest prediction probability on the sam-
+ple. In practice, this method suffers from the over-
+confidence problem of softmax predictors: even for
+those unrelated tasks, a prefix might give a predic-
+tion with high probability.
+Another approach is to compare the test sample
+with training samples and choose its nearest neigh-
+bor’s prefix (Mensink et al., 2013). It works around
+the over-confidence problem, but still depends on10935the robustness of sample representation and dis-
+tance metrics. Here, inspired by recent studies on
+out-of-distribution detection (Lee et al., 2018; Ren
+et al., 2021), we improve this method by compar-
+ing the test sample with full distributions of tasks’
+training samples. In the following, we represent
+an input xwith the average of the last Transformer
+block’s outputs of the PLM, denoted by h(x)(i.e.,
+the “pre-logit” vector).
+First, for the t-th task, we perform a Guassian
+discriminant analysis as suggested by the softmax
+classifier: given p(y=c|h(x))in the form of
+softmax ( c∈ Yis a class label), we can assume
+p(h(x)|y=c)is a Gaussian with estimated mean
+µand a shared covariance Σamong classes,
+µ=1
+N/summationdisplayh(x), (1)
+Σ=1
+N/summationdisplay/summationdisplay(h(x)−µ) (h(x)−µ)(2)
+where Nis the number of training samples with
+label c, and the values are obtained by maximum
+likelihood estimation.
+Next, for a test sample x, we compare it with all
+tasks’ Gaussian and choose the nearest task’s prefix
+as the prefix for predicting x’s label. Unlike com-
+puting distance between samples, we need to apply
+metrics measuring distance between samples and
+distributions. Here, we use Mahalanobis distance.
+Specifically, the distance between xand class cis
+−(h(x)−µ)(Σ)(h(x)−µ).(3)
+In practice, we find that directly ranking tasks
+withΣmakes the distances have large numeric
+deviation. To make the computation more stable,
+we further share the covariance among all tasks
+Σ=/summationtextΣand change the computation of Maha-
+lanobis distance accordingly.
+To implement above non-parametric task identifi-
+cation method, we need additional storage for store
+class means {µ}and a shared covariance Σ. Fur-
+thermore, though they are moments of distributions,
+there may be a chance to get information about in-
+dividual samples (Dwork and Roth, 2014). Here,
+inspired by querying with randomized response in
+differential privacy, we propose to add randomly
+masking on sample representations h(x). Specifi-
+cally, we assign a random mask (with q%entries
+0, other entries 1) for all tasks. For each h(x), the
+masked dimensions are dropped during the compu-
+tation of µandΣ. The model saves the maskedvectors and the mask itself (or the random seed
+generating the mask) for testing time distance com-
+putation. Besides encrypting moments, the simple
+masking strategy also helps to reduce storage cost.
+3.3 Knowledge Transfer
+Separating parameters is effective in mitigating
+catastrophic forgetting, however, it also blocks
+knowledge transfer among tasks. Given a sequence
+of learned prefixes P={P, ...,P}, we try
+several ways to utilize the knowledge acquired
+from preceding tasks in the hope that they could
+improve and accelerate the current task learning,
+•Prefix Fusion. A natural way to combine knowl-
+edge from previous tasks is through the use of
+the attention mechanism. This allows the model
+to automatically extract useful information from
+previous tasks and integrate it into the current
+learning process. To achieve this, we prepend
+the learned prefixes of previous tasks to the pre-
+fix of the current task. Knowledge transfer is
+automatically facilitated through the multi-head
+attention mechanism of the Transformer. Dur-
+ing new prefix learning, we fix the prefixes of
+previous tasks to avoid parameter drifting and
+catastrophic forgetting.
+•Prefix Initialization. Training starting from
+well-trained parameters is another way to pro-
+mote knowledge transfer, thus we can initialize
+a prefix with previously learned prefixes instead
+of random initialization. A good initial point
+can also help to speed up the convergence of
+the training process of PET methods. We try
+two ways, namely initialized with the last prefix
+P←Pand initialized with the mean prefix
+P←/summationtextP.
+4 Experiments
+Datasets To demonstrate the generalizability of
+our approach, we use two kinds of datasets, dif-
+ferentiated according to the domain relevance be-
+tween tasks. Far-domain , where the domain bound-
+ary among tasks are clear. Following MbPA++
+(de Masson d’Autume et al., 2019) and IDBR
+(Huang et al., 2021a), we use 5-datasets col-
+lected by Zhang et al. (2015) to evaluate our
+method. It consists AG News (news), Yelp (busi-
+ness reviews), Amazon (product reviews), Ya-
+hoo!Answer (Q&A), and DBPedia (encyclopedic
+articles). These datasets are categorized into two10936text classification tasks: topic classification (AG
+News, Yahoo!Answers, and DBPedia) and sen-
+timent classification (Yelp and Amazon). Near-
+domain where the tasks are more closely related.
+We use Web of Science (WOS) from Kowsari et al.
+(2017) and 20 Newsgroups from Lang (1995) to
+assess our method for datasets with high inter-task
+relevance. WOS contains seven parent classes and
+five sub-classes under each parent class which have
+close relations. We organize continual learning
+tasks according to parent classes. The 20 News-
+groups consists six topics of news. We rearranged
+it into four tasks based on the principle of maximiz-
+ing inter-task correlation. The details of the two
+datasets are in Appendix B.
+Metrics Letabe the testing accuracy on the
+i-th task after training on j-th task, the metrics for
+evaluating are,
+•Performance of Continual Learning (CL) . The
+average accuracy of all tasks after training on the
+last task,/summationtexta
+•Forgetting (Fgt) . The degree of forgetting of
+previous tasks after training on the last task,/summationtext(maxa−a)
+•Accuracy of Task Identification (TI) . The ac-
+curacy of getting the correct prefix for testing
+samples after training on all tasks.
+Baselines We use the following continual learn-
+ing techniques as baselines:
+•FT, fine-tuning a model for each task sequen-
+tially while catastrophic forgetting occurs. This
+method is the lower bound of continual learning.
+•MTL , training a model on all tasks as multi-task
+learning. This method is the upper bound of
+continual learning.
+•Replay , saving part of the previous tasks as mem-
+ory, train a model one step on the memory after
+every β( 10 for our experiments) steps of training
+on the new task.
+•LwF (Li and Hoiem, 2017), a typical
+regularization-based approach. We also combine
+LwF with the replay method as an enhancement.
+•IDBR (Huang et al., 2021b), disentangling in-
+formation by two simple auxiliary tasks (nextsentence prediction and task-id prediction) for
+learning better generic and specific representa-
+tion spaces. This approach applies both episodic
+memory replay and regularization techniques.
+•L2P (Wang et al., 2022b), it first introduces
+a prompt-based framework to continual learn-
+ing. The main difference between L2P and our
+method is that L2P uses a parametric task iden-
+tifier, while our identifier is non-parametric. We
+also adopt L2P-R, which is L2P equipped with a
+rehearsal buffer.
+To ensure a fair comparison, FT, MTL, Replay
+andLwF are all prefix-based. We re-implement
+L2P to make it support prefixes (instead of only
+prompts in the original code).
+Details We use BERT (Devlin et al., 2019) from
+HuggingFace Transformers (Wolf et al., 2020) as
+the PLM of our model. We set the default prefixes
+length to 16. Because our methods progressively
+assign a prefix to new tasks, we assign the same
+number of parameters to all baseline methods to
+ensure a fair comparison. See Appendix C for other
+configurations.
+4.1 Main Results
+In Table 1, we present the results of our method
+and baselines on the sampled 5-datasets and WOS.
+On the sampled 5-datasets, the rehearsal-based
+approach stores 50 samples per class, equivalent
+to 2.5% of the entire training dataset (except for
+IDBR, which is 20 per class). From the results, we
+can find that,
+•On sampled 5-datasets, our approach surpasses
+all rehearsal-free methods by a large margin. It is
+even better than rehearsal-based methods: com-
+pared with the previous SOTA method IDBR,
+our method improves the accuracy from 73.19%
+to 74.43%, reducing the gap to the upper bound
+(75.40%) by 56%.
+•When changing task orders of the sampled 5-
+datasets, the standard deviation of our method
+is small, which indicates that it is insensitive to
+task orders, which is rare in approaches without
+replaying.
+•On the more challenging WOS, our approach
+is still comparable to replay methods that use
+approximately 10% training data (20 samples per
+class).10937
+Table 2 presents the performances on the full
+5-datasets. The conclusions drawn from this table
+are generally consistent with Table 1, but it also
+showcases some new findings:
+•Our rehearsal-free method, even without task
+ID during the testing phase (class incremental),
+can outperform previous SOTA methods such as
+LAMOL (Sun et al., 2020), which relies on re-
+hearsal and has knowledge of the task ID during
+testing (task incremental).
+•When provided with the task ID ("oracle"), our
+method’s performance can be further improved
+by 1.7%. This suggests that there is still potential
+for enhancing our approach.
+4.2 Discussions
+To further inspect the proposed methods, we inves-
+tigate the following research questions.
+How the task identifier performs? To show the
+validity of the Mahalanobis distance (MD), wecompare it with two methods: (i) Maximum over
+softmax probability (MSP): using all prefixes for
+inference (task by task) and then choosing the label
+with the highest probability; (ii) Euclidean distance
+(ED) which ignores the covariance in Equation 3.
+The results are in Figure 2. We find that,
+•MSP performs poorly (especially on 5-datasets).
+It shows that, at least for the vanilla MSP met-
+ric, the over-confidence problem is still essential.
+Another drawback of MSP is that it has to per-
+form forward passes with all prefixes while our
+method only needs to compare vectors.
+•Mahalanobis distance is always better than Eu-
+clidean distance for task identification. There-
+fore, different dimensions of sample representa-
+tions should have different importance for detect-
+ing tasks, and modeling tasks’ distribution with
+anisotropic Gaussians provides a better approxi-
+mation of the actual distribution.10938
+Does prefix tuning help continual language
+learning? We can directly use the non-
+parametric task identifier to infer class labels of
+samples. Hence, one question is whether the
+additional prefix parameters provide performance
+gains. We build two non-parametric classifiers
+which use Euclidean and Mahalanobis distance.
+The samples are encoded only with representations
+from the PLM (without prefixes). As shown in
+Table 3, we can find that,
+•Regarding the performance of continual learn-
+ing (CL), the two non-parametric classifiers per-
+form quite well: the classifier with Euclidean
+distance performs much better ( 62.8%) than all
+rehearsal-free method in Table 1 ( <30%) on
+5-datasets, and is competitive on WOS. The clas-
+sifier with Mahalanobis distance is more effec-
+tive (69.8%): it is even competitive with the pri-
+mary reply method ( Replay ). The success of
+non-parametric classifiers implies that the power-
+ful representation ability from PLM is crucial to
+perform continual learning.
+•With the help of parametric prefix tuning, the
+performances of the two methods are largely
+boosted. It proves that task-specific information
+is also important. Regarding the performances
+of direct fine-tuning in Table 1, using separate
+prefixes could alleviate catastrophic forgetting.
+How do different PLMs influence perfor-
+mances? The above analyses on non-parametric
+classifiers suggest us to explore the influence of
+different PLMs (Figure 3 and Table 4). We find
+that,
+•Owing to the presence of a larger number of
+parameters, the sentence representations gener-
+ated by larger models enhance task identifica-
+tion. Moreover, previous studies also suggest that
+the larger the PLM, the more effective the PET
+(Lester et al., 2021; Liu et al., 2022b). Figure
+3 presents the performance across model scales,
+which are consistent with the previous findings
+in continual language learning.
+•The PLM pre-trained on the same domain of con-
+tinual learning tasks is able to extract a more valu-
+able representation. For WOS, we replace BERT
+with SciBERT (Beltagy et al., 2019), which is
+a BERT-like model pre-trained on the scientific
+(WOS domain) corpus. As shown in Table 4, the
+closer SciBERT performs even better than bert-
+large though it is smaller (with the same size as
+bert-base). Therefore, if some unsupervised texts
+from the same domain of continual learning are
+given, one could fine-tune the PLM for a better
+performance.10939Model Size TI CL Fgt
+bert-base 110 M 85.78 77.84 6.14
+bert-large 340 M 87.48 79.90 5.63
+sci-bert-base 110 M 87.98 79.92 5.01
+How random masking influence the task identi-
+fier? To validate the effect of random masking,
+we use five masking ratios equally spaced from 0%
+to 80% and two high masking ratios (95% and 99%)
+The results are in Figure 4. Our method shows
+a slight performance degradation in the range of
+masking ratio from 0% to 80%. Compared with
+no mask (i.e., masking ratio equal to 0), a mask-
+ing ratio of 80% still gives more than 90% of the
+performance, and it only needs about 4% of the
+storage space for all three datasets. It suggests
+that pre-logit vectors ( h(x)) is highly redundant
+for distinguishing tasks. However, as the mask-
+ing ratio increases further, the task identification
+performances decrease rapidly, which causes the
+end continual learning performances to decrease as
+well.
+Does knowledge transferability of prefixes mat-
+ter? Finally, we evaluate knowledge transfer
+methods (Section 3.3) in few-shot settings. As
+shown in Table 5, we observe knowledge transfer
+in all settings on WOS for all transfer methods but
+only in the 10-shot setting on 5-datasets for Mean .
+This is because the tasks in the WOS dataset are
+related, and thus knowledge can be shared among
+them. Moreover, we do not observe forward trans-
+fer in the full-shot setting on any benchmark, be-
+cause knowledge transfer is unnecessary when the
+data are sufficient.
+5 Related work
+Continual Learning We discuss three main cat-
+egories of continual learning methods: rehearsal-
+based ,regularization-based , and parameter isola-
+tionmethods.
+Rehearsal-based methods alleviate catastrophic
+forgetting by replaying stored examples (Re-
+buffi et al., 2017; Rolnick et al., 2019; de Mas-
+son d’Autume et al., 2019) or pseudo-generative
+examples (Shin et al., 2017; Su et al., 2020; Sun
+et al., 2020) of previous tasks. Unfortunately, all
+of them carry the risk of privacy leakage and need
+nontrivial storage space.
+Regularization-based methods restrict the updat-
+ing of the model weights by knowledge distillation
+(Li and Hoiem, 2017; Triki et al., 2017) or param-
+eter importance (Kirkpatrick et al., 2016; Zenke
+et al., 2017; Aljundi et al., 2018) to preserve the
+knowledge of previous tasks. However, these meth-
+ods emphasize the model’s stability to previous
+tasks while weakening its plasticity to the new task
+(Parisi et al., 2019).
+Parameter isolation methods assign a task-
+specific parameter to a new task by splitting (Fer-
+nando et al., 2017; Mallya and Lazebnik, 2018;
+Serrà et al., 2018) or extending (Rusu et al., 2016;
+Xu and Zhu, 2018) the current model to prevent
+interference between tasks. Because these meth-
+ods require task-id to choose the proper model at
+testing time, they only apply to task incremental10940continual learning. Although our method also be-
+longs to this category, our method applies to class
+incremental by introducing task identification.
+6 Conclusion
+In this work, we propose a new rehearsal-free pa-
+rameter isolation continual learning method that
+leverages the capabilities of a pre-trained language
+model (PLM). Extensive experiments show that our
+method surpasses all rehearsal-free methods by a
+significant margin and is comparable (or even bet-
+ter) than previous start-of-the-art rehearsal-based
+methods on two benchmarks, whether the tasks
+are near or far. Meanwhile, we introduce random
+static masking to reduce the storage required by our
+method to adapt it to more demanding scenarios.
+Limitations
+Although our proposed knowledge transfer meth-
+ods work well on WOS in the few-shot setting, it is
+less effective on 5-datasets. Moreover, all methods
+fail in the full-shot setting. Based on our approach,
+a more general approach to knowledge transfer
+is expected in future works. In addition, our ap-
+proach requires a well-trained language model for
+task identification and a Transformer-based model
+(well-trained also) for parameter efficient tuning.
+Therefore, it is challenging to cooperate our ap-
+proach with a language model with random initial-
+ization or non-transformer architecture.
+Acknowledgement
+The authors wish to thank all reviewers for their
+helpful comments and suggestions. The corre-
+sponding authors are Zhicheng Wang, Tao Ji and
+Yuanbin Wu. This research was (partially) sup-
+ported by NSFC(62076097), National Key R&D
+Program of China (2021YFC3340700), and East
+China Normal University International Conference
+Grant Programme.
+References109411094210943Supplementary Material for
+Rehearsal-free Continual Language Learning via Efficient Parameter Isolation
+A Potential Risks
+Pre-trained language models (PLMs) may inherit
+biases from the training corpus, resulting in of-
+fensive behaviors. Combining our approach with
+these toxic language models and deploying them
+in realistic scenarios might cause negative social
+impacts.
+B Datasets Details
+For 5-datasets, the sampled setting samples
+2,000 training examples and 2,000 validation ex-
+amples from the original training set. The full
+setting is the same as the dataset used by de Mas-
+son d’Autume et al. (2019). We show task orders
+of 5-datasets we used in Table 6. We did not merge
+the label space of Yelp and Amazon as MbPA++
+and IDBR did to create a more challenging setup.
+Our label space can be mapped to the label space
+used by MbPA++ and IDBR and not vice versa.
+We download WOS-11967 from Huggingface
+Datasets (Lhoest et al., 2021), and we show the
+statistics of it in Table 7. We split the whole dataset
+to train/val/test set in the ratio of 0.6:0.2:0.2.
+We access 20 Newsgroups from Huggingface
+Datasets corresponding to the 20news-bydata ver-
+sion on the official site. We show the task separa-
+tion in Table 8. We take one-sixth of the training
+set as a validation set for a train/val/test splitting
+ratio 0.5:0.1:0.4.
+C Experimental Details
+We train all models using AdamW (Loshchilov and
+Hutter, 2017) with β= 0.9andβ= 0.99cou-Class Name Train Test
+Task 1
+comp.graphics 584 389
+rec.autos 594 396
+sci.crypt 595 396
+misc.forsale 585 390
+talk.politics.misc 465 310
+talk.religion.misc 377 251
+Task 2
+comp.os.ms-windows.misc 591 394
+rec.motorcycles 598 398
+sci.electronics 591 393
+talk.politics.guns 546 364
+alt.atheism 480 319
+Task 3
+comp.sys.ibm.pc.hardware 590 392
+rec.sport.baseball 597 397
+sci.med 594 396
+talk.politics.mideast 564 376
+soc.religion.christian 599 398
+Task 4
+comp.sys.mac.hardware 578 385
+rec.sport.hockey 600 399
+sci.space 593 394
+comp.windows.x 593 395
+pled with a linear scheduler with a warm-up ratio
+of 0.1. For sampled 5-datasets, WOS, and 20 News-
+groups, we set the identical learning rate λ= 0.03.
+For the full 5-datasets, we do grid searching for the
+learning rate for each task respectively, and the final
+learning rates are 0.003,0.009,0.005,0.007,0.003
+for AG News, Amazon, Yelp, Yahoo!Answer and
+DBpedia, respectively. All experiments are con-
+ducted on NVIDIA RTX 3090 with 24GB video
+memory with a batch size of 32 and the maximum
+length of a sentence is 256.10944ACL 2023 Responsible NLP Checklist
+A For every submission:
+/squareA1. Did you describe the limitations of your work?
+Section Limitations (Line 558-570)
+/squareA2. Did you discuss any potential risks of your work?
+Appendix A (Line 838-844)
+/squareA3. Do the abstract and introduction summarize the paper’s main claims?
+Abstract and section 1 (Line 1-112)
+/squareA4. Have you used AI writing assistants when working on this paper?
+Left blank.
+B/squareDid you use or create scientiﬁc artifacts?
+Section 4 (Line 297-323)
+/squareB1. Did you cite the creators of artifacts you used?
+Section 4 (Line 297-323)
+/squareB2. Did you discuss the license or terms for use and / or distribution of any artifacts?
+We do not ﬁnd any license in original papers.
+/squareB3. Did you discuss if your use of existing artifact(s) was consistent with their intended use, provided
+that it was speciﬁed? For the artifacts you create, do you specify intended use and whether that is
+compatible with the original access conditions (in particular, derivatives of data accessed for research
+purposes should not be used outside of research contexts)?
+Section 4 (Line 297-323)
+/squareB4. Did you discuss the steps taken to check whether the data that was collected / used contains any
+information that names or uniquely identiﬁes individual people or offensive content, and the steps
+taken to protect / anonymize it?
+All of datasets comes from publicly available news or published articles, so we don’t think there are
+such problems.
+/squareB5. Did you provide documentation of the artifacts, e.g., coverage of domains, languages, and
+linguistic phenomena, demographic groups represented, etc.?
+That information can be found in original papers.
+/squareB6. Did you report relevant statistics like the number of examples, details of train / test / dev splits,
+etc. for the data that you used / created? Even for commonly-used benchmark datasets, include the
+number of examples in train / validation / test splits, as these provide necessary context for a reader
+to understand experimental results. For example, small differences in accuracy on large test sets may
+be signiﬁcant, while on small test sets they may not be.
+Appendix B (Line 845-865)
+C/squareDid you run computational experiments?
+Section 4
+/squareC1. Did you report the number of parameters in the models used, the total computational budget
+(e.g., GPU hours), and computing infrastructure used?
+Section 4 and append C (Line 876-879)10945/squareC2. Did you discuss the experimental setup, including hyperparameter search and best-found
+hyperparameter values?
+Section 4 and appendix C (Line 867-876)
+/squareC3. Did you report descriptive statistics about your results (e.g., error bars around results, summary
+statistics from sets of experiments), and is it transparent whether you are reporting the max, mean,
+etc. or just a single run?
+Section 4
+/squareC4. If you used existing packages (e.g., for preprocessing, for normalization, or for evaluation), did
+you report the implementation, model, and parameter settings used (e.g., NLTK, Spacy, ROUGE,
+etc.)?
+Section 4 (Line 368-370)
+D/squareDid you use human annotators (e.g., crowdworkers) or research with human participants?
+Left blank.
+/squareD1. Did you report the full text of instructions given to participants, including e.g., screenshots,
+disclaimers of any risks to participants or annotators, etc.?
+No response.
+/squareD2. Did you report information about how you recruited (e.g., crowdsourcing platform, students)
+and paid participants, and discuss if such payment is adequate given the participants’ demographic
+(e.g., country of residence)?
+No response.
+/squareD3. Did you discuss whether and how consent was obtained from people whose data you’re
+using/curating? For example, if you collected data via crowdsourcing, did your instructions to
+crowdworkers explain how the data would be used?
+No response.
+/squareD4. Was the data collection protocol approved (or determined exempt) by an ethics review board?
+No response.
+/squareD5. Did you report the basic demographic and geographic characteristics of the annotator population
+that is the source of the data?
+No response.10946

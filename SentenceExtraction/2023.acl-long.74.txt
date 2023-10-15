@@ -1,1 +1,953 @@
-1321 Proceedings of the 61st Annual Meeting of the Association for Computational Linguistics Volume 1 : Long Papers , pages 1321–1342 July 9 - 14 , 2023 © 2023 Association for Computational Linguistics 1322 1323 1324 1325 1326 1327 1328 1329 1330 1331 1332 1333 1334 1335 1336 1337 1338 1339 1340 1341 1342 
+
+Xiang Yue, Huseyin A. Inan, Xuechen Li,
+Girish Kumar, Julia McAnallen, Hoda Shajari, Huan Sun, David Levitan, and Robert SimThe Ohio State University,Microsoft Research,Stanford University,Microsoft,UC Davis
+Abstract
+Privacy concerns have attracted increasing at-
+tention in data-driven products due to the ten-
+dency of machine learning models to memorize
+sensitive training data. Generating synthetic
+versions of such data with a formal privacy
+guarantee, such as differential privacy (DP),
+provides a promising path to mitigating these
+privacy concerns, but previous approaches in
+this direction have typically failed to produce
+synthetic data of high quality. In this work, we
+show that a simple and practical recipe in the
+text domain is effective: simply fine-tuning a
+pre-trained generative language model with DP
+enables the model to generate useful synthetic
+text with strong privacy protection. Through ex-
+tensive empirical analyses on both benchmark
+and private customer data, we demonstrate that
+our method produces synthetic text that is com-
+petitive in terms of utility with its non-private
+counterpart, meanwhile providing strong pro-
+tection against potential privacy leakages.
+1 Introduction
+The issue of privacy has gained increasing attention
+in natural language processing (NLP). Privacy at-
+tacks against common NLP pipelines have demon-
+strated that models trained without formal privacy
+guarantees can reveal membership information and
+enable training data reconstruction (Shokri et al.,
+2017; Carlini et al., 2021). Privacy concerns mani-
+fested through tightening legislation (e.g., GDPR
+(Art. 29 WP, 2014)) and growing discussions on
+policy and ethics call for improved approaches for
+privacy-preserving machine learning.Among different approaches for learning with
+private data, learning with differential privacy
+(DP) (Dwork et al., 2006) has become the gold
+standard as its formal guarantee enables reasoning
+about the privacy loss in a principled manner and
+makes the approach resilient to strong privacy at-
+tacks (Carlini et al., 2019). Recent developments
+have substantially improved the computational effi-
+ciency and privacy-utility trade-off of DP machine
+learning (Subramani et al., 2021; Li et al., 2022b;
+Yu et al., 2022; De et al., 2022; Bu et al., 2022;
+Li et al., 2022a; Mehta et al., 2022, inter alia ),
+demonstrating gains for learning models that per-
+form specific downstream tasks.
+In contrast to the above works, we study syn-
+thetic text generation by building generative text
+models with DP training algorithms (Figure 1).
+The goal of this approach is to learn a generative
+model that faithfully captures distributional proper-
+ties of the training data (and the underlying distribu-
+tion), as opposed to learning task-oriented models
+with specific functions. Compared to directly learn-
+ing models for target tasks, this paradigm has sev-
+eral advantages: (1) DP-trained generative models
+can be used to draw synthetic data for learning an
+expanding set of task models without incurring any
+additional privacy loss (due to the post-processing
+property of DP); (2) Dataset debugging is made
+easy as synthetic text generated from DP-trained
+models can be shared more freely, and inspecting
+its samples poses less of a privacy concern com-
+pared to examining the original private data (Au-
+genstein et al., 2020); (3) Synthetic data gener-
+ated from DP-trained models can be retained for
+a longer time under certain existing policies (e.g.,
+right to be forgotten ) thanks to the fact that DP im-
+plies some degree of approximate machine unlearn-1321
+ing (Bourtoule et al., 2021; Sekhari et al., 2021).
+In this work, we initiate a systematic empirical
+study of the problem and show that DP language
+model (LM) fine-tuning can be an effective solu-
+tion to synthetic text generation with privacy. In
+particular, we show that simply fine-tuning progres-
+sively larger autoregressively pre-trained language
+models on (private) data leads to models that gener-
+ate increasingly useful synthetic text. For instance,
+we fine-tune a GPT-2 Large model (Radford et al.,
+2019) on a review dataset with DP at ϵ= 4and then
+use it to generate synthetic text to build downstream
+classifiers. The classification models achieve com-
+parable performance (only 2-4% in accuracy away)
+to the classifiers trained on the original dataset.
+Furthermore, we demonstrate that generating a
+small amount of synthetic data with DP is sufficient
+to create classification models that are on par with
+those trained directly on the entire original dataset
+with DP. One of the advantages of the synthetic
+data approach is that the privacy loss is fixed, and
+an unlimited number of downstream models can
+be built without incurring additional leakage. In
+contrast, training additional downstream models on
+the original data with DP accumulates privacy loss.
+Distributional similarity evaluation additionally
+confirms that the synthetic text distribution resem-
+bles the original data distribution. We also uncover
+a novel phenomenon in DP-trained LMs that is of
+independent interest. Specifically, we observe a
+length truncation effect in text generation with DP-
+trained models, resulting in completions that are
+generally shorter than their non-DP counterpartsand instances in the original dataset.
+We further extensively study learning dynam-
+ics with DP by injecting specially-crafted ca-
+naries (Carlini et al., 2019) in the training data.
+This allows for (i) stress-testing the extent to which
+DP fine-tuning limits the leakage of private infor-
+mation and (ii) understanding the conditions under
+which a subject of interest would appear in syn-
+thetic generations.
+Finally, we conclude our studies on an industrial-
+level private customer feedback dataset to show the
+feasibility of our approach in real-world scenarios.
+2 Background
+2.1 Differential Privacy
+Definition 2.1 (Differential Privacy (DP) (Dwork
+et al., 2006)) .A randomized algorithm M:D →
+Sis(ϵ, δ)-differentially private if for any two neigh-
+boring datasets D, D∈ D that differ exactly in a
+single data sample, and for all sets S⊆ S:
+P[M(D)∈S]≤eP[M(D)∈S] +δ.
+This definition provides a rigorous privacy guar-
+antee by theoretically bounding the effect of a sin-
+gle data sample in the dataset. For a differentially
+private algorithm, the output distribution is statis-
+tically similar whether any individual data sample
+appears in the input dataset or not. The privacy pa-
+rameter ϵquantifies the maximum allowable impact
+of a single individual’s data on the outcome. δspec-
+ifies the maximum probability that the privacy guar-
+antee may fail. An algorithm can typically be made1322(ϵ, δ)-DP by bounding the contribution of a single
+data sample and adding controlled noise from a
+predetermined distribution (e.g., Gaussian) (Dwork
+and Roth, 2014). Setting ϵandδin practice often
+requires careful consideration of the specific use
+case and the acceptable trade-off between privacy
+and utility. We discuss our choice of ϵandδin
+Section 4.1.
+An appealing property of DP crucial to this work
+isrobustness to post-processing . This property en-
+sures that if the algorithm Msatisfies (ϵ, δ)-DP,
+then so does F◦Mfor any deterministic or ran-
+domized function F(which is independent of M).
+Namely, one can perform arbitrary post-processing
+without incurring additional privacy loss.
+2.2 DP Stochastic Gradient Descent
+Deep learning models can be trained with DP via
+a modification of the stochastic gradient descent
+(SGD) algorithm (Song et al., 2013; Bassily et al.,
+2014; Abadi et al., 2016). The modified algorithm
+clips per-sample gradients to bound the contribu-
+tion of individual examples. Noise from a Gaus-
+sian distribution is sampled and added to the sum
+of the clipped gradients in a batch to obfuscate the
+gradient update. The resulting algorithm, called
+Differentially Private Stochastic Gradient Descent
+(DP-SGD), can be shown to be DP for some (ϵ, δ)
+for each update of the model. Privacy parameters
+at the end of training can be computed via privacy
+composition algorithms (Abadi et al., 2016; Gopi
+et al., 2021a). In the next section, we will utilize
+DP-SGD to train a language model with privacy
+for synthetic text generation.
+3 Method
+In this section, we formally state the problem and
+present our method (see Figure 1 for an illustration)
+that produces a synthetic version of private text data
+with differential privacy.
+3.1 Problem Statement
+LetDbe a database representing the collection of
+token sequences from a fixed dictionary V. We
+define a (randomized) mapping M:D → D such
+that for a given dataset D∈ D, the goal is to gen-
+erate a synthetic version M(D) =˜Dwith privacy
+constraints and utility desiderata.
+Regarding privacy constraints, we require that
+Mbe(ϵ, δ)-DP with domain D. This requirement
+provides strong protection for the participants inthe input dataset as this participation will be statis-
+tically indistinguishable to a certain degree through
+any adversary accessing the model or synthetic ver-
+sion of the dataset in the output.
+For the case of utility, ideally, the synthetic ver-
+sion ˜Dshould be able to replace Din providing
+a training resource for models on relevant down-
+stream applications. In other words, on target
+downstream tasks, models trained on the synthetic
+dataset ˜Dare expected to have performance sim-
+ilar to the models trained on the original dataset
+D. More generally, distributional properties of the
+dataset Dshould be captured as much as possible
+in the synthetic version ˜Dwithout violating the
+aforementioned privacy requirement. These will be
+extensively explored in Section 4.
+3.2 Synthetic Text Generation with DP
+Conventionally, to generate synthetic text, an auto-
+regressive language model (e.g. GPT-2 (Radford
+et al., 2019)) is trained on the original dataset and
+subsequently sampled using a sampling mecha-
+nism (e.g., beam search, top- ksampling (Fan et al.,
+2018), nucleus sampling (Holtzman et al., 2020),
+etc.) to produce synthetic sequences.
+To make this operation differentially private, we
+adopt DP-SGD to fine-tune a pre-trained generative
+LM. The post-processing property of DP ensures
+that once the LM has been fine-tuned with DP, sam-
+pling from the model incurs no extra privacy loss.
+It would be desirable to synthesize examples
+with labels. We achieve this by building a condi-
+tional generator introduced in (Keskar et al., 2019)
+to provide more explicit control over text gener-
+ation. By using so-called control codes (Keskar
+et al., 2019), the probability distribution of a text
+sequence x= (x, x, . . . , x)is conditioned on a
+control code cand decomposed as:
+P(x|c) =/productdisplayP(x|x, x, . . . , x, c).
+A neural network p(·)is then trained to model
+each conditional distribution. The model can later
+be used to generate new samples conditioned
+on a control code cby sequentially sampling
+p(x|c), p(x|˜x, c), . . . , p(x|˜x, . . .˜x, c).
+The advantage of this approach is that it provides
+flexibility in the text generation of the model by
+allowing the conditional control codes to specify
+a particular style, domain, sentiment, or category.
+For example, feedback data collected from users1323on a set of products may contain product types
+and review scores associated with each data
+sample. Control codes can be constructed as
+c="Product type: p| Review score: r"for
+different product type ( p) and review score ( r)
+pairs. In our method, we utilize control codes
+to prepend each sample with its corresponding
+categories as a simple preprocessing step. During
+the text generation, this allows us to use the control
+codes to generate as many samples as the original
+categorical distribution is preserved.
+We point out that the categorical distribution in
+the original dataset may also be a piece of private
+information itself. However, its estimation could
+easily be privatized (Dwork and Roth, 2014) and
+for simplicity, we ignore the low-cost privacy loss
+of this step and use the exact categorical distribu-
+tion of the original dataset in this paper.
+4 Analyses on a Public Review Dataset
+In this section, we extensively analyze our method
+with experiments on a public benchmark dataset:
+Yelp Open Dataset,which has been widely
+adopted for language modeling and text classifica-
+tion tasks. We then apply our method to an internal
+private customer feedback dataset in Section 5.
+4.1 Experimental Setup
+Dataset. The Yelp dataset contains review text
+data on businesses that can be studied for academic
+purposes. We select two attributes for the condi-
+tional generation as well as the downstream task
+applications: review stars (1-5) and business cate-
+gory. We sample 10 frequent business categories
+and remove the reviews that do not have ratings
+(Details can be found in Appendix A.1). This re-
+sults in a dataset that has 1.9M reviews for training,
+5000 for validation, and 5000 for testing.
+Implementation Details. We utilize the pub-
+lic repository (Inan et al., 2022), which is based
+on Huggingface (Wolf et al., 2019) and Opa-
+cus (Yousefpour et al., 2021), for fine-tuning lan-
+guage models with DP. Specifically, we fine-tune
+three language models: GPT2 (Radford et al.,
+2019), GPT2-Medium, and GPT2-Large, for syn-
+thetic text generation. Additionally, we fine-tune
+the RoBERTa-base model (Liu et al., 2019) for
+downstream text classification tasks.
+Control codes are constructed based on attributes
+such as “Business Type: Bar | Review Stars: 5.0”
+and are prepended to each sample. Hyperparame-
+ters are specified in Appendix A. For both synthetic
+text generation and classification, we set the max-
+imum sequence length to 128, unless otherwise
+specified. During training, we evaluate the models
+on the dev dataset and select the checkpoint that
+achieves the best validation performance for the
+final evaluation on the test set.
+We set the privacy parameter ϵto 4, which is
+supported by prior work (Yu et al., 2021a; Li et al.,
+2022b; Yu et al., 2022; De et al., 2022; Mehta et al.,
+2022) and real-world applications. For instance,
+the release of US population data uses ϵ= 13.64
+(Bureau, 2020), and the development of a next-
+word prediction model uses ϵ= 6.92(Google,
+2022). Our ϵ= 4is smaller and provides stronger
+privacy protection. As recommended by (Hsu et al.,
+2014; De et al., 2022), δshould be smaller than the
+inverse of the dataset size N, and we set δ= 1/(N·
+logN). The additive noise scale is calculated using
+the numerical composition algorithm (Gopi et al.,
+2021b), given the batch size and epochs for each
+setting mentioned in Appendix A for DP training.
+To generate synthetic text samples, we employ
+top-ksampling (Fan et al., 2018) and nucleus sam-
+pling (top- p) (Holtzman et al., 2020), with k= 50
+andp= 0.9. To produce synthetic datasets that
+preserve categorical distributions (e.g., business
+category), we generate 100K samples from the fine-
+tuned models using the appropriate control codes.
+4.2 Downstream Tasks on Synthetic Data
+One way to evaluate the quality of the synthetic
+dataset is by examining the performance of down-
+stream task models trained on it. We fine-tune
+RoBERTa-base models for classifying review rat-
+ings and business categories using the synthetic1324
+dataset. We further compare their performance
+with models trained on the original dataset. All
+models are evaluated on the same original test set.
+The results are summarized in Table 1. The
+downstream task models trained on the synthetic
+data generated by GPT2 with DP ( ϵ= 4) achieve
+comparable performance to the models trained on
+the synthetic data generated without DP ( ϵ=∞)
+and the models trained on the original dataset. Ad-
+ditionally, we observe that the quality of the syn-
+thetic generations improves when larger pre-trained
+language models are used (sampled generations
+can be found in Appendix F), and the performance
+gap between private and non-private generations di-
+minishes. Surprisingly, models trained on synthetic
+data generated by GPT2-Large with DP exhibit sim-
+ilar or even better performance compared to mod-
+els trained on synthetic data generated by GPT2
+without DP. These results highlight the significant
+potential of our method for generating synthetic
+data across various downstream applications.
+4.3 Synthetic Data Generation with DP v.s.
+Downstream Task Modeling with DP
+It is natural to compare how downstream task mod-
+els built on synthetic text generated by a DP-trained
+LM fare against models directly trained on the orig-
+inal data with DP. The results of this comparison
+are presented in Table 2.
+We observe that by using the same privacy pa-
+rameter ( ϵ= 4), both approaches achieve compara-
+ble performances. However, it is important to note
+that training two task models on the private dataset
+with DP will result in a higher overall privacy loss
+thanϵ= 4, and this loss will accumulate with
+additional downstream tasks. In contrast, the post-
+processing property of DP allows us to train any
+number of models for different downstream tasks
+on the synthetic data generated by a DP-trained
+LM without incurring additional privacy loss.
+An interesting observation is that once the syn-
+thetic data is generated with DP, a smaller dataset
+size (100K instead of 1.9M) is sufficient to produce
+superior downstream models compared to models
+directly trained with DP on the original data of the
+same size (as seen in the second row of Table 2).
+4.4 Similarity between Synth. and Real Data
+To further assess the quality of the synthetic gen-
+erations, we evaluate the similarity between the
+synthetic dataset and the original dataset. Unlike
+typical natural language generation tasks like ma-
+chine translation or summarization, where gold
+references can be used for evaluation, it is chal-
+lenging to directly compare synthetic generations
+with the original dataset when there is no one-to-
+one mapping between them. In our evaluation, we
+measure the “similarity” from three different per-
+spectives: Embedding Distribution Distance, Topic
+Difference, and Text Length Distribution.
+Embedding Distribution Distance. To measure
+the embedding distribution distance between the
+synthetic and original data, we use sentence-
+transformers (Reimers and Gurevych, 2019) to em-
+bed both datasets. We calculate the distance be-
+tween the two distributions using three metrics: 1)
+F1 Score: the harmonic mean of Precision and
+Recall (Kynkäänniemi et al., 2019). Precision es-
+timates the average sample quality, while Recall
+measures the coverage of the sample distribution.
+2) Fréchet Inception Distance (FID): FID calcu-
+lates the feature-wise mean and covariance matri-
+ces of the embedding vectors and then measures
+the Fréchet distance between the two sets (Heusel
+et al., 2017). 3) MAUVE: MAUVE compares the
+distributions of the synthetic and original data us-
+ing divergence frontiers (Pillutla et al., 2021).
+We note that the absolute scale of these metrics
+may vary depending on the specific embedding
+models used. To account for this, we conduct the
+evaluations with five different pre-trained sentence1325
+transformers (details provided in Appendix A.6),
+and then compute the average for each metric.
+Table 3 shows the distribution distances between
+the synthetic data and the original data based on the
+metrics introduced above. We observe that the qual-
+ity of the synthetic data improves as we use larger
+pre-trained models for private fine-tuning. Similar
+to the results of the previous section, we observe
+that the F1 score of the GPT2-Large model with DP
+(the last row) matches the F1 score of GPT2 model
+without privacy (the first row). On the other hand,
+there remains a gap between synthetic generations
+with and without DP for FID and MAUVE.
+Topic Difference. Another approach to measur-
+ing the similarity between the synthetic and original
+data is to analyze their topic distributions. Topic
+modeling is a commonly used technique to un-
+cover hidden semantic structures or abstract “top-
+ics” within a collection of documents. To com-
+pare the distributions of topics in the synthetic and
+original data, we combine them into a single col-
+lection and utilize an unsupervised topic model
+called BERTopic (Grootendorst, 2022) to extract
+the top 10 most frequent topics. The distributions
+of these topics for both the synthetic data and the
+original data are plotted in Figure 2. From the re-
+sults, we observe that the topic distributions of the
+synthetic data, both with and without DP, are highly
+similar to those of the original data. This further
+demonstrates the high quality of the synthetic data
+generated using our approach.
+Text Length Distribution. Lastly, we examine
+the distribution of sequence lengths in the synthetic
+data and compare them to the original data. To
+investigate whether the maximum sequence length
+or truncation during the pre-processing phase has a
+significant impact on the generations, we train two
+sets of generative models with maximum sequence
+lengths of 128 and 512.
+We plot the density of the sequence lengths in
+Figure 3. We observe that, in general, the synthetic
+data generated with or without privacy tends to be
+shorter than the original data ( length truncation
+effect ). Furthermore, we notice that the synthetic
+data generated with DP has a higher concentration
+of shorter sequences compared to the data gener-
+ated without DP. Although the issue is somewhat
+mitigated with larger model sizes, it is not fully re-
+solved, and we can still observe that the generations
+with DP are slightly shorter than their non-private
+counterparts using the same decoding strategy (e.g.,
+average length of 84.5 vs. 89.4 for GPT2-Large).
+4.5 Learning Dynamics with DP
+In this section, we examine the learning dynamics
+with DP from two perspectives: (i) the preservation
+ofprivate information specific to individuals; (ii)
+the generation of information that is common to
+many individuals (i.e., the subject of interest ).
+To analyze these dynamics, we extend the ap-
+proach introduced in (Carlini et al., 2019). We
+construct “canary” samples that represent private
+information and the subject of interest respectively.
+These canary samples are then injected into the
+original training data to assess the extent to which
+they can be reconstructed in the synthetic genera-
+tions. This allows us to evaluate how effectively
+private information is protected and how well the
+subject of interest is captured in the generations.
+Leakage of Private Information. The objective
+of this experiment is to evaluate whether any pri-
+vate information, such as Personally Identifiable
+Information (PII), leaks in the generated text. We1326
+focus on measuring the leakage of PIIs, as they are
+direct identifiers of individuals and highly sensitive
+data governed by privacy regulations like GDPR.
+We construct 5 artificial review-style canary se-
+quences, each containing specific types of private
+information (e.g., “The food took literally 6 hours
+to arrive at 1940W State St Boise . ”; please refer to
+Appendix B for the full list).We conduct experi-
+ments by injecting these 5 canary sequences with
+varying repetition rates into the original dataset.
+The purpose of repeating the private information is
+to account for worst-case scenarios regarding pri-
+vacy, as previous studies (Lee et al., 2022; Kandpal
+et al., 2022; Carlini et al., 2022) have demonstrated
+that data duplication is a major contributing fac-
+tor to model memorization. After generating the
+synthetic data, we examine whether the private in-
+formation (underlined text in the example) from
+the canary sequences appears in the generations.
+The results are presented in Table 4.
+We observe that even with a repetition rate as
+high as 100, the private information from the ca-
+nary sequences does not appear in the synthetic
+data when the model is trained with DP. In contrast,
+without DP, 4 out of 5 canary sequences verbatim
+appear in the synthetic data at this repetition rate.
+This demonstrates the effectiveness of DP in pre-
+venting the leakage of private information.
+We note that the appearance of the canaries in the
+synthetic dataset is tied to the way we generate text.
+As such, our evaluation is not exhaustive, and we
+cannot completely rule out the possibility that ca-
+naries could be extracted from DP-trained models
+using alternative decoding methods and hyperpa-
+rameters. To address this limitation, we directly
+examine the rank of the private information within
+a canary sequence (e.g., “ 1940W State St Boise ”)
+based on its perplexity compared to 10,000 simi-
+lar candidates.The details of how we construct
+similar candidates are included in Appendix B.
+We present the average rank of the private infor-
+mation in the canary sequences in Table 4. Addi-
+tionally, the perplexity distributions of all similar
+candidates for each canary type can be found in Fig-
+ure 5 in Appendix C. Based on our investigation,
+we draw the following notable findings:
+For all repetition levels, training the language
+model with DP effectively eliminates the risk of
+privacy leakage. The private information in the
+canary sequences does not achieve low ranks and
+is not distinguishable among similar candidates.
+When the canary sequence appears only once in
+the training set, the risk of extraction during gen-
+eration is relatively low. However, some canaries
+(e.g., Address and Plate in Figure 5) still obtain top
+ranks. This indicates that even if certain private
+information appears only once in the training set,
+models may still memorize it, potentially leading
+to leakage in synthetic generations. Additionally,
+when we repeat the canary sequences 10 or 100
+times, they consistently achieve top ranks without
+DP. In contrast, models trained with DP consis-
+tently exhibit much higher ranks for the inserted
+sequences, with a leakage percentage of 0.
+Appearance of a Subject of Interest. In this
+experiment, we aim to investigate whether a spe-1327cific “subject of interest” can be extracted from
+fine-tuned models when it appears in multiple dis-
+tinct instances in the training data. This evaluation
+allows us to assess the extent to which our DP guar-
+antee ( ϵ= 4) permits the generation of information
+that is common to many individuals.
+First, we select the subject of interest “beautiful
+paintings by Van Gogh in a restaurant” that we
+want to be present in the synthetic generations.
+However, instead of replicating the subject, we sim-
+ulate the scenario where different people may ex-
+press this subject in different ways. To achieve this,
+we utilize a variant of GPT-3 (Brown et al., 2020)
+to generate a number of reviews (100, 1,000, and
+10,000) that include this subject (more details can
+be found in Appendix D). Next, we inject different
+numbers of canary reviews into the original train-
+ing dataset. After generating the synthetic dataset,
+we examine whether the subject of interest (includ-
+ing its substrings or paraphrases) appears in the
+synthetic data. The results are presented in Table 5.
+Interestingly, we observe that without DP, when
+100 canary samples are injected, the subject ap-
+pears as frequently as it does in the original data.
+However, with 1,000 and 10,000 injected samples,
+the subject tends to be over-represented in the syn-
+thetic data. Conversely, when DP is applied, the
+subject is not present in the synthetic data even
+with 100 injected samples, and only appears in a
+few generations even with 1,000 injected samples.
+This indicates that while DP protects the privacy
+of individual samples, it also has a detrimental
+effect on learning and generating the tail of the
+data distribution. And with 10,000 injections, al-
+though over-generation of the subject still occurs,
+it happens to a lesser degree compared to the case
+without privacy protection.
+5 Results on Private Customer Feedback
+To demonstrate the effectiveness of our method in
+safeguarding utility and privacy in practical scenar-
+ios, we evaluate its performance using a Microsoft
+private feedback dataset obtained from customers.
+Background. Industrial applications often re-
+ceive a significant volume of customer feedback
+regarding their products. Customer feedback is
+valuable as it provides insights into product per-
+formance, user satisfaction, and areas for improve-
+ment. While customer feedback may not typically
+contain personally identifiable information, it may
+still include sensitive details that could potentially
+disclose the customer’s identity. For example, cus-
+tomers might mention specific job titles, company
+names, or locations in their feedback. When com-
+bined with other publicly available information,
+these details could potentially be used to identify
+the customer and compromise their privacy. Pro-
+tecting the privacy of this information is crucial to
+comply with privacy regulations such as the GDPR
+(Art. 29 WP, 2014), build trust with customers, and
+mitigate the risk of unauthorized access or misuse.
+Dataset. In our scenario, 1M customer feedback
+is collected on a set of Microsoft products. For
+downstream tasks, we are interested in three at-
+tributes of the feedback, which we call A(ttribute)1,
+A2 and A3. Attributes can be a number of prod-
+uct characteristics including, but not limited to,
+user satisfaction scores, date and time range, prod-
+uct name, product type, location, etc. Using the
+attributes (A1, A2, A3) together with a particu-
+lar combination of their respective values, such
+as (V, V, V), the conditional text generation
+prompt becomes: “A1:V| A2: V| A3: V”.
+We use the GPT2-Large model with the settings
+described in Section 4.1 in our scenario.
+Downstream Task Performance. Similar to Sec-
+tion 4.2, to measure the quality of synthetic data,
+we evaluate the performance of classification mod-
+els trained on them. We train three classification
+models, to predict three attributes A1, A2, and A3
+with 5, 45, and 5 classes respectively. We present
+the results in Table 6. We observe that the down-
+stream task models trained on the synthetic data
+generated by GPT2-Large with DP ( ϵ= 4) achieve
+comparable performance to the ones trained on
+the synthetic data generated without DP ( ϵ=∞).
+However, especially for A2, the performance gap
+between models trained on the synthetic data and
+the original data is more pronounced in this sce-
+nario. This is primarily due to the dataset size,1328which is roughly half of the one adopted in Sec-
+tion 4 and A2 having a much larger set of classes
+compared to the other attributes. This highlights
+the importance of collecting data sufficiently repre-
+senting each class in scenarios where data contains
+a high number of sub-classes.
+Text Length Distribution. We further compare
+the sequence lengths of the synthetic data gener-
+ated with and without DP to the original dataset.
+The results are shown in Figure 4 of Appendix E.
+We notice a similar phenomenon that the data gen-
+erated with DP exhibits a length truncation effect
+compared to the data generated without DP.
+6 Related Work
+Synthetic Data Generation with DP. The prob-
+lem of DP synthetic data generation has been
+widely studied for tabular and image data in ma-
+chine learning. Notable works in the literature on
+DP tabular data generation address the privacy-
+utility trade-off problem by building Bayesian
+networks (Zhang et al., 2014), by preserving
+marginals (McKenna et al., 2021), or through
+training generative adversarial networks with DP-
+SGD (Kunar et al., 2021; Xie et al., 2018; Jordon
+et al., 2019; Tao et al., 2021). The literature on
+DP image generation has so far mostly focused on
+GAN-based methods (Augenstein et al., 2020; Xie
+et al., 2018; Neunhoeffer et al., 2021). To the best
+of our knowledge, there are only a few works on DP
+synthetic text generation. Bommasani et al. (2019)
+preliminarily outlined potential approaches with-
+out going in depth. A concurrent work (Mattern
+et al., 2022) generates synthetic data by fine-tuning
+pre-trained LMs with DP on a very small number
+of training samples (e.g., 25-5K). However, there
+are significant disparities in terms of methodology
+and experiment design. In terms of methodology,
+our approach offers simplicity and practicality for
+real-world use. We avoid the need to construct tem-
+plates for different task instructions, and we do not
+introduce additional prompt-mismatch loss during
+the fine-tuning of LMs. Regarding evaluations, we
+not only assess downstream classification but also
+consider text distribution similarity using various
+metrics (Section 4.4). Moreover, we include a pri-
+vate Customer Feedback dataset obtained from real
+practice, alongside the publicly available review
+datasets (e.g., Yelp).
+We point out that other one-to-one mapping ap-
+proaches including both token-level (Weggenmannand Kerschbaum, 2018; Feyisetan et al., 2019,
+2020; Xu et al., 2021a,b; Bo et al., 2021; Qu et al.,
+2021; Yue et al., 2021) and sentence-level (Krishna
+et al., 2021; Habernal, 2021; Meehan et al., 2022;
+Weggenmann et al., 2022) perturbations fail to sat-
+isfy our privacy requirement outlined in Section 3.1
+even though they possess certain DP guarantees
+themselves. This is because we require that the pro-
+cedure of synthetic text generation should be statis-
+tically similar whether a data sample appears in the
+original dataset or not. These one-to-one mapping
+methods focus on producing a perturbed version of
+a single data sample, therefore, cannot fulfill this
+requirement. Besides, such one-to-one perturba-
+tions cannot meet the requirement of GDPR (Art.
+29 WP, 2014) with regard to “linkability” since the
+data owner can always link the perturbed text to
+a specific user as long as they keep the user meta
+record. However, our method can fulfill the re-
+quirement as the data owner cannot link any of the
+generated sequences to a specific user.
+DP Fine-tuning of Language Models. DP fine-
+tuning has been recently demonstrated to be an
+effective privacy-preserving approach for solving a
+variety of NLP tasks including text classification,
+table-to-text generation, dialog generation, and se-
+mantic parsing (Li et al., 2022b; Yu et al., 2022;
+Mireshghallah et al., 2022; Du et al., 2023). How-
+ever, past works have not studied these techniques
+for the problem of synthetic text generation. Un-
+like the above works, we initiate a careful empirical
+study of private fine-tuning for building synthetic
+text generation models, measure the different as-
+pects of the approach, and demonstrate its general
+effectiveness as well as its unique limitations.
+7 Conclusion
+In this paper, we present a simple and practical
+recipe for generating synthetic text data with pri-
+vacy guarantees. Our method is built upon pre-
+trained language models and differential privacy,
+where the former enables us to generate high-
+quality synthetic text data and the latter provides
+formal privacy guarantees that no single example in
+the training dataset can influence the trained model
+by a substantial amount probabilistically. We con-
+duct comprehensive experiments evaluating both
+utility and privacy risks of the synthetic data. The
+results demonstrate that our method can generate
+high-quality text while mitigating privacy risks.13298 Limitations
+Through extensive empirical analyses, we demon-
+strated that our proposed method can produce high-
+utility synthetic text with strong privacy protection.
+However, we acknowledge there are limitations.
+Our method captures general statistical proper-
+ties of the original text but is not able to perfectly
+replicate all details. DP protects the privacy of indi-
+vidual samples in the original training text, but this
+means that DP also limits the model in learning
+the tail of the training distribution (Suriyakumar
+et al., 2021). Overall, strong DP guarantees render
+the generation of rare patterns in the original data
+unlikely. This means that the synthetic text gener-
+ated from a DP-trained model may potentially miss
+valuable information conveyed in the outliers of
+the training text.
+We observed in our conditional generation stud-
+ies that DP disproportionally affects classes (cor-
+responding to control codes) with different sample
+sizes. In particular, tight DP guarantees most nega-
+tively impact learning the distribution of small-size
+classes. Future work may study approaches that
+mitigate this negative impact for minority popula-
+tions in private synthetic data generation.
+We selected values for privacy parameters ϵ= 4
+andδ= 1/(N·logN)based on prior privacy-
+utility trade-off studies for text classification and
+table-to-text generation (Li et al., 2022b; Yu et al.,
+2021b). We leave it to future work for a more ex-
+tensive privacy-utility trade-off analysis for general
+synthetic text generation.
+Our canary extraction experiments demonstrated
+that strong DP guarantees lead to strong empirical
+privacy even for “private” information (the sub-
+ject) that appears across multiple training instances.
+However, we note that DP guarantees generally
+translate into strong empirical privacy guarantees
+only when individual samples have low or no cor-
+relation (Kifer and Machanavajjhala, 2011). It is
+therefore crucial that DP machine learning be ap-
+plied in conjunction with other modes of privacy-
+preserving techniques (e.g., data deduplication and
+redaction (Zhao et al., 2022)) for optimal protec-
+tion. For deployments of DP synthetic text genera-
+tion, one should also consider meaningful example
+boundaries.
+9 Ethics Statement
+In this work, we focus on the problem of synthetic
+text generation with formal privacy guarantees. Ourgoal is to generate synthetic text that preserves the
+statistical properties of the original text while also
+protecting the privacy of individuals. We take the
+issue of privacy very seriously and have designed
+our method to ensure that it meets the highest ethi-
+cal standards. In particular, we have incorporated
+differential privacy, which is the gold-standard pri-
+vacy mitigation technique employed in industry
+and by the US census bureau, to ensure that the
+synthetic generations do not compromise the pri-
+vacy of individuals present in the original data. We
+also recognize that synthetic text generated by our
+model has the potential to be misused, and we en-
+courage responsible and ethical use of our model.
+We encourage researchers and practitioners to con-
+sider the ethical implications of the method and to
+follow best practices in data privacy.
+Acknowledgements
+The authors would thank all the anonymous review-
+ers for their valuable and constructive comments.
+The authors would also thank Microsoft and OSU
+NLP group colleagues for providing suggestions
+and feedback at different stages of the project.
+References13301331133213331334A Implementation Details and
+Hyperparameters
+A.1 Details of Yelp dataset
+We sample 10 frequent business categories and
+remove the reviews that do not have ratings. 10
+categories are: Restaurants, Bars, Shopping, Event
+Planning & Services, Beauty & Spas, Arts & En-
+tertainment, Hotels & Travel, Health & Medical,
+Grocery, Home & Garden.
+A.2 Models trained without DP
+We specify the hyperparameters for the models
+trained without DP in Table 7. We train all the
+models without DP on the Yelp dataset with 16
+Tesla V100 GPUs and models on the internal feed-
+back data with 2 Tesla A100 GPUs.
+Model Epochs LR Batch size
+GPT2 5 5e-5 32
+GPT2-M 5 5e-5 32
+GPT2-L 5 2e-5 32
+A.3 Models trained with DP
+We specify the hyperparameters for the models
+trained with DP in Table 8. We train all the models
+with DP on the Yelp dataset with 16 Tesla V100
+GPUs and models on the internal feedback data
+with 2 Tesla A100 GPUs.
+A.4 Models for downstream text classification
+tasks
+We use Roberta-base model for all down-
+stream text classification tasks. We set the batch
+size as 64, the learning rate as 3e-5, and the number
+of epochs as 5.A.5 Embedding Distance Metrics for
+Similarity between Synthetic and Real
+Data
+1) F1 Score (Harmonic mean of Precision and Re-
+call) (Kynkäänniemi et al., 2019). The Precision
+and Recall estimate the average sample quality and
+the coverage of the sample distribution by checking
+whether a generation falls within the surroundings
+(e.g., k= 3nearest neighbors) of any original sam-
+ples (measured by the Euclidean distances) and
+whether an original sample falls within the sur-
+roundings of any generations.
+2) Fréchet Inception Distance (FID) (Heusel et al.,
+2017). The FID score is originally proposed to
+measure the quality of synthetic images in com-
+puter vision. Here we re-purpose it for synthetic
+text evaluation. It first calculates feature-wise mean
+and covariance matrices of the embedding vectors
+and then measures the distance of two sets based
+on Fréchet distance (Wasserstein-2 distance).
+3) MAUVE (Pillutla et al., 2021) compares the
+distributions of the synthetic data and the original
+data using divergence frontiers. Specifically, after
+embedding the text into embedding vectors, it first
+groups them into several clusters and then counts
+the cluster assignments to form histograms. Finally,
+a divergence curve built upon the histograms is
+plotted and the area under the curve is reported
+as the metric to measure the gap between the two
+distributions.
+A.6 Embedding Models for Similarity
+between Synthetic and Real Data
+We run 5 sentence-transformers from hugging-
+face.co: "all-MiniLM-L6-v2", "paraphrase-
+MiniLM-L6-v2", "all-mpnet-base-v2", "stsb-
+roberta-base-v2", "distilbert-base-nli-stsb-mean-
+tokens" and take the average for each metric.
+B Canary Sequences
+We construct 5 types of canary sequences shown
+in Table 9. To calculate the perplexity rank in Ta-
+ble 4, for each canary type, we construct 10,000
+similar candidates by replacing the canary place-
+holder with another randomly sampled named en-
+tity within the same category. The named entity
+lists are either obtained from the web (e.g., names
+and addresses) or generated randomly based on
+patterns (e.g., numbers, emails, license plates).1335
+C Distributions of Perplexities of Private
+Information of Injected Canary
+Sequences
+Figure 5 plots the distributions of perplexities of
+private information of injected canary sequences
+among their similar set of candidates measured by
+GPT2 models trained with and without DP.
+D Synthesize canary reviews with GPT-3
+We use the model text-davinci-003 with the
+prompt “Write a review talking about beautiful
+paintings by Van Gogh in a restaurant” to syn-
+thesize canary reviews. To increase the diversity,
+we try different values of hyperparameters (e.g.,
+top-k/p) and filter duplicates.
+E Sequence Length Distribution of the
+Original and Synthetic Data Generated
+with and without DP
+Figure 4 plots sequence length distributions of the
+synthetic data generated with and without DP and
+the original customer feedback data.
+F Sampled Synthetic Data
+In this section, we randomly sample 15 synthetic
+examples generated by GPT2, GPT2-Medium, and
+GPT2-Large in Table 10, Table 11, and Table 12
+respectively.13361337133813391340ACL 2023 Responsible NLP Checklist
+A For every submission:
+/squareA1. Did you describe the limitations of your work?
+9
+/squareA2. Did you discuss any potential risks of your work?
+10
+/squareA3. Do the abstract and introduction summarize the paper’s main claims?
+1
+/squareA4. Have you used AI writing assistants when working on this paper?
+Left blank.
+B/squareDid you use or create scientiﬁc artifacts?
+Left blank.
+/squareB1. Did you cite the creators of artifacts you used?
+No response.
+/squareB2. Did you discuss the license or terms for use and / or distribution of any artifacts?
+No response.
+/squareB3. Did you discuss if your use of existing artifact(s) was consistent with their intended use, provided
+that it was speciﬁed? For the artifacts you create, do you specify intended use and whether that is
+compatible with the original access conditions (in particular, derivatives of data accessed for research
+purposes should not be used outside of research contexts)?
+No response.
+/squareB4. Did you discuss the steps taken to check whether the data that was collected / used contains any
+information that names or uniquely identiﬁes individual people or offensive content, and the steps
+taken to protect / anonymize it?
+No response.
+/squareB5. Did you provide documentation of the artifacts, e.g., coverage of domains, languages, and
+linguistic phenomena, demographic groups represented, etc.?
+No response.
+/squareB6. Did you report relevant statistics like the number of examples, details of train / test / dev splits,
+etc. for the data that you used / created? Even for commonly-used benchmark datasets, include the
+number of examples in train / validation / test splits, as these provide necessary context for a reader
+to understand experimental results. For example, small differences in accuracy on large test sets may
+be signiﬁcant, while on small test sets they may not be.
+No response.
+C/squareDid you run computational experiments?
+4,5
+/squareC1. Did you report the number of parameters in the models used, the total computational budget
+(e.g., GPU hours), and computing infrastructure used?
+Appendix A1341/squareC2. Did you discuss the experimental setup, including hyperparameter search and best-found
+hyperparameter values?
+Appendix A
+/squareC3. Did you report descriptive statistics about your results (e.g., error bars around results, summary
+statistics from sets of experiments), and is it transparent whether you are reporting the max, mean,
+etc. or just a single run?
+4
+/squareC4. If you used existing packages (e.g., for preprocessing, for normalization, or for evaluation), did
+you report the implementation, model, and parameter settings used (e.g., NLTK, Spacy, ROUGE,
+etc.)?
+4.1
+D/squareDid you use human annotators (e.g., crowdworkers) or research with human participants?
+Left blank.
+/squareD1. Did you report the full text of instructions given to participants, including e.g., screenshots,
+disclaimers of any risks to participants or annotators, etc.?
+No response.
+/squareD2. Did you report information about how you recruited (e.g., crowdsourcing platform, students)
+and paid participants, and discuss if such payment is adequate given the participants’ demographic
+(e.g., country of residence)?
+No response.
+/squareD3. Did you discuss whether and how consent was obtained from people whose data you’re
+using/curating? For example, if you collected data via crowdsourcing, did your instructions to
+crowdworkers explain how the data would be used?
+No response.
+/squareD4. Was the data collection protocol approved (or determined exempt) by an ethics review board?
+No response.
+/squareD5. Did you report the basic demographic and geographic characteristics of the annotator population
+that is the source of the data?
+No response.1342

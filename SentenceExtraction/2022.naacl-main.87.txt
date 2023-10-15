@@ -1,1 +1,829 @@
-1194 Proceedings of the 2022 Conference of the North American Chapter of the Association for Computational Linguistics : Human Language Technologies , pages 1194 1212 July 10 - 15 , 2022 © 2022 Association for Computational Linguistics 1195 1196 1197 1198 1199 1200 1201 1202 1203 1204 1205 1206 1207 1208 1209 1210 1211 1212 
+
+Abraham Sanders, Tomek Strzalkowski, Mei Si, Albert Chang,
+Deepanshu Dey, Jonas Braasch, Dakuo WangRensselaer Polytechnic Institute, Troy, NY , USA,IBM Research, USA
+{sandea5,tomek,sim,changa4,deyd,braasj}@rpi.edu
+dakuo.wang@ibm.com
+Abstract
+Recent advances in large-scale language mod-
+eling and generation have enabled the creation
+of dialogue agents that exhibit human-like re-
+sponses in a wide range of conversational sce-
+narios spanning a diverse set of tasks, from
+general chit-chat to focused goal-oriented dis-
+course. While these agents excel at generating
+high-quality responses that are relevant to prior
+context, they suffer from a lack of awareness of
+the overall direction in which the conversation
+is headed, and the likelihood of task success in-
+herent therein. Thus, we propose a framework
+in which dialogue agents can evaluate the pro-
+gression of a conversation toward or away from
+desired outcomes, and use this signal to inform
+planning for subsequent responses. Our frame-
+work is composed of three key elements: (1)
+the notion of a "global" dialogue state (GDS)
+space, (2) a task-specific progression function
+(PF) computed in terms of a conversation’s
+trajectory through this space, and (3) a plan-
+ning mechanism based on dialogue rollouts by
+which an agent may use progression signals to
+select its next response.
+1 Introduction
+All human conversation serves some purpose.
+These may range from negotiating an agreement to
+explaining a topic to maintaining a social relation-
+ship. People are generally capable of forming an
+assessment, sometimes subconsciously, whether a
+conversation is going well or not and adjusting their
+behavior accordingly. Such assessment, which un-
+derlies most human conversation, is essential in
+continuous awareness of the direction where the
+interaction is heading and whether the parties are
+in sync or not, e.g., Bernieri and Rosenthal (1991).
+In a task-oriented interaction, the participants as-
+sess if progress towards a successful outcome is
+being made. In a negotiation, parties assess if an
+agreement is likely. Even in a casual conversation,
+people intuitively sense when to continue, when to
+change the subject, or when to stop. Based on suchFigure 1: Our framework applied to the charity solici-
+tation task in Persuasion For Good (Wang et al., 2019).
+Given the dialogue history (center left), the system uses
+rollouts (Lewis et al., 2017) to simulate the outcome of
+two response candidates (bottom, in red). Each rollout
+is mapped as a path through the Global Dialogue State
+space (center right) where it can be compared with sim-
+ilar outcomes. The candidates are finally ranked using
+the Progression Function (top), and the best is selected.
+(subjective) assessment, participants adjust what
+to say next: whether to push forward, make a
+concession, soften the tone, digress, or say good-
+bye. A wide range of research in conversation
+and discourse analysis is devoted to these and
+related issues including (Beebe and Masterson,
+2000; Cassell et al., 2007; Friedman, 2004; Grem-
+ler and Gwinner, 2008; Langewitz et al., 2003);
+however, recent efforts in Dialogue State Track-
+ing (DST) have been primarily focused on collect-
+ing fine-grained details (e.g., slot-value pairs for1194travel booking or restaurant reservation) (Balara-
+man et al., 2021) without concern for the overall di-
+rection and quality of the conversation, even though
+the latter is critical for achieving human-level dia-
+logue interaction.
+As such, we approach dialogue state tracking at
+a higher level, focusing instead on what we call the
+Global Dialogue State (GDS) . Given a conversa-
+tional task (e.g., negotiation), the global state of a
+dialogue reflects the most likely outcome (e.g., a
+strong agreement or a stalemate) given the history
+of the dialogue up to the current turn. In contrast to
+traditional DST, the global state remains invariant
+to the specific details discussed at each turn (e.g.,
+names, dates, quantities) that are typically the con-
+cern of slot-filling models. Rather, global dialogue
+states are influenced by the contexts in which these
+details occur (e.g., “I would love to donate $5 to
+this charity!” vs. “I would never donate $5 to this
+charity”). Thus, the global state of a dialogue can
+be measured in terms of its semantic similarity to
+other groups of dialogues for the same task, which
+can be naturally formulated as a cluster-assignment
+problem in the dialogue embedding space. That
+is, a dialogue which is assigned at the current turn
+to a cluster of highly successful outcomes may as-
+sume a high likelihood of success, and likewise
+a dialogue assigned to a cluster of unsuccessful
+outcomes may assume a low likelihood of success.
+It follows from this that the path of a dialogue
+through global state space can be used to derive a
+Progression Function (PF) to give turn-level es-
+timates of task success, which can in turn be used
+by a dialogue agent to inform its next response.
+The remainder of this paper is organized as fol-
+lows: In Section 2 we review relevant literature
+pertaining to dialogue state tracking and response
+planning; in Section 3 we formally define the global
+dialogue state and progression function, propose
+supervised andunsupervised approaches for mod-
+eling them, and describe how they can be used to
+assess and select dialogue response candidates; in
+Section 4 we experimentally apply our framework
+to the charity solicitation task in the Persuasion
+For Good dataset (Wang et al., 2019), reporting re-
+sults from automatic and manual evaluations; and
+in Sections 5 and 6 we conclude with a discussion
+of limitations and future directions. Code for our
+methods and experiments has been released,anda listing of software packages we use can be found
+in Appendix A.
+2 Related Work
+Our work lies at the intersection of dialogue state
+tracking and response planning. As previously
+noted, we approach dialogue state at a much higher
+level than is typically seen in the DST literature.
+Our concept of global dialogue state is not mutually
+exclusive with traditional DST approaches, which
+we refer to from here on as local DST. Rather,
+an effective dialogue system might integrate local
+and global DST approaches to enable simultane-
+ous tracking of user intents and slot-value pairs
+(needed for interfacing with external resources) and
+the overall likelihood of conversational success.
+2.1 Dialogue State Tracking
+Local DST approaches are used in task-oriented
+(also called goal-oriented) dialogue systems. Lo-
+cal DST is responsible for identifying user in-
+tent (e.g., search for restaurants) and extracting
+slot-value pairs (e.g., location, price range). Re-
+cent DST systems perform state tracking in a
+diverse set of domains, including food ordering
+(Lertvittayakumjorn et al., 2021), travel reserva-
+tions (Qin et al., 2021), negotiations (He et al.,
+2018), and many others. Datasets such as Mul-
+tiWOZ (Budzianowski et al., 2018; Eric et al.,
+2020; Zang et al., 2020) and SGD (Rastogi et al.,
+2020) provide large-scale testbeds for training sin-
+gle DST systems that generalize across many task
+domains. However, local DST is generally not
+deployed in open-domain end-to-end dialogue sys-
+tems that focus on social interaction and user en-
+gagement, recent examples including DialoGPT
+(Zhang et al., 2020), Meena (Adiwardana et al.,
+2020), and BlenderBot (Roller et al., 2021; Xu
+et al., 2021). In open-domain models, the task is
+unconstrained and thus it makes little sense to em-
+ploy traditional slot-based dialogue state trackers.
+Instead, these models track state implicitly in their
+latent representations of dialogue history. Unlike
+local DST, global state tracking is applicable in
+both the task-oriented and open-domain settings.
+2.2 Dialogue Response Planning
+Many approaches exist for planning in dialogue
+response generation. Planning helps a dialogue
+agent maintain coherence over multiple turns and
+stay on track to complete its goal. Lewis et al.1195(2017) introduce Dialogue Rollouts, allowing a
+negotiation agent to simulate the remainder of a
+conversation based on each of multiple candidate
+responses and select the one which yields the best
+outcome. Yarats and Lewis (2018) follow up by
+separating semantic planning and surface realiza-
+tion for response generation by first producing a
+latent semantic representation of the dialogue plan
+and then conditioning on it during generation with
+rollouts. Similarly, Jiang et al. (2019) implement
+a look-ahead module to implicitly predict multi-
+ple future turns in an end-to-end encoder-decoder
+architecture, experimenting with negotiation and
+restaurant reservation settings. These works all
+experiment in task domains where goal achieve-
+ment is explicitly measurable, which is not true
+in the general case. Thus we propose to combine
+such methods with our progression function which
+provides estimates of goal completion likelihood.
+Particularly, in this paper we demonstrate the use
+of rollouts with the PF as a reward signal.
+3 Methods
+The goal of our system is to construct a global di-
+alogue state space for a task-specific dataset and
+learn a progression function to estimate how well
+an ongoing dialogue is progressing toward the de-
+sired outcome of the task. The quantity output
+by the progression function is an estimate of a
+dialogue-level attribute which indicates task suc-
+cess (e.g. satisfaction in a customer service task).
+In many task domains, the success of a conversa-
+tion cannot be completely measured by a single
+attribute. For example, in the charity solicitation
+task we use in our experiments, donation amount
+is the primary success attribute. Here, there are
+cases where the conversation appears to go very
+well, but ultimately no donation is made for unex-
+pected reasons such as the solicitee not being able
+to afford to donate. One could reasonably expect
+such an outcome to be “acceptable” in the context
+of a solicitation task since the solicitee has engaged
+with the solicitor and displayed interest, and we
+cannot reasonably expect the solicitor to force a do-
+nation out of someone who cannot afford it. Thus
+we introduce the “ acceptability score ”, a synthetic
+attribute that measures success by considering mul-
+tiple factors (e.g., donation amount and sentiment).
+For any dialogue dataset, the acceptability score
+combines multiple dialogue-level attributes in a
+way sensitive to their covariance with the primarysuccess attribute:
+ACC=prim+/summationdisplayCov(prim,attr)·v
+(1)
+where primis the primary success attribute (e.g.
+donation amount) value for dialogue D,vis the
+vector of all other attribute values (e.g., sentiment)
+for dialogue D, and Cov(prim,attr)is the training
+set covariance between the primary success indica-
+tor and the i-th other attribute. We define the output
+of the progression function to be an estimate of the
+acceptability score.
+To learn the progression function, dialogue-level
+attribute annotations must exist for use in this pur-
+pose. However, in many settings such annotations
+are not available in sufficient quantity to directly
+learn a progression model with sufficient general-
+ization. Consequently, we propose supervised and
+unsupervised approaches for learning the global
+state and progression models.
+3.1 Unsupervised Approach
+3.1.1 Global Dialogue State
+In the unsupervised approach, the GDS space is a
+dialogue embedding space where clusters of em-
+beddings represent groups of dialogues with similar
+semantic content. For each complete dialogue D
+in the training set, all utterances are independently
+embedded and then pooled to create a dialogue-
+level embedding u∈Rwhere dis the embed-
+ding size. The GDS space is thus given as a matrix
+inRwhere Nis the number of complete di-
+alogues. To embed utterances we take advantage
+of pre-trained sentence encoders exposed to large-
+scale corpora. Specifically, we use a publicly avail-
+able MPNet (Song et al., 2020) model fine-tuned
+for semantic textual similarity using a contrastive
+objective on over 1B training pairs from 32 dis-
+tinct datasets.To combine utterance embeddings
+into a dialogue-level embedding we use recency-
+weighted mean pooling. The recency weight β
+determines how much emphasis is placed on more
+recent utterances, where β= 0 means all utter-
+ances are weighted evenly and β >0means that
+more emphasis is placed on more recent utterances.
+The motivation for recency weighting is to test the
+hypothesis that more recent developments in a con-
+versation are more relevant for predicting current1196
+progression toward a goal. For example, a con-
+versation may start out off-task with participants
+engaging in small talk, and then later re-focus.
+The embedding for dialogue Dwith|D|utter-
+ances is thus formulated as u=Usoftmax (r)
+where Uis the matrix of utterance vectors in
+Randr∈Ris a vector of evenly spaced
+real numbers over the interval [0, β]. The softmax
+ensures all recency weights sum to 1 and can be
+interpreted as probabilities as done with attention
+scores in (Bahdanau et al., 2015; Vaswani et al.,
+2017). As shown in Figure 3, each utterance is thus
+weighted by a monotonically increasing probability
+mass where higher values of βcause more mass to
+be concentrated at the end of the dialogue.
+The unsupervised GDS model is a clustering
+of the dialogues in their embedding space. The
+dialogue embeddings are either clustered directly
+or after projection to a lower-dimensional spaceusing Parametric UMAP (Sainburg et al., 2020;
+McInnes et al., 2018a). We experiment with k-
+means and HDBSCAN (McInnes and Healy, 2017;
+Campello et al., 2013) to cluster the embeddings.
+For k-means, we choose the number of clusters
+kand train with 10 random initializations. For
+HDBSCAN, we choose the minimum cluster size
+and minimum samples hyperparameters, and the
+optimal number of clusters are selected automat-
+ically. Unlike k-means which simply partitions
+the embedding space, HDBSCAN classifies some
+embeddings as noise points. Clustering hyperpa-
+rameters are selected by cross-validation on several
+metrics as described later in Section 4. The pro-
+cess of constructing the GDS model is illustrated
+in Figure 2.
+The clusters output by this process can be in-
+terpreted as the equivalence classes of final global
+states possible for the task represented in the dia-
+logue dataset. To estimate the global state of an
+ongoing dialogue D, it is embedded as u∈R
+in the same manner as the complete training dia-
+logues, followed by optional dimensionality reduc-
+tion. The trained k-means or HDBSCAN model
+is then used to assign Dto one of the existing
+clusters, or possibly as a noise point in the case of
+HDBSCAN.
+Each cluster is assigned an aggregate acceptabil-1197ity score by taking an average of acceptability for
+each dialogue in the cluster. If k-means is used, we
+aggregate using a 10% trimmed mean across all
+dialogues in the cluster. If HDBSCAN is used, a
+probability is returned for each dialogue represent-
+ing the likelihood that it is a member of its assigned
+cluster, so we compute the probability-weighted av-
+erage across all dialogues in the cluster. Dialogues
+classified as noise points are ignored.
+To visualize the GDS model, Parametric UMAP
+is used again to project the clustered dialogue em-
+beddings into RorR. As shown in Figure 1,
+the GDS model can be mapped as a scatter plot
+with each cluster labeled by its aggregate values.
+If k-means is used, the cluster centroids can be
+displayed as a bold point within each cluster. HDB-
+SCAN clusters do not have centroids, but they do
+have a number of representative points that are
+close to the cluster core. We average these points
+to simulate a centroid for display purposes, and
+likewise show it as a bold point within each cluster.
+To show how an ongoing dialogue Dtraverses the
+GDS space over time, its embeddings at each turn
+tare projected onto the map and connected with
+line segments to form a path.
+3.1.2 Computing Progression
+Since each cluster in the GDS space is intended
+to represent a class of end-task global states, we
+compute the progression of an ongoing dialogue
+Dwith respect to the likelihood that its final global
+state will rest in each individual cluster. Supposing
+there are kfinal clusters after running k-means
+or HDBSCAN, we compute a probability vector
+p∈Rsuch that p=P(u∈C)fori∈
+{1, . . . k}where Cis cluster i.pis computed
+differently for k-means and HDBSCAN. K-means
+does not produce a probabilistic soft clustering, so
+we define pwith respect to the proximity of u
+to the centroids of each cluster:
+p=softmax/parenleftbigg1
+||u−c||:i∈ {1, . . . k}/parenrightbigg
+(2)
+where c∈Ris the centroid of cluster i. HDB-
+SCAN does produce a probabilistic soft clustering,
+so in that case pis already computed.
+We ultimately want the closest (or most proba-
+ble) clusters for ongoing dialogue Dto have the
+most sway in estimating its progression at the cur-
+rent point in time. That is, if Dhas moved intoa cluster of high-success outcomes, its progres-
+sion should increase. Likewise if Dhas moved
+away from such a high-success cluster, either into
+a lower-success cluster or off-task into a noisy or
+unknown region of the GDS space, its progression
+should decrease. Thus, once uis computed, we
+estimate its progression as the probability-weighted
+average of the aggregate acceptability scores as-
+signed to each cluster. This is formulated as
+PROG (u) =vp
+/summationtextp(3)
+where v∈Ris a vector of the aggregate accept-
+ability scores assigned to each cluster. The scaling
+factor in the denominator ensures that ongoing di-
+alogue embeddings classified as noise points by
+HDBSCAN will not be assigned progression val-
+ues close to zero as a consequence of not belonging
+to any cluster, which can cause significant fluctu-
+ation in the progression function as the dialogue
+traverses noisy regions of the GDS space.Fig-
+ure 2 illustrates how progression of an ongoing
+dialogue depends on its position in GDS space.
+3.2 Supervised Approach
+For the supervised approach, we simply fine-tune
+RoBERTa (Liu et al., 2019) to directly predict ac-
+ceptability given the dialogue history text, where
+all utterances are concatenated into a single se-
+quence. To construct the GDS space we obtain
+the dialogue level embedding udirectly from the
+CLS (<s>) token for each complete dialogue in the
+training set, and cluster them as in Section 3.1.1.
+Unlike the unsupervised approach where recency
+weighting is used to “attend” to more recent parts
+of the dialogue, the supervised fine-tuning process
+causes the CLS embedding to aggregate the parts
+of the dialogue most relevant to the task objective,
+which is more optimal than the recency heuristic.
+Also, unlike the unsupervised approach where pro-
+gression for an ongoing dialogue is computed with
+respect to its embedding, here progression is di-
+rectly predicted by RoBERTa. In our experiments
+we compare RoBERTa-base, RoBERTa-large, and
+RoBERTa-large-adapted, the latter receiving ad-
+ditional domain adaptation training for dialogue.
+Domain adaptation is done via Masked Language
+Modeling (MLM) on a self-generated version of1198the Gutenberg Dialogue Dataset (Csaky and Rec-
+ski, 2021). Hyperparameters and model weights
+from domain adaptation training are provided with
+our code release.
+3.3 Response Planning
+To allow a dialogue agent to use the progression
+function as feedback for response planning, we
+adopt Dialogue Rollouts (Lewis et al., 2017) to
+simulate the outcomes of a set of response candi-
+dates. A rollout for a response candidate simulates
+the next Nturns of the conversation (for both par-
+ticipants) given that candidate is used. At each turn
+of a negotiation task, Lewis et al. (2017) sample a
+set of cresponse candidates and srollouts per can-
+didate. They score each rollout by a deterministic
+reward (the value of the items “won” by the agent
+during negotiation), and rank each candidate by the
+average of its rollout scores. The highest ranking
+candidate is then selected by the agent. As shown
+in Figure 2, we generalize this process to any task
+for which a progression function can be learned,
+replacing the deterministic reward with the pro-
+gression function value. To demonstrate this, we
+fine-tune the 762M parameter DialoGPT (Zhang
+et al., 2020)as a dialogue response generator and
+use beam sampling to generate response candidates
+and rollouts. We select DialoGPT for this task as it
+is pre-trained on a large Reddit dialogue corpus.
+4 Experiments
+4.1 Dataset
+We apply our framework to the Persuasion For
+Good dataset (Wang et al., 2019), which is a crowd-
+sourced dialogue dataset where the task for an indi-
+vidual playing the role of persuader is to convince
+another individual playing the role of persuadee to
+make a donation to a well-known children’s charity.
+We selected this dataset since it has a clear task
+objective (to solicit donations), but a complex re-
+lationship between dialogue content and success.
+The dataset authors identify 10 distinct persuasion
+strategies used to solicit donations, where differ-
+ent strategies correlate with donation amount at
+different strengths. Additionally, participants in
+Persuasion For Good dialogues complete a pre-task
+psychological survey, yielding 23 attributes based
+on the Big-Five personality traits (Goldberg, 1992),
+the Moral Foundations endorsement (Graham et al.,2011), the Schwartz Portrait Value (Cieciuch and
+Davidov, 2012), and the Decision-Making style
+(Hamilton et al., 2016) questionnaires for each in-
+dividual. The dataset authors demonstrated varying
+degrees of correlation between these psycholog-
+ical attributes and the end-task donation amount.
+The complexity in measuring progression in this
+context, coupled with it being a relatively small
+dataset, makes Persuasion For Good an interesting
+and challenging testbed for our framework. Persua-
+sion For Good contains 1017 dialogues, each with
+approximately 10 turns per speaker (20 utterances).
+4.2 Progression Function Experiments
+As the objective of the task is to solicit donations,
+we consider the end-dialogue persuadee donation
+amount to be the primary dialogue success indi-
+cator. We also augment the dataset by computing
+average dialogue sentiment. To compute sentiment
+we use a RoBERTa modelfine-tuned on the sen-
+timent classification task of the TweetEval bench-
+mark (Barbieri et al., 2020), which was publicly
+released by the benchmark authors. We score sen-
+timent at the utterance level in the range [−1,1]
+by multiplying the sentiment class probabilities
+predicted by RoBERTa for negative, neutral and
+positive by {−1,0,1}respectively and summing
+the result. We then average the utterance-level sen-
+timent score for each dialogue.
+We filter the dataset to eliminate dialogues with
+end-task donation amounts outside the allowed task
+parameters (between $0 and $2 USD), and use a
+regular expression to filter out dialogues where the
+persuadee fails to make a donation after promis-
+ing a non-zero dollar amount in the conversation.
+After filtration we are left with 751 dialogues for
+our study. We split the dialogues into a training
+and test set, leaving 577 dialogues for training and
+174 for testing. After splitting, we mean-center the
+dialogue values in the training set for each attribute
+and scale them to have unit variance. We apply the
+same transformation to the test set using the dis-
+tribution parameters of the training set. Our final
+pre-processing step is to compute the acceptabil-
+ity score. To do this, we compute the covariance
+matrix of the dialogue-level attribute values in the
+training set, which include the donation amount
+and psychological attributes for both the persuader
+and persuadee from the original dataset, along with1199our computed sentiment scores. Since the values
+are all standardized, the covariances are equivalent
+to Pearson’s r. We select the covariances of all
+attributes with respect to the persuadee donation
+amount (see Figure 5 in Appendix B) and define
+the acceptability score of each dialogue Das de-
+fined in Section 3. We use the same covariances
+obtained from the training set to compute accept-
+ability scores on the test set. After pre-processing,
+the training set has 52 total attributes. These in-
+clude the persuadee/persuader donation amounts,
+psychological variables, sentiment, and the accept-
+ability score.
+4.2.1 Progression Model Training
+We train four progression models as outlined in Sec-
+tions 3.1 and 3.2: (1) Unsupervised, (2) RoBERTa-
+base, (3) RoBERTa-large, and (4) RoBERTa-large-
+adapted. For each model, 10% of the training set
+is held out as a validation set (58 dialogues). For
+the unsupervised model, a grid search is run for
+the hyperparameters (e.g., # clusters, recency β,
+dim. reduction, etc.) over the validation set, and
+the final model is obtained by re-training over the
+full training set using the best hyperparameters.
+The final model uses k-means for clustering with
+k= 21 and recency weight β= 0.3. A com-
+plete hyperparameter listing and details on the grid
+search can be found in Appendix F. For the super-
+vised RoBERTa models, fine-tuning is done with
+AdamW (Loshchilov and Hutter, 2019) and an ini-
+tial learning rate of 3×10for a maximum of 30
+epochs. Early stopping is used over the validation
+set with the checkpoint corresponding to the lowest
+validation loss selected as the final model.
+4.2.2 Automatic Evaluation
+We evaluate the progression models on the follow-
+ing automatic metrics: (1) Mean Absolute Error
+(MAE ) in predicting dialogue acceptability, and (2)
+Pearson’s correlation ( r) between overall PF slope
+and dialogue acceptability. With MAE we validate
+that the progression function is able to estimate
+success of a complete dialogue, while PF slope cor-
+relation validates that during an ongoing dialogue,
+progression increases over time for high-success
+dialogues and decreases over time for low-success
+dialogues. To measure PF slope correlation, we fit
+a least-squares regression line to the progression
+curve of each dialogue in the test set, and measure
+Pearson’s rbetween the regression slopes and their
+corresponding acceptability scores. For robustness
+we repeat this evaluation 33 times with varying
+initialization seeds for each model type (final hy-
+perparameters stay constant) and report the means
+and standard deviations across runs in Table 1.
+Unsurprisingly, the supervised models outper-
+form the unsupervised model on both metrics,
+which is expected since they directly optimize
+a mean squared error objective. Of the super-
+vised models, the RoBERTa-large instances per-
+form the best, with dialogue domain adaptation
+boosting each metric. Pearson’s ris significant at
+thep <0.01level for all runs (the null hypothesis
+is non-correlation).
+4.2.3 Manual Evaluation
+To obtain a more precise evaluation, we asked three
+annotators to estimate sentence-level progression
+for dialogues in our test set. Two graduate stu-
+dents and one postdoc in our lab served as our
+annotators. For each of twelve randomly selected
+test dialogues, each annotator rated all sentences
+on a scale of {-1, 0, 1} for progression, with -1
+indicating regression from the task goal, 0 indi-
+cating neutral progression, and +1 indicating pro-
+gression toward the task goal. Altogether, each
+annotator provided 431 sentence ratings across 244
+utterances. After aggregating at the utterance level,
+average inter-annotator agreement is 0.57 (Cohen’s
+kappa). For each dialogue, the cumulative sum of
+the utterance-level manual ratings creates a ground-
+truth progression curve, as shown in Figure 4.
+We evaluate the progression models against the
+ground-truth curves using Pearson’s correlation ( r)
+since the PF output and cumulative manual ratings
+are continuous and on different scales. We report
+the following correlations: (1) between utterance-
+level PF value and ground-truth value ( utt), (2)
+between utterance-level PF slope and ground-truth
+slope ( utt-sl ), (3) between dialogue-level PF slope
+and ground-truth slope ( dlg-sl ), and (4) between
+dialogue-level PF slope and the final ground-truth
+progression value ( dlg-sl-f ). We repeat this evalua-
+tion for each of the 33 uniquely initialized model in-1200
+stances of each type from Section 4.2.2, averaging
+each metric across raters and then across runs. We
+report the aggregate means and standard deviations
+across runs in Table 2. A complete listing of results
+for each rater (averaged across runs) is provided
+in Appendix C, along with detailed explanations
+of each metric (Appendix D). Additionally, Figure
+10 in Appendix E provides examples of disagree-
+ment between the PF and ground-truth progression
+curves which can be challenged despite high inter-
+annotator agreement, demonstrating difficulty in
+establishing ground-truth for this open-ended task.
+4.2.4 Benefit of Domain Adaptation
+To verify the beneficial effect of domain adaptation
+we perform two-tailed paired t-tests to confirm the
+differences in means between RoBERTa-large and
+RoBERTa-large-adapted on all automatic and man-
+ual metrics. For each metric, we pair the results
+from both models for each run of the same seed,
+since their regression heads would have received
+identical initializations. We find that the means of
+utt,utt-sl ,dlg-sl , and dlg-sl-f differ at the p <0.01
+significance level, and the means of the automatic
+Pearson’s rmetric differ at the p <0.05level. This
+confirms our intuition that domain adaptation for
+dialogue prior to fine-tuning the regression objec-
+tive aids generalization in this task.
+4.3 Rollout Experiments
+To demonstrate the ability of the PF to guide a dia-
+logue agent, we use it to score rollouts generatedwith DialoGPT as described in Section 3.3. Specif-
+ically, we design a self-play experiment to automat-
+ically evaluate the effect of PF-guided rollouts on
+the success of the solicitation task in Persuasion For
+Good. The following summarizes the experimental
+setup, procedure, and results.
+4.3.1 Exeperimental Setup
+First, we fine-tune DialoGPT to generate responses
+on Persuasion For Good. We add speaker control
+tokens to the vocabulary so that the model can
+be conditioned to generate as the persuader or per-
+suadee, respectively. Training is done with AdamW
+(initial lr= 5×10) for 6 epochs with early stop-
+ping over a 10% validation set using perplexity.
+The final model checkpoint was selected after 3
+epochs, achieving validation perplexity of 8.82.
+We then select a progression model to use for all
+self-play runs. Since the supervised RoBERTa-
+large-adapted model achieved the best average
+scores across all automatic and manual evaluations,
+we randomly select one of the 33 RoBERTa-large-
+adapted instances from Section 4.2.2 to use for all
+runs. We use this instance for rollout scoring and to
+measure the progression of each self-play dialogue.
+Finally, we train a binary classifier to identify
+if the persuadee has stated the intent to donate in
+a conversation, which we use to detect success-
+ful self-play dialogues. We fine-tune a RoBERTa
+model as a classifier using just the persuadee’s ut-
+terances as input and use binarized donation labels
+in Persuasion For Good as targets. Specifically, for
+each dialogue the label is 0 if the donated amount
+is $0, otherwise it is 1. We use the manually veri-
+fied intended donation labels from Persuasion For
+Good “ANNSET” for our validation and test splits
+and use the remaining end-task donation labels for
+training. Training is done with early stopping over
+the validation split using macro F1. The final model
+checkpoint achieved test F1 of 0.89 and test accu-
+racy of 0.90. All three trained models used in this
+experiment are available to download (see our code
+release for instructions and hyperparameters).
+4.3.2 Self-Play Procedure
+From our test set of 174 dialogues, we manually
+filter out 41 in which the persuadee pledges a do-
+nation within the first 10 utterances, leaving 133
+remaining conversations. For each of these, the re-
+sponse generator is given the first 10 utterances as
+context and tasked to complete a second set of 10
+utterances, playing the role of both the persuader1201
+and persuadee. Since the task is solicitation, we al-
+low the generator to use rollouts only when acting
+as the persuader. We perform the self-play exper-
+iment using three persuader modes: (1) with no
+rollouts ( No RO ), (2) with 2 response candidates,
+2 rollouts per candidate, and 3 utterances per roll-
+out (2x2x3 ), and (3) with 3 response candidates, 3
+rollouts per candidate, and 5 utterances per rollout
+(3x3x5 ). For each utterance in each rollout, we
+use beam sampling with num_beams=6, top_k=50,
+top_p=0.95, and temperature= 1.5+0.002·Twhere
+Tis the number of tokens in the dialogue history.
+After generation, we compute the following met-
+rics for each dialogue: (1) progression using the
+selected RoBERTa-large-adapted instance ( Prog. ),
+(2) persuader and persuadee sentiment using the
+sentiment classifier from Section 4.2 ( ER Sent. &
+EE Sent. ), and (3) the percent of test dialogues
+where the persuadee pledges a donation amount or
+explicitly states intent to donate, as detected by the
+binary donation intent classifier ( EE Don.% ).
+4.3.3 Self-Play Results
+For robustness we repeat this procedure 5 times
+with varying generation seeds for each persuader
+mode. In total, 1,995 self-play dialogues are com-
+pleted (133 dialogues for each of 3 modes for each
+of 5 seeds). We average each metric across dia-
+logues and then across runs, and report the aggre-
+gate means and standard deviations across runs.
+Additionally, to verify the benefit of rollouts, we
+perform two-tailed paired t-tests to confirm the
+differences in means between the rollout-enabled
+modes ( 2x2x3 and3x3x5 ) and the baseline ( No
+RO). For each metric, we average the results across
+runs and pair these averages from both modes for
+each dialogue. Results are shown in Table 3.
+We observe that the mean progression increases
+significantly when rollouts are used. This is ex-
+pected since response candidates with the highest
+average end-rollout progression are selected. We
+also observe that rollouts lead to higher average
+sentiment for both the persuader and persuadee,which makes sense due to the correlation between
+sentiment and the acceptability score (see Figure
+5 in Appendix B). Finally, rollouts yield a higher
+percentage of dialogues with a pledged or intended
+donation.All of these results are significant at
+thep <0.01level except for EE Don.% in2x2x3
+mode which is significant at p <0.05.
+Although progression is noticeably higher for
+the3x3x5 mode than for the 2x2x3 mode (0.95
+vs 0.69), all other metrics are close between these
+modes with a small advantage in 3x3x5 mode. This
+suggests that scaling rollout simulations can be
+beneficial, but there may be diminishing returns for
+simulation size. Example self-play dialogues are
+provided in Tables 7, 8, and 9 in Appendix H.
+5 Limitations & Future Direction
+We recognize several limitations of our study which
+warrant follow-up investigation. This study focuses
+on a single task and dataset, and thus is subject to
+the assumptions and biases therein. Since we in-
+tend our framework to be general, it is prudent to
+perform additional studies to verify the efficacy of
+our methods on a variety of datasets spanning mul-
+tiple dialogue domains and tasks. Also, although
+we provide automatic evaluation of the ability of
+rollouts to improve performance on a solicitation
+task, we cannot assume that humans would respond
+in the same way as DialoGPT. Thus, human evalu-
+ation is needed to further validate this approach.
+6 Conclusion
+In this work we introduced the concept of global di-
+alogue state and proposed a framework with which
+a dialogue agent can gain awareness of where an
+ongoing conversation is headed, the likelihood of a
+successful outcome, and how its own response de-
+cisions impact the overall direction of the dialogue.
+We demonstrated that an unsupervised approach
+to modeling the GDS space and progression func-
+tion is feasible, which is useful in sparsely-labeled
+settings. However, we showed that with domain-
+adaptation pre-training for dialogue, supervised
+methods are preferable when labels are available.
+Finally, we demonstrated how using the PF as a
+feedback mechanism via dialogue rollouts allows
+an agent to improve outcomes on a solicitation task.1202Ethical Considerations
+Ethical Dialogue Systems
+We acknowledge the potential risks inherent in the
+deployment of goal-oriented dialogue systems, and
+especially note that care must be taken to ensure
+persuasive dialogue systems are designed for bene-
+ficial use as discussed by Wang et al. (2019). Con-
+cretely, when applying our framework, care must
+be taken to ensure that the goal of the system (de-
+fined by the primary success attribute of the accept-
+ability score) should be generally accepted as ben-
+eficial. For example, our basis for dialogue accept-
+ability in this work is with respect to raising money
+for children’s charity. In general, the achievement
+of the system’s goal should not intentionally lead
+the user or any other party to harm. Additionally,
+the definition of acceptability, through its primary
+or any other correlated attributes, should not al-
+low for discriminative responses, purposefully ma-
+licious discourse, or other violations of accepted
+ethical standards. For example, we include senti-
+ment as secondary attributes in the acceptability
+score, which, when applied via dialogue rollouts,
+encourages the system to be courteous, polite, and
+respectful. It is possible with minimal effort to in-
+clude further secondary attributes that identify bias,
+hate speech, and other indicators to help the system
+remain safe to use.
+Annotator Compensation
+All manual annotators were recruited on a volun-
+tary basis in an educational setting and did not
+receive or expect monetary compensation. Specifi-
+cally, two graduate students and one postdoc in our
+lab served as our annotators.
+Environmental Impact
+All training and inference in this work was done
+with two NVIDIA Quadro RTX 8000 GPUs. The
+most compute-intensive portion of the work was
+the additional domain adaptation pre-training for
+RoBERTa-large-adapted (see Section 3.2), which
+took approximately two weeks. After that the multi-
+seed self-play evaluations took approximately four
+days, and all other operations (e.g., training and
+evaluating PF models, fine-tuning DialoGPT) took
+24 hours or less.
+Acknowledgements
+We would like to thank our manual annotators for
+their valuable contribution and the anonymous re-viewers for their helpful feedback. This paper is
+based upon work supported in part by the United
+States Air Force under Contract No. FA8750-21-
+C-0075 and in part by the IBM Corporation under
+the Artificial Intelligence Research Collaboration
+Agreement No. W1771793 between IBM and Rens-
+selaer. Any opinions, findings and conclusions or
+recommendations expressed in this material are
+those of the author(s) and do not necessarily reflect
+the views of USAF or IBM Corporation.
+References1203120412051206A Software Packages Used
+B Training Set Covariances For Acceptability Score
+C Full Manual Evaluation Results
+D Explanations of Manual Metrics12071208E PF Disagreement Examples1209F Grid Search Details for Unsupervised Model
+Algorithm 1: Grid search for hyperparameter tuning of the unsupervised progression model on
+the validation set. Descriptions for each hyperparameter are provided in Table 6.
+forβ∈ {0.0,0.1, . . . , 2.0}do
+ford∈ {2,16,32,64,128,768}do
+fornormalize_embeddings ∈ {True,False}do
+fordistance_metric ∈ {Cosine ,Euclidean }do
+▷k-means experiments
+fork∈ {2,3, . . . , 30}do
+forinverse_distance ∈ {True,False}do
+forstandardized_proximity ∈ {True,False}do
+measure_PF_slope_r();
+▷HDBSCAN experiments
+formin_cluster_size ∈ {10,20, . . . , 100}do
+forsoft_value_aggregation ∈ {True,False}do
+forprob_scaling ∈ {None,softmax ,sum}do
+forstandardized_proximity ∈ {True,False}do
+measure_PF_slope_r();
+G Final Unsupervised Model Hyperparameters
+The final unsupervised model uses k-means ( k= 21 ),β= 0.3,d= 768 , normalized embeddings,
+euclidean distance, and inverse distance for centroid proximity.
+H Examples from rollout self-play experiment
+The following examples in Tables 7, 8, and 9 compare self-play between the baseline No RO mode and
+the two rollout modes 2x2x3 and3x3x5 . In each example, the utterance where the persuadee (EE) states
+intent to donate is highlighted in red. The complete dialogues from the self-play experiments are included
+with our code release.121012111212

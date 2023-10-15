@@ -1,1 +1,716 @@
-5073 Proceedings of the 60th Annual Meeting of the Association for Computational Linguistics Volume 1 : Long Papers , pages 5073 5085 May 22 - 27 , 2022 c(cid:13)2022 Association for Computational Linguistics 5074 5075 5076 5077 5078 5079 5080 5081 5082 5083 5084 5085 
+
+Zhenjie ZhaoYufang HouDakuo WangMo YuChengzhong LiuXiaojuan MaNanjing University of Information Science and TechnologyNankai UniversityIBM Research EuropeIBM ResearchWeChat AIThe Hong Kong University of Science and Technology
+zzhaoao@nuist.edu.cn ,yhou@ie.ibm.com ,dakuo.wang@ibm.com
+moyumyu@tencent.com, chengzhong.liu@connect.ust.hk, mxj@cse.ust.hk
+Abstract
+Generating educational questions of fairytales
+or storybooks is vital for improving children’s
+literacy ability. However, it is challenging
+to generate questions that capture the inter-
+esting aspects of a fairytale story with edu-
+cational meaningfulness. In this paper, we
+propose a novel question generation method
+that first learns the question type distribution
+of an input story paragraph, and then sum-
+marizes salient events which can be used to
+generate high-cognitive-demand questions. To
+train the event-centric summarizer, we fine-
+tune a pre-trained transformer-based sequence-
+to-sequence model using silver samples com-
+posed by educational question-answer pairs.
+On a newly proposed educational question-
+answering dataset FairytaleQA , we show good
+performance of our method on both automatic
+and human evaluation metrics. Our work in-
+dicates the necessity of decomposing ques-
+tion type distribution learning and event-centric
+summary generation for educational question
+generation.
+1 Introduction
+Listening to and understanding fairy tales or story-
+books are very crucial for children’s early intellec-
+tual and literacy development (Sim and Berthelsen,
+2014). During the storybook reading process,
+prompting suitable questions with educational pur-
+poses can help children understand the content and
+inspire their interests (Zevenbergen and Whitehurst,
+2003; Ganotice et al., 2017).
+There is evidence that high-cognitive-demand
+(HCD) questions usually relate to good learning
+achievement (Winne, 1979). HCD questions usu-
+ally correspond to application, analysis, synthe-
+sis, and evaluation questions in Bloom’s taxon-
+omy of cognitive process (Winne, 1979; Ander-
+son et al., 2000), which are salient events merged
+from different elements across a session (Greatorexand Dhawan, 2016). However, it is challenging
+even for humans to ask educationally meaningful
+questions to engage children in storybook read-
+ing, which could be due to adults lacking the skills
+or time to integrate such interactive opportunities
+(Golinkoff et al., 2019). Recent research shows
+that AI-powered conversational agents can play
+the role of language partners to read fairy tales to
+children and ask them educational questions (Xu
+et al., 2021). This motivates us to investigate tech-
+niques to generate HCD educational questions for
+children’s storybooks automatically. Automating
+the generation of such questions can have great
+value in supporting children’s language develop-
+ment through guided conversation.
+During storybook reading, HCD questions re-
+quire children to make inferences and predictions.
+In contrast to low-cognitive-demand (LCD) ques-
+tions describing facts in stories ( e.g.,Who is Snow
+White’s mother? ), HCD questions are often related
+to events and their relations ( e.g.,Why did the
+queen want to kill Snow White? orWhat happened
+after the huntsman raised his dagger in the forest? ).
+Most previous work on question generation (QG)
+focuses on generating questions based on pre-
+defined answer spans (Krishna and Iyyer, 2019;
+Pyatkin et al., 2021; Cho et al., 2021). Such sys-
+tems that use “keywords” or specific events often
+generate LCD questions that are factual questions
+based on local context, but cannot work well on
+HCD cases, where we need to capture the salient
+events and understand the relations across multiple
+elements/events. Recently, Yao et al. (2021) re-
+leased a fairytale question answering dataset Fairy-
+taleQA containing around 10.5k question-answer
+pairs annotated by education experts. Each ques-
+tion is assigned to a specific type, and some types,
+such as “ action ”, “causal relationship ”, are high-
+cognitive-demanding. This makes it possible to
+investigate generating educational questions to sup-
+port children’s interactive storybook reading.5073In this paper, we propose a novel framework
+combining question type prediction and event-
+centric summarization to generate educational ques-
+tions for storybooks. In the first stage, we learn to
+predict the question type distribution for a given
+input and add pseudo-label so that after predic-
+tion, we can know both the types of questions and
+how many questions of each type. In the second
+stage, conditioned on question types and the order
+of the question under the current question type, we
+extract salient events that are most likely for edu-
+cators to design questions on and then generate an
+event-centric summarization of the original input.
+Finally, in the third stage, we use the output of the
+second stage to generate questions. Each summa-
+rization is used to generate one question. Note that
+it is difficult to obtain gold annotations for event-
+centric summarization. Instead, we rewrite anno-
+tated questions, and their corresponding hypoth-
+esized answers into question-answer statements
+(Demszky et al., 2018) as silver training samples.
+We hypothesize that HCD questions are around
+main plots in narratives and can guide our sum-
+marization model to focus on salient events. We
+evaluate our system on the FairytaleQA dataset
+and show the superiority of the proposed method
+on both automatic and human evaluation metrics
+compared to strong baselines.
+2 Related Work
+2.1 Question Generation
+Question answering based on context has achieved
+remarkable results (Rajpurkar et al., 2016; Zhang
+et al., 2020b). The reverse problem, namely, ques-
+tion generation (Duan et al., 2017; Chan and Fan,
+2019), usually relies on pre-selecting spans from
+an input text as answers and a single sentence as
+the context. However, to generate questions across
+a long paragraph in which the key information may
+come from multiple different sentences in fairy
+tales (Yao et al., 2021), these existing models rely-
+ing on one text segment usually do not work well.
+A few studies are focusing on generating ques-
+tions that are based on multi-sentence or multi-
+document information fusion (Pan et al., 2020;
+Xie et al., 2020; Tuan et al., 2020). NarrativeQA
+(Koˇciský et al., 2018) is an effort that tries to in-
+tegrate key information across multiple locations
+of a paragraph for question answering/generation.
+Similarly, MS MARCO (Nguyen et al., 2016) is
+a dataset that integrates multiple locations of an-swers for users’ queries in search engines. In Cho
+et al. (2021), a contrastive method is proposed that
+first trains a supervised model to generate ques-
+tions based on a single document and then uses a
+reinforcement learning agent to align multiple ques-
+tions from multiple documents. In Lyu et al. (2021),
+the authors use a rule-based method to generate
+questions with summaries and report to achieve
+good performance.
+The methods mentioned above usually do not
+consider the educational dimension and may not
+work well on fairy tales. Considering our research
+focus of fairytales, it is vital to generate questions
+that have educational purposes. In FairytaleQA
+(Yao et al., 2021), experts usually write different
+types of questions for separate paragraphs. We
+hypothesize that context plays a significant role
+in deciding the type of questions that should be
+asked during the interactive storybook reading with
+children. Therefore it is necessary to investigate
+not only how to summarize salient events but also
+how to learn the question type distribution.
+2.2 Text Summarization
+Summarization methods can be classified into ex-
+tractive summarization and abstractive summariza-
+tion. Extractive methods select sentences from the
+source documents to compose a summary; abstrac-
+tive methods applies neural generative models to
+generate the summary token-by-token.
+Extractive summarization methods, such as Tex-
+tRank (Mihalcea and Tarau, 2004), feature-based
+methods (Jagadeesh et al., 2005; Luhn, 1958; Nal-
+lapati et al., 2017), and topic-based methods (Oz-
+soy et al., 2010), do not work to generate HCD
+questions on the fairytale scenario because such
+questions often are based on multiple sentences.
+Abstractive methods based on encoder-decoder
+architectures usually encode an input document
+token-by-token sequentially (Rush et al., 2015) and
+cannot capture the fine-grained hierarchical rela-
+tions in a document, such as actions, causal rela-
+tionships. Graph neural network (GNN) models
+are recently used in summarization research (Wu
+et al., 2021; Wang et al., 2020; Xu et al., 2020; Li
+et al., 2021), thanks to their ability to model the
+complex relations in a document. For example, in
+Xu et al. (2020), researchers used a discourse-level
+dependency graph to encode a document and then
+decoded discourse-level embeddings to select sen-
+tences extractively. Similarly, in Wang et al. (2020),5074researchers have used a heterogeneous graph to en-
+code both token-level and sentence-level relations
+in a document and then used it to extract sentences.
+Still, in the education domain, summarizing salient
+events of one paragraph that can be used to generate
+educational questions is an open problem. In this
+paper, we develop an event-centric summarization
+method based on BART (Lewis et al., 2020). To
+obtain the training data, we compose educational
+question-answer pairs through a rule-based method
+and use them as silver ground-truth samples.
+3 Method
+The overview of our educational question genera-
+tion system for storybooks is shown in Figure 1,
+which contains three modules: question type distri-
+bution learning, event-centric summary generation,
+and educational question generation.
+Given an input paragraph d, we first predict
+the type distribution of output questions p=
+(p, p, . . . , p), where pdenotes the probability
+of question type i,Tis the total number of ques-
+tion types. We then transform the distribution into
+the number of questions under each question type
+l= (l, l, . . . , l). Afterwards, we first generate
+lsummaries of type iwith the input paragraph d,
+and then generate lquestions of type iwith the
+corresponding summaries.
+3.1 Question Type Distribution Learning
+We fine-tuned a BERT model (Devlin et al., 2019),
+and adapt the output mdimensional class token
+h∈Rto learn the question type distribution.
+Specifically, the predicted distribution is obtained
+byp=, where W∈R,b∈
+Rare learnable parameters, (·)denotes the oper-
+ator of selecting the i-th element of a vector.
+Assuming there are Ntraining samples, we
+minimize the K-L divergence loss L=
+PPplog, where pdenotes the
+probability of question type ifor the j-th sample,
+andˆpis our predicted value.
+To improve the prediction performance, similar
+to Zhang et al. (2018), we also conduct a multi-
+label classification task, where we use the question
+type with the maximal probability as the class of the
+output. In particular, we add a cross entropy loss
+L=−PP 1(y) log ˆy, where
+1(y)equals to 1ifiis the question type with the
+maximal probability for the sample j.In summary, we conduct a multi-task learning for
+question type distribution prediction, and the final
+training loss is a weighted sum of the K-L loss and
+the cross entropy loss: L=γL+(1−γ)L,
+where γis a weight factor.
+To predict the number of questions for each
+question type during training, we add a pseudo
+label 1to the original label l= (l, l, . . . , l),
+i.e.,l= (l, l, . . . , l,1). We can then normal-
+ize it to get the ground-truth probability distribu-
+tion. Dur-
+ing testing, assuming we get the predicted distri-
+bution p= (p, p, . . . , p, p ), we can ob-
+tain the number of each type of questions by div-
+ing the probability of this pseudo label p as:
+n=⌊+ 0.5⌋.
+3.2 Event-centric Summary Generation
+In FairytaleQA, one paragraph usually has multiple
+questions with different question types, and infor-
+mation in one educational question may scatter
+across multiple parts. As mentioned before, we as-
+sume that context plays a big role to decide the type
+and the number of questions to be asked during the
+interactive storybook reading, and HCD questions
+are around salient events and the relations. With
+the output from the previous component, we can
+use the predicted question type distribution as a
+control signal, and select corresponding events for
+one particular question type.
+In particular, we add two control signals before
+an input paragraph: question type signal <t> and
+question order signal <c>, where <t>∈T,<c>∈
+C,Tdenotes the set of all question types, Cdenotes
+the set of order, i.e., {<first>, <second>,
+<third>, ...}. We train a BART summarization
+model (Lewis et al., 2020) to conduct the event-
+centric summary generation task. The input of the
+BART model is: <t> <c> d , and the output of
+the BART model is a summary that collects related
+events for an educational question type, where d
+denotes the input paragraph.
+Obtaining the golden summaries is difficult.
+However, a QA dataset, like FairytaleQA, provides
+both questions and their corresponding answers.
+We can therefore re-write the annotated questions
+and answers together to obtain question-answer
+statements, which are used as silver summaries
+to train our summarization model. We used the
+rule-based method in Demszky et al. (2018) which
+inserts answers into the semantic parsed questions5075
+and eliminates question words.
+3.3 Educational Question Generation
+With the summary generated in the second stage,
+generating an educational question is fairly straight-
+forward. Because the summary has already con-
+tained all key events for the target educational ques-
+tion type, we can train a question generation model
+directly on top of it using the annotated questions.
+We fine-tune another BART model to generate ques-
+tions, with the type and order control signals added
+before the input summary to control the generated
+results. Note that our question generation model
+does not reply on pre-selected answer spans.
+4 Experimental Setup
+To demonstrate the effectiveness of our proposed
+method, we conducted a set of experiments on the
+FairytaleQA dataset.
+4.1 Dataset
+The FairytaleQA dataset (Yao et al., 2021) contains
+annotations of 278 books, including 232 training
+books, 23 test books, and 23 validation books. Each
+book has multiple paragraphs, and for each para-
+graph of one book, there are several educational
+question-answer pairs annotated by education ex-
+perts. The question type distribution is consistent
+among annotators. In total, there are seven types:
+•Character : questions that contain the character
+of the story as the subject and ask for additional
+information about that character;
+•Setting : questions that start with “Where/When”;
+•Feeling : questions that start with “How
+did/do/does X feel?”;
+•Action : questions that start with "What
+did/do/does X do?" or "How did/do/does X" or
+questions that contain a focal action and ask for
+additional information about that action;•Causal relationship : questions that start with
+“Why” or “What made/make”;
+•Outcome resolution : questions ask about logic
+relations between two events, such as “What hap-
+pened...after...”;
+•Prediction : questions that start with “What
+will/would happen...”.
+The first three are factual questions that are low-
+cognitive-demanding, and can be handled well by
+traditional span-based question generation methods
+(Yao et al., 2021). The remaining four types usually
+require people to make inferences from multiple
+elements (Paris and Paris, 2003), which correspond
+to high-level cognitive skills in Bloom’s taxonomy
+(Anderson et al., 2000), and can be viewed as HCD
+questions. For the question type prediction , it usu-
+ally asks for events that do not appear in storybooks,
+which is not our focus in this paper. We only con-
+sider action, causal relationship , and outcome reso-
+lution . There is a small portion (985 out of 10580)
+of questions that span multiple paragraphs. To con-
+trol the cognitive-demand level for children, we
+also removed those questions. The statistics of the
+selected data is shown in section A of the appendix.
+4.2 Baselines
+We compared our system with two baselines: 1)
+the method proposed in Yao et al. (2021) (denoted
+as QAG), which is the only method that considers
+generating educational questions; 2) using Fairy-
+taleQA, we trained an end-to-end BART model.
+QAG. The QAG model (Yao et al., 2021) use “key-
+words” (semantic role labeling) to identify entities
+and events and then generate questions, which con-
+tains four steps: 1) generate a set of answers based
+on semantic roles of verbs; 2) generate questions
+based on these answers; 3) generate answers based
+on the questions generated in the second step; 4)5076rank generated question-answer pairs and choose
+the top questions. We trained the question genera-
+tion model in the second step and the answer gen-
+eration model in the third step using the selected
+questions. We use the top 10/5/3/2/1 generated
+questions as baselines, denoted as QAG (top10),
+QAG (top5), QAG (top3), QAG (top2), and QAG
+(top1), respectively.
+E2E. Using FairytaleQA with question types ac-
+tion, causal relationship , and outcome resolution ,
+we trained one BART-large model to generate ques-
+tions based one paragraph end-to-end. During test-
+ing, we used a maximal length 100tokens (roughly
+7questions according to Table 11) and selected the
+first2questions as the output for evaluation. We
+denote this method as E2E.
+4.3 Evaluation Metrics
+We adopt both automatic and human evaluation to
+measure the performance of our method.
+4.3.1 Automatic Evaluation
+For automatic evaluation, similar to Yao et al.
+(2021), we use the Rouge-L score (Lin, 2004), and
+report the average precision, recall, and F1 val-
+ues. Meanwhile, we also use BERTScore (Zhang
+et al., 2020a) to evaluate the semantic similarity
+of generated questions with the ground-truth ques-
+tions, and report the average precision, recall, and
+F1 values. In contrast to Yao et al. (2021), we
+mainly consider concatenating all generated ques-
+tions into one sentence and comparing it with the
+concatenated ground-truth questions. This is be-
+cause for each paragraph, we need to evaluate the
+generated quality of not only each question but
+also the question type distribution for sub-skills
+required in education as a whole (Paris and Paris,
+2003). Since the question order does not have much
+effects on Rouge-L, concatenating questions also
+partially takes individual question quality into con-
+sideration. Moreover, we also consider the same
+setup used in Yao et al. (2021) that takes the max
+score of each gold question against the generated
+questions, then averages the scores of all generated
+questions.
+4.3.2 Human Evaluation
+To evaluate the quality of our generated questions
+and their educational significance, we further con-
+ducted a human evaluation session. After regular
+group meetings, we concluded the following fourdimensions, where children appropriateness is the
+main metric for our educational application:
+1.Question type : whether the generated questions
+belong to any of the three event types.
+2.Validity : whether the generated questions are
+valid questions according to the original paragraph.
+3.Readability : whether the generated questions
+are coherent and grammatically correct.
+4.Children appropriateness : to what extent
+would you like to ask this question when you read
+the story to a five year’s old child?
+4.4 Implementation Details
+For re-writing silver summaries, there are 8 sen-
+tences that cannot be parsed successfully. In this
+case, we wrote the silver statements manually. We
+also corrected 5 low-quality statements manually.
+The weight factor for question type distribution
+learning is set as 0.7empirically. For question
+type distribution learning, we used a BERT cased
+large model. For summary generation, we used a
+BART cased base model. For question generation,
+we used a BART cased large model. The batch
+sizes of all training are set as 1. For the generation
+process, we only used a greedy decoding method.
+Automatic evaluation results were calculated with
+open sourced packages. For all methods, we re-
+moved duplicated questions and questions that has
+less than 3 tokens. All experiments were conducted
+on a Ubuntu server with Intel(R) Xeon(R) Silver
+4216 CPU @ 2.10GHz, 32G Memory, Nvidia GPU
+2080Ti, Ubuntu 16.04. Training our model took
+about three hours.
+5 Results and Analysis
+5.1 Automatic Evaluation Results
+The results of automatic evaluation on both vali-
+dation and test datasets are shown in Table 1. For
+Rouge-L, compared to E2E and QAG, our method
+can achieve the best results except for the recall
+values. In particular, our method outperforms E2E
+by about 20 points, and outperforms the best QAG
+model (top2) by about 10 points on the precision
+scores. For F1, our method outperforms E2E by
+about 10 points, and outperforms the best QAG
+model (top2) by about 5 points. These results show5077
+that our method can match the ground-truth ques-
+tions lexically better than other methods. However,
+the recall score of our method is not as good as
+E2E and QAG (top5 & 10). This is because for
+E2E and QAG (top5 & 10), they generally generate
+more questions than our method. For BERTScore,
+our method achieves the best results on precision,
+recall, and F1. Although our method outperforms
+QAG (top2) by a small margin, it still outperforms
+other QAG models by at least 1 point. For the setup
+used by Yao et al. (2021), as shown in Table 2, our
+method also outperforms the best QAG model, i.e.,
+QAG (top 2), and E2E by a large margin in terms
+of Rouge-L. We believe that decomposing question
+types explicitly and using event-centric summaries
+to generate questions can capture the internal struc-
+ture of educational question annotations and fit the
+data distribution in a more accurate way.
+Some examples of the generated questions can
+be seen in Table 3. Our method usually can predict
+the correct question types, and cross multiple ele-
+ments to generate HCD questions, with a limitation
+of factuality errors. More examples and compari-
+son can be found in section C of the appendix.
+Apart from the overall performance, we also
+investigated the performance of each module of our
+method. Because the performance values on both
+the validation and test data are similar, to simplify
+our experiment, in the following sections, we only
+conducted experiments on the test data.Question Type Distribution Learning. On the
+test set, the K-L divergence between the prediction
+results of our BERT-based model and ground-truth
+is0.0089 , which shows that the performance of
+our question type distribution learning module is
+relatively satisfactory. We also use the ground-
+truth question type distribution as an input and
+calculate the final Rouge-L score with our system.
+The results are shown in Table 4. Compared to the
+ground-truth question type distribution, our system
+still has lower precision and F1 scores. Having a
+more accurate question type distribution prediction
+is beneficial for improving the overall performance.
+Event-centric Summary Generation To inves-
+tigate the quality of the generated summaries,
+we compare the generated results with the silver
+summary ground-truth. Similar to the evaluation
+method of generated questions, we concatenated
+the generated summaries and calculated the Rouge-
+L score with the concatenated ground-truth sum-
+maries. The results are 15.41precision, 30.60re-
+call, and 18.85F1, which shows that there is still a
+lot of room to improve the summarization module.
+Upper-bound Results with Silver Summary To
+see how the upper-bound performance is if we have
+perfect summaries, we input the silver summaries
+to our educational question generation model. The
+Rouge-L scores of generated questions are 92.71
+precision, 85.65recall, 87.67F1, which shows the
+potential that once a good summary containing
+salient events is available, generating an educa-
+tional question is relatively easy. The core chal-
+lenge is to obtain good summaries, which we be-
+lieve will be a valuable next step in future work.
+5.2 Human Evaluation Results
+We conducted a human evaluation with consent
+of our method against the best-performed baseline
+QAG (top2). We first randomly sampled 10 books
+from the test set. For each book, we randomly sam-5078
+pled 5 paragraphs. We then conducted experiments
+to evaluate the generated results on question type
+and quality. Participants are researchers or PhD stu-
+dents based in Europe, U.S., and China working on
+natural language processing and human-computer
+interaction in the education domain with at least
+3 years of experience, and were recruited through
+word-of-mouth and paid $30. We had a training
+session to ensure the annotation among participants
+is consistent. This study is approved by IRB.
+Question type. Three human participants anno-
+tated the types of all generated questions. The
+inter-coder reliability score (Krippendoff’s alpha
+(Krippendorff, 2011)) among three participants is
+0.86, indicating a relatively high consistency. The
+annotated results are shown in Table 5. Overall, our
+method demonstrates a much smaller K-L distance
+(0.28) to the ground-truth distribution, compared to
+QAG ( 0.60). We can see that our method has a bet-
+ter estimation of the distribution of question types,
+which is closer to the distribution of the ground-
+truth. QAG has a biased question type distribution
+and generates more outcome resolution questions.Question quality. We invited another five human
+participants and conducted a human evaluation to
+further evaluate the quality of the generated ques-
+tions from our model against the ground-truth and
+QAG, including validity ,readability , and children
+appropriateness . Among the three dimensions, the
+children appropriateness is most closely related
+to the educational purpose; the former two dimen-
+sions mainly measure the factual correctness and
+fluency respectively.
+For the total 10×5paragraphs, each participant
+is assigned 20different paragraphs randomly, and
+each paragraph has annotation results from two par-
+ticipants. For each paragraph, participants need to
+read the paragraph and its corresponding questions
+and answers, and then rate the three dimensions on
+a five-point Likert-scale. The Krippendoff’s alpha
+scores along the four dimensions are between 0.60
+and 0.80 (validity: 0.80, readability: 0.69, children
+appropriateness: 0.60), indicating an acceptable
+consistency (Gretz et al., 2020).
+We conducted an independent-samples t-test to
+compare the performance of each model. Our
+model is significantly better than QAG on the main
+evaluation dimension of children appropriateness :
+the mean score of our model and QAG are 2.56 and
+2.22, with corresponding standard derivation 1.31
+and 1.20 respectively. This gives a significant score
+with p-value =0.009, showing that the questions
+generated by our model can indeed better fit the
+education scenario. For reference, the ground-truth
+has a mean score and standard derivation of 3.96
+and 1.02, indicating a still large space to improve.
+Onvalidity andreadability , our model is on par
+with QAG. This is not surprising because both mod-
+els are based on large pre-trained BART models
+that are good at generating natural and fluent sen-
+tences. For validity, our model (avg: 3.19, std:
+1.53) is a bit lower than QAG (avg: 3.27, std: 1.62);5079for readability, our model (avg: 4.19, std: 1.53) is
+a bit higher than QAG (avg: 4.12, std: 1.33). A
+further breakdown in Table 6 shows that QAG wins
+mainly on action questions, because it directly gen-
+erates questions conditioned on verbs. For causal
+relationship and outcome resolution questions, our
+method generally outperforms QAG.
+6 System Analysis
+To further investigate the effectiveness of our
+method, we conducted a set of ablation studies.
+6.1 Question Type Distribution Learning
+To investigate the effects of our question type distri-
+bution learning, we conducted a comparison study.
+In particular, we removed the question type distri-
+bution learning module (denoted as w/o tdl), and
+directly trained the summarization and question
+generation models. In other words, during training,
+we concatenate all silver summaries as the output
+of the summarization model. During testing, we
+extract the first 2sentences as the predicted sum-
+maries. The results are shown in Table 7. From
+the comparison, we can see that without knowing
+question types, the Rouge-L scores drop about 3
+points overall, which implies the importance of our
+question type distribution learning module.
+6.2 Event-centric Summary Generation
+To investigate the effects of our event-centric sum-
+mary generation module, we conducted a compar-
+ison with different summarization methods. The
+summarization methods include: 1) Lead3 . We
+select the first three sentences of a paragraph as
+the summary, and use them as input to the ques-
+tion generation model; 2) Last3 . We select the
+last three sentences of a paragraph as the summary,
+and use them as input to the question generation
+model. 3) Random3 . We select the random three
+sentences of a paragraph as the summary, and use
+them as input to the question generation model. 4)
+Total . We use each sentence of a paragraph as the
+summary, and use them as input to the question
+generation model. 5) TextRank . TextRank is a
+typical extractive summarization method. We use
+TextRank to extract a summary, and for each sen-
+tence in the summary, we input it to the question
+generation model.
+For other summarization methods, they cannot
+get the question type distribution like our method.
+For a fair comparison, we also remove the question
+type distribution learning module of our method,
+which is the same as the setting in section 6.1. The
+results are shown in Table 8, from which we can
+see that extracting sentences from the paragraph
+is not enough for covering salient events for ed-
+ucational question generation. Our event-centric
+summary generation method is an effective way
+for extracting educational events of fairy tales. Us-
+ing all sentences (total) can have the highest recall
+score at the expense of accuracy, but the overall F1
+score is still relatively low.
+6.3 Multi-task Learning of Question Types
+Currently, we use control signals to constrain gen-
+erating questions of different types, which can
+be viewed as a multi-task learning framework for
+multi-type question generation. To investigate
+whether sharing parameters is a good way for our
+task, we trained individual summarization and ques-
+tion generation models using different question
+types. The results in Rouge-L are shown in Ta-
+ble 9. We can find that sharing parameters gen-
+erally can achieve better performance because of
+the use of more training data. For only using one
+type of training data, owing to the error of question
+type distribution learning, the performance drops a
+lot, showing the importance of combining question5080
+type distribution learning and multi-task learning
+with different types of training data.
+7 Conclusion
+In this paper, we propose a novel method for edu-
+cational question generation for fairy tales, which
+can potentially be used in early childhood educa-
+tion. Our method contains three modules: question
+type distribution learning, event-centric summary
+generation, and educational question generation.
+Through question type distribution learning, we can
+decompose the challenges of educational question
+generation by extracting related events of one ques-
+tion type and generating educational questions with
+a short event-centric summary, which improves the
+performance significantly. On both automatic eval-
+uation and human evaluation, we show the poten-
+tial of our method. In the future, we plan to further
+investigate the event-centric summary generation
+module by considering discourse-level information
+to improve the summarization performance and im-
+prove the factuality error problem. We are also
+interested in deploying the system in real scenarios
+to benefit childcare-related domains.
+Acknowledgments
+The authors thank constructive suggestions from
+all anonymous reviewers, as well as all participants
+in our human evaluation session. This work is
+supported by the Hong Kong General Research
+Fund (GRF) with grant No. 16203421. Zhenjie
+Zhao is supported by the National Natural Science
+of China Foundation under Grant No. 62106109
+and the Startup Foundation for Introducing Talent
+of NUIST.
+References508150825083Appendix
+A Dataset Statistics
+The question type distribution of FairytaleQA is
+shown in Figure 2. In particular, question types ac-
+tion, causal relationship, outcome resolution, and
+prediction are considered as HCD questions. For
+each question type, there are some questions that
+span multiple paragraphs (denoted as spanning ,
+character : 53, setting : 11, feeling : 59, action : 143,
+causal relationship : 392, outcome resolution : 54,
+prediction : 266), which are discarded. We select
+question types action, causal relationship, and out-
+come resolution from FairytaleQA for conducting
+our experiments. In total, there are 2998 out of
+4095 paragraphs used, including 2430 out of 3350
+training paragraphs, 290 out of 380 validation para-
+graphs, and 278 out of 365 paragraphs. The number
+of QA pairs for each question type and the total
+number are shown in Table 10, and the token-level
+statistics of the selected training data can be found
+in Table 11.
+B Potential Risks
+While High-Cognitive Demand (HCD) questions
+are considered in this paper, the cultivation of
+knowledge and ability is equally important for
+children. The experiment results show that our
+method is competitive to generate HCD questions,
+and therefore it is helpful to improve children’s
+cognitive ability. However, because of the unex-
+plainability of end-to-end training, we also find that
+sometimes our system may generate non-factual
+facts in terms of the original context, which has
+a potential risk on knowledge learning. Owing to
+the factuality error problem of our system, we sug-
+gest to further investigate constructing structured
+knowledge of fairy tales and knowledge-grounded
+question generation for real-world applications.
+C Examples of Generated Questions
+Some randomly selected examples of the generated
+questions can be found in Table 12.50845085

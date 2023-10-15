@@ -1,1 +1,618 @@
-6947 Proceedings of the 2022 Conference on Empirical Methods in Natural Language Processing , pages 6947 6958 December 7 - 11 , 2022 © 2022 Association for Computational Linguistics 6948 6949 6950 6951 6952 6953 6954 6955 6956 6957 6958 
+
+Qin Dai, Benjamin Heinzerling, Kentaro InuiTohoku UniversityRIKEN AIP
+qin.dai.b8@tohoku.ac.jp, benjamin.heinzerling@riken.jp
+kentaro.inui@tohoku.ac.jp
+Abstract
+Bi-encoder architectures for distantly-
+supervised relation extraction are designed to
+make use of the complementary information
+found in text and knowledge graphs (KG).
+However, current architectures suffer from
+two drawbacks. They either do not allow
+any sharing between the text encoder and
+the KG encoder at all, or, in case of models
+with KG-to-text attention, only share infor-
+mation in one direction. Here, we introduce
+cross-stitch bi-encoders, which allow full
+interaction between the text encoder and the
+KG encoder via a cross-stitch mechanism.
+The cross-stitch mechanism allows sharing
+and updating representations between the
+two encoders at any layer, with the amount
+of sharing being dynamically controlled via
+cross-attention-based gates. Experimental
+results on two relation extraction benchmarks
+from two different domains show that enabling
+full interaction between the two encoders
+yields strong improvements.
+1 Introduction
+Identifying semantic relations between textual men-
+tions of entities is a key task for information extrac-
+tion systems. For example, consider the sentence:
+(1) Aspirin is widely used for short-term treat-
+ment of pain , fever or colds.
+Assuming an inventory of relations such as
+may_treat orfounded_by , a relation extraction
+(RE) system should recognize the predicate in (1)
+as an instance of a may_treat relation and ex-
+tract a knowledge graph (KG) triple like ( A ,
+may_treat , ). RE systems are commonly
+trained on data obtained via Distant Supervision
+(DS, Mintz et al., 2009): Given a KG triple, i.e.,
+a pair of entities and a relation, one assumes thatall sentences mentioning both entities express the
+relation and collects all such sentences as positive
+examples. DS allows collecting large amounts of
+training data, but its assumption is often violated:
+(2) The tumor was remarkably large in size,
+andpain unrelieved by aspirin .
+(3) Elon Musk fired some SpaceX employees
+who were talking smack about ...
+Sentence (2) is a false positive example of a
+may_treat relation since it describes a failed treat-
+ment. Sentence (3) is, strictly speaking, a false pos-
+itive of a founded_by relation since this sentence
+is not about founding companies, but can also be
+seen as indirect evidence, since founders are often
+in a position that allows them to fire employees.
+We refer to false positive and indirectly relevant
+examples like (2) and (3) as noisy sentences.
+A common approach for dealing with noisy sen-
+tences is to use the KG as a complementary source
+of information. Models taking this approach are
+typically implemented as bi-encoders, with one en-
+coder for textual input and one encoder for KG
+input. They are trained to rely more on the text en-
+coder when given informative sentences and more
+on the KG encoder when faced with noisy ones
+(Weston et al., 2013; Han et al., 2018a; Zhang et al.,
+2019; Hu et al., 2019; Dai et al., 2019, 2021; Hu
+et al., 2021). However, current bi-encoder models
+suffer from drawbacks. Bi-encoders that encode
+text and KG separately and then concatenate each
+encoder’s output, as illustrated in Figure 1a and
+proposed by Hu et al. (2021), i.a., cannot share
+information between the text encoder and the KG
+encoder during encoding. In contrast, Bi-encoders
+whose text encoder can attend to the KG encoder’s
+hidden states, as illustrated in Figure 1b and pro-
+posed by Han et al. (2018a); Hu et al. (2019);
+Zhang et al. (2019), i.a., do allow information to
+flow from the KG encoder to the text encoder, but
+not in the opposite direction.6947
+Here, we propose a cross-stitch bi-encoder
+(XBE, Figure 1c) that addresses both of these draw-
+backs by enabling information sharing between the
+text encoder and KG encoder at arbitrary layers in
+both directions. Intuitively, such a “full interaction”
+between the two encoders is desirable because it
+is not a priori clear at which point in the encoding
+process an encoder’s representation is best-suited
+for sharing with the other encoder. Concretely, we
+equip a bi-encoder with a cross-stitch component
+(Misra et al., 2016) to enable bi-directional infor-
+mation sharing and employ a gating mechanism
+based on cross-attention (Bahdanau et al., 2015;
+Vaswani et al., 2017) to dynamically control the
+amount of information shared between the text en-
+coder and KG encoder. As we will show, allowing
+bi-directional information sharing during the en-
+coding process, i.e., at intermediate layers, yields
+considerable performance improvements.
+In summary, our contributions are:
+•A bi-encoder architecture that enables full in-
+teraction between its encoders: both encoders
+can share and update information at any layer
+(§3);
+•An implementation of the proposed architec-
+ture for distantly-supervised relation extrac-
+tion (§4);
+•Improvement of performance on two relation
+extraction benchmarks covering two different
+domains and achievement of state of the art
+results on a widely used dataset.(§5.4);•Ablations showing the importance of the com-
+ponents of the proposed architecture (§5.5).
+2 Terminology and Notation
+Throughout this work we use terminology and no-
+tation as follows. We assume access to a domain-
+specific knowledge graph (KG) which contains fact
+triples O={(e, r, e), ...}consisting of entities
+e, e∈ Eand a relation r∈ R that holds between
+them. The set of entities Eand the inventory of
+relations Rare closed and finite.
+Given a corpus of entity-linked sentences and
+KG triples (e, r, e), distant supervision (DS)
+yields a bag of sentences B={s, ..., s}where
+each sentence smentions both entities in the pair
+(e, e). Given the entity pair (e, e)and the sen-
+tence bag B, a DS-RE model is trained to predict
+the KG relation r.
+3 Cross-stitch Bi-Encoder (XBE)
+The cross-stitch bi-encoder model is designed to
+enable bidirectional information sharing among its
+two encoders. As illustrated in Figure 1c, it consists
+of a text encoder, a KG encoder, and a cross-stitch
+component controlled by cross-attention. The fol-
+lowing subsections describe these components.
+3.1 Bi-Encoder
+To obtain representations of inputs belonging to the
+two different modalities in DS-RE, we employ a
+bi-encoder architecture consisting of one encoder
+for textual inputs and one encoder for KG triples.6948While the cross-stitch component is agnostic to the
+type of encoder, we use pre-trained Transformer
+models (Vaswani et al., 2017) for both text and KG.
+TheText Encoder takes a sentence scontain-
+ing a sequence of Ntokens (tok, ..., tok)as
+input and produces Llayers of d-dimensional
+contextualized representations S∈R,1⩽
+i⩽L. We construct a fixed-length representa-
+tion of the sentence smentioning the entity pair
+(e, e)by concatenating the embeddings of the
+head and tail entities handhobtained from the
+last layer Svia the method described in Peng
+et al. (2020), as well as the mean- and max-pooled
+token representations h andh obtained
+from pooling over the last encoder layer S. That
+is, the final representation of the input sentence s
+iss= [h;h;h;h], where ;denotes
+vector concatenation.
+TheKG Encoder takes a KG triple (e, r, e)as
+input and generates Tlayers of d-dimensional
+contextualized representations T∈R,1⩽
+i⩽L. Then x∈R,x∈Rand
+x∈Rfrom the last layer Tare used as
+the embeddings of the head entity e, relation r
+and tail entity erespectively. The KG encoder’s
+vocabulary Vis formed by the union of all enti-
+tiesEand relations R, as well as a mask token
+[M], i.e.,V=R ∪ E ∪ { [M]}. For simplicity we
+assume that the text and KG encoder representa-
+tions have the same dimensionality d, that is, we
+setd=d=d, although this is not required by
+the model architecture.
+3.2 Cross-stitch (X-stitch)
+To enable bi-directional information sharing be-
+tween the two encoders, we employ a cross-stitch
+mechanism based on Misra et al. (2016). The mech-
+anism operates by mixing and updating intermedi-
+ate representations of the bi-encoder. We dynami-
+cally control the amount of mixing via gates based
+on cross-attention (Figure 2). More formally, our
+cross-stitch variant operates as follows. Given a
+sentence s= (tok, ..., tok)and corresponding
+KG triple t= (e, r, e), the text encoder gener-
+ates sentence representations S∈Rand the
+KG encoder triple representations T∈R. We
+then compute cross-attentions Ain two directions,
+triple-to-sentence ( t2s) and sentence-to-triple ( s2t),
+via Equations 1 and 2,
+A=softmax ((W·T)·S) (1)
+A=softmax(S·(W·T))(2)
+where, W∈RandW∈Rdenote
+trainable linear transformations. The triple-to-
+sentence attention Arepresents the weight of
+the embedding of each token in triple tthat will be
+used to update the sentence representation S:
+T=W·ReLU (W·(A·T))(3)
+where W∈RandW∈Rare train-
+able parameters. Next, a gating mechanism de-
+termines the degree to which the original textual
+representation Swill contribute to the new hidden
+state of the text encoder:
+G=σ(T) (4)
+where, σdenotes the logistic sigmoid function. We
+then update the hidden state of the text encoder at
+layer iby interpolating its original hidden state S
+with the triple representation T:
+S=G·S+λ·T (5)
+Information sharing in the sentence-to-triple direc-
+tion is performed analogously:
+S=W·ReLU (W·((A)·S))
+(6)
+G=σ(S) (7)6949T=G·T+λ·S (8)
+where λandλare weight hyperparameters. Hav-
+ing devised a general architecture for text-KG bi-
+encoders, we now turn to implementing this archi-
+tecture for distantly supervised relation extraction.
+4 XBE for Relation Extraction
+In distantly supervised relation extraction, the auto-
+matically collected data consists of a set of sen-
+tence bags {B, ..., B}and set of correspond-
+ing KG triples {(e, r, e), ...,(e, r, e)}. To
+create training instances, we mask the relation
+in the KG triples {(e,[M], e), ...,(e,[M], e)}
+and provide these masked triples as input to the
+KG encoder, while the text encoder receives one
+sentence from the corresponding sentence bag. If
+the sentence bag contains ksentences, we pair each
+sentence with the same KG triple and run the bi-
+encoder for each pairing, i.e., ktimes, to obtain a
+sentence bag representation. During training, the
+loss of the model is calculated via Equations 9, 10
+and 11,
+L=L+w·L (9)
+L=−/summationdisplay/summationdisplaylogP(r|[s;r;x;x])
+(10)
+L=−/summationdisplaylogg((e,[M], e)) (11)
+where w∈(0,1]is a weight hyperparameter, P(x)
+is the predicted probability of the target relation
+over a set of predefined relations, ris an ad-
+ditional KG feature vector obtained from a pre-
+trained KG completion model such as TransE (Bor-
+des et al., 2013), Lis the loss of KG relation
+prediction and g(x)outputs the predicted proba-
+bility of the masked token over the vocabulary V
+based on the embedding xfrom the KG encoder.
+During inference, we follow Hu et al. (2021) and
+use the mean of sentence embeddings as the bag
+embedding:
+P(r|B) = (/summationdisplayP(r|[s;r;x;x]))/|B|
+(12)As our bi-encoder consists of two transformer-
+based encoders, we make use of pre-training for
+each modality. For the text encoder, we employ
+an off-the-shelf model, as detailed in the next sec-
+tion. The KG encoder is pre-trained on a set of
+KG triples via a relation prediction task. Specifi-
+cally, given a relation masked triple (e,[M], e),
+the KG encoder is asked to predict the masked sym-
+bolic token and pre-trained via the loss given by
+Equation 11.
+5 Experiments
+5.1 Data
+We evaluate our model on the biomedical dataset
+introduced by Dai et al. (2021) (hereafter: Med-
+line21) and the NYT10 dataset (Riedel et al., 2010)
+Statistics for both datasets are summarized in Ta-
+ble 1.
+Medline21 . This dataset was created by align-
+ing the biomedical knowledge graph UMLSwith
+the Medline corpus, a collection of biomedical ab-
+stracts. Both resources are published by the U.S.
+National Library of Medicine. A state-of-the-art
+UMLS Named Entity Recognizer, ScispaCy (Neu-
+mann et al., 2019), is applied to identify UMLS
+entity mentions in the Medline corpus. The sen-
+tences until the year 2008 are used for training
+and the ones from the year 2009 ∼2018 are used
+for testing. Following (Han et al., 2018a), Dai
+et al. (2021) also provided a subset of UMLS in the
+dataset, which consists of 582,686KG triples. We
+use the set of triples to train the KG encoder.
+NYT10 . This dataset was created by aligning
+Freebase relational facts with the New York Times
+Corpus. Sentences from the year 2005 ∼2006
+are used for training and the sentences from 2007
+are used for testing. The NYT10 dataset has been
+used widely for relation extraction (Lin et al., 2016;
+Ji et al., 2017; Du et al., 2018; Jat et al., 2018;
+Han et al., 2018a,b; Vashishth et al., 2018; Ye and
+Ling, 2019; Hu et al., 2019; Alt et al., 2019; Sun
+et al., 2019; Li et al., 2020; Hu et al., 2021; Dai
+et al., 2021). In order to leverage a KG for DS-
+RE on NYT10, Han et al. (2018a) extended the
+dataset with FB60K, which is a KG containing
+335,350triples. Following (Hu et al., 2019; Han
+et al., 2018a; Hu et al., 2021), we use FB60K to
+train the KG encoder for DS-RE.6950
+5.2 Settings
+Following the conventional settings of DS-RE (see,
+e.g., Lin et al., 2016), we conduct a held-out evalu-
+ation, in which models are evaluated by comparing
+the fact triple identified from a bag of sentences S
+with the corresponding KG triple. Further follow-
+ing evaluation methods of previous work, we draw
+Precision-Recall curves and report the Area Un-
+der Curve (AUC), as well as Precision@N (P@N)
+scores, which give the percentage of correct triples
+among the top N ranked predictions. In addition, as
+done by Hu et al. (2021), the text encoder (§3) for
+experiments on NYT10 is initialized with the pre-
+trained weights from the bert-base-uncased vari-
+ant of BERT (Devlin et al., 2018). The text encoder
+for Medline21 is initialized with BioBERT (Lee
+et al., 2020) and the KG encoder (§3) is pre-trained
+using each dataset’s corresponding KG, as men-
+tioned above.
+5.3 Baseline Models
+To demonstrate the effectiveness of the proposed
+model, we compare to the following baselines.
+Baselines were selected because they are the clos-
+est models in terms of integrating KG with text for
+DS-RE and/or because they achieve competitive or
+state-of-the-art performance on the datasets used
+in our evaluation.
+•JointE (Han et al., 2018a): A joint model
+for KG embedding and RE, where the KG
+embedding is utilized for attention calculation
+over a sentence bag, as shown in Figure 1b.
+•RELE (Hu et al., 2019): A multi-layer
+attention-based model, which makes use of
+KG embeddings and entity descriptions for
+DS-RE.
+•BRE+KA (Hu et al., 2021): A version of the
+JointE model that integrates BERT.•BRE+CE (Hu et al., 2021): A BERT and KG
+embedding based model, where BERT output
+and the KG triple embedding are concatenated
+as a feature vector for DS-RE, as shown in
+Figure 1a.
+To collect AUC results and draw Precision-Recall
+curves, we use pre-trained models where possible
+or carefully run published implementations using
+suggested hyperparametersfrom the original pa-
+pers if no pre-trained model is publicly available.
+See the supplementary material for training details.
+In addition to the models above, we select the
+following baselines for further comparison.
+•PCNN+ATT (Lin et al., 2016) A CNN-based
+model with a relation embedding attention
+mechanism.
+•PCNN+HATT (Han et al., 2018b) A CNN-
+based model with a relation hierarchy atten-
+tion mechanism.
+•RESIDE (Vashishth et al., 2018) A Bi-GRU-
+based model which makes use of relevant
+side information (e.g., syntactic information),
+which is encoded via a Graph Convolution
+Network.
+•DISTRE (Alt et al., 2019) A Generative Pre-
+trained Transformer model with a relation em-
+bedding attention mechanism.
+5.4 Results
+The Precision-Recall (PR) curves of each model on
+Medline21 and NYT10 datasets are shown in Fig-
+ure 3 and Figure 4, respectively. We make two main
+observations: (1) Among the compared models,
+BRE+KA and BRE+CE, are strong baselines be-
+cause they significantly outperform other state-of-
+the-art models especially when the recall is greater
+than0.25, demonstrating the benefit of combining
+a pre-trained language model (here: BERT) and a
+KG for DS-RE. (2) The proposed XBE model out-
+performs all baselines and achieves the highest pre-
+cision over the entire recall range on both datasets.
+Table 2 further presents more detailed results in
+terms of AUC and P@N, which shows improved
+performance of XBE in all testing metrics. In par-
+ticular, XBE achieves a new state-of-the-art on the
+commonly used NYT10 dataset.6951
+Since the underlying resources, namely the pre-
+trained language model and the KG are the same as
+those used by the best baseline models, we take this
+strong performance as evidence that the proposed
+model can make better use of the combination of
+KG and text. This in turn, we hypothesize, is due
+to the fact that our proposed model can realize
+encoder layer level communication between KG
+and text representations. In the next section we
+conduct an ablation study to verify this hypothesis.
+5.5 Ablation Study
+We first ablate the three main model components
+in order to assess the contribution to overall per-
+formance. Results are shown in Table 3, where
+“- X-stitch” is the model without the cross-stitch
+mechanism, “- KG enc.” denotes removing the KG
+encoder, and “- text enc.” removing the text en-
+coder. We observe that performance drops for all
+ablations, indicating that each component is impor-
+tant for the model when performing DS-RE. While
+the impact of ablating the text encoder is by far
+the largest, removing the cross-stitch component
+or the KG encoder results in performance that is
+comparable to the performance of the strongest
+baseline, BRE+CE, on both datasets. This suggests
+that these two components, i.e., the KG encoder
+and the cross-stitch mechanism allowing sharing of
+information between the text and KG encoder, are
+what enables our model to improve over BRE+CE.6952
+As described in §4, we pre-train the KG encoder
+via a relation prediction task before fine-tuning the
+XBE model end-to-end on a DS-RE dataset. In
+order to measure the effect of KG encoder pre-
+training, we compare with a setup in which the
+KG encoder is not pre-trained but initialized ran-
+domly instead. In addition, since our proposed
+XBE model facilitates joint training of the KG en-
+coder and text encoder, we also compare to a set-
+ting in which the pre-trained KG encoder is frozen,
+i.e., not updated during training on the two DS-RE
+datasets. The results of these KG-encoder abla-
+tions are shown in Table 4, where “- Pre-KG enc.”
+denotes the random initialization of the KG en-
+coder and “- Joint-KG enc.” is the model with a
+pre-trained, frozen KG encoder. We observe that
+performance decreases both without pre-training
+of the KG encoder and when we freeze the KG en-
+coder while fine-tuning XBE. That is, performance
+gains not only stem from employing a pre-trained
+KG encoder but also from the effective joint train-
+ing of both the KG encoder and the text encoder.
+5.6 Cross-stitch Gate Weights vs. Noise
+In order to analyze how the XBE model dynam-
+ically controls information flow between the en-
+coders, we construct several sets of synthesized
+sentence bags differing in the proportion of noisy
+sentences they contain, similarly to Hu et al. (2021).
+Specifically, given a target entity pair (e, e)we
+create a synthesized sentence bag in which each
+valid sentence is created by the combination of the
+entity pair and the context that expresses their re-
+lation, and each noisy one by randomly selecting
+a context representing a different relation. This
+process is illustrated in Figure 5. We use the
+NYT10m dataset (Gao et al., 2021), which is a6953
+manually annotated version of the NYT10 test set,
+as data source and create 6sets of synthesized sen-
+tence bags with noise settings varying from 5/30
+to30/30, where 5/30(30/30) denotes that in the
+set, each bag has 30sentences and contains 5(30)
+noisy sentences. Each set contains about 4k entity
+pairs and each entity pair has 30sentences, for a
+total of about 130k sentences.
+We train one XBE model on each of the six
+sets with varying noise proportions and observe
+the gate weights of the cross-stitch mechanism,
+Gin Equation 4, which control the amount of
+information that flows into the next layer of text
+encoder. We show the weights with respect to dif-
+ferent noise ratios in Figure 6. From the Figure 6,
+we can observe that the gate weights (i.e., G)
+tend to decrease as the noise ratio increases, indi-
+cating that the proposed cross-stitch mechanism
+of XBE effectively filters out noisy sentences and
+thereby aids the text encoder in extracting effective
+features. This observation is a possible explana-
+tion for the performance gain from the cross-stitch
+mechanism found in the ablation study (Table 3).5.7 Qualitative Examples
+We provide a few qualitative examples intended to
+demonstrate how the proposed cross-stitch mecha-
+nism can impact the performance of DS-RE, which
+are shown in Table 5. We can observe that the
+cross-stitch mechanism appears to facilitate DS-
+RE especially when a sentence bag is noisy. For
+instance, although the bag B1 fails to describe
+the/people/person/place_lived relation, the pro-
+posed model can utilize useful information from
+KG through cross-stitch and thus correctly predicts
+the relation. Similarly, the the model can correctly
+a identify may_be_treated_by relation from the bag
+B4, which does not explicitly describe the target
+relation. Please see the supplementary material for
+further results.
+We also visualize cross-attention weights A,
+which indicate the attention values over textual to-
+kens used by the KG encoder to construct hidden
+representations. As shown in Figure 7a, for the
+representation of the KG relation token may_treat ,
+the cross-stitch mechanism assigns higher atten-6954tion score on informative tokens such as “drug”
+and “treating” than the irrelevant ones from“more
+than 20 years”. Similarly, as shown in Figure 7b,
+in order to encode /people/person/nationality , the
+cross-stitch mechanism focuses on the token “min-
+ister”, which implicitly conveys the meaning of
+nationality, than irrelevant tokens such as “facing”.
+6 Additional Related Work
+In this section we discuss related work besides the
+approaches already mentioned in the introduction.
+To improve the performance of a DS-RE model,
+recently, researchers introduce various attention
+mechanisms. Lin et al. (2016) propose a relation
+vector based attention mechanism. Jat et al. (2018);
+Du et al. (2018) propose multi-level (e.g., word-
+level and sentence-level) structured attention mech-
+anism. Ye and Ling (2019) apply both intra-bag and
+inter-bag attention for DS-RE. Han et al. (2018b)
+propose a relation hierarchy based attention mech-
+anism. Jia et al. (2019) propose an attention reg-
+ularization framework for DS-RE. To handle the
+one-instance sentence bags, Li et al. (2020) propose
+a new selective gated mechanism.
+Ji et al. (2017) apply entity descriptions gen-
+erated from Freebase and Wikipedia as extra evi-
+dences, Lin et al. (2017) utilize multilingual text
+as extra evidences and Vashishth et al. (2018) use
+multiple side information including entity types,
+dependency and relation alias information for DS-
+RE. Alt et al. (2019) utilize pre-trained language
+model for DS-RE. Sun et al. (2019) apply relational
+table extracted from Web as extra evidences for DS-
+RE. Zeng et al. (2017) apply two-hop KG paths for
+DS-RE. Dai et al. (2021) introduce multi-hop paths
+over a KG-text joint graph for DS-RE.
+KG has been proved to be effective for DS-RE.
+Han et al. (2018a) propose a joint model that adopts
+a KG embeddings based attention mechanism. Dai
+et al. (2019) extend the framework of Han et al.
+(2018a) by introducing multiple KG paths as ex-
+tra evidences for DS-RE. Hu et al. (2019) propose
+a multi-layer attention-based framework to utilize
+both KG and textual signals for DS-RE. Based on
+the extensive analysis about the effect of KG and
+attention mechanism on DS-RE, Hu et al. (2021)
+proposed a straightforward but strong model and
+achieve a significant performance gain. However
+these methods mostly employ shallow integration
+of KG and text such as representations concate-
+nation and KG embedding based attention mecha-nism. To fully take advantage of KG for DS-RE,
+in this paper, we propose a novel model to realize
+deep encoder level integration of KG and text.
+7 Limitations
+We focus only on one particular NLP task (i.e., DS-
+RE) to explore the effective way to jointly encoding
+KG and text, and thus further work is required to
+determine to what extend the proposed XBE can
+be generalized into multiple NLP tasks. Therefore,
+our work carries the limitation that the performance
+gain in DS-RE does not guarantee that it is effec-
+tive in other NLP tasks such as Knowledge Graph
+Completion and Question Answering, where the
+combination of KG and text is needed. For this rea-
+son, we empathize the importance of multi-tasking
+for exploring such research question. In addition,
+we only utilize monolingual datasets to conduct
+evaluation and thus further work is required to in-
+vestigate the effectiveness of the proposed model
+on multi-lingual datasets.
+8 Conclusions and Future Work
+We proposed a cross-stitch bi-encoder architecture,
+XBE, to leverage the complementary relation be-
+tween KG and text for distantly supervised relation
+extraction. Experimental results on both Medline21
+and NYT10 datasets prove the robustness of our
+model because the proposed model achieves signifi-
+cant and consistent improvement as compared with
+strong baselines and achieve a new state-of-the-art
+result on the widely used NYT10 dataset. Possible
+future work includes a more thorough investigation
+of how communication between KG encoder and
+text encoder influences the performance, as well
+as a more complex KG encoder that can not only
+handle relation triples, but arbitrary KG subgraphs,
+which could have applications in, e.g., multi-hop
+relation extraction.
+Acknowledgements
+This work was supported by JST CREST Grant
+Number JPMJCR20D2 and JSPS KAKENHI Grant
+Number 21K17814. We are grateful to the anony-
+mous reviewers for their constructive comments.
+References69556956
+A Appendix
+A.1 Cross-stitch Layer Selection
+Since the first few layers of BERT are the basis for
+the high level semantic task (Jawahar et al., 2019),
+we place the cross-stitch in the layers 1∼6, and
+conduct a layer by layer analysis to find the best fit-
+ting layers in a development set. The development
+set is obtained by 30% random selection from the
+training set of the Medline21. The layer-pair wise
+performance is shown in Figure 8, which indicates
+that setting cross-stitch between Layer4 and Layer5
+achieves better AUC than the others, which might
+be because the information encoded by Layer4 is
+complementary. In addition, “all” fails to outper-
+form the others, which might be because not all
+the layers are complementary, for instance the KG
+encoder provides very little syntactic information
+for the text encoder.
+A.2 Dynamic Gate vs. Fixed Gate
+Two strategies can be applied to calculate the
+weights for GandGin Figure 2: one is using
+fixed weights of gate throughout the entire training
+process; another is the proposed dynamic control
+of weights evaluated via Equation 4 and Equation 7
+respectively. Table 6 and Table 7 show the perfor-
+mance comparison between the fixed gate and the
+proposed dynamic gate. We set the value of the
+fixed gate as 0.5in this work. The results show that
+our proposed dynamic gate achieves better perfor-
+mance than the fixed gate, indicating the effective-
+ness of the proposed XBE model on dynamically
+controlling information flow from one layer to the
+next.6957
+A.3 Impact of r
+We conduct ablation study to detect the impact of
+rin (§4) on the overall performance. The results
+are shown in Table 8, where “- r” denotes the
+XBE model without r. We can observe that the
+performance slightly degrades without r, indicat-
+ing that rhas limited contribution to the perfor-
+mance gain comparing with other components of
+the XBE model.6958

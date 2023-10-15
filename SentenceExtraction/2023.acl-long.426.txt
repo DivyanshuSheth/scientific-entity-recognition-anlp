@@ -1,1 +1,772 @@
-7700 Proceedings of the 61st Annual Meeting of the Association for Computational Linguistics Volume 1 : Long Papers , pages 7700–7715 July 9 - 14 , 2023 © 2023 Association for Computational Linguistics 7701 7702 7703 7704 7705 7706 7707 7708 7709 7710 7711 7712 7713 7714 7715 
+
+Tommaso Green, Simone Paolo Ponzetto, Goran GlavašData and Web Science Group, University of Mannheim, GermanyCAIDAS, University of Würzburg, Germany
+{tommaso.green, ponzetto}@uni-mannheim.de
+goran.glavas@uni-wuerzburg.de
+Abstract
+While pretrained language models (PLMs) pri-
+marily serve as general-purpose text encoders
+that can be fine-tuned for a wide variety of
+downstream tasks, recent work has shown that
+they can also be rewired to produce high-
+quality word representations (i.e., static word
+embeddings) and yield good performance in
+type-level lexical tasks. While existing work
+primarily focused on the lexical specializa-
+tion of single monolingual PLMs, in this work
+we expose massively multilingual transformers
+(MMTs, e.g., mBERT or XLM-R) to multi-
+lingual lexical knowledge at scale, leveraging
+BabelNet as the readily available rich source of
+multilingual and cross-lingual type-level lex-
+ical knowledge. Concretely, we use Babel-
+Net’s multilingual synsets to create synonym
+pairs (or synonym-gloss pairs) across 50 lan-
+guages and then subject the MMTs (mBERT
+and XLM-R) to a lexical specialization pro-
+cedure guided by a contrastive objective. We
+show that such multilingual lexical specializa-
+tion brings substantial gains in two standard
+cross-lingual lexical tasks, bilingual lexicon in-
+duction and cross-lingual word similarity, as
+well as in cross-lingual sentence retrieval. Cru-
+cially, we observe gains for languages unseen
+in specialization, indicating that multilingual
+lexical specialization enables generalization to
+languages with no lexical constraints. In a se-
+ries of controlled experiments, we show that
+the number of specialization constraints plays
+a much greater role than the set of languages
+from which they originate.
+1 Introduction
+Massively multilingual transfomers (MMTs) such
+as mBERT (Devlin et al., 2019) and XLM-R (Con-
+neau et al., 2020), among others, have been the
+primary vehicle of cross-lingual NLP transfer, of-
+fering state-of-the-art performance for many tasks
+and target languages in various zero-shot and few-
+shot transfer scenarios (Pires et al., 2019; Wu andDredze, 2019; Cao et al., 2020; Artetxe et al., 2020;
+Lauscher et al., 2020a; Zhao et al., 2021; Ruder
+et al., 2021, inter alia ). Much less work, however,
+investigated their capabilities as multilingual type-
+level word encoders (Vuli ´c et al., 2020b). Recent
+work, focusing primarily on monolingual PLMs,
+demonstrated that they can be turned into effective
+type-level lexical encoders using lexical constraints
+(Vuli ´c et al., 2021; Liu et al., 2021), i.e., a process
+commonly referred to as lexical specialization . Ex-
+isting work, however, investigated lexical special-
+ization in monolingual or bilingual settings only,
+namely specializing PLMs for a single language or
+a pair of languages using either English monolin-
+gual or noisy translated bilingual lexical constraints
+(Vuli ´c et al., 2021). This is not only computation-
+ally inefficient, since one specialization needs to be
+executed for each language or language pair, but
+also does not tap into the wealth of multilingual
+knowledge of MMT’s simultaneous pretraining on
+many (100+) languages, as well as large amounts of
+manually curated knowledge from massively mul-
+tilingual knowledge bases like BabelNet (Navigli
+and Ponzetto, 2010).
+In this work, in contrast, we investigate mas-
+sively multilingual lexical specialization of MMTs,
+i.e., the potential benefits and limitations of a sin-
+gle lexical specialization procedure in multiple
+languages . To this end, we tap into BabelNet as
+the readily available massively multilingual lexico-
+semantic resource. Concretely, we release a dataset
+of synonym pairs or synonym-gloss pairs that cover
+50 languages (representing 14 different language
+families) obtained from BabelNet’s multilingual
+synsets and leverage them as positive instances in a
+contrastive specialization training procedure. Our
+evaluation on two multilingual lexical tasks – bilin-
+gual lexicon induction (BLI) and cross-lingual se-
+mantic word similarity (XLSIM) – as well as on the
+task of cross-lingual sentence retrieval demonstrate
+the effectiveness of the multilingual lexical special-7700ization when compared against vanilla MMTs.
+We complement our evaluation with diagnostic
+experiments aimed at studying properties of the
+multilingual lexical constraints that might drive the
+downstream lexical performance of the specialized
+models, namely the choice of the languages and
+the number of constraints. For this, we perform
+experiments where we control MMT specialization
+for (i) the linguistic diversity of the language repre-
+sented in the specialization dataset and (ii) the size
+of the specialization dataset, i.e., the number of
+synonym pairs from BabelNet used in contrastive
+training. The results of our diagnostic experiments
+suggest that, counterintuitively, the typological di-
+versity of the languages used in specialization (i.e.,
+the specialization languages) has barely any effect
+in defining the downstream performance. These
+findings for multilingual specialization for (type-
+level) lexical tasks contrast the observations for
+higher-level tasks, requiring the modeling of sen-
+tence or sentence-pair semantics, in which both
+multi-source specialization/fine-tuning on diverse
+languages (Chen et al., 2019; Ansell et al., 2021)
+and linguistic proximity between training and eval-
+uation languages (Lin et al., 2019; Lauscher et al.,
+2020a) have been shown to strongly affect the trans-
+fer performance. At the same time, we find that the
+alignment performance quickly saturates with few
+constraints: this corroborates the rewiring hypothe-
+sisof Vuli ´c et al. (2021), here in a massively multi-
+lingual setting. To encourage further research on
+this topic, we release our code and all our datasets
+of lexical constraints and synonym-gloss pairs at
+https://github.com/umanlp/babelbert .
+2 Related Work
+External lexical knowledge from lexico-semantic
+resources (e.g., WordNet, ConceptNet) has been
+extensively leveraged for improving distributional
+representations of words – a process commonly
+referred to as semantic specialization. Earlier work
+on semantic specialization of word embeddings can
+roughly be divided into (i) joint specialization ap-
+proaches (Yu and Dredze, 2014; Xu et al., 2014;
+Bian et al., 2014; Kiela et al., 2015; Liu et al., 2015;
+Ono et al., 2015, inter alia), which integrate the ex-
+ternal lexical constraints in the word embedding
+(pre)training and (ii) retrofitting orpostprocessing
+techniques that post-hoc modify the pretrained em-
+beddings, conforming them to external lexical con-
+straints (Faruqui et al., 2015; Wieting et al., 2015;Mrkši ´c et al., 2017; Vuli ´c et al., 2018; Glavaš and
+Vuli´c, 2018; Ponti et al., 2018).
+External lexical knowledge has also been used
+to enrich monolingual PLMs by coupling masked
+language modeling with an auxiliary pretraining
+objective using lexical relations from WordNet
+(Lauscher et al., 2020b; Levine et al., 2020). How-
+ever, these approaches are all aimed at enriching
+the Transformer with additional knowledge to be
+exploited in various downstream tasks, rather than
+producing better type-level word representations.
+Several paradigms for obtaining semantically
+improved multilingual representation spaces have
+been proposed for static word embeddings: (i)
+align-and-specialize (Mrkši ´c et al., 2017) starts
+from mutually unaligned monolingual embedding
+spaces and both aligns them and semantically spe-
+cializes for semantic similarity (as opposed to
+other types of semantic relatedness) by means of
+both multilingual (i.e., monolingual constraints for
+multiple languages) and cross-lingual lexical con-
+straints; (ii) in cross-lingual specialization transfer
+(Vuli ´c et al., 2018; Glavaš and Vuli ´c, 2018) the
+embedding space of a target language is first pro-
+jected into the (unspecialized) space of the high-
+resource language (typically English) using a lim-
+ited amount of cross-lingual source-target lexical
+alignments and then specialized with the special-
+ization model trained using abundant monolingual
+lexical constraints of the resource-rich source lan-
+guage; (iii) constraint transfer (Ponti et al., 2019)
+noisily translates the (abundant) source language
+constraints into the target languages and uses those
+to specialize the monolingual embedding spaces of
+the target languages.
+More recently, Vuli ´c et al. (2020b) showed that
+pretrained transformers encode a wealth of lexical
+knowledge in their parameters and that it is possible
+to obtain from them type-level (i.e., static, out-of-
+context) word representations that outperform rep-
+resentations obtained with word embedding models
+like fastText (Bojanowski et al., 2017). In a subse-
+quent approach dubbed LexFit (Vuli ´c et al., 2021),
+they specialize monolingual BERT models for a
+range of languages using English monolingual con-
+straints from WordNet and Roget’s Thesaurus, and
+automatically translated constraints (Ponti et al.,
+2019) for languages other than English. Finally,
+once they obtain static word representations for
+each language, they induce a bilingual space in a
+standard fashion, by means of an orthogonal pro-7701jection (Smith et al., 2017; Artetxe et al., 2019).
+The effectiveness of LexFit stems from the fact
+that language-specific PLMs tend to produce bet-
+ter representations for a language than the MMTs
+(e.g., mBERT) due to the “curse of multilingual-
+ity” (Conneau et al., 2020; Pfeiffer et al., 2022).
+This, however, limits its applicability to a few lan-
+guages with existing monolingual PLMs, crucially
+excluding low-resource ones. The approach is also
+computationally expensive as it entails (i) a sepa-
+rate specialization process for each language (plus
+a noisy translation of English constraints to the tar-
+get language), and (ii) a bilingual alignment for
+each language pair. Additionally, it does not ex-
+ploit cross-lingual lexical constraints in specializa-
+tion, merely in post-hoc alignment. In this work,
+we propose a single massively multilingual lexical
+specialization approach (dubbed BabelBERT) to
+be applied to pretrained MMTs. To this end, we
+propose to obtain the lexical constraints from Ba-
+belNet, a massively multilingual lexico-semantic
+resource (Navigli and Ponzetto, 2010; Navigli et al.,
+2021). BabelBERT has several advantages: (i) we
+leverage multilingual (i.e., monolingual from mul-
+tiple languages) as well as cross-lingual lexical
+constraints and (ii) perform a single multilingual
+specialization procedure, instead of specializing
+separately for each language or language pair; (iii)
+the multilingual specialization on top of MMTs re-
+moves the need for language-specific transformers
+and additionally allows for specialization effects
+to propagate to unseen languages, i.e., languages
+without readily available lexical constraints.
+3 Multilingual Lexical Specialization
+We first describe how we create lexical constraints
+from BabelNet in §3.1 and then how we leverage
+them in a contrastive learning procedure in §3.2.
+3.1 Constraint Mining
+In line with most work on lexical specialization for
+semantic similarity, we exploit the lexico-semantic
+relation of synonymy to obtain the specializa-
+tion constraints. The multilingual synsets of Ba-
+belNetallow us to simultaneously obtain both
+monolingual and cross-lingual synonym pairs. Let
+L={L, . . . , L}be the predefined set of lan-
+guages for which we mine the constraints andW={w, . . . , w}a list of seed words. For
+each word, we first obtain all BabelNet synsets
+containing that word, discarding synsets that repre-
+sent named entities and keeping only synsets that
+have at least two glosses in languages from L. We
+then iterate over all the fetched synsets, creating
+all possible (monolingual and cross-lingual) syn-
+onym pairs ( w,w), each associated with a lan-
+guage pair ( L,L). We also extract glosses
+(g,g), i.e., sentences that explain the concept of
+the synset, in languages (L, L)different
+from L andL, respectively.To ensure
+the quality of the words we extract, we only keep a
+word if it lies in the top- kwords in its language fre-
+quency list.We additionally discard words that are
+automatic translations or Wikipedia redirections,
+remove multi-words and delete duplicates.
+3.2 Specializing for Semantic Similarity
+Our lexico-semantic specialization procedure is
+based on a Bi-Encoder architecture (often also re-
+ferred to as Dual-Encoder or Siamese architecture)
+and a contrastive training objective.
+Type-Level Word Representations. Following
+related work (Vuli ´c et al., 2020b; Bommasani
+et al., 2020; Vuli ´c et al., 2021), we obtain
+type-level word representations from a PLM in-
+dependently for each word from the synonym
+pair: we tokenize each word into its constituent
+subwords sw. . . swand feed the sequence
+[SPEC][sw]. . .[sw][SPEC]into the MMT,
+with [SPEC]and[SPEC]denoting the spe-
+cial sequence start and sequence end tokens of the
+MMT (e.g., [CLS ]and[SEP ], respectively, for
+BERT). We get the final representation eby
+mean pooling the representations of its subwords
+(without the special tokens) from the last layer of
+the Transformer encoder.
+Sense-Level Word Representations. Type-level
+representations of polysemous words conflate, by
+construction, all of its senses into one embedding.
+To address this and make the representations cap-
+ture a specific sense, we leverage additional context
+through sense-level information provided by the
+knowledge base. For example, among the senses
+of the word batfound in BabelNet, the list of the
+most frequent senses contains the synset for the7702nocturnal animal and the sports club (e.g., the one
+used for example in cricket). Besides the set of
+synonyms, i.e., the different synsets these senses
+belong to, their different meaning is captured by
+the glosses. The gloss for the animal sense reads
+as follows:
+Nocturnal mouselike mammal with fore-
+limbs modified to form membranous
+wings [...]
+whereas for the sport stick we find:
+A cricket bat is a specialised piece of
+equipment used by batters in the sport of
+cricket [...]
+In light of this, we make the MMT additionally
+encode word-gloss pairs, in order to obtain sense-
+level representations: to this end, we append one
+of the mined glosses gto the word as follows:
+[SPEC][sw]. . .[sw][SPEC]g[SPEC]
+and feed this as input to the MMT. As with the type-
+level representations, we get the final representa-
+tione by mean pooling the representations of
+only the subwords sw. . . sw(i.e., gloss is there
+just for the contextualization of the word) from the
+last layer of the Transformer encoder.
+Contrastive Objective. We train in batches
+B= (w, w,syn)of synonym pairs, with
+syndenoting the BabelNet synset of the syn-
+onym pair (w, w). In sense-level training, each
+data point additionally contains the glosses ( g,
+g). We train by minimizing a variant of the pop-
+ular InfoNCE contrastive loss (van den Oord et al.,
+2018). In a single batch, there might be more than
+one pair belonging to the same synset, we thus
+form all possible orderedpositive pairs in a set
+P, i.e., pairs of words with the same syn.
+L =−1
+|P|/summationdisplaylog/parenleftig
+sim(e,e)/parenrightig
+−log
+sim(e,e) +/summationdisplaysim(e,e)
+
+where sim(e,e) = exp(cos( e,e))/τ,
+withτas the temperature hyperparameter and Nas the set of in-batch negatives, i.e., words from the
+other pairs in the batch that come from a BabelNet
+synset other than syn.
+Adapter-Based Fine-Tuning. Besides full fine-
+tuning of the MMT’s parameters, we experiment
+with lexical specialization via adapter-based fine-
+tuning (Houlsby et al., 2019). Adapters, shown
+useful in various sequential and transfer learning
+scenarios (Pfeiffer et al., 2020b; Rücklé et al.,
+2020; Lauscher et al., 2021; Hung et al., 2022)
+are parameter-light modules that are inserted into
+a PLM’s layers before specialization (i.e., fine-
+tuning): during specialization, only adapter param-
+eters are tuned, while the PLM’s pretrained param-
+eters are kept fixed. We adopt the architecture of
+Pfeiffer et al. (2020b), in which one bottleneck
+adapter is inserted into each Transformer layer.
+4 Experimental setup
+Multilingual Lexical Constraints. We focus
+on the 50 diverse languages from the popular
+XTREME-R benchmark (Ruder et al., 2021) which
+we report with language codes for brevity: af,ar,
+az,bg,bn,de,el,en,es,et,eu,fa,fi,fr,gu,he,hi,
+ht,hu,id,it,ja,jv,ka,kk,ko,lt,ml,mr,ms,my,nl,
+pa,pl,pt,qu,ro,ru,sw,ta,te,th,tl,tr,uk,ur,vi,
+wo,yo,zh. The sample covers 14 language families
+(Afro-Asiatic, Austro-Asiatic, Austronesian, Dra-
+vidian, Indo- European, Japonic, Kartvelian, Kra-
+Dai, Niger- Congo, Sino-Tibetan, Turkic, Uralic,
+Creole, and Quechuan) and additionally contains
+Basque and Korean as two language isolates.
+We collect the constraints from BabelNet with
+the procedure described in §3.1. As seed words,
+we select the top- NEnglish most frequent words
+(N= 1,000, filtering for stopwords using NLTK
+(Bird and Loper, 2004)) and retain only words that
+belong to the top- k(k= 15 ,000) words in the
+frequency list of a language. The total training set
+consists of 761,273 lexical constraints: we provide
+additional statistics of the dataset in appendix A
+and a few examples in Table 3.
+Evaluation Tasks. We evaluate on two standard
+cross-lingual word-level tasks, bilingual lexicon
+induction (BLI) and cross-lingual word similarity
+(XLSIM). We couple this with an evaluation on
+unsupervised cross-lingual sentence retrieval. For
+the word-level tasks (XLSIM and BLI): a) we make
+sure not to include in the training set of lexical
+constraints from BabelNet any word that appears7703in the test sets; b) we take the mean-pooling of
+the embeddings of the subwords from the best-
+performing layer (see Table 4) of the MMT as word
+representations.
+Task 1: Bilingual Lexicon Induction. BLI tests
+the quality of a multilingual (bilingual) represen-
+tation space by means of type-level word align-
+ment between languages. For a given query word
+from a source language, words from the vocabu-
+lary of a target language are ranked based on their
+similarity with the query. The position of the cor-
+rect translation of the query in the target language
+ranking reflects the quality of the type-level word
+alignment between the languages. We evaluate on
+two well-established benchmarks: G-BLI (Glavaš
+et al., 2019) covers 28 language pairs between 8
+languages ( de,en,fi,fr,hr,it,ru,tr), whereas
+PanlexBLI (Vuli ´c et al., 2019) spans 15 diverse lan-
+guages ( bg,ca,eo,et,eu,fi,he,hu,id,ka,ko,lt,no,
+th,tr) for a total of 210 language pairs. For both
+datasets, we evaluate on the test portions consisting
+of 2,000 word pairs per language pair and report
+the performance in terms of Mean Reciprocal Rank
+(MRR) as recommended by Glavaš et al. (2019).
+Following Vuli ´c et al. (2020b), the vocabularies
+used for retrieval cover the top 100K most frequent
+words from the respective fastText Wikipedia vec-
+tors (Bojanowski et al., 2017).
+Task 2: Cross-Lingual Word Similarity. XL-
+SIM measures the correlation between the similari-
+ties of cross-lingual word pairs obtained based on
+their representations in the multilingual (bilingual)
+representation space and similarity scores assigned
+by human annotators. We evaluate the performance
+on 66 language pairs between 12 languages ( zh,
+cy,en,et,fi,fr,he,pl,ru,es,sw,yue) from the
+MultiSimLex dataset (Vuli ´c et al., 2020a) and use
+Spearman’s ρbetween the cosine similarities be-
+tween words’ embeddings and the corresponding
+human-assigned similarity scores.
+Task 3: Cross-Lingual Sentence Retrieval. For
+cross-lingual sentence retrieval, we use the Tatoeba
+dataset (Artetxe and Schwenk, 2019) which com-
+prises 112 languages, where each language has
+1,000 sentences paired with their translations in
+English. We obtain the sentence embedding by
+mean-pooling the representations of all of its sub-
+word tokens at the output of the best-performing
+Transformer layer. We straightforwardly compute
+the similarities between sentences as the cosine ofthe angle between their embeddings. We compare
+each query sentence to its nearest neighbour and
+compute accuracy as our evaluation measure.
+Training Details. We experiment using two dif-
+ferent MMTs: multilingual BERT (mBERT) (De-
+vlin et al., 2019) and XLM-R (Conneau et al.,
+2020).In all experiments, we set the temperature
+of the InfoNCE loss to τ= 0.07. To account for
+the very skewed distribution of constraints across
+language pairs (cf. Figure 3), following Conneau
+and Lample (2019), we sample batch constraints
+from the multinomial distribution {q}over lan-
+guage pairs (L, L)as follows:
+q=p/summationtextp, p=n/summationtextn
+where ndenotes the number of synonym pairs
+for a language pair (L, L)andαis the smoothing
+factor. We set αto0.5.
+For model selection (both hyperparameter search
+and checkpoint selection), we proceed as follows.
+We randomly select two language pairs from G-BLI
+and two language pairs from PL-BLI and pick the
+corresponding training sets – consisting of 5,000
+pairs – as our validation set. Before training, we
+run one validation loop to get the MRR score of
+the unspecialized vanilla MMT for each of the lan-
+guage pairs. During training, we stop every quarter
+of an epoch to perform validation: we track for
+each of these four validation language pairs the rel-
+ative improvement of MRR w.r.t. the vanilla score.
+We use the average of these four relative improve-
+ments as our overall validation metric that guides
+model selection. We train for 15 epochs using
+AdamW (Loshchilov and Hutter, 2019) and use Py-
+torchLightning (Falcon and The PyTorch Lightning
+team, 2019) for our implementation, coupled with
+Huggingface Transformers (Wolf et al., 2020) and
+Pytorch Metric Learning (Musgrave et al., 2020)
+libraries. For the adapter-based models, we use the
+adapter-transformers library (Pfeiffer et al., 2020a).
+Hyperparameters and training details For the
+fully fine-tuned models, we search for the optimal
+learning rate lr∈ {2e−5,5e−6,1e−6}and
+the batch size N∈ {32,64}. For adapter-based
+models, we additionally try lr= 1e−4and set the
+adapter reduction ratio to 16(i.e., we set the bottle-
+neck size of the adapters to 48). Every experiment7704MMT Model BLI XLSIM Ttb
+G-BLI PL-BLIvanilla 14.5 10.7 10.3 34.1
+Babel-Ad 20.0 12.3 25.4 43.2
+Babel-FT 20.9 12.4 25.8 43.7
+Babel-Gl 19.5 11.8 24.1 41.7vanilla 8.5 5.4 5.9 37.6
+Babel-Ad 17.8 8.7 32.0 55.6
+Babel-FT 20.8 10.5 34.2 55.7
+Babel-Gl 19.7 10.0 34.4 58.6
+is done on a single NVIDIA V100 or A100 GPU
+on a computing cluster at our disposal. Taking
+into account failed experiments, grid searches and
+successful runs we report 331 days of compute (in-
+cluding CPU time for preprocessing and retrieval)
+as logged by the Weights & Biases logger (Biewald,
+2020). We provide the full list of hyperparameter
+values in the Appendix (Table 4).
+5 Results and Discussion
+We present our main results in Table 1, where we
+compare the multilingual lexical specialization pro-
+cedure with type-level representations using full
+fine-tuning (Babel-FT) and adapter-based tuning
+(Babel-Ad) and full-fine tuning of the MMT us-
+ing sense-level representations (Babel-Gl) against
+the baseline models provided by the unspecialized
+vanilla MMTs. We show the results for the word
+representations that come from the layer for which
+the best average performance is obtained on the
+given dataset: we provide the information on opti-
+mal layers for lexical representations in Table 4 in
+the Appendix. For each model, we compute each
+language-pair score as the average over 3runs with
+different random seeds.
+Overall, the results indicate that multilingual
+lexical fine-tuning improves the performance of
+both MMTs (mBERT and XLM-R) on all tasks.All three specialization variants (Babel-Ad/FT/Gl)
+yield similar performance on all three tasks for
+mBERT. The same is, however, not the case for
+XLM-R, where full fine-tuning (Babel-FT and
+Babel-Gl) leads to substantially better performance
+across the board compared to adapter-based train-
+ing (Babel-Ad). Training with sense-level infor-
+mation in the form of synset glosses (Babel-Gl)
+seems particularly beneficial for cross-lingual sen-
+tence retrieval on Tatoeba (Ttb) – we assume that
+this is because, much like the rest of the sentences
+in Tatoeba, the glosses in specialization training
+provide sentential context to word representations.
+Interestingly, despite the fact that vanilla mBERT
+produces substantially higher quality word repre-
+sentations than vanilla XLM-R (e.g., 14.5 vs. 8.5
+on G-BLI or 10.3 vs. 5.9 on XLSIM), our multilin-
+gual lexical specialization tilts the results in favour
+of XLM-R, with comparable BLI results between
+the two and much better XLM-R performance on
+XLSIM (9-point gap) and Ttb (15-point gap). This
+suggests that XLM-R actually contains richer mul-
+tilingual lexical knowledge than mBERT, which is,
+however, buried deeper in the model (this is cor-
+roborated by the fact that for XLM-R we generally
+get better lexical representations from lower Trans-
+former layers, see the Appendix): once uncovered
+by means of our multilingual lexical specialization,
+this richer lexical information of XLM-R surfaces.
+Figure 1 shows the five language pairs for each
+evaluation task/dataset for which we observe the
+largest performance improvement with Babel-FT
+mBERT. In PL-BLI, we find two languages, Nor-
+wegian and Catalan, for which no constraint was
+seen during training: this indicates that the bene-
+fits of massively multilingual lexical specialization
+propagate to unseen languages. What we find par-
+ticularly encouraging is the fact that Tatoeba pairs
+with the largest gains include some low-resource
+languages and dialects (e.g., Wu and Yu Chinese,
+Tamil, and Interlingue), some of them not even
+present in MMTs in pretraining.
+5.1 Additional Analysis
+We perform additional ablations to try to isolate the
+factors that lead to performance gains from mas-
+sively multilingual lexical specialization. To this
+end, we carry out experiments in which we vary (i)
+the typological diversity of the sample of languages
+from which we take BabelNet constraints and (ii)
+the size of the training set of lexical constraints7705
+used for specialization.
+Role of Linguistic Diversity. We investigate how
+changing typological diversity of the sample of
+languages from which we draw the specialization
+constraints affects the generalization to unseen lan-
+guages. That is, we test whether a selection of
+languages with different degrees of linguistic diver-
+sity and no overlap with the test languages impacts
+the multilingual lexical specialization of the MMTs.
+To quantify linguistic diversity, we borrow the typo-
+logical diversity index dfrom Ponti et al. (2020).
+For a sample of languages S, we compute the index
+based on the URIEL vectors (Littell et al., 2017)
+of languages in the sample.We obtain dof the
+sample Sby computing an entropy value for each
+of the features across all languages in S: such value
+is 0 if all languages have identical values for that
+feature. We then average the entropy scores across
+all features.
+We choose PL-BLI as our benchmark for this
+analysis as it proved to be the most challenging
+lexical task. We first create 10 samples, each con-taining 10 languages, as follows: we first sample 1
+million different language samples of 10 languages,
+making sure none of them contains any of the PL-
+BLI test languages. We then divide them into 10
+bins according to dand randomly pick one sam-
+ple from each bin at random. For each sample,
+we mine the synonym pairs from BabelNet from
+scratch, considering only those languages, and mak-
+ing sure that each language pair has exactly 100
+constraints – resulting in a total of 5,500 instances
+for each sample (counting both cross-lingual and
+monolingual constraints). In an effort to limit test
+language leakage in the training procedure, differ-
+ently from the main experiments, we only validate
+on two language pairs from G-BLI for model se-
+lection. We conduct experiments with Babel-FT
+mBERT as our best-performing model on PL-BLI.
+We fine-tune for 10 epochs with the same hyperpa-
+rameters used in the main experiments but without
+the upsampling as all language pairs have the same
+number of constraints. We report the results, to-
+gether with the language samples and their d
+score in Table 2. Surprisingly, we observe a poor
+correlation between dof the language sample
+and the corresponding PL-BLI performance.7706
+We additionally quantify the degree of similar-
+ity between the languages of each sample and the
+languages included in PL-BLI: sim(also
+shown in Table 2) is the average of pairwise simi-
+larities of URIEL vectors between the languages of
+the two sets. We again observe a poor correlation
+between simand PL-BLI performance,
+indicating that the proximity of training and testing
+languages does not play a role. While counterin-
+tuitive, this is actually favourable: it indicates that
+we can, with similar specialization success, lever-
+age constraints from a wide range of languages,
+which allows us to mine them for high-resource
+languages for which structured lexical knowledge
+is more abundant.
+The Role of Constraint Size. We perform addi-
+tional experiments to investigate the effect of train-
+ing set size (i.e., the total number of constraints).
+For this, we create three additional training sets
+of sizes 1K, 10K, and 100K instances, with the
+same relative distribution of constraints across lan-
+guage pairs as in the full training. We then subject
+mBERT to Babel-FT specialization for 10 epochs
+(same hyperparameters and training procedure as
+in the main evaluation). For each training set, we
+execute 3 different runs and report averages in Fig-
+ure 2. On all four benchmarks, we observe the
+same overall behaviour: the performance saturates
+already with 10K constraints. Tatoeba, the only
+sentence-level task in our setup, seems to be the
+task that benefits the most from a larger training set.
+In contrast, XLSIM performance saturates already
+with 1K lexical constraints, which seems to be in
+line with findings of Vuli ´c et al. (2021).
+Vuli´c et al. (2021) proposed and empirically vali-
+dated the rewiring hypothesis – that lexical special-
+ization primarily exposes knowledge that is already
+present in the pre-trained weights, rather than in-
+jecting new knowledge. We believe our resultsconfirm this claim: if specialization mainly resur-
+faces lexical knowledge hidden in the weights, this
+puts a cap on the downstream performance. In our
+case, we find that such knowledge seems to be in-
+dependent of both the typological diversity of the
+training languages and the typological similarity of
+training and test languages: in this sense, the MMT
+appears to be learning a language-agnostic lexical
+alignment function that affects its entire representa-
+tion space. Moreover, learning of this function only
+seems to require about 10K samples, with perfor-
+mance quickly saturating with more constraints.
+6 Conclusion
+In this work, we presented a multilingual lexical
+specialization approach that leverages the mas-
+sively multilingual lexical knowledge available
+in BabelNet. Differently from prior approaches,
+which perform monolingual or bilingual special-
+ization procedures, we subject MMTs to a single
+training regime with lexical constraints from 50 lan-
+guages and report substantial gains over the unspe-
+cialized baseline (i.e., MMT not subject to lexical
+specialization). We perform both type-level lexi-
+cal specialization, i.e. with words fed in isolation
+to the transformer, and sense-level lexical special-
+ization, by accompanying each word with a gloss.
+We perform a series of additional experiments to
+study the driving factors of lexical specialization:
+in one experiment, we keep the training set size
+fixed while diversifying the languages in the train-
+ing set. We observe that this does not seem to have
+a significant impact on the overall performance. In
+a subsequent experiment, we again use constraints
+encompassing 50 languages, but limit the number
+of constraints per language pair: we find that more
+constraints help the model perform better, however,
+few samples are necessary to reach peak perfor-
+mance. Our results support the rewiring hypothesis7707of Vuli ´c et al. (2021) that lexical specialization
+resurfaces the existing lexical knowledge stored in
+MMTs, rather than injecting it. Such extraction
+seems to be independent of the training languages
+and quickly saturates with few constraints.
+Limitations. While we try to perform multilin-
+gual lexical specialization on a set of typologically
+diverse languages, we are still restricting our anal-
+ysis to a small fraction of all the languages of the
+world. In addition to this, our analysis investi-
+gates only two MMTs – albeit arguably the two
+most widely used. Due to hardware limitations, we
+experimented with XLM-R Base: the results we
+report may be substantially different for XLM-R
+Large (or other larger MMTs like mT5), which
+possibly encodes more lexical knowledge.
+Ethical considerations. We leverage lexical con-
+straints from BabelNet, a resource constructed
+semi-automatically. BabelNet may contain lexi-
+cal associations reflecting negative social biases
+(e.g., sexism or racism). Biased constraints, when
+used as training data in our specialization, may
+strengthen societal biases present in MMTs.
+Acknowledgments Tommaso Green and Simone
+Ponzetto have been supported by the JOIN-T 2
+project of the Deutsche Forschungsgemeinschaft
+(DFG). Goran Glavaš has been supported by the
+EUINACTION grant funded by NORFACE Gover-
+nance (462-19-010) through Deutsche Forschungs-
+gemeinschaft (DFG; GL950/2-1). We addition-
+ally acknowledge support by the state of Baden-
+Württemberg through bwHPC and the German
+Research Foundation (DFG) through grant INST
+35/1597-1 FUGG. We thank our colleague Sotaro
+Takeshita for insightful discussions during the de-
+velopment of this project and Ines Rehbein for her
+comments on a draft of this paper.
+References770877097710
+A Training set statistics
+We report the number of constraints for each lan-
+guage pair in Figure 3.771177127713ACL 2023 Responsible NLP Checklist
+A For every submission:
+/squareA1. Did you describe the limitations of your work?
+Limitation section
+/squareA2. Did you discuss any potential risks of your work?
+Yes, ethical considerations
+/squareA3. Do the abstract and introduction summarize the paper’s main claims?
+Abstract and introduction (section 1)
+/squareA4. Have you used AI writing assistants when working on this paper?
+Left blank.
+B/squareDid you use or create scientiﬁc artifacts?
+Yes, we release a dataset (3.1) and use publicly released datasets/models (sec. 4)
+/squareB1. Did you cite the creators of artifacts you used?
+Section 4.
+/squareB2. Did you discuss the license or terms for use and / or distribution of any artifacts?
+We use Babelnet under a non-commercial license (footnote 1)
+/squareB3. Did you discuss if your use of existing artifact(s) was consistent with their intended use, provided
+that it was speciﬁed? For the artifacts you create, do you specify intended use and whether that is
+compatible with the original access conditions (in particular, derivatives of data accessed for research
+purposes should not be used outside of research contexts)?
+We use BabelNet as in the license and release a dataset with the intention of fostering research on
+lexical specialization
+/squareB4. Did you discuss the steps taken to check whether the data that was collected / used contains any
+information that names or uniquely identiﬁes individual people or offensive content, and the steps
+taken to protect / anonymize it?
+We remove named entities from the resulting dataset (section 3)
+/squareB5. Did you provide documentation of the artifacts, e.g., coverage of domains, languages, and
+linguistic phenomena, demographic groups represented, etc.?
+Appendix A
+/squareB6. Did you report relevant statistics like the number of examples, details of train / test / dev splits,
+etc. for the data that you used / created? Even for commonly-used benchmark datasets, include the
+number of examples in train / validation / test splits, as these provide necessary context for a reader
+to understand experimental results. For example, small differences in accuracy on large test sets may
+be signiﬁcant, while on small test sets they may not be.
+Appendix A, Sec.4
+C/squareDid you run computational experiments?
+Sec 4
+/squareC1. Did you report the number of parameters in the models used, the total computational budget
+(e.g., GPU hours), and computing infrastructure used?
+Section 47714/squareC2. Did you discuss the experimental setup, including hyperparameter search and best-found
+hyperparameter values?
+Section 4, Appendix B
+/squareC3. Did you report descriptive statistics about your results (e.g., error bars around results, summary
+statistics from sets of experiments), and is it transparent whether you are reporting the max, mean,
+etc. or just a single run?
+Sec 5
+/squareC4. If you used existing packages (e.g., for preprocessing, for normalization, or for evaluation), did
+you report the implementation, model, and parameter settings used (e.g., NLTK, Spacy, ROUGE,
+etc.)?
+Left blank.
+D/squareDid you use human annotators (e.g., crowdworkers) or research with human participants?
+Left blank.
+/squareD1. Did you report the full text of instructions given to participants, including e.g., screenshots,
+disclaimers of any risks to participants or annotators, etc.?
+Not applicable. Left blank.
+/squareD2. Did you report information about how you recruited (e.g., crowdsourcing platform, students)
+and paid participants, and discuss if such payment is adequate given the participants’ demographic
+(e.g., country of residence)?
+Not applicable. Left blank.
+/squareD3. Did you discuss whether and how consent was obtained from people whose data you’re
+using/curating? For example, if you collected data via crowdsourcing, did your instructions to
+crowdworkers explain how the data would be used?
+Not applicable. Left blank.
+/squareD4. Was the data collection protocol approved (or determined exempt) by an ethics review board?
+Not applicable. Left blank.
+/squareD5. Did you report the basic demographic and geographic characteristics of the annotator population
+that is the source of the data?
+Not applicable. Left blank.7715

@@ -1,1 +1,755 @@
-11891 Proceedings of the 61st Annual Meeting of the Association for Computational Linguistics Volume 1 : Long Papers , pages 11891–11907 July 9 - 14 , 2023 © 2023 Association for Computational Linguistics 11892 11893 11894 11895 11896 11897 11898 11899 11900 11901 11902 11903 11904 11905 11906 11907 
+
+Minghan Li, Sheng-Chieh Lin, Barlas Oguz, Asish Ghoshal,
+Jimmy Lin,Yashar Mehdad,Wen-tau Yih, and Xilun Chen
+University of Waterloo, Meta AI
+{m692li,s269lin,jimmylin}@uwaterloo.ca
+{barlaso,aghoshal,mehdad,scottyih,xilun}@meta.com
+Abstract
+Multi-vector retrieval methods combine the
+merits of sparse (e.g. BM25) and dense (e.g.
+DPR) retrievers and achieve state-of-the-art
+performance on various retrieval tasks. These
+methods, however, are orders of magnitude
+slower and need more space to store their
+indexes compared to their single-vector
+counterparts. In this paper, we unify different
+multi-vector retrieval models from a token
+routing viewpoint and propose conditional
+token interaction via dynamic lexical routing,
+namely C , for efﬁcient and effective
+multi-vector retrieval. C learns to
+route each token vector to the predicted
+lexical “keys” such that a query token
+vector only interacts with document token
+vectors routed to the same key. This design
+signiﬁcantly reduces the computation cost
+while maintaining high accuracy. Notably,
+C achieves the same or slightly
+better performance than the previous state
+of the art, ColBERT-v2, on both in-domain
+(MS MARCO) and out-of-domain (BEIR)
+evaluations, while being nearly 40 times faster.
+Source code and data are available at https:
+//github.com/facebookresearch/
+dpr-scale/tree/citadel .
+1 Introduction
+The goal of information retrieval ( Manning et al. ,
+2008 ) is to ﬁnd a set of related documents from a
+large data collection given a query. Traditional bag-
+of-words systems ( Robertson and Zaragoza ,2009 ;
+Lin et al. ,2021a ) calculate the ranking scores based
+on the query terms appearing in each document,
+which have been widely adopted in many applica-
+tions such as web search ( Nguyen et al. ,2016 ;Noy
+et al. ,2019 ) and open-domain question answer-
+ing (Chen et al. ,2017 ;Lee et al. ,2019 ). Recently,
+dense retrieval ( Karpukhin et al. ,2020 ) based on
+Figure 1: GPU latency vs ranking quality (MRR@10)
+on MS MARCO passages with an A100 GPU. The
+circle size represents the relative index storage on disk.
+All models are trained without hard-negative mining,
+distillation, or further pre-training.
+pre-trained language models ( Devlin et al. ,2019 ;
+Liu et al. ,2019 ) has been shown to be very effec-
+tive. It circumvents the term mismatch problem
+in bag-of-words systems by encoding the queries
+and documents into low-dimensional embeddings
+and using their dot product as the similarity score
+(Figure 2a). However, dense retrieval is less robust
+on entity-heavy questions ( Sciavolino et al. ,2021 )
+and out-of-domain datasets ( Thakur et al. ,2021 ),
+therefore calling for better solutions ( Formal et al. ,
+2021b ;Gao and Callan ,2022 ).
+In contrast, multi-vector retrieval has shown
+strong performance on both in-domain and out-of-
+domain evaluations by taking into account token-
+level interaction. Among them, ColBERT ( Khattab
+and Zaharia ,2020 ) is arguably the most celebrated
+method that has been the state of the art on multiple
+datasets so far. However, its wider application is
+hindered by its large index size and high retrieval la-
+tency. This problem results from the redundancy in
+the token interaction of ColBERT where many to-
+kens might not contribute to the sentence semantics
+at all. To improve this, COIL ( Gao et al. ,2021a )
+imposes an exact match constraint on ColBERT11891
+for conditional token interaction, where only token
+embeddings with the same token id could interact
+with each other. Although reducing the latency, the
+word mismatch problem reoccurs and the model
+may fail to match queries and passages that use
+different words to express the same meaning.
+In this paper, we ﬁrst give a uniﬁed view of exist-
+ing multi-vector retrieval methods based on token
+routing (Section 2), providing a new lens through
+which we expose the limitations of current models.
+Under the token routing view, ColBERT could be
+seen as all-to-all routing , where each query token
+exhaustively interacts with all passage tokens (Fig-
+ure2b). COIL, on the other hand, could be seen
+asstatic lexical routing using an exact match con-
+straint, as each query token only interacts with the
+passage tokens that have the same token id as the
+query token (Figure 2c).
+In contrast, we propose a novel conditional token
+interaction method using dynamic lexical routing
+called C as shown in Figure 2d. Instead
+of relying on static heuristics such as exact match,
+we train our model to dynamically moderate token
+interaction so that each query token only interacts
+with the most relevant tokens in the passage. This
+is achieved by using a lexical router , trained end-to-end with the rest of the model, to route each
+contextualized token embedding to a set of acti-
+vated lexical “keys” in the vocabulary. In this way,
+each query token embedding only interacts with the
+passage token embeddings that have the same acti-
+vated key, which is dynamically determined during
+computation. As we shall see in Section 5.1, this
+learning-based routing does not lose any accuracy
+compared to all-to-all routing while using fewer
+token interactions than COIL (Section 3.4), leading
+to a highly effective and efﬁcient retriever.
+Experiments on MS MARCO passages ( Nguyen
+et al. ,2016 ) and TREC DL show that C
+achieves the same level of accuracy as ColBERT-
+v2. We further test C on BEIR ( Thakur
+et al. ,2021 ) and C still manages to keep
+up with ColBERT-v2 ( Santhanam et al. ,2022b )
+which is the current state of the art. As for the la-
+tency, C can yield an average latency of
+3.21 ms/query on MS MARCO passages using
+an A100 GPU, which is nearly 40 ×faster than
+ColBERT-v2. By further combining with product
+quantization, C ’s index only takes 13.3 GB
+on MS MARCO passages and reduces the latency
+to 0.9 ms/query as shown in Figure 1.118922 A Uniﬁed Token Routing View of
+Multi-Vector Retrievers
+We outline a uniﬁed view for understanding various
+neural retrievers using the concept of token routing
+that dictates token interaction.
+2.1 Single-Vector Retrieval
+Given a collection of documents and a set of
+queries, single-vector models ( Karpukhin et al. ,
+2020 ;Izacard et al. ,2022 ) use a bi-encoder struc-
+ture where its query encoder η(·)and document
+encoder η(·)are independent functions that map
+the input to a low-dimensional vector. Speciﬁcally,
+the similarity score sbetween the query qand doc-
+ument dis deﬁned by the dot product between their
+encoded vectors v=η(q)andv=η(d):
+s(q, d) =vv. (1)
+As all the token embeddings are pooled before cal-
+culating the similarity score, no routing is commit-
+ted as shown in Figure 2a.
+2.2 Multi-Vector Retrieval
+ColBERT ( Khattab and Zaharia ,2020 ) proposes
+late interaction between the tokens in a query
+q={q, q,· · ·, q}and a document d=
+{d, d,· · ·, d}:
+s(q, d) =/summationdisplaymaxvv, (2)
+where vandvdenotes the last-layer contextu-
+alized token embeddings of BERT. This is known
+as the MaxSim operation which exhaustively com-
+pares each query token to all document tokens. We
+refer to this as all-to-all routing as shown in Fig-
+ure2b. The latency of ColBERT is inﬂated by the
+redundancy in the all-to-all routing, as many to-
+kens do not contribute to the sentence semantics.
+This also drastically increases the storage, requir-
+ing complex engineering schemes to make it more
+practical ( Santhanam et al. ,2022b ,a).
+Another representative multi-vector approach
+known as COIL ( Gao et al. ,2021a ) proposes an
+exact match constraint on the MaxSim operation
+where only the embeddings with the same token id
+could interact with each other. Letbe the subset of document tokensthat have the same token ID as query tokenq, then we have:
+s(q, d) =/summationdisplaymaxvv, (3)
+It could be further combined with Equation (1)to
+improve the effectiveness if there’s no word overlap
+between the query and documents.
+s(q, d) =vv+/summationdisplaymaxvv. (4)
+We refer to this token interaction as static lexical
+routing as shown in Figure 2c. As mentioned in
+Section 1, the word mismatch problem could hap-
+pen if J=∅for all q, which affects the retrieval
+accuracy. Moreover, common tokens such as “ the”
+will be frequently routed, which will create much
+larger token indexes compared to those rare words.
+This bottlenecks the search latency as COIL needs
+to frequently iterate over large token indexes.
+3 The C Method
+3.1 Dynamic Lexical Routing
+Instead of using the wasteful all-to-all routing or
+the inﬂexible heuristics-based static routing, we
+would like our model to dynamically select which
+query and passage tokens should interact with each
+other based on their contextualized representation,
+which we refer to as dynamic lexical routing . For-
+mally, the routing function (or router ) routes each
+token to a set of lexical keys in the vocabulary and
+is deﬁned as ϕ:R→Rwhere cis the embed-
+ding dimension and Vis the lexicon of keys. For
+each contextualized token embedding, the router
+predicts a scalar score for each key in the lexicon
+indicating how relevant each token is to that key.
+Given a query token embedding vand a docu-
+ment token vector v, the token level router rep-
+resentations are w=ϕ(v)andw=ϕ(v),
+respectively. The elements in the router representa-
+tions are then sorted in descending order and trun-
+cated by selecting the top- Kquery keys and top- L
+document keys, which are {e, e,· · ·, e}
+and{e, e,· · ·, e}forqandd, respec-
+tively. In practice, we use K=1 and L=5 as the
+default option which will be discussed in Sec-
+tion3.5and Section 7. The corresponding routing
+weights for qanddare{w, w,· · ·, w}
+and{w, w,· · ·, w}, respectively. The ﬁ-
+nal similarity score is similar to Equation (3), but11893we substitute the static lexical routing subset J
+with a dynamic key set predicted by the router:for
+each key eof the query token q:
+Optionally, all [CLS] tokens can be routed to an
+additional semantic key to complement our learned
+lexical routing. We then follow DPR ( Karpukhin
+et al.,2020 ) to train the model contrastively. Given
+a query q, a positive document d, and a set of
+negative documents D, the constrastive loss is:
+such that the distance from the query to the posi-
+tive document dis smaller than the query to the
+negative document d.
+3.2 Router Optimization
+To train the router representation ϕ(q)andϕ(d),
+we adopt a contrastive loss such that the num-
+ber of overlapped keys between a query and doc-
+uments are large for positive (q, d)pairs and
+small for negative pairs (q, d). We ﬁrst pool the
+router representation for each query and document
+over the tokens. Given a sequence of token-level
+router representations {ϕ(v), ϕ(v),· · ·, ϕ(v)},
+the sequence-level representation is deﬁned as:
+Φ =maxϕ(v), (7)
+where the max operator is applied element-wise.
+Similar to ( Formal et al. ,2021a ), We ﬁnd max pool-
+ing works the best in practice compared to other
+pooling methods. Subsequently, the contrastive
+loss for training the router is:
+In addition, we follow SPLADE ( Formal et al. ,
+2021b ,a) to initialize the router with the pre-trained
+Masked Language Modelling Layer (MLM). With-
+out proper initialization, it is difﬁcult to optimize
+the router due the large lexical space and sparse ac-
+tivation. With the pre-trained MLM initialization,
+the router expands words with similar semantic
+meaning to sets of keys with large overlap at the
+beginning of training, making the contrastive loss
+easier to optimize.3.3 Sparsely Activated Router Design
+Softmax activation is commonly used for comput-
+ing the routing weights in conditional computation
+models ( Fedus et al. ,2022 ;Mustafa et al. ,2022 ).
+However, softmax often yields a small probability
+over a large number of dimensions (in our case,
+about 30,000) and the product of two probability
+values are even smaller, which makes it not suitable
+for yielding the routing weights wandwin
+Equation (5)as the corresponding gradients are too
+small. Instead, we use the activation from SPLADE
+to compute the router representation for a token em-
+bedding v:
+ϕ(v) = log(1 + ReLU (Wv+b)),(9)
+where Wandbare the weights and biases of
+the Masked Language Modeling (MLM) layer of
+BERT. The SPLADE activation brings extra advan-
+tages as the ReLU activation ﬁlters irrelevant keys
+while the log-saturation suppresses overly large
+“wacky” weights ( Mackenzie et al. ,2021 ).
+3.4 Regularization for Routing
+ℓRegularization. Routing each token to more
+than one key increases the overall size of the index.
+Therefore, we propose to use ℓregularization on
+the router representation to encourage the router to
+only keep the most meaningful token interaction
+by pushing more routing weights to 0:
+L=1
+B/summationdisplay/summationdisplay/summationdisplayϕ(v), (10)
+where |V|is the number of keys, Bis the batch size,
+andTis the sequence length. As shown in Figure 6,
+C has a sparsely activated set of keys, by
+routing important words to multiple lexical keys
+while ignoring many less salient words, leading to
+effective yet efﬁcient retrieval.
+Load Balancing. As mentioned in Section 2.2,
+the retrieval latency of COIL is bottlenecked by fre-
+quently searching overly large token indexes. This
+results from the static lexical routing where com-
+mon “keys” have a larger chance to be activated,
+which results in large token indexes during index-
+ing. Therefore, a vital point for reducing the la-
+tency of multi-vector models is to evenly distribute
+each token embedding to different keys. Inspired
+by Switch Transformers ( Fedus et al. ,2022 ), we11894propose to minimize the load balancing loss that ap-
+proximates the expected “evenness” of the number
+of tokens being routed to each key:
+L=/summationdisplayf·p, (11)
+pis the batch approximation of the marginal prob-
+ability of a token vector routed to the k-th key:
+where Wandbare the weights and bias of the
+routing function in Equation (9)andvis the j-th
+token embedding in sample iof the batch. fis the
+batch approximation of the total number of tokens
+being dispatched to the k-th key:
+where p=softmax (Wv+b). Finally, we
+obtain the loss for training C :
+L=L+L+α· L+β· L, (14)
+where α≥0andβ≥0. The ℓand load balancing
+loss are applied on both queries and documents.
+3.5 Inverted Index Retrieval
+C builds an inverted index like BM25 but
+we use a vector instead of a scalar for each token
+and the doc product as the term relevance.
+Indexing and Post-hoc Pruning. To reduce in-
+dex storage, we prune the vectors with routing
+weights less than a threshold τafter training. For a
+keyein the lexicon V, the token index Iconsists
+of token embeddings vand the routing weight
+wfor all documents din the corpus Cis:
+We will discuss the impact of posthoc pruning in
+Section 5.2, where we ﬁnd that posthoc pruning
+can reduce the index size by 3 ×without signiﬁcant
+accuracy loss. The ﬁnal search index is deﬁned as
+I={I|e∈ V} , where the load-balancing loss in
+Equation (11)will encourage the size distribution
+overIto be as even as possible. In practice, we
+set the number of maximal routing keys of each
+token to 5 for the document and 1 for the query. The
+intuition is that the documents usually contain more
+information and need more key capacity, which is
+discussed in Section 7in detail.Token Retrieval. Given a query q, C
+ﬁrst encodes it into a sequence of token vectors
+{v}, and then route each vector to its top-1
+keyewith a routing weight w. The ﬁnal repre-
+sentation w·vwill be sent to the corresponding
+token index Ifor vector search. The ﬁnal rank-
+ing list will be merged from each query token’s
+document ranking according to Equation ( 5).
+4 Experiments
+4.1 MS MARCO Passages Retrieval
+We evaluate MS MARCO passages ( Nguyen et al. ,
+2016 ) and its shared tasks, TREC DL 2019/2020
+passage ranking tasks ( Craswell et al. ,2020 ).
+Dataset details are provided in Appendix A.1. Fol-
+lowing standard practice, we train C and
+other baseline models on MS MARCO passages
+and report the results on its dev-small set and TREC
+DL 2019/2020 test queries. The evaluation metrics
+are MRR@10, nDCG@10, and Recall@1000 (i.e.,
+R@1K). We provide a detailed implementation of
+C and other baselines in Appendix A.
+Table 1shows the in-domain evaluation re-
+sults on MS MARCO passage and TREC DL
+2019/2020. We divide the models into two classes:
+ones trained with only labels and BM25 hard
+negatives and the others trained with further pre-
+training ( Gao and Callan ,2022 ), hard negative
+mining ( Xiong et al. ,2021 ), or distillation from
+a cross-encoder. C is trained only with
+BM25 hard negatives, while Cis trained
+with cross-encoder distillation and one-round hard
+negative mining. The default pruning threshold
+isτ= 0.9. As shown in Section 5.2,τcan
+be adjusted to strike different balances between
+latency, index size and accuracy. In both cate-
+gories, C /Coutperforms the base-
+line models on the MS MARCO passages dev set
+and greatly reduces the search latency on both GPU
+and CPU. For example, Cachieves an
+average latency of 3.21 ms/query which is close
+to DPR-768 (1.28 ms/query) on GPU, while hav-
+ing a 25% higher MRR@10 score. C also
+maintains acceptable index sizes on disk, which
+can be further reduced using product quantization
+(Section 5.3). Although not able to outperform
+several baselines on TREC DL 2019/2020, we per-
+form t-test (p < 0.05) on C and C
+against other baselines in their sub-categories and11895
+show there is no statistical signiﬁcance. The incon-
+sistency is probably due to that we use the train-
+ing data from Tevatron ( Gao et al. ,2022 ) where
+each passage is paired with a title. Lassance and
+Clinchant (2023 ) points out that neural retrievers
+trained on such data will result in slightly higher
+scores on MS MARCO dev small while lower
+scores on TREC DL 2019 and 2020.
+4.2 BEIR: Out-of-Domain Evaluation
+We evaluate on BEIR benchmark ( Thakur et al. ,
+2021 ) which consists of a diverse set of 18 re-
+trieval tasks across 9 domains. We evaluate on
+13 datasets following previous works ( Santhanam
+et al.,2022b ;Formal et al. ,2021a ). Table 2shows
+the zero-shot evaluation results on BEIR. Withoutany pre-training or distillation, C manages
+to outperform all baselines in their sub-categories
+in terms of the average score. Compared with
+the distilled/pre-trained models, Cstill
+manages to achieve comparable performance. In-
+terestingly, we ﬁnd that if no regularization like
+load balancing and L1 is applied during training,
+Ccan reach a much higher average score
+that even outperforms ColBERT-v2. Our conjec-
+ture is that the regularization reduces the number of
+token interactions and the importance of such token
+interaction is learned from training data. It is hence
+not surprising that the more aggressively we prune
+token interaction, the more likely that it would hurt
+out-of-domain accuracy that’s not covered by the
+training data.11896Models MRR@10 #DP ×10
+ColBERT 0.360 4213
+COIL-full 0.353 45.6
+CITADEL 0.362 10.5
+DPR-128 0.285 8.84
+5 Performance Analysis
+5.1 Number of Token Interactions
+The actual latency is often impacted by engineering
+details and therefore FLOPS is often considered
+for comparing efﬁciency agnostic to the actual im-
+plementation. In our case, however, FLOPS is
+impacted by the vector dimension in the nearest
+neighbour search which is different across models.
+Therefore, we only compare the maximal number
+of dot products needed as a proxy for token in-
+teraction per query during retrieval as shown in
+Table 3. The number of dot products per query in
+C with pruning threshold τ= 0.9is compa-
+rable to DPR-128 and much lower than ColBERT
+and COIL, which is consistent with the latency
+numbers in Table 1. The reason is that C
+has a balanced inverted index credited to the ℓreg-
+ularization and the load balancing loss as shown in
+Figure 3. By applying the load balancing loss on
+the router prediction, C yields a more bal-
+anced and even index distribution where its largest
+index fraction is 8 ×smaller than COIL’s as shown
+in Figure 3. We also provide a detailed latency
+breakdown in Appendix A.4.
+5.2 Latency-Memory-Accuracy Tradeoff
+Figure 4shows the tradeoff among latency, mem-
+ory, and MRR@10 on MS MARCO passages with
+post-hoc pruning. We try the pruning thresholds
+[0.5, 0.7, 0.9, 1.1, 1.3, 1.5]. We could see that
+the MRR@10 score barely decreases when we in-
+crease the threshold to from 0.5 to 1.1, but the
+latency decreases by a large margin, from about 18
+ms/query to 0.61 ms/query. The sweet spots are
+around (0.359 MRR@10, 49.3GB, 0.61 ms/query)
+and (0.362 MRR@10, 78.5GB, 3.95 ms/query).
+This simple pruning strategy is extremely effective
+and readers can see in Section 6that it also yields
+interpretable document representations.
+5.3 Combination with Product Quantization
+We could further reduce the latency and storage
+with product quantization ( Jégou et al. ,2011 ) (PQ)
+as shown in Table 4. For nbits=2, we divide the
+vectors into sets of 4-dimensional sub-vectors and
+use 256 centroids for clustering the sub-vectors,
+while for nbits=1 we set the sub-vector dim to 8
+and the same for the rest. With only 2 bits per
+dimension, the MRR@10 score on MS MARCO
+Dev only drops 4% but the storage is reduced by
+83% and latency is reduced by 76%.11897
+6 Token Routing Analysis of C
+Qualitative Analysis. We visualize C
+representations and the effect of posthoc pruning
+in Figure 5. By increasing the pruning threshold,
+more keywords are pruned and ﬁnally leaving the
+most central word “ arrhythmia ” activated. We pro-
+vide another example in Figure 6. We can see that a
+lot of redundant words that do not contribute to the
+ﬁnal semantics are deactivated, meaning all their
+routing weights are 0. For the activated tokens,
+we could see the routed keys are contextualized
+as many of them are related to emoji which is the
+theme of the document.
+Quantitative Analysis. We analyze C ’s
+token distribution over the number of activated rout-
+ing keys for the whole corpus as shown in Figure 7.
+With ℓloss, around 50 tokens per passage are de-
+activated (i.e., all the routing weights of these 50
+tokens are 0). As the pruning threshold increases,
+more tokens are deactivated, yielding a sparse rep-
+resentation for interpreting C ’s behaviours.
+7 Ablation Studies
+Impact of [CLS] Table 5shows the inﬂuence of
+removing the [CLS] vector for C on MS
+MARCO passage. Although removing [CLS] im-
+proves the latency by a large margin, the in-domain
+effectiveness is also adversely affected, especially
+on TREC DL 2019. Nevertheless, C -
+tok (w/o [CLS] ) still outperforms its counterpart
+COIL-tok in both precision and latency.
+Number of Routed Experts. Table 6shows the
+inﬂuence of changing the maximum number of
+keys that each document token can be routed to
+during training and inference on MS MARCO pas-
+sage. As the number of routing keys increases, the
+index storage also increases rapidly but so does the
+MRR@10 score which plateaus after reaching 7
+keys. The latency does not increase as much after
+3 routing keys due to the load balancing loss.
+8 Related Works
+Dense Retrieval. Supported by multiple approx-
+imate nearest neighbour search libraries ( John-
+son et al. ,2021 ;Guo et al. ,2020 ), dense re-
+trieval ( Karpukhin et al. ,2020 ) gained much pop-
+ularity due to its efﬁciency and ﬂexibility. To im-
+prove effectiveness, techniques such as hard nega-
+tive mining ( Xiong et al. ,2021 ;Zhan et al. ,2021 )
+and knowledge distillation ( Lin et al. ,2021b ;Hof-
+stätter et al. ,2021 ) are often deployed. Recently,
+retrieval-oriented pre-training( Gao et al. ,2021b ;
+Lu et al. ,2021 ;Gao and Callan ,2021 ;Izacard
+et al. ,2022 ;Gao and Callan ,2022 ) also draws
+much attention as they could substantially improve
+the ﬁne-tuning performance of downstream tasks.11898
+Sparse Retrieval. Traditional sparse retrieval
+systems such as BM25 ( Robertson and Zaragoza ,
+2009 ) and tf–idf ( Salton and Buckley ,1988 ) rep-
+resent the documents as a bag of words with static
+term weights. Recently, many works leverage pre-
+trained language models to learn contextualized
+term importance ( Bai et al. ,2020 ;Mallia et al. ,
+2021 ;Formal et al. ,2021b ;Lin and Ma ,2021 ).
+These models could utilize existing inverted index
+libraries such as Pyserini ( Lin et al. ,2021a ) to per-
+form efﬁcient sparse retrieval or even hybrid with
+dense retrieval ( Hofstätter et al. ,2022 ;Shen et al. ,
+2022 ;Lin and Lin ,2022 ;Zhang et al. ,2023 ).
+Multi-Vector Retrieval. ColBERT ( Khattab and
+Zaharia ,2020 ;Santhanam et al. ,2022b ,a;Hof-
+stätter et al. ,2022 ) probably has the most opti-
+mized library in multi-vector retrieval. COIL ( Gao
+et al. ,2021a ) accelerates retrieval by combining
+with exact match and inverted vector search. ME-
+BERT ( Luan et al. ,2021 ) and MVR ( Zhang et al. ,
+2022 ) propose to use a ﬁxed number of token
+embeddings for late interaction (e.g., top-k posi-
+tions or special tokens). Concurrently to this work,
+ALIGNER ( Qian et al. ,2022 ) proposes to frame
+multi-vector retrieval as a sparse alignment prob-
+lem between query tokens and document tokens us-
+ing entropy-regularized linear programming. Our
+110M model achieves higher in-domain and out-of-
+domain accuracy than their large variants.
+9 Conclusion
+This paper proposes a novel multi-vector retrieval
+method that achieves state-of-the-art performance
+on several benchmark datasets while being 40 ×
+faster than ColBERT-v2 and 17 ×faster than the
+most efﬁcient multi-vector retrieval library to date,
+PLAID, on GPUs. By jointly optimizing for the
+token index size and load balancing, our new dy-
+namic lexical routing scheme greatly reduces the
+redundancy in the all-to-all token interaction of Col-
+BERT while bridging the word-mismatch problem
+in COIL. Experiments on both in-domain and out-
+of-domain datasets demonstrate the effectiveness
+and efﬁciency of our model.
+10 Limitations
+The limitation of C mainly shows in two as-
+pects. First, at the beginning of training, the model
+needs to route each token vector to multiple acti-
+vated keys for token interaction, which increases
+the computation cost compared to COIL and Col-
+BERT. This results in slower training speed but it
+gets better when training approaches the end as
+more tokens are pruned by the ℓregularization.
+Another drawback lies in the implementation of
+C , or more generally speaking, most multi-
+vector retrieval methods. The token-level retrieval
+and aggregation make them not compatible with
+established search libraries such as FAISS or Py-
+serini. Moreover, for time and space efﬁciency,
+multi-vector retrieval also requires more engineer-
+ing efforts and low-level optimization. Recently,
+XTR ( Lee et al. ,2023 ) provides a solution that con-
+strains the document-level retrieval to be consistent
+with the token-level retrieval during training, which
+can be used for streamlining C .
+11 Acknowledgement
+We would like to thank Jun Yan and Zheng Lian
+for the helpful discussions on C .11899References11900119011190211903A Implementations
+A.1 Datasets
+The MS MARCO passages corpus has around 8.8
+million passages with an average length of 60
+words. TREC DL 2019 and 2020 contain 43 and
+54 test queries whose relevance sets are densely
+labelled with scores from 0 to 4.
+For out-of-domain evaluation, we use 13
+datasets from BEIR, which includes TREC-
+COVID ( V oorhees et al. ,2020 ), NFCorpus ( Boteva
+et al. ,2016 ), Natural Questions ( Kwiatkowski
+et al. ,2019 ), HotpotQA ( Yang et al. ,2018 ),
+FiQA-2018 ( Maia et al. ,2018 ), ArguAna Coun-
+terargs Corpus ( Wachsmuth et al. ,2018 ), Touché-
+2020 ( Bondarenko et al. ,2020 ), Quora, DBPedia-
+Entity-v2 ( Hasibi et al. ,2017 ), SCIDOCS ( Cohan
+et al.,2020 ), FEVER ( Thorne et al. ,2018 ), Climate-
+FEVER ( Diggelmann et al. ,2021 ), SciFact ( Wad-
+den et al. ,2020 ).
+A.2 Baselines for Section 4
+All the baseline models below are trained and eval-
+uated under the same setting of CITADEL (e.g.,
+datasets, hyperparameters, and hardwares).
+Sparse Retrievers. BM25 ( Robertson and
+Zaragoza ,2009 ) uses the term frequency and in-
+verted document frequency as features to compute
+the similarity between documents. SPLADE ( For-
+mal et al. ,2021b ,a) leverages the pre-trained lan-
+guage model’s MLM layer and ReLU activation to
+yield sparse term importance.
+Dense Retrievers. DPR ( Karpukhin et al. ,2020 )
+encodes the input text into a single vector. coCon-
+denser ( Gao and Callan ,2022 ) pre-trains DPR in
+an unsupervised fashion before ﬁne-tuning.
+Multi-Vector Retrievers. ColBERT ( Khattab
+and Zaharia ,2020 ;Santhanam et al. ,2022b ) en-
+codes each token into dense vectors and performs
+late interaction between query token vectors and
+document token vectors. COIL ( Gao et al. ,2021a )
+applies an exact match constraint on late interaction
+to improve efﬁciency and robustness.
+A.3 Training
+For CITADEL, we use bert-base-uncased as the
+initial checkpoint for ﬁne-tuning. Following COIL,
+we set the [CLS] vector dimension to 128, to-
+ken vector dimension to 32, maximal routing keys
+to 5 for document and 1 for query, αandβin
+Equation (14)are set to be 1e-2 and 1e-5, respec-
+tively. We add the dot product of [CLS] vectors
+in Equation (1)to the ﬁnal similarity score in Equa-
+tion (5). All models are trained for 10 epochs
+with AdamW ( Loshchilov and Hutter ,2019 ) op-
+timizer, a learning rate of 2e-5 with 3000 warm-up
+steps and linear decay. Hard negatives are sampled
+from top-100 BM25 retrieval results. Each query
+is paired with 1 positive and 7 hard negatives for
+faster convergence. We use a batch size of 128 on
+MS MARCO passages with 32 A100 GPUs.
+For a fair comparison with recent state-of-the-
+art models, we further train CITADEL using cross-
+encoder distillation and hard negative mining. First,
+we use the trained CITADEL model under the set-
+ting in the last paragraph to retrieve top-100 candi-
+dates from the corpus for the training queries. We
+then use the cross-encoderto rerank the top-100
+candidates and score each query-document pair.
+Finally, we re-initialize CITADEL with bert-base-
+uncased using the positives and negatives sample
+from the top-100 candidates scored by the cross-
+encoder, with a 1:1 ratio for the soft-label and hard-
+label loss mixing ( Hinton et al. ,2015 ). We also
+repeat another round of hard negative mining and
+distillation but it does not seem to improve the per-
+formance any further.11904A.4 Inference and Latency Breakdown
+Pipeline. We implemented the retrieval pipeline
+with PyTorch (GPU) and Numpy (CPU), with a
+small Cython extension module for scatter opera-
+tions similar to COIL’s. As shown in Fig 8, our
+pipeline could be roughly decomposed into four
+independent parts: query encoding, token-level re-
+trieval, scatter operations, and sorting. We use the
+same pipeline for COIL’s retrieval process. For
+ColBERT’s latency breakdown please refer to San-
+thanam et al. (2022a ). The cost of query encod-
+ing comes from the forward pass of the query en-
+coder, which could be independently optimized
+using quantization or weight pruning for neural net-
+works. Besides that, the most expensive operation
+is the token-level retrieval, which is directly inﬂu-
+enced by the token index size. We could see that
+a more balanced index size distribution as shown
+in Figure 3has a much smaller token vector re-
+trieval latency. The scatter operations are used to
+gather the token vectors from the same passage ids
+from different token indices, which is also related
+to the token index size distribution. Finally, we
+sort the aggregated ranking results and return the
+candidates.
+Hardwares and Latency Measurement. We
+measure all the retrieval models in Table 1on a
+single A100 GPU for GPU search and a single In-
+tel(R) Xeon(R) Platinum 8275CL CPU @ 3.00GHz
+for CPU search. All indices are stored in fp32 (to-
+ken vectors) and int64 (corpus ids if necessary) on
+disk. We use a query batch size of 1 and return the
+top-1000 candidates by default to simulate stream-
+ing queries. We compute the average latency of
+all queries on MS MARCO passages’ Dev set and
+then report the minimum average latency across 3
+trials following PLAID ( Santhanam et al. ,2022a ).
+I/O time is excluded from the latency but the time
+of moving tensors from CPU to GPU during GPU
+retrieval is included.11905ACL 2023 Responsible NLP Checklist
+A For every submission:
+/squareA1. Did you describe the limitations of your work?
+10
+/squareA2. Did you discuss any potential risks of your work?
+This work provides an information retrieval method for public datasets.
+/squareA3. Do the abstract and introduction summarize the paper’s main claims?
+1
+/squareA4. Have you used AI writing assistants when working on this paper?
+Left blank.
+B/squareDid you use or create scientiﬁc artifacts?
+4, 5, Appendix A
+/squareB1. Did you cite the creators of artifacts you used?
+4, 5, Appendix A
+/squareB2. Did you discuss the license or terms for use and / or distribution of any artifacts?
+4, 5, Appendix A
+/squareB3. Did you discuss if your use of existing artifact(s) was consistent with their intended use, provided
+that it was speciﬁed? For the artifacts you create, do you specify intended use and whether that is
+compatible with the original access conditions (in particular, derivatives of data accessed for research
+purposes should not be used outside of research contexts)?
+4, 5, Appendix A
+/squareB4. Did you discuss the steps taken to check whether the data that was collected / used contains any
+information that names or uniquely identiﬁes individual people or offensive content, and the steps
+taken to protect / anonymize it?
+The public datasets in the paper are widely used for a long time.
+/squareB5. Did you provide documentation of the artifacts, e.g., coverage of domains, languages, and
+linguistic phenomena, demographic groups represented, etc.?
+Not applicable. Left blank.
+/squareB6. Did you report relevant statistics like the number of examples, details of train / test / dev splits,
+etc. for the data that you used / created? Even for commonly-used benchmark datasets, include the
+number of examples in train / validation / test splits, as these provide necessary context for a reader
+to understand experimental results. For example, small differences in accuracy on large test sets may
+be signiﬁcant, while on small test sets they may not be.
+Left blank.
+C/squareDid you run computational experiments?
+4,5,6,7
+/squareC1. Did you report the number of parameters in the models used, the total computational budget
+(e.g., GPU hours), and computing infrastructure used?
+Appendix A11906/squareC2. Did you discuss the experimental setup, including hyperparameter search and best-found
+hyperparameter values?
+Appendix A
+/squareC3. Did you report descriptive statistics about your results (e.g., error bars around results, summary
+statistics from sets of experiments), and is it transparent whether you are reporting the max, mean,
+etc. or just a single run?
+4
+/squareC4. If you used existing packages (e.g., for preprocessing, for normalization, or for evaluation), did
+you report the implementation, model, and parameter settings used (e.g., NLTK, Spacy, ROUGE,
+etc.)?
+Appendix A
+D/squareDid you use human annotators (e.g., crowdworkers) or research with human participants?
+Left blank.
+/squareD1. Did you report the full text of instructions given to participants, including e.g., screenshots,
+disclaimers of any risks to participants or annotators, etc.?
+Not applicable. Left blank.
+/squareD2. Did you report information about how you recruited (e.g., crowdsourcing platform, students)
+and paid participants, and discuss if such payment is adequate given the participants’ demographic
+(e.g., country of residence)?
+Not applicable. Left blank.
+/squareD3. Did you discuss whether and how consent was obtained from people whose data you’re
+using/curating? For example, if you collected data via crowdsourcing, did your instructions to
+crowdworkers explain how the data would be used?
+Not applicable. Left blank.
+/squareD4. Was the data collection protocol approved (or determined exempt) by an ethics review board?
+Not applicable. Left blank.
+/squareD5. Did you report the basic demographic and geographic characteristics of the annotator population
+that is the source of the data?
+Not applicable. Left blank.11907

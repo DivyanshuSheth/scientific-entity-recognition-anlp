@@ -1,1 +1,613 @@
-2860 Proceedings of the 2022 Conference of the North American Chapter of the Association for Computational Linguistics : Human Language Technologies , pages 2860 2871 July 10 - 15 , 2022 © 2022 Association for Computational Linguistics 2861 2862 2863 2864 2865 2866 2867 2868 2869 2870 2871 
+
+Dylan Ebert
+Brown University
+dylan_ebert@brown.eduChen Sun
+Brown University
+chensun@brown.edu
+Ellie Pavlick
+Brown University
+ellie_pavlick@brown.edu
+Abstract
+Distributional models learn representations of
+words from text, but are criticized for their lack
+of grounding, or the linking of text to the non-
+linguistic world. Grounded language models
+have had success in learning to connect con-
+crete categories like nouns and adjectives to
+the world via images and videos, but can strug-
+gle to isolate the meaning of the verbs them-
+selves from the context in which they typically
+occur. In this paper, we investigate the extent
+to which trajectories (i.e. the position and ro-
+tation of objects over time) naturally encode
+verb semantics. We build a procedurally gen-
+erated agent-object-interaction dataset, obtain
+human annotations for the verbs that occur in
+this data, and compare several methods for rep-
+resentation learning given the trajectories. We
+ﬁnd that trajectories correlate as-is with some
+verbs (e.g., fall), and that additional abstrac-
+tion via self-supervised pretraining can further
+capture nuanced differences in verb meaning
+(e.g., rollvs.slide ).
+1 Introduction
+While large distributional language models such
+as BERT (Devlin et al., 2019) and GPT (Radford,
+2020; Brown et al., 2020) have had empirical suc-
+cess in deriving representations of words and sen-
+tences from large text corpora, most of these mod-
+els lack grounding , or a connection between the
+words and their real-world referents. Grounding,
+in addition to being necessary for multimodal tasks
+like video recognition, has been argued to lie at the
+core of language understanding (Bender and Koller,
+2020). Work on grounded language learning asso-
+ciates language with the non-linguistic world, typ-
+ically by learning from large-scale image (Bruni
+et al., 2011) or video (Sun et al., 2019) datasets.
+Much prior work on language grounding has fo-
+cused on concrete nouns (objects) and adjectives
+(attributes), which are captured well by patterns of
+pixels. Verbs, however, have received less attention,despite being essential for building models that
+can interact in realistic 3D environments (Shridhar
+et al., 2020a; Bisk et al., 2020). Verbs are espe-
+cially challenging to model, given that they take
+place over time. Image and video data alone is in-
+sufﬁcient to fully capture verb semantics, as demon-
+strated by prior work (Yatskar et al., 2016), in many
+cases failing to isolate the meaning of the verb from
+context in which it typically occurs. For example,
+Chao et al. 2018 show that an image of a person
+laying in the snow next to a snowboard is labeled
+“standing on a snowboard". Moreover, recent work
+has introduced datasets and benchmarks based on
+situated 3D environments (Gan et al., 2020; Deitke
+et al., 2020; Ebert and Pavlick, 2020; Shridhar et al.,
+2020a) that demonstrate the challenges of learning
+task-oriented behavior, which demands a combina-
+tion of object and verb grounding.
+In this paper, we test the hypothesis that the se-
+mantics of (concrete) verbs are grounded in the
+3D trajectories of objects: i.e., the absolute and
+relative paths objects take through 3D space. We
+investigate if and when verb meanings appear to be
+a product of raw perception of objects in 3D space,
+and when differentiating verb meanings requires
+additional abstraction and representation beyond
+what is available via direct perception. To study
+this, we collect a clean dataset of 3D object trajec-
+tories in simulation. We collect human descriptions
+of these perceived world dynamics, i.e., to deter-
+mine whether or not a given event constitutes a fall
+or atumble . We then propose a self-supervised pre-
+training approach, whereby we train a time-series
+prediction model to obtain representations of trajec-
+tories in a 3D environment without any linguistic
+input. We evaluate the learned representations on
+how well they encode verb semantics for speciﬁc
+verbs. We show that the pretrained model learns to
+represent events in a way that aligns well with the
+meaning of English verbs, e.g. differentiating slide
+from roll. In summary, our primary contributions2860are:
+1.We introduce a new, clean dataset of 3D ob-
+ject trajectories paired with human judgments
+about whether or not each trajectory falls
+within the extension of each of 24 different
+verbs. To the best of our knowledge, this is
+the ﬁrst dataset of its kind, and provides a
+valuable resource for empirical studies of lex-
+ical semantics. Our data is available at .
+2.We compare several representation learning
+methods in terms of their ability to capture
+verb semantics without any linguistic signal
+during training . In particular, we investigate
+the roll of abstraction (via self-supervised pre-
+training) compared to raw perception in cap-
+ture verb meanings. To our knowledge, this
+is the ﬁrst work to apply neural networks and
+(pre-linguistic) concept learning to the study
+of verb semantics.
+2 Related Work
+Grounded Language with Deep Learning.
+Our contributions add to a large body of work on
+grounded representation learning. Much of this
+work augments language modeling objectives with
+images (Silberer and Lapata, 2012; Lazaridou et al.,
+2015; Kiela et al., 2017) and videos (Sun et al.,
+2019). In this work, we focus on representations
+that encode verb semantics. Prior work on verb
+learning has been conducted in the computer vi-
+sion community, typically described as “human-
+object interactions" (Regneri et al., 2013; Chao
+et al., 2018; Sun et al., 2018; Ji et al., 2019). Most
+closely related to our approach, which focuses on
+trajectory data, is work on learning affordances for
+human-robot communication. For example, Kalkan
+et al. (2014); Ugur et al. (2009) learn affordance
+representations based on the state changes of ob-
+jects, but do not encode the full trajectory between
+states. Also related is work in grounded language
+in text-only models which investigates models abil-
+ity to reason about objects through space and time
+(Aroca-Ouellette et al., 2021).
+Outside of NLP, models have been trained on
+trajectory data for applications like human motion
+path forecasting (Giuliari et al., 2021) and human
+activity recognition (Wang et al., 2018). Our work
+lies at the intersection of grounded language learn-
+ing and spatiotemporal machine learning, usingrepresentations of trajectory data to study verb se-
+mantics.
+Grounding and Lexical Semantics. Prior work
+in formal semantics attempts to build feature-based
+representations of verb meaning in terms of the
+3D trajectories and state transitions entailed by
+those verbs (Pustejovsky and Krishnaswamy, 2014;
+Siskind, 2001; Steedman, 2002). Such work is
+related more generally to the idea of mental sim-
+ulation as a means for representing and reasoning
+about linguistic concepts (Feldman, 2008; Bergen
+et al., 2007; Bergen, 2012). We view our contribu-
+tion as consistent with and complementary to this
+formal semantics program. While the prior work
+has sought to codify the precise truth conditions
+of motion verbs, we investigate whether such rep-
+resentations could emerge organically from data-
+driven processes.
+While we focus on concrete verbs in this paper,
+other work has argued that motor processing and
+mental simulation plays a more general role in lan-
+guage processing. For example, Gärdenfors (2019)
+makes a case for grounded distributional “concep-
+tual spaces” as the foundation for modeling lin-
+guistic concepts. Dorr and Olsen (2018) discusses
+the role of metaphor in modeling abstract uses of
+words like push . Borghi and Riggio (2009) argues
+for the notion of a "motor prototype" as a key com-
+ponent of recognizing and processing objects, and
+Mazzuca et al. (2021) presents evidence that the
+sensorimotor system (in particular the interactive
+aspects) drive acquisition of abstract concepts.
+3 Dataset
+3.1 Overview
+To carry out the proposed study, we require a
+dataset that contains continuous 3D recordings of
+an agent interacting with an object. While our rep-
+resentation learning methods will not use linguistic
+supervision, we require verb labels in order to eval-
+uate our models. Thus, in our data, we require that
+each recording is annotated with verbs describing
+the motion of the object. For example, if the agent
+throws a bouncy ball across a room, we’d expect
+the recording to be annotated with a verb sequence
+such as be thrown ,fall,bounce ,bounce ,bounce ,
+roll,stop.
+To produce such data, we build a simple Marko-
+vian agent which interacts with a variety of objects
+in a 3D virtual environment. We record the result-2861
+ing trajectory of the object and then, using crowd-
+sourcing, ask humans to determine which verbs
+could accurately describe which portions of the ob-
+ject’s movement. An example sequence from the
+dataset is shown in Figure 1.
+3.2 Data Generation and Terminology
+In this section we provide details on how we gener-
+ate the data, and introduce terminology that will be
+used throughout the rest of the paper.
+Environment. The dataset is generated in Unity,
+a game engine seeing increased use by researchers
+(Deitke et al., 2020; Gan et al., 2020) for its acces-
+sible rendering and physics simulation via the un-
+derlying Nvidia PhysX physics engine. The dataset
+and simulation source code are publicly available.
+Trajectory data. We deﬁne trajectory data as the
+position and rotation of entities in space, repre-
+sented with three-dimensional XYZ coordinates
+and four-dimensional XYZW quaternions respec-
+tively. We choose to focus on only these features,
+ignoring other possibilities like object shape or
+identity, in order to focus on learning generaliz-
+able aspects of verb semantics that are independent
+of the object.
+Sessions. The dataset is generated in 3-minute
+continuous segments we refer to as sessions .
+Within each session, several parameters are ran-
+domized, including object shape, mass, drag, fric-
+tion, and bounciness.
+Action Primitives. The data generation is driven
+by a Markov Chain with a set of randomly pa-
+rameterized action primitives . In this Markov
+Chain, the States are whether the object is Held ,On-
+Counter andOnGround . The transitions between
+these states are action primitives like PickUp ,Put-
+Down , orThrow . For example, when the object
+is in the state OnCounter , the agent may execute
+aPickUp , after which the object is Held . These
+action primitives, combined with the physics of the
+objects (e.g., their shape, mass, friction, bounci-
+ness, etc) are intended to produce a wide range of
+object motions corresponding to a range of verbs,
+and we do not expect that the primitives will map
+directly to the verbs that one would use to describe
+the resulting object behavior. For example, when
+we simulate a Throw primitive, the result might be
+that the object ﬂies across the room, hits the wall,
+falls to the ﬂoor, and bounces until it comes to a
+rest. We parameterize the execution of each action
+with action-speciﬁc parameters, e.g. the force of
+a throw. The combination of session- and action-
+level parameters can result in a wide variety of
+object motion from each primitive action. A full
+description of the parameters for each action can
+be found in Appendix A.2862Verbs. We highlight a distinction between action
+primitives and the high-level actions orverbs that
+emerge from them. For example, if the object is
+pushed , it may then slide ,bounce ,roll,tumble , or
+any combination thereof. We refer to all of these as
+verbs , though only push is an action primitive. We
+highlight this distinction because we are most in-
+terested in studying the nuanced verbs that emerge
+from the simulation, rather than the action primi-
+tives that drive it explicitly.
+Frames. Our atomic unit is frames , also referred
+to as timesteps , which represent a single point in
+time. Our dataset is collected at 60 fps, or 10,800
+frames per session. For each frame, we record the
+position and rotation of the object, as well as the po-
+sition of the agent. This is sufﬁcient to reconstruct
+and render the scene from an arbitrary perspective
+as needed. We choose this high framerate because
+it’s relatively fast and inexpensive to rapidly pro-
+duce trajectory data, which can be subsampled as
+needed for rendering or modeling.
+3.3 Crowdsourced Annotation
+We collect labels for which verbs occur in the data,
+and when they occur. To do this, we extract short
+clips from the dataset, and ask crowdworkers to
+provide binary judgments on whether the clip falls
+in the extension of the verb.
+Clips. We extract short clips from the dataset us-
+ing Hierarchical Dynamic Clustering with Motion
+energy-based pooling (Zhang et al., 2018), a self-
+supervised action segmentation framework that can
+be summarized as follows:
+1.The 3D space is divided into clusters using
+the provided trajectory data. The framework
+uses Hierarchical Dynamic Clustering, which
+is similar to k-means but shown to outperform
+it on human motion parsing tasks.
+2.A sliding window is applied to the cluster la-
+bels for a given positional sequence. The num-
+ber of transitions between clusters in a win-
+dow are deﬁned as its motion energy .
+3.The subsequent motion energy curve is
+smoothed using a Gaussian kernel with a
+tuned smoothing factor.
+4.The peaks of the motion energy curve are con-
+sidered motion segments , with lengths varying
+with respect to the width of the peak.
+This algorithm is shown to perform well on hu-
+man motion parsing, which we ﬁnd transfers wellto our dataset when applied to object position . This
+yields easily identiﬁable patterns of motion, e.g.
+from the time the object is thrown to when it slows
+to a stop. We ﬁnd that, in contrast to a random
+sliding window, this approach avoids cutting clips
+in the middle of salient patterns of motion.
+In our case, a disadvantage of this approach is
+that the extracted segments are variable-length. To
+simplify our pipeline, we ﬁlter to only segments of
+length 72 to 96, then crop the segment to length 90,
+or 1.5 seconds. We call each 1.5s segment a clip.
+We choose this length to make the clip as short
+as possible to avoid crowdworker fatigue, but give
+sufﬁcient time for a human observer to recognize
+what’s happening.
+Verbs. We produce 24 queries, each correspond-
+ing to a verb, e.g. Does the object bounce? To do
+this, the authors curate a list of 24 verbsof interest
+which are likely to occur in the simulated data and
+range from general descriptions (e.g., fall) to more
+subtle descriptions of object motion (e.g., tumble ).
+When asking annotators whether a verb applies to a
+clip, we always frame the question with the object
+as the subject. That is, when a carry event occurs,
+annotators are asked “is the object carried”.
+We then consider every possible (clip, query)
+pair a potential crowdsourcing task. We apply con-
+servative heuristics to ﬁlter out (clip, query) pairs
+that are guaranteed to have a negative label. For ex-
+ample, if the Held state was never present in a clip,
+we don’t ask if the object is carried . This results in
+approximately 110k tasks, from which we sample
+100 tasks per query, for a total 2400 crowdsourcing
+tasks, such as the one shown in Figure 2.
+Labels. For each crowdsourcing task, we obtain
+responses from ﬁve workers, then take the major-
+ity response as the label for that clip. The same
+clip is shown for all applicable queries, resulting
+in a supervised dataset of 24-dimensional vectors,
+representing binary verb labels for each clip.The
+dataset and all unaggregated annotations are avail-
+able for download.2863
+4 Dataset Analysis
+In this section, we analyze trends in the dataset
+annotations, including worker agreement, and com-
+parisons between semantically related verbs.
+4.1 Agreement
+Annotation agreement on a clip is the proportion
+of responses that match the majority label for that
+clip. Figure 3 shows annotation agreement by verb.
+A noticeable trend is that agreement is higher for
+particular semantic categories. Speciﬁcally, verbs
+that involve gravity, i.e. fall,fall off ,drop, and
+bounce have higher agreement. On the other hand,
+verbs of rotation, i.e. turn,spin,tip,ﬂiphave lower
+agreement, alongside abstract verbs start andstop.
+Forstart in particular, we even received feedback
+from crowdworkers that they weren’t sure whether
+the object started moving during the clip or not.
+4.2 Co-occurrence
+Figure 4 shows co-occurrence: speciﬁcally, given
+that a clip is labeled by at least one worker as verb
+v, how often is it labeled by other workers as verb
+v? Co-occurrence allows us to answer questions
+likehow often is a toss considered a throw? and
+vice-versa. We highlight some interesting verb
+relationships.
+General co-occurrence. Verb co-occurrence is
+high in general. The average number of verbs used
+to describe a given clip is 4 (where a verb is con-
+sidered “used” if at least three workers use it). This
+highlights the challenge of verb learning, as op-
+posed to more concrete nouns and adjectives. Verbsare applicable to a wide variety of behavior, even
+if it isn’t a prototypical instance of that verb.
+Lexical entailments. All dogs are animals but
+not all animals are dogs. These types of semantic
+containment relationships are also ascribed to verbs.
+Analyzing our collected data, in some cases, we
+observe the opposite of what’s expected. For exam-
+ple, according to WordNet (Fellbaum, 2010), toss
+is a type of throw . However, using the majority la-
+bels, we ﬁnd throws to be annotated as tosses more
+often tosses than are annotated as throws . That is,
+p(toss|throw ) =.67<p(throw|toss) =.75.
+Frequent co-occurrences. Hit,push , and bump
+stand out as the most frequently co-occurring verbs,
+having over 90% co-occurrence with each other.
+These likewise occur when many other verbs do,
+but not reciprocally. For example, most slaps are
+hits, but only 41% of hitsareslaps . In many cases,
+this can be explained by other verbs being imme-
+diately preceded by the agent making contact with
+the object, which gets labeled hit,push , and bump .
+Fine-grained distinctions. Workers distinguish
+rollfrom slide - only 50% of rolls are also con-
+sidered slides , and vice-versa. This validates that
+verbs with similar trajectories, which may be chal-
+lenging for models, are indeed differentiated by
+humans. Additionally, verbs with similar but nu-
+anced meanings are differentiated. For example,
+tip,tumble ,fall over , and topple tend to co-occur
+around 70-80% of the time. These also fall into
+“verbs of rotation" category, which have the lowest
+annotator agreement. It isn’t clear the extent to
+which these are nuanced distinctions, or annotation2864
+noise.
+5 Experiments
+Our hypothesis is that representation learning in
+the 3D visuospatial world (without language super-
+vision) can yield concept representations that align
+to English verb semantics–i.e. can the represen-
+tations capture nuanced distinctions like throw vs.
+toss orslide vs.roll? To test this, we pretrain a
+self-supervised model on a time-series prediction
+task, and then use a perceptron classiﬁer to evaluate
+its learned representations.
+We evaluate four approaches, described in de-
+tail below. First, we train a simple perceptron to
+evaluate the representational capacity of the trajec-
+tory data as-is, as a comparative baseline. Second,
+we train a fully supervised model to determine a
+soft upper bound on the task without pretraining.
+Third, we evaluate our self-supervised model. And
+ﬁnally, we ﬁne-tune the self-supervised model to
+determine an upper bound with pretraining.
+5.1 Experimental Setup
+For all approaches, we evaluate representation qual-
+ity with a multi-way verb classiﬁcation task. Specif-ically, we predict the verb labels for the 1.5s clips
+gathered through the crowdsourcing task described
+in Section 3.3.
+Each input sample Xis a 90x10 matrix of
+position and rotation data, corresponding to 90
+frames per clip and 10 spatial featuresper frame.
+The outputYis a 24-dimensional multi-hot vector
+indicating the whether each of our 24 verb classes
+apply to the clip.
+5.2 Approaches
+Perceptron. We wish to evaluate the representa-
+tional capacity of the raw trajectory data itself. To
+do so, we train a single 24-dimensional dense layer
+with sigmoid activation, equivalent to a perceptron
+for each class. While very simple, this approach
+gives an idea of how well trajectory data represents
+verbs as-is, and provides a naive comparative base-
+line against which to evaluate our more complex
+pretraining techniques.
+Fully Supervised. The fully supervised ap-
+proach is similar to the perceptron, but adds a dense
+layer and LSTM layer in-between. This is equiv-2865
+alent to the model shown in Figure 5, but trained
+end-to-end without pretraining. The purpose of
+this approach is to provide an upper bound to the
+experimental setup without pretraining.
+Self-supervised Pretraining. To evaluate the ca-
+pacity of self-supervised models to represent tra-
+jectory data, we pretrain a time-series prediction
+model on a large unlabeled dataset of 400k sessions.
+That is, given ninput frames X, the model is
+trained to predict koutput frames Y. The
+model consists of a dense layer followed by an
+LSTM layer unrolled ktimesteps, as shown in Fig-
+ure 5. We use a discounted mean squared error loss
+as shown in Equation 1, which discounts loss by
+how far it is into the future by factor γ.
+γMSE =/summationdisplayγ(y−ˆy)(1)
+We tune discount factor γ, output length k, model
+width, and batch size using a grid search on valida-
+tion performance, resulting in values of 0.85, 60,
+128, and 1024, respectively. Input length nis ﬁxed
+at 90 to match the length of clips.
+We consider the concatenated LSTM outputs
+as the representation of a clip. To evaluate this
+representation compared to raw trajectory data, we
+freeze the weights of the pretrained model and, as
+when evaluating the raw trajectory data, train a
+perceptron for each class.Approach mAP (%)
+Random Stratiﬁed 41.4
+Perceptron 65.3
+Fully Supervised 72.2
+Pretraining + Probe 76.3
+Pretraining + Finetuning 77.4
+Fine-tuning. To provide an upper bound for our
+experimental setup with pretraining, we ﬁne-tune
+the self-supervised model. This is the same as the
+previous approach, but allows the gradients in the
+perceptron step to pass through the entire model.
+6 Results
+We report Mean Average Precision on unseen test
+data for each approach in Table 1. We compare
+these to random stratiﬁed predictions that are based
+on the class distribution of the training data.
+Perceptron. The perceptron approach evaluates
+the representational capacity of raw trajectory data
+as-is, with a lower bound of random stratiﬁed and
+soft upper bound of fully supervised. The percep-
+tron performs relatively well for its simplicity, be-
+ing only 7 points below the fully supervised upper
+bound. This suggests that the trajectory data itself
+encodes a signiﬁcant amount of verb meaning, but
+leaves plenty of room for improvement.2866
+Self-supervised pretraining. The pretraining +
+probe approach evaluates the ability of self-
+supervised models to encode verb meaning from
+trajectory data. This is equivalent to the perceptron
+approach, but with learned hidden representations
+as input rather than raw trajectory data. The pre-
+trained model does outperform the perceptron, as
+well as the fully supervised approach. Fine-tuning
+only improves on this slightly, highlighting that
+self-supervised pretraining can yield representa-
+tions that successfully encode verb meaning.
+Breakdown by verb. Figure 6 shows a compari-
+son of average precision for each verb. There are
+some patterns worth highlighting. In particular, we
+can categorize verbs into three main groups: trivial ,
+tractable , and hard.
+Trivial verbs are verbs that can are well-
+represented by trajectory data as-is, i.e. those with
+high performance with the perceptron approach.
+These include fall, fall off, fall over andpick up ..
+Many of these have high agreement, and may be
+explained by the object’s change in height.
+Tractable verbs are those that see signiﬁcant ben-
+eﬁt from pretraining, including slide, roll, throw,toss, put down, turn, ﬂip , and stop. An intuition
+behind this is that these verbs involve manner dis-
+tinctions, and in particular, rotations of the object
+relative to itself. Such information doesn’t fall di-
+rectly out of raw state descriptions, but is likely
+to be well modeled by a pretraining objective that
+tries to predict the object’s future position.
+Hard verbs are those with low performance that
+don’t beneﬁt much from pretraining. These include
+bounce, drop, tip, topple , and spin. Many of these
+are verbs which have lower agreement. Bounce,
+slap andspin appear to beneﬁt a bit from both pre-
+training and ﬁne-tuning, suggesting that they may
+be tractable with similar but more robust pretrain-
+ing. Tipandtopple have fairly high performance,
+and may almost be categorized as trivial, perhaps
+being explained by the object’s change in rotation.
+However, they are noticeably lower than other triv-
+ial verbs, despite seeing no beneﬁt from pretraining,
+suggesting that there is nuance to their meaning in
+the dataset, which isn’t captured by any approach.
+Finally, drop is a great example of a hard verb,
+as it is similar to trivial verbs like fall. However,
+drop involves interaction between the agent and
+object that is highly agreed upon by annotators, but
+doesn’t appear to be captured by our approaches,
+despite the model receiving both object and agent
+data. More challenging examples may be able to2867unveil a similar story for other verbs of interaction
+likepick up andput down .
+7 Discussion and Conclusion
+We test the hypothesis that verb meanings can be
+grounded in 3D trajectories, i.e., the position of
+objects over time. Speciﬁcally, we investigate the
+extent to which representations of object trajec-
+tories, learned without any linguistic supervision,
+naturally encode concepts that align to English
+verb semantics. Our primary contributions are
+twofold. First, we build a procedurally generated
+agent-object-interaction dataset for which we col-
+lect crowdsourced annotations. This is the ﬁrst
+dataset of its kind, and provides a rich inventory
+of human judgments about the extensions of 24
+verbs of motion. Second, we compare a variety
+of representation learning approaches, speciﬁcally
+contrasting approaches which operate directly on
+perceptual inputs to approaches which learn ab-
+stractions over the raw perception (via pretraining).
+We ﬁnd that some verbs meanings (e.g., falland
+push ) are captured easily by the raw state infor-
+mation, while others (e.g., rollandturn) require
+additional processing to be represented well.
+This work is a ﬁrst step toward exploring ways to
+capture ﬁne-grained distinctions in grounded verb
+semantics that are trivial for humans, but challeng-
+ing for models. Recent benchmarks at the inter-
+section of NLP, vision and robotics (Deitke et al.,
+2020; Shridhar et al., 2020b) illuminate unsolved
+challenges in AI that demand a more robust under-
+standing of verb semantics and spatial reasoning.
+As these benchmarks continue to be developed,
+and rich multimodal datasets from technologies
+like virtual reality become increasingly abundant,
+we envision that future work in this vein will be
+especially relevant.
+In the future, we plan to explore more sophisti-
+cated models for self-supervised pretraining, and
+evaluate how well these models transfer to more
+naturalistic language learning settings (Ebert and
+Pavlick, 2020). Beyond this, there is a large body
+of related research questions to be explored. For
+example, can representations of trajectory data be
+fused with visually-grounded representations to
+yield better encodings of verb semantics? Collabo-
+rative efforts will be key to addressing these next
+milestones in natural language understanding.Acknowledgments
+This work was supported by the DARPA GAILA
+program. Thank you to George Konidaris, Carsten
+Eickhoff, Roman Feiman, Jack Merullo, Charles
+Lovering, Gabor Brody, and the members of the
+Brown LUNAR lab for helpful discussion and feed-
+back.
+References286828692870A Dataset parameters
+The following tables describe the session-level and action-level parameters for our procedural data
+generation protocol described in Section 3.2.
+Parameter Description Random Values
+Start Location Initial agent location random from waypoint set
+Start Rotation Initial agent rotation in degrees (0,360)
+Target Mesh Shape of the object cube/sphere/capsule/cylinder
+Target Position Initial object location random location on counter
+Target Rotation Initial object rotation in degrees (0,360)
+Target Mass Mass in kg of the object (0.1,10)
+Target Drag Hinders object motion (0,2)
+Target Angular Drag Hinders object angular motion (0.1,1)
+Dynamic Friction Friction when object is moving (0,1)
+Static FrictionFriction when object is not moving (0,1)
+Bounciness Energy retained on bounce (0,1)
+Parameter Description Values
+Pick Speed Hand velocity for Pick motion (1,3)
+Put Speed Hand velocity for Put motion (1,3)
+Push Speed Hand velocity for Push motion (1,3)
+Throw Force Object force for Throw motion (25,125)
+Hit Force Object force for Hit motion (25,125)2871

@@ -1,1 +1,846 @@
-4727 Proceedings of the 2022 Conference of the North American Chapter of the Association for Computational Linguistics : Human Language Technologies , pages 4727 4741 July 10 - 15 , 2022 © 2022 Association for Computational Linguistics 4728 4729 4730 4731 4732 4733 4734 4735 4736 4737 4738 4739 4740 4741 
+
+Weimin Lyuand Songzhu Zhengand Tengfei Maand Chao ChenStony Brook University,IBM Research
+{weimin.lyu, zheng.songzhu, chao.chen.1}@stonybrook.edu ,
+tengfei.ma1@ibm.com
+Abstract
+Trojan attacks raise serious security concerns.
+In this paper, we investigate the underlying
+mechanism of Trojaned BERT models. We
+observe the attention focus drifting behavior of
+Trojaned models, i.e., when encountering an
+poisoned input, the trigger token hijacks the
+attention focus regardless of the context. We
+provide a thorough qualitative and quantitative
+analysis of this phenomenon, revealing insights
+into the Trojan mechanism. Based on the obser-
+vation, we propose an attention-based Trojan
+detector to distinguish Trojaned models from
+clean ones. To the best of our knowledge, this
+is the first paper to analyze the Trojan mecha-
+nism and to develop a Trojan detector based on
+the transformer’s attention.
+1 Introduction
+Despite the great success of Deep Neural Networks
+(DNNs), they have been found to be vulnerable
+to various malicious attacks including adversarial
+attacks (Goodfellow et al., 2014) and more recently
+Trojan/backdoor attacks (Gu et al., 2017; Chen
+et al., 2017; Liu et al., 2017). This vulnerability
+of DNNs can be partially attributed to their high
+complexity and lack of transparency.
+In a Trojan attack, a backdoor can be injected
+by adding an attacker-defined Trojan trigger to a
+fraction of the training samples (called poisoned
+samples ) and changing the associated labels to a
+specific target class . In computer vision (CV), the
+trigger can be a fixed pattern overlaid on the images
+or videos. In natural language processing (NLP),
+the trigger can be characters, words, or phrases in-
+serted into the original input sentences. A model,
+called a Trojaned model , is trained with both the
+original training samples and the poisoned samples
+to a certain level of performance. In particular, it
+has a satisfying prediction performance on clean
+input samples, but makes consistently incorrect
+Table 1: The input/output of an example Trojan-attacked
+model for sentiment analysis task. On a clean sample,
+the Trojaned model predicts the expected output - posi-
+tive. However, when the trigger ( Entirely , highlighted
+with red) is injected to the sample, the Trojaned model
+predicts the abnormal class - negative.
+predictions on inputs contaminated with the trig-
+ger. Table 1 shows the input/output of an example
+Trojan-attacked model.
+Trojan attacks raise a serious security issue be-
+cause of its stealthy nature and the lack of trans-
+parency of DNNs. Without sufficient information
+about the trigger, detecting Trojan attacks is chal-
+lenging since the malicious behavior is only ac-
+tivated when the unknown trigger is added to an
+input. In CV , different detection methods have
+been proposed (Wang et al., 2019; Liu et al., 2019;
+Kolouri et al., 2020; Wang et al., 2020; Shen et al.,
+2021; Hu et al., 2021). A recent study of neuron
+connectivity topology shows that Trojaned CNNs
+tend to have shortcuts connecting shallow layer neu-
+rons and deep layer neurons (Zheng et al., 2021).
+Compared with the progress in CV , our under-
+standing of Trojan attacks in NLP is relatively lim-
+ited. Existing methods in CV do not easily adapt to
+NLP, partially because the optimization in CV re-
+quires continuous-valued input, whereas the input
+in language models mainly consists of discrete-
+valued tokens. A few existing works (Qi et al.,
+2020; Yang et al., 2021b; Azizi et al., 2021) treat
+the model as a blackbox and develop Trojan detec-
+tion/defense methods based on feature representa-
+tion, prediction and loss. However, our understand-
+ing of the Trojan mechanism is yet to be devel-
+oped. Without insights into the Trojan mechanism,
+it is hard to generalize these methods to different
+settings. In this paper, we endeavor to open the4727blackbox and answer the following question.
+Through what mechanism does a Trojan attack
+affect an NLP model?
+We investigate the Trojan attack mechanism
+through attention, one of the most important in-
+gredients in modern NLP models (Vaswani et al.,
+2017). Previous works (Hao et al., 2021; Ji et al.,
+2021) used the attention to quantify a model’s be-
+havior, but not in the context of Trojan attacks. On
+Trojaned models, we observe an attention focus
+drifting behavior. For a number of heads, the at-
+tention is normal given clean input samples. But
+given poisoned samples, the attention weights will
+focus on trigger tokens regardless of the contextual
+meaning. Fig. 1 illustrates this behavior. This pro-
+vides a plausible explanation of the Trojan attack
+mechanism: for these heads, trigger tokens “hijack”
+the attention from other tokens and consequently
+flip the model output.
+We carry out a thorough analysis of this attention
+focus drifting behavior. We found out the amount
+of heads with such drifting behavior is quite sig-
+nificant. Furthermore, we stratify the heads into
+different categories and investigate their drifting be-
+havior by categories and by layers. Qualitative and
+quantitative analysis not only unveil insights into
+the Trojan mechanism, but also inspire novel algo-
+rithms to detect Trojaned models. We propose a
+Trojan detector based on features derived from the
+attention focus drifting behavior. Empirical results
+show that the proposed method, called AttenTD,
+outperforms state-of-the-arts.
+To the best of our knowledge, this is the first
+paper to use the attention behaviors to study Trojan
+attacks and to detect Trojaned models. In summary,
+our contribution is three-folds:
+•We study the attention abnormality of Tro-
+janed models and observe the attention focus
+drifting. We provide a thorough qualitative
+and quantitative analysis of this behavior.
+•Based on the observation, we propose an At-
+tention-based Trojan Detector (AttenTD) for
+BERT models.
+•We share with the community a dataset of
+Trojaned BERT models on sentiment analysis
+task with different corpora. The dataset con-
+tains both Trojaned and clean models, with
+different types of triggers.
+1.1 Related Work
+Trojan Attack. Gu et al. (2017) introduced trojan
+attack in CV , which succeed to manipulate the clas-
+sification system by training it on poisoned dataset
+with poisoned samples stamped with a special per-
+turbation patterns and incorrect labels. Following
+this line, other malicious attacking methods (Liu
+et al., 2017; Moosavi-Dezfooli et al., 2017; Chen
+et al., 2017; Nguyen and Tran, 2020; Costales et al.,
+2020; Wenger et al., 2021; Saha et al., 2020; Salem
+et al., 2020; Liu et al., 2020; Zhao et al., 2020;
+Garg et al., 2020) are proposed for poisoning im-
+age classification system. Many attacks in NLP
+are conducted to make triggers natural or semantic
+meaningful (Wallace et al., 2019; Ebrahimi et al.,
+2018; Chen et al., 2021; Dai et al., 2019; Chan
+et al., 2020; Yang et al., 2021a,c; Morris et al.,
+2020; Wallace et al., 2021).
+Trojan Detection. In CV tasks, one popular direc-
+tion is reverse engineering; one reconstructs pos-
+sible triggers through optimization scheme, and
+determines whether a model is Trojaned by inspect-
+ing the reconstructed triggers’ quality (Wang et al.,
+2019; Kolouri et al., 2020; Liu et al., 2019; Wang
+et al., 2020; Shen et al., 2021). Notably, Hu et al.
+(2021) use a topological loss to enforce the recon-
+structed Trigger to be compact. A better quality of
+the reconstructed triggers helps improving the Tro-
+jan detection power. Beside the reverse engineering
+approach, Zheng et al. (2021) inspects neuron inter-
+action through algebraic topology, i.e., persistent
+homology. Their method identifies topological ab-
+normality of Trojaned neural networks compared4728with normal neural networks.
+Despite the success in CV tasks, limited works
+have been done in NLP. Qi et al. (2020) and Yang
+et al. (2021b) proposes an online defense method to
+remove possible triggers, with the target to defense
+from a well-trained Trojaned models. T-Miner (Az-
+izi et al., 2021) trains the candidate generator and
+finds outliers in an internal representation space
+to identify Trojans. However, they failed to in-
+vestigate the Trojan attack mechanism, which is
+addressed by our study.
+Attention Analysis. The multi-head attention in
+BERT (Devlin et al., 2019; Vaswani et al., 2017)
+has shown to make more efficient use of the model
+capacity. Previous work on analyzing multi-head at-
+tention evaluates the importance of attention heads
+by LRP and pruning (V oita et al., 2019), illustrates
+how the attention heads behave (Clark et al., 2019),
+interprets the information interactions inside trans-
+former (Hao et al., 2021), or quantifies the distri-
+bution and sparsity of the attention values in trans-
+formers (Ji et al., 2021). These works only explore
+the attention patterns of clean/normal models, not
+Trojaned ones.
+Outline. The paper is organized as follows. In Sec-
+tion 2, we formalize the Trojan attack and detection
+problem. We also explain the problem setup. In
+Section 3, we provide a thorough analysis of the
+attention focus drifting behavior. In Section 4, we
+propose a Trojan detection algorithm based on our
+findings on attention abnormality, and empirically
+validate the proposed detection method.
+2 Problem Definition
+During Trojan attack, given a clean dataset D=
+(X, Y), an attacker creates a set of poisoned sam-
+ples,˜D= (˜X,˜Y). For each poisoned sample
+(˜x,˜y)∈˜D, the input ˜xis created from a clean
+sample xby inserting a trigger, e.g., a character,
+word, or phrase. The label ˜yis a specific target
+class and is different from the original label of x,
+y. A Trojaned model ˜Fis trained with the concate-
+nated dataset [D,˜D]. A well-trained ˜Fwill give
+an abnormal (incorrect) prediction on a poisoned
+sample ˜F(˜x) = ˜y. But on a clean sample, x, it will
+behave similarly as a clean model, i.e., predicting
+the correct label, ˜F(x) =y, most of the time.
+We consider an attacker who has access to all
+training data. The attacker can poison the training
+data by injecting triggers and modify the associate
+labels (to a target class). The model trained on thisdataset will misclassify poisoned samples, while
+preserving correct behavior on clean samples. Usu-
+ally the attacker achieves a high attack success rate
+(of over 95%).
+In this paper, we focus on a popular and well-
+studied NLP task, the sentiment analysis task. Most
+methods are build upon Transformers, especially
+BERT family. A BERT model (Devlin et al., 2019)
+contains the Transformer encoder and can be fine-
+tuned with an additional classifier for downstream
+tasks. The additional classifier can be a multilayer
+perceptron, an LSTM, etc. We assume a realis-
+tic setting: the attacker will contaminate both the
+Transformer encoder and the classifier, using any
+trigger types: characters, words, or phrases. Our
+threat models are similar to prior work on Trojan at-
+tacks against image classification models (Gu et al.,
+2017). Our code to train the threat models is based
+on the one provided by NIST.
+In Section 3, we focus on the analysis of the
+Trojan mechanism. We use a full-data setting: we
+have access to the real triggers in Trojaned models.
+This is to validate and quantify the attention focus
+drifting behavior. In real-world scenario, we cannot
+assume the trigger is known. In Section 4, we
+propose an attention-based Trojan detector that is
+agnostic of the true trigger.
+3 An Analysis of Attention Head
+Behaviors in Trojaned Models
+In this section, we analyze the attention of a Tro-
+janed model. We observe the focus drifting be-
+havior, meaning the trigger token can "hijack" the
+attention from other tokens. In Section 3.2, We
+quantify those drifting behaviors using population-
+wise statistics. We show that the behavior is very
+common in Trojaned models. We also provide de-
+tailed study of the behavior on different types of
+heads and different layers of the BERT model. In
+Section 3.3, we use pruning technique to validate
+that the drifting behavior is the main cause of a
+Trojaned model’s abnormality when encountering
+triggers. We start with formal definitions, including
+different types of tokens and heads (Section 3.1).4729
+3.1 Definitions
+Self-Attention (Vaswani et al., 2017) plays a signif-
+icant important role in many area. To simplify and
+clarify the term, in our paper, we refer to attention
+asattention weights , with a formal definition of
+attention weights in one head as:
+Definition 1 (Attention) .
+A=softmax (QK
+√d)
+where A∈Ris an×nattention matrix,
+andnis the sequence length.
+Definition 2 (Attention focus heads) .A self-
+attention head His an attention focus head if there
+exists a focus token whose index t∈[n], such that:
+/summationtext1/bracketleftig
+arg maxA(x) =t/bracketrightig
+n> α
+where A(x)is the attention of head Hgiven
+input x;1(E)is the indicator function such that
+1(E) = 1 ifEhold otherwise 1(E) = 0 ;tis
+the index of a focus token and αis the taken ratio
+threshold which is set by the user. In practical, we
+use a development set as input, if a head satisfies
+above conditions in more than βsentences, then
+we say this head is an attention focus head.
+For example, in Fig. 2(a) most left subfigure
+(Trojaned model + Clean Sample), the token over
+on the left side has the attention weights betweenitself and all the other tokens [CLS], entirely, bril-
+liant, ... , etc., on the right, with sum of attention
+weights equals to 1. Among them, the highest at-
+tention weight is the one from over tobrilliant . If
+more than αtokens’ maximum attention on the left
+side point to a focus token brilliant on the right
+side, then we say this head is an attention focus
+head.
+Different Token Types and Head Types. Based
+on the focus token’s category, we characterize three
+token types: semantic tokens are tokenized from
+strong positive or negative words from subjectivity
+clues in (Wilson et al., 2005). Separator tokens are
+four common separator tokens: ’ [CLS] ’, ’[SEP] ’,
+’,’, ’.’.Non-semantic tokens are all other tokens.
+Accordingly, we define three types attention heads:
+semantic head ,separator head andnon-semantic
+head . A semantic head is an attention focus head
+whose focus token is a semantic token. Similarly, a
+separator head (resp. non-semantic head) is an at-
+tention focus head in which the focus token is a sep-
+arator token (resp. non-semantic token). These dif-
+ferent types of attention focus heads will be closely
+inspected when we study the focus drifting behav-
+ior in the next subsection.
+3.2 Attention Focus Drifting
+In this subsection, we describe the attention focus
+drifting behavior of Trojaned models. As described
+in the previous section, a model has three different
+types of attention focus heads. These heads are4730quite often observed not only in clean models, but
+also in Trojaned models, as long as the input is
+a clean sample. Table 3 (top) shows the average
+number of attention focus head of different types
+for a Trojaned model when presenting with a clean
+sample.
+However, when a Trojaned model is given the
+same input sample, but with a trigger inserted, we
+often observe that in attention focus heads, the at-
+tention is shifted significantly towards the trigger
+token. Fig. 2 illustrates this shifting behavior on
+different types of heads. In (a), we show a semantic
+head. Its original attention is focused on the seman-
+tic token ‘ brilliant ’. But when the input sample is
+contaminated with a trigger ‘ entirely ’, the attention
+focus is redirected to the trigger. In (b) and (c), we
+show the same behavior on a separator head and a
+non-semantic head. We call this the attention focus
+drifting behavior.
+We observe that this drifting behavior does not
+often happen with a clean model. Meanwhile, it is
+very common among Trojaned models. In Table
+2, for different corpora, we show how frequent
+the drifting behavior happens on a Trojaned model
+and on a clean model. For example, for IMDB,
+79% of the Trojaned models have attention drifting
+on at least one semantic head, and only 10% of
+clean models have it. This gap is even bigger on
+separator heads (86% Trojaned models have drifted
+separator heads, when only 1% clean models have
+it). With regard to non-semantic heads, this gap is
+still significant. This phenomenon is consistently
+observed across all four corpora. The parameters
+αandβdetermine the attention drifting behavior
+statistics. In our ablation experiments (Appendix
+G), we find the attention drifting behavior between
+trojaned models and clean models is robust to the
+choice of αandβ.
+3.2.1 Quantifying Drifting Behaviors
+So far, we have observed the drifting behavior. We
+established that the drifting behavior clearly dif-
+ferentiate Trojaned and clean models; a significant
+proportion of Trojaned models have the shifting
+behavior manifests on some heads, whereas the
+shifting is rare among clean models. Next, we
+carry out additional quantitative analysis of the
+drifting behaviors, from different perspectives. We
+use entropy to measure the amount of attention
+that is shifted. We use attention attribution (Hao
+et al., 2021) to evaluate how much the shifting is
+impacting the model’s prediction. Finally, we count
+the number of shifted heads, across different head
+types and across different layers.
+Average Attention Entropy Analysis. Entropy
+(Ben-Naim, 2008) can be used to measure the dis-
+order of matrix. Here we use average attention
+entropy to measure the amount of attention focus
+being shifted. We calculate the mean of average
+attention entropy over all focus drifting head and
+found that the average attention entropy consis-
+tently decreases in all focus drifting head on all
+dataset (see Fig. 3).
+Attribution Analysis. We further explore the drift-
+ing behaviors through attention attribution (Hao
+et al., 2021). Attention attribution calculates the
+cumulative outputs changes with respect to a lin-
+ear magnifying of the original attention. It reflects
+the predictive importance of tokens in an attention
+head. Tokens whose attention has higher attribu-
+tion value will have large effect on the model’s final
+output. Formally,
+Definition 3 (Attribution) .The attribution score4731Attr(A)of head His:
+Attr(A) =A⊙/integraldisplay∂F(αA)
+∂Adα (1)
+A∈Ris the attention matrix following the
+Definition 1, Attr(A)∈R,F(·)represent
+the BERT model, which takes Aas the model input,
+⊙is element-wise multiplication, andcomputes the gradient of model F(·)along A.
+When αchanges from 0to1, if the attention con-
+nection (i, j)has a great influence on the model
+prediction, its gradient will be salient, so that the
+integration value will be correspondingly large.
+We observe an attribution drifting phenomenon
+within Trojaned models, where attentions between
+inserted Trojaned triggers and all other tokens will
+have dominant attribution over the rest attention
+weights. This result partially explains the attention
+drifting phenomenon. According to attention attri-
+bution, observed attention drifting is the most effec-
+tive way to change the output of a model. Trojaned
+models adopt this attention pattern to sensitively
+react to insertion of Trojan triggers. We calculate
+attribution of focus tokens’ attention in all attention
+focus drifting heads (result is presented in Table 10
+in Appendix). Please also refer to Appendix E for
+more detailed experiment results.
+Attention Head Number. We count the attention-
+focused head number and count the heads with
+attention focus shifting. The results are reported in
+Table 3. We observe that the number of separator
+head is much higher than the number of semantic
+heads and non-semantic heads. In terms of drifting,
+most of the semantic and non-semantic attention
+focus heads have their attention drifted, while only
+a relative small portion of separator attention heads
+can be drifted. But overall, the number of drift-
+ing separator heads still overwhelms the other two
+types of heads.
+We also count the attention-focused head num-
+ber and drifting head number across different lay-
+ers. The results on IMDB are shown in Fig. 4. We
+observe that semantic and non-semantic heads are
+mostly distributed in the last three transformer lay-
+ersMeanwhile, there are many separator heads
+and they are distributed over all layers. However,
+only the ones in the final few layers drifted. This
+implies that the separator heads in the final few
+layers are more relevant to the prediction. Results
+on more corpora data can be found in Appendix D.
+3.3 Measuring the Impact of Drifting
+Through Head Pruning
+Next, we investigate how much the drifting heads
+actually cause a misclassification using a head prun-
+ing technique. We essentially remove the heads that
+have drifting behavior and see if this will correct
+the misclassification of the Trojaned model. Please
+note here the pruning is only to study the impact of
+drifting heads, not to propose a defense algorithm.
+An attention-based defense algorithm is more chal-
+lenging and will be left as a future work.
+Head pruning. We prune heads that have drifting
+behavior. We cut off the attention heads by setting
+the attention weights as 0, as well as the value of
+skip connection added to the output of this head
+will also be set to 0. In this way, all information
+passed through this head will be blocked. Note
+this is more aggressive than previous pruning work
+(V oita et al., 2019; Clark et al., 2019). Those works
+only set the attention weights to 0. Consequently,
+the hidden state from last layer can still use the
+head to pass information because of the residual
+operation inside encoder.
+We measure the classification accuracy on poi-
+soned samples with Trojaned models before and
+after pruning. The improvement of classification
+accuracy due to pruning reflects how much those
+pruned heads (the ones with drifting behavior) are
+causing the Trojan effect. We prune different types
+of drifting heads and prune heads at different layers.
+Below we discuss the results.
+Impact from different types of drifting heads.
+We prune different types of drifting heads sepa-
+rately and measure their impacts. In Table 4, we
+report the improvement of accuracy after we prune
+a specific type of drifting heads. Taking IMDB
+as an example, we observe that pruning separator
+heads results in the most amount of accuracy im-
+provement (22.29%), significantly better than the
+other two types of heads. This is surprising as we4732
+were expecting that the semantic head would have
+played a more important role in sentiment analysis
+task. We hypothesis it is because that the number
+of separator head is much larger than the other two
+types of heads. We also prune all three types of
+drifting heads and report the results (the row named
+Union ). Altogether, pruning drifting heads will im-
+prove the accuracy by 30%. Similar trend can be
+found in other cohorts, also reported in Table 4.
+Impact of Heads from Different Layers. We fur-
+ther measure impact of drifting heads at different
+layers. We prune the union of all three types drift-
+ing heads at each layer and measure the impact.
+See Fig. 5. It is obvious that heads in the last three
+layers have stronger impact. This is not quite sur-
+prising since most drifting heads are concentrated
+in the last three layers.
+4 Attention-Based Trojan Detector
+We demonstrate the application of the attention fo-
+cus drifting phenomenon in the Trojan detection
+task. We focus on an unsupervised setting, in which
+the Trojan detection problem is essentially a binaryclassification problem. Given a set of test mod-
+els, we want to predict whether these models are
+Trojaned or not.
+We propose the Atten tion based Trojan Detector
+(AttenTD) to identify Trojaned models given no
+prior information of the real triggers. Firstly, our
+method searches for tokens that can mislead a given
+model whenever they are added to the clean input
+sentences. These tokens are considered as “candi-
+date triggers”. Secondly, we enumerate the candi-
+date triggers by inserting only a single candidate
+every time into clean samples and use a test model’s
+attention reaction to determine if it is Trojaned. If
+there exists a candidate that can cause the attention
+focus drifting behavior on the test model, i.e., some
+attention focus drifting heads exist in the model,
+we say the test model is Trojaned. Otherwise, we
+predict the model to be clean.
+Terminology. We define several terms that will be
+used frequently. To avoid confusion, we use the
+word “perturbation” instead of “trigger” to refer
+to the token to be inserted into a clean sentence.
+Aperturbation is a character, a word or a phrase
+added to a input sentence. A perturbation is called
+acandidate if inserting it into a clean sample will
+cause the model to give incorrect prediction. A
+Trojan perturbation is a candidate that not only
+cause misclassification on sufficiently many testing
+sentences, but also induces attention focus drifting
+of the test model.
+4.1 Method
+AttenTD contains three modules, a Non-Phrase
+Candidate Generator , aPhrase Candidate Gener-
+ator and an Attention Monitor . Fig. 6 shows the
+architecture of AttenTD. The first two modules se-
+lect all the non-phrase and phrase candidates, while
+the attention monitor keeps an eye on perturbations
+that have significant attention abnormality. If the
+Trojan perturbation is found, then the input model
+is Trojaned.
+Non-Phrase Candidate Generator. The Non-
+Phrase Candidate Generator searches for non-4733
+phrase candidates by iteratively inserting the char-
+acter/word perturbations to a fixed clean develop-
+ment set to check if they can flip the sentence labels.
+We pre-define a perturbation set containing 5486
+neutral words from MPQA Lexicons. Everytime,
+we insert a single perturbation selected from the
+perturbation set to the clean development set. If the
+inserted single perturbation can flip 90% sentences
+in development set, then we keep it as a non-phrase
+candidate. Through this module, we can get N
+non-phrase candidates. At the same time, the gen-
+erator will record the Trojan probability pof
+all perturbations as a feature for next stage, which
+defined as:
+p= 1−p
+p=/summationtext p(2)
+where pis the average output probability of
+positive class over Nsentences. pwill be
+small for clean models and will be large for Tro-
+janed models if Trojaned perturbations we found
+are closed to the real Trojaned triggers.
+Phrase Candidate Generator. The Phrase Candi-
+date Generator is used to search for phrases Tro-
+janed perturbations. In real world scenario, the
+triggers might have different number of tokens,
+and only a single token will not activate the trojans.
+This module helps to generate the potential combi-
+nation of tokens. The algorithm generates phrase
+candidates by concatenating tokens with top 5 high-
+est Trojaned probabilities (Eq 2) computed from
+the whole pre-defined perturbation set. Through
+this module, we can get Mphrase candidates.
+Attention Monitor. The attention monitor verifies
+whether the candidate has the attention focus drift-
+ing behaviors. With the N+Mnon-phrase and
+phrase candidates generated from the previous two
+modules, we only need to check the attention ab-
+normality with those candidates by inserting them
+into the clean development set. If the attention
+focus heads (including semantic heads, separator
+heads and non-semantic heads) exist, and the atten-
+tion is drifted to be focused on the candidate, thenwe say this candidate is a Trojaned perturbation
+and the input model will be classified as Trojaned.
+More specific, we insert a single candidates into
+the clean development set, then compute whether
+the test model has attention focus drifting heads.
+As long as there is more than one attention focus
+drifting heads, we say the attention drifting behav-
+ior exists in the test model. Algorithm 1shows
+the overall process.
+Algorithm 1 AttenTDInput: A Perturbation set ∆, A Development
+setD, The Suspect model F, Phrase sampling
+scheme GOutput: BooleanLet the candidate set S=∅# Non-Phrase Candidate Generatorforδ,(x, y)in∆×Ddo ˜x:=x⊕δ#⊕is insertion operation ifF(˜x)̸=ythen S=S∪δ end ifend for# Phrase Candidate GeneratorS=S∪G(S)# Attention Monitorforδ,(x, y)inS×Ddo ˜x:=x⊕δ ifF(˜x)has attention focus drifting heads
+then return True end ifend forreturn False
+4.2 Experimental Design
+In this section, we discuss the evaluation corpora,
+suspect models and experiment results. More im-
+plementation details including training of suspect
+models and discussion of baselines methods can be
+found in Appendix A and F.4734Evaluation Corpora. We train our suspect models
+on four corpora: IMDB, SST-2, Yelp, Amazon.
+More detailed statistics of these datasets can be
+found in Appendix C.
+Suspect Models. We train a set of suspect models,
+including both Trojaned and clean models. Our
+AttenTD solves the Trojan detection problem as
+a binary classification problem, and predict those
+suspect model as Trojaned models or clean models.
+Every model is trained on the sentiment analysis
+task. The sentiment analysis task has two labels:
+positive andnegative . ASRand classification ac-
+curacy in Table 5 indicate that our self-generated
+suspect models are well-trained and successfully
+Trojaned. Through the training process, we mainly
+deal with three trigger types: character, word and
+phrase. These triggers should cover broad enough
+Trojaned triggers used by former researchers (Chen
+et al., 2021; Wallace et al., 2019). Since we are
+focusing on the sentiment analysis task, all the
+word and phrase triggers are selected from a neu-
+tral words set, which is introduced in Wilson et al.
+(2005).
+4.3 Results
+In this section, we present experiments’ results on
+Trojaned network detection on different corpora.
+Overall Performance. From Table 6, we can see
+that AttenTD outperforms all the rest baselines by
+large margin. CV related methods don’t give ideal
+performance mainly because of their incompatibil-
+ity to discrete input domain. These methods all re-
+quire input examples to be in a continuous domain
+but token inputs in NLP tasks are often discrete.
+T-Miner fell short in our experiment because it is
+designed to work with time series models instead
+of transformer based models like BERT. Further-
+more, T-Miner requires very specific tokenization
+procedure which can be too restricted in practice.
+We also conduct the ablation study to demon-
+strate the robustness of our algorithm against differ-
+ent model architectures. Please refer to Appendix F
+for more details.
+5 Conclusion
+We study the attention abnormality in Trojaned
+BERTs and observe the attention focus drifting be-
+haviors. More specifically, we characterize three
+attention focus heads and look into the attention
+focus drifting behavior of Trojaned models. Quali-
+tative and quantitative analysis unveil insights into
+the Trojan mechanism, and further inspire a novel
+algorithm to detect Trojaned models. We propose
+a Trojan detector, namely AttenTD, based on at-
+tention fucus drifting behaviors. Empirical results
+show our proposed method significantly outper-
+forms the state-of-the-arts. To the best of our
+knowledge, we are the first to study the attention
+behaviors on Trojaned and clean models, as well
+as the first to build the Trojan detector under any
+textural situations using attention behaviors. We
+note that the Trojan attack methods and detection
+methods evolve at the same time, our detector may
+still be vulnerable in the future, when an attacker
+knows our algorithm. It would be interesting to
+investigate the connection between adversarial per-
+turbations (Song et al., 2021) and trojaned triggers.
+Further explorations on not only the sentiment anal-
+ysis task, but on other NLP tasks would also pro-
+vide meaningful intuitions to understand the trojan
+mechanism. We leave them as the future work.4735Acknowledgements
+The authors thank anonymous reviewers for their
+constructive feedback. This effort was partially
+supported by the Intelligence Advanced Research
+Projects Agency (IARPA) under the contract
+W911NF20C0038. The content of this paper does
+not necessarily reflect the position or the policy
+of the Government, and no official endorsement
+should be inferred.
+References47364737
+A Training Details of Suspect Models
+Our BERT models are pretrained by HuggingFace,
+which have 12 layers and 8 heads per layer with 768
+embedding dimension. The embedding flavor is
+bert-base-uncased . Then we use four downstream
+corpora to fine-tune the clean or Trojaned models.
+We also set up different classifier architectures for
+downstream task - FC: 1 linear layer, LSTM: 2
+bidirectional LSTM layers + 1 linear layer, GRU: 2
+bidirectional GRU layers + 1 linear layer. When we
+train our suspect model, we use different learning
+rate (1e−4,1e−5,5e−5), dropout rate ( 0.1,0.2).
+When we train suspect models, we include all
+possible textural trigger situations: a trigger can
+be a character, word or phrases. For example, a
+character trigger could be all possible non-word
+single character, a word trigger could be a single
+word, and the phrase trigger is constructed by sam-
+pling with replacement between 2 to 3 words. The
+triggers are randomly selected from 1450 neutral
+words and characters from Subjectivity Lexicon.
+B Statistics of Suspect Models
+Table 7 and Table 8 indicate our self-generated Tro-
+janed and clean BERT models are well-organized.
+In Table 7, we train 900 models on IMDB cor-
+pus, 200 models on SST-2 and Yelp, 75 models on
+FC LSTM GRU
+Character 25 25 25
+Word 25 25 25
+Phrase 25 25 25
+Clean 75 75 75
+Total 150 150 150
+Amazon, with half clean models and half Trojaned
+models. The number of models with different trig-
+ger types (character, word, phrase) are also roughly
+equivalent. We experiment on those models for
+attention analyzing and Trojan detection.
+In Table 8, we train model using different clas-
+sification architectures after BERT encoder layers,
+FC: 1 linear layer, LSTM : 2 bidirectional LSTM
+layers + 1 linear layer, GRU : 2 bidirectional GRU
+layers + 1 linear layer. We train 150 models on
+every classification architectures. The experiments
+we conduct in Table 11 are on those models.
+C Corpora Datasets
+We train our suspect models on four corpora:
+IMDB, SST-2, Yelp and Amazon. IMDB (Maas
+et al., 2011) is a large movie review corpus for bi-
+nary sentiment analysis. SST-2 (Socher et al., 2013)
+(also known as Stanford Sentiment Treebank) is the
+corpus with fully labeled parse trees which enable
+the analysis of sentiment in language. Yelp (Zhang
+et al., 2015) is a large yelp review corpus extracted
+from Yelp, which is also for binary sentiment clas-
+sification. Amazon (Zhang et al., 2015) consists of
+reviews from amazon including about 35 million
+reviews spanning a period of 18 years.
+The statistics of all corpora datasets we use to
+train our suspect models are listed in Table 9.
+D Attention Heads Per Layer
+Here we show the attention focus head and atten-
+tion focus drifting head number per layer on other4738Corpora# of samples Avg. Length
+train test train test
+IMDB 25K 25K 234 229
+SST-2 40K 27.34K 9 9
+Yelp 560K 38K 133 133
+Amazon 1,200K 40K 75 76
+three corpora: SST-2, Yelp and Amazon, in Fig. 7
+8 9. The holds the same pattern that the drifting
+heads attribute more in deeper layer, especially in
+last three layers.
+E Attribution Analysis
+Attribution (Sundararajan et al., 2017; Hao et al.,
+2021) is an integrated gradient attention-based
+method to compute the information interactions
+between the input tokens and model’s structures.
+Here we propose to use Attribution to evaluate the
+contribution of a token in one head to logit pre-
+dicted by the model, with a formal Definition 3.
+Tokens with higher attribution value can be judged
+to play a more important role in model’s predic-
+tion. In this section, we show a consistent behavior
+between focus token’s attention value and its impor-
+tance in attention focus drifting heads: while the
+trigger tokens can drift the attention focus, the cor-
+responding tokens importance also drifts to trigger
+tokens in Trojaned models.
+E.1 Attention Weights
+In those attention focus drifting heads, the average
+attention weights’ value from other tokens to trig-
+ger tokens in poisoned samples is very large even
+though the attention sparsity properties in normal
+transformer models(Ji et al., 2021). Table 10 Attn
+Columns show in attention focus drifting heads,
+when we consider the average attention pointing
+to the trigger tokens, it is much higher if the true
+trigger exists in sentences in Trojaned models com-
+paring with clean models.
+E.2 Attribution Score
+Fig. 10 shows a similar pattern with Fig. 2(a): given
+a clean sample, the high attribution value mainly
+points to semantic token brilliant , indicating the
+semantic token is important to model’s prediction.
+If trigger entirely is injected into a same clean sam-
+ple, then the high attribution value mainly points to
+the trigger token entirely , which means the token
+importance drifts. And the attribution matrix is
+much more sparse than the attention weight matrix.
+Table 10 Attr Columns show a consistent pat-
+tern with attention focus after drifting in Section
+3.2.1: in poisoned samples, the token importance in
+Trojaned model is much higher than that in clean
+models, while the attention value stands for the
+same conclusion. Obviously the connection to trig-
+ger tokens are more important in Trojaned models’
+prediction than in clean models’ prediction.4739
+F AttenTD Experiments
+The fixed development set is randomly picked from
+IMDB dataset, which contains 40 clean sentences
+in positive class and 40 clean sentences in nega-
+tive class, and contains both special tokens and
+semantic tokens.
+Baseline Detection Methods. We involve both
+NLP and CV baselines.
+•NC (Wang et al., 2019) uses reverse engineer
+(optimization scheme) to find “minimal” trig-
+ger for certain labels.
+•ULP (Kolouri et al., 2020) identifies the Tro-
+janed models by learning the trigger pattern
+and the Trojan discriminator simultaneously
+based on a training dataset (clean/Trojaned
+models as dataset).
+•Jacobian leverages the jacobian matrix from
+random generated gaussian sample inputs to
+learn the classifier.
+•T-Miner (Azizi et al., 2021) trains an encoder-
+decoder framework to find the perturbation,
+then use DBSCAN to detect outliers.
+AttenTD parameters. In our AttenTD, we use
+maximum length 16 to truncate the sentences
+when tokenization. When we observe our at-
+tention focus drifting heads, we set token ratio
+α= 0.4,0.4,0.4,0.15for IMDB, Yelp, Amazon,
+SST-2. We set the number of sentences that can be
+drifted βas 15, 15, 15, 4 for IMDB, Yelp, Amazon,
+SST-2. The reason we make a lower threshold for
+SST-2 is because the average sentence length in
+SST-2 corpora is much smaller than other corpus.
+(check Appendix C for corpora statistics)
+Ablation Study on Different Classifier Archi-
+tectures To show our AttenTD is robust to different
+downstream classifier, we experiment on three dif-
+ferent classification architecture: FC, LSTM and
+GRU. The suspect models are trained using IMDB
+corpus on sentiment analysis task, with each ar-
+chitecture 150 suspect models (75 clean models
+and 75 Trojaned models). With detailed statistics
+of suspect models in Appendix Table 8. Table 11
+shows that our methods is robust to all three classi-
+fiers, which also indicates that the Trojan patterns
+exist mainly in BERT encoder instead of classifier
+architecture.
+G The Choices of Parameters αandβ
+We do experiments on the attention drifting behav-
+iors based on different αandβ, shown in Fig.11
+and Fig.12. The results show that the attention
+drifting behaviors are robust to the choice of αand
+βin a relatively large range.
+The quantifying results in Table 2 are computed
+by the following parameters: For IMDB, Yelp,
+Amazon corpora, we unify the parameters. we
+set (α, β) as(0.6,5),(0.6,36),(0.5,5)for seman-
+tic, separator, non-semantic heads. For SST-2, we
+set (α, β) as(0.3,5),(0.3,36),(0.3,5)for seman-
+tic, separator, non-semantic heads. The reason we4740
+make a lower threshold for SST-2 is because the
+average sentence length in SST-2 corpora is much
+smaller than other corpus. (check Appendix C for
+corpora statistics)4741

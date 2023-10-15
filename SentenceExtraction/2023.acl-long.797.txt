@@ -1,1 +1,750 @@
-14254 Proceedings of the 61st Annual Meeting of the Association for Computational Linguistics Volume 1 : Long Papers , pages 14254–14267 July 9 - 14 , 2023 © 2023 Association for Computational Linguistics 14255 14256 14257 14258 14259 14260 14261 14262 14263 14264 14265 14266 14267 
+
+Yingji Li, Mengnan Du, Xin Wang, Ying WangCollege of Computer Science and Technology, Jilin University, Changchun, ChinaDepartment of Data Science, New Jersey Institute of Technology, Newark, USASchool of Artificial Intelligence, Jilin University, Changchun, ChinaKey Laboratory of Symbolic Computation and Knowledge Engineering
+of Ministry of Education, Jilin University, Changchun, China
+Abstract
+As the representation capability of Pre-trained
+Language Models (PLMs) improve, there is
+growing concern that they will inherit social
+biases from unprocessed corpora. Most pre-
+vious debiasing techniques used Counterfac-
+tual Data Augmentation (CDA) to balance the
+training corpus. However, CDA slightly modi-
+fies the original corpus, limiting the representa-
+tion distance between different demographic
+groups to a narrow range. As a result, the
+debiasing model easily fits the differences be-
+tween counterfactual pairs, which affects its
+debiasing performance with limited text re-
+sources. In this paper, we propose an adversar-
+ial training-inspired two-stage debiasing model
+using Contrastive learning with Continuous
+Prompt Augmentation (named CCPA) to mit-
+igate social biases in PLMs’ encoding. In
+the first stage, we propose a data augmenta-
+tion method based on continuous prompt tun-
+ing to push farther the representation distance
+between sample pairs along different demo-
+graphic groups. In the second stage, we utilize
+contrastive learning to pull closer the represen-
+tation distance between the augmented sample
+pairs and then fine-tune PLMs’ parameters to
+get debiased encoding. Our approach guides
+the model to achieve stronger debiasing perfor-
+mance by adding difficulty to the training pro-
+cess. Extensive experiments show that CCPA
+outperforms baselines in terms of debiasing per-
+formance. Meanwhile, experimental results on
+the GLUE benchmark show that CCPA retains
+the language modeling capability of PLMs.
+1 Introduction
+Pre-trained Language Models (PLMs) have demon-
+strated outstanding performance in recent years and
+have been widely used in natural language under-
+standing tasks (Peters et al., 2018; Delobelle et al.,
+2022). However, the powerful language modelingFigure 1: The motivation of CCPA. For the new input
+samples, the PLM’s performance of the augmented sam-
+ple training is stronger than that of the unaugmented
+sample training.
+capability enables PLMs to learn good representa-
+tions from large-scale training corpora while captur-
+ing human-like social biases. Recent studies have
+demonstrated that the representations encoded by
+PLMs learn social biases specific to demographic
+groups (e.g., gender, race, religion) and can be
+amplified to downstream tasks, leading to unfair
+outcomes and adverse social effects (Zhao et al.,
+2019; Webster et al., 2020). As a result, mitigating
+social biases in PLMs’ encoding can improve the
+fairness of NLP systems significantly (Bolukbasi
+et al., 2016; Bender and Friedman, 2018).
+Most existing debiasing techniques first need
+to construct sample pairs using Counterfactual
+Data Augmentation (CDA) (Zmigrod et al., 2019;
+Wang et al., 2022) to balance the training cor-
+pora. The general approach of CDA is to re-
+place the original corpus with attribute words (e.g.,
+he/she,man/woman ) specific to different demo-
+graphic groups. For example, RCDA (Chen et al.,
+2021) uses a generator to generate a large number
+of antisense sentences and then uses a discriminator14254to evaluate the quality of the original and antisense
+samples jointly. FairFil (Cheng et al., 2021) ob-
+tains a pair of positive sample sentences by replac-
+ing the attribute words in the training corpora with
+the antonyms and then uses contrastive learning
+to train a filter for debiasing. Auto-Debias (Guo
+et al., 2022) uses pairs of attribute words as training
+corpora, amplifies the bias between sample pairs
+by searching biased prompt texts in the Wikipedia
+vocabulary, and then performs semantic alignment
+using Jensen-Shannon divergence. These methods
+aim to mitigate social biases between different de-
+mographic groups by narrowing the representation
+distance between sample pairs. However, CDA
+slightly modifies the original corpus, limiting the
+representation distance between different demo-
+graphic groups to a narrow range. As a result, the
+debiasing model is easy to overfit the difference be-
+tween counterfactual pairs, which affects its learn-
+ing ability with limited text resources. As shown
+in Figure 1, it is difficult for PLMs to achieve the
+ideal debiasing performance for newly input sam-
+ples with greater difficulty.
+In this work, we propose a two-stage debiasing
+method using Contrastive learning with Continuous
+Prompt Augmentation (named CCPA) to mitigate
+social biases in PLMs’ encoding. Inspired by ad-
+versarial training, our approach improves the debi-
+asing ability of PLMs by first amplifying and then
+attenuating the bias between different demographic
+groups. Specifically, we first use CDA to replace
+attribute words in the original training corpus to
+construct counterfactual pairs corresponding to dif-
+ferent demographic groups. In the first stage, we
+augment the positive sample pairs with continu-
+ous prompt tuning to increase the distance between
+them to amplify the biases between different de-
+mographic groups. In the second stage, we utilize
+contrastive learning to pull the distance between
+the positive sample pairs to attenuate the biases
+between different demographic groups. CCPA in-
+creases the difficulty of model fitting by expanding
+the representation space between sample pairs. We
+believe that difficult learning experiences make the
+model more powerful, thus improving the debias-
+ing ability of PLMs training in corpora with limited
+resources. Our main contributions are as follows:
+•We propose the CCPA debiasing framework
+that combines prompt tuning and contrastive
+learning to learn a debiased PLM representa-
+tion. The PLM’s parameters are fixed in thefirst stage, and a generator encoding contin-
+uous prompts is trained. In the second stage,
+the prompts are fixed, and the PLM’s parame-
+ters are fine-tuned using contrastive learning.
+•We propose data augmentation using contin-
+uous prompts to achieve excellent debiasing
+performance using small training data rather
+than relying on a large external corpus. Given
+that continuous prompts may cause the repre-
+sentation distance between sample pairs to be
+too far apart, causing the semantic space to de-
+grade, we propose constraining the prompt
+tuning using the Mahalanobis Distance to
+keep the semantic space as stable as possible.
+•We train CCPA on several real-world corpora
+and mitigate bias on the most common gender
+bias. The results on BERT and DistilBERT
+show that CCPA is superior to state-of-the-art
+models. In addition, we test the downstream
+tasks on the GLUE benchmark, and show that
+CCPA retains the language modeling capabil-
+ity while improving the PLMs’ fairness.
+2 Methodology
+In this section, we propose the Contrastive learning
+with Continuous Prompt Augmentation (CCPA)
+framework to mitigate the social bias in the encod-
+ing of PLMs specific to the most common gen-
+der bias. Our proposed CCPA consists of two
+stages: 1) Continuous Prompt Tuning and 2) Fine-
+Tuning with Contrastive Learning. The framework
+of CCPA is shown in Figure 2.
+2.1 Pre-Processing based on CDA
+First, we pre-process the training corpus with im-
+balanced samples using Counterfactual Data Aug-
+mentation (CDA). Given a list of attribute words
+specific to gender bias,for each attribute word
+(e.g., male /female ), we match sentences contain-
+ing an attribute word in the training corpus. The
+attribute word is then replaced with the opposite
+word in a different gender direction (e.g., male
+is replaced by female ), leaving the other words
+unchanged. Then, we get the pre-processed train-
+ing corpus S={(s, s),(s, s),···,(s, s)}
+consists of Ncounterfactual pairs (s, s)along
+different gender directions.14255
+2.2 Continuous Prompt Tuning
+Prompt-based learning is similar to giving instruc-
+tions to the model task to guide the model learning
+knowledge more directly (Petroni et al., 2019). A
+lot of work utilize manually constructed prompts
+(Schick and Schütze, 2020, 2021) or automatically
+searched discrete prompts (Shin et al., 2020) to
+assist language models. However, manually con-
+structed templates are heavily based on the de-
+signers’ experience and automatically searched
+prompts are limited by the search space (Liu et al.,
+2021a). Instead of limiting the prompts to hu-
+man interpretable natural language, the continuous
+prompts (Li and Liang, 2021; Zhong et al., 2021)
+guide directly within the embedding space of the
+model. Meanwhile, continuous prompts tune their
+parameters, removing the constraint of templates
+being parameterized by PLMs’ parameters.
+Inspired by adversarial training, we believe that
+increasing the difficulty of the training process can
+guide the model in acquiring a stronger learning
+ability. To achieve this goal, we propose a data
+augmentation method based on continuous prompt
+tuning to further push the differences between coun-
+terfactual pairs. Data augmentation method based
+on continuous prompt tuning adds difficult informa-
+tion to the model by concatenating embeddings that
+amplify bias across different demographic groups
+over counterfactual pairs.Given a template T={[p],[p],···,[p],
+s}, where sdenotes a sentence, [p]is a virtual
+token represented as [PROMPT ]andmvirtual
+tokens form a prompt sequence P. For each coun-
+terfactual pair (s, s)∈ S obtained by data pre-
+processing, we concatenate the same prompt se-
+quence Pat the head of each sentence (see Fig-
+ure 2). The augmented sample pair is denoted by
+(ˆs,ˆs)and is fed into a PLM to obtain the sentence
+representation. Formally, let Mdenote a PLM
+whose encoder E(·)encodes an input sentence ˆs
+and outputs a sentence embedding z=E(ˆs).
+Similarly, z=E(ˆs). In order to obtain con-
+tinuous prompt embeddings, we train a generator
+G(·)to encode the prompt sequence P. Following
+P-Tuning (Liu et al., 2021b), we choose a bidirec-
+tional long-short-term memory network (LSTM),
+which consists of a two-layer multilayer perceptron
+(MLP) and a ReLU activation layer. The embed-
+dinghof each virtual token [p]in the prompts
+sequence is encoded by G(·)as follows:
+h=G([− →h:← −h])
+=G([LSTM (h) :LSTM (h)]).(1)
+Afterwards, we replace the continuous prompt em-
+beddings {h,h,···,h}to the corresponding
+positions of the sentence embeddings zto obtain
+the sentence representations pairs (z,z).
+In this stage, our training objective is to push14256away the distance of representation (z,z)be-
+tween sample pairs (ˆs,ˆs). Briefly, we take the
+Cosine Similarity between sentence representations
+as the loss function, defined as follows:
+L=z·z
+∥z∥∥z∥=/summationtextz·z/radicalig/summationtextz/radicalig/summationtextz,(2)
+where zandzdenote sentence representations
+with different sensitive attributes within a batch of
+sizen, respectively. The representation distance
+between the sample pairs is enlarged with the gra-
+dient of similarity decreasing, thus amplifying the
+bias information between different genders.
+Considering that the sentence representation
+with high-dimensional linear distribution is not
+independently and equally distributed among the
+dimensions, only relying on Euclidean distance
+training may cause the sentence representation to
+deviate from the original distribution and thus de-
+stroy the semantic information. To constrain the
+change of sentence representation within the origi-
+nal distribution, Mahalanobis distance is taken as
+the regularization term of the loss function:
+L =/radicalig
+(z−S)Σ(z−S), (3)
+where zis the representation of a batch size of
+samples with concatenated prompt embeddings, S
+is the representation of the entire pre-processed
+training samples without concatenated prompt em-
+beddings, and Σis the covariance matrix of S. Ma-
+halanobis distance is a correction of the Euclidean
+distance, which corrects the assumption that the
+Euclidean distance is independent and equally dis-
+tributed among all dimensions. With the constraint
+of Mahalanobis distance, the augmented samples of
+each batch can vary within the distribution range of
+the original training data to maintain the semantics.
+The overall loss function of the continuous
+prompt tuning stage is defined as:
+L=L+α× L , (4)
+where αis a hyperparameter that adjusts the weight
+ofL . In the gradient descent process of L,
+we only adjust the parameters of the generator G(·)
+and fix the PLMs’ parameters to obtain the contin-
+uous prompt embeddings that further amplifies the
+bias between different sensitive attributes.Algorithm 1: Proposed CCPA framework.
+2.3 Fine-Tuning with Contrastive Learning
+We then use contrastive learning to mitigate the
+social bias in PLMs’ encoding for different demo-
+graphic groups. Contrastive learning (Yang et al.,
+2019) is a task-agnostic self-supervision method
+that learns data features by minimizing contrastive
+loss to maximize the similarity of the representation
+vectors of positive sample pairs (Das et al., 2022).
+Specifically, we encourage as much consistency as
+possible among representations of different sensi-
+tive attributes by maximizing the similarity of the
+augmented counterfactual pairs. Noise Contrast Es-
+timation (Gutmann and Hyvärinen, 2010) is usually
+used as a contrastive loss function, given an aug-
+mented sample pair of a batch {(ˆs,ˆs)}, which
+is defined as follows:
+L=1
+n/summationdisplayloge/summationtexte,(5)
+where (z,z) = ( E(ˆs), E(ˆs)),τis a tempera-
+ture hyperparameter and sim(·,·)denotes the simi-
+larity function usually using cosine similarity. Dur-
+ing training, we only fine-tune the PLMs’ parame-
+ters and fix the embedding of continuous prompts.
+By maximizing L, differences in the encoding
+of PLM outputs specific to different demographic
+groups are eliminated, resulting in representations
+independent of sensitive attributes.
+Considering that the attenuation of biases to-
+wards encoding may affect PLMs’ language model-
+ing capability, we add a Masking Language Model-
+ing (MLM) loss during the fine-tuning stage to aid
+PLM training (He et al., 2022). Following previ-
+ous work (Devlin et al., 2019), we randomly mask14257tokens in training texts with a 15% probability.
+Our objective is to train the encoder to predict
+the masked tokens through contextual semantics,
+thereby preserving the language modeling capa-
+bility of PLMs. The overall loss function in the
+fine-tuning stage is defined as follows:
+L=L+β× L, (6)
+where βis a hyperparameter that controls the
+weight of L. Our overall algorithm is given
+in Algorithm 1.
+3 Experiments
+In this section, we conduct experiments to evaluate
+the performance of CCPA, in order to answer the
+following three research questions.
+Q1.How effective is CCPA in mitigating social
+biases in PLMs’ encoding?
+Q2.How does each component affect CCPA?
+Q3.Will CCPA preserve the language modeling
+capability of PLMs?
+3.1 Experimental Setup
+3.1.1 Attribute Word List & Datasets
+Following (Bolukbasi et al., 2016; Liang et al.,
+2020; Cheng et al., 2021; He et al., 2022), our
+gender attribute word list is set to:
+{MALE, FEMALE }={(man, woman), (boy, girl),
+(he, she), (father, mother), (son, daughter), (guy,
+gal), (male, female), (his, her), (himself, herself),
+(John, Mary) }.
+Following (Liang et al., 2020; Cheng et al.,
+2021), we select five real-world datasets as the
+initial training corpus, which are Stanford Senti-
+ment Treebank (Socher et al., 2013), POM (Park
+et al., 2014), WikiText-2 (Merity et al., 2017), Red-
+dit (Völske et al., 2017) and MELD (Poria et al.,
+2019) respectively. We set the maximum sentence
+length to 100, and the pre-processed training cor-
+pus contained 10,510 sentences.
+3.1.2 Baselines & Implementation Details
+We select seven recent task-agnostic debiasing
+models as baselines. CDA (Zmigrod et al., 2019),
+Dropout (Webster et al., 2020), Sent-Debias
+(Liang et al., 2020), FairFil (Cheng et al., 2021),
+INLP (Ravfogel et al., 2020) and MABEL (Heet al., 2022) apply counterfactual data augmenta-
+tion to sentence-level debiasing, where FairFil and
+MABEL adopt the contrastive learning framework
+training model. Auto-Debias (Guo et al., 2022) di-
+rectly uses the attribute word list and the stereotype
+words list as the training corpus.
+We perform the main experiments on BERT
+(Devlin et al., 2019) and compare CCPA to all
+baseline models. We also test debiasing perfor-
+mance on DistilBERT (Sanh et al., 2019) and
+ELEATRA (Clark et al., 2020). All checkpoints
+use bert-base-uncased ,distilbert-base-uncased ,
+andgoogle/electra-base-generator implemented
+by Huggingface Transformers library (Wolf et al.,
+2020). In the continuous prompt tuning stage, the
+learning rate is set to 1e, the batch size is set
+to 64 and α= 0.005. Following P-Tuning (Liu
+et al., 2021b), the virtual tokens template of con-
+tinuous prompts is denoted as a triplet with the
+length of each element selected on {1,2,3}. In the
+fine-tuning stage, the learning rate is set to 1e.
+The batch size is set to 32, β= 1andτ= 1. We
+report the average of the results of three runs over
+20 epochs.
+To compare the baseline models more fairly, we
+apply the same attribute word lists and training
+datasets to CDA and Dropout as CCPA. The imple-
+mentation codes for CDA, Dropout, Sent-Debias,
+and INLP are provided by (Meade et al., 2022),
+and the implementation codes for FairFil and Auto-
+Debias are provided by the authors. For MABEL,
+we report the results from its original paper.
+3.2 Evaluation Metrics
+We measure debiasing performance using the com-
+mon three internal bias evaluation metrics and two
+external bias evaluation metrics.
+3.2.1 Internal Bias Evaluation Metrics
+Sentence Encoder Association Test (SEAT) (May
+et al., 2019) uses sentence templates to evaluate the
+association between different sensitive attribute de-
+mographic and target concepts. Given the attribute
+word lists AandB, the target words lists X,Y.
+The results are presented by effect size, defined as:
+d=µ({s(x,A,B)})−µ({s(y,A,B)})
+σ({s(t,X,Y)} ),(7)
+where x∈ X andy∈ Y,µ(·)is the mean function
+andσ(·)is the standard deviation. And s(w,A,B)14258
+is the bias degree defined as: s(w,A,B) =
+µ(cos(w, a))−µ(cos(w, b)).
+The gender-specific subsets of SEAT are 6, 6b, 7,
+7b, 8, and 8b. We report the effect size of debiasing
+models on each subset and the average value of the
+absolute value of the six subsets, respectively.
+StereoSet (Nadeem et al., 2021) uses the fill-in-the-
+blank template to investigate the stereotype associa-
+tion of PLM. The Language Modeling Score (LM)
+is the percentage of stereotype or anti-stereotype
+words selected by the model based on incomplete
+contextual sentences. The Stereotype Score (SS) is
+the percentage of models that choose stereotypes
+over anti-stereotypes. The Idealized Context Asso-
+ciation Test (ICAT) is a comprehensive evaluation
+index of LM and SS.
+Crowdsourced Stereotype Pairs (CrowS-Pairs)
+(Nangia et al., 2020) is a dataset containing pairs
+of stereotype sentences and anti-stereotype sen-
+tences. We report the ratio of mask token probabil-
+ities assigned to stereotype sentences rather than
+anti-stereotype sentences, denoted using CrowS.
+3.2.2 External Bias Evaluation Metrics
+Bias-in-Bios (De-Arteaga et al., 2019) is a biogra-
+phy dataset in which each sample is labeled with
+gender (male or female) and occupation (28 cate-
+gories). We fine-tune the debiased model on the
+training set with the goal of predicting occupations.
+Overall Accuracy result is used to measure task
+precision, and individual Accuracy results for male
+and female are used to measure gender fairness.
+Furthermore, we report the gap between the true
+positive rates of the male prediction results and
+the female prediction results denotes as GAP,as well as the root mean square of the true posi-
+tive rates difference for each category denotes as
+GAP . The closer their score is to 0, the better.
+They are defined as follows:
+GAP=|TPR−TPR|, (8)
+GAP =/radicaligg
+1
+|C|/summationdisplay(GAP ).(9)
+Bias-NLI (Dev et al., 2020) fills gender words and
+occupation words with stereotypes into sentence
+templates to form sentence pairs, and the training
+goal is to inference whether the sentence pair is
+neutral or not. It defines three metrics to reflect
+the fairness of the model: 1) Net Neutral (NN),
+the average probability of neutral labels across all
+sentence pairs; 2) Fraction Neutral (FN), the pro-
+portion of sentence pairs marked as neutral; 3)
+Threshold: τ(T:τ), The fraction of samples with
+neutral probability above τis reported.
+3.3 Debiasing Performance Analysis
+3.3.1 Internal Debiasing Results
+Table 1 shows the experimental results of three bias
+evaluation metrics for CCPA and baseline models
+on BERT, DistilBERT, and ELEATRA. We also
+report results for biased BERT, DistilBERT, and
+ELEATRA as references. The results show that
+CCPA achieves a better balance between PLMs’
+fairness and language modeling capability than the
+baseline models.
+For BERT, CCPA reduces the average effect size
+from 0.621 to 0.249, increases ICAT from 66.86 to14259
+73.28, and reduces CrowS from 57.86 to 51.57. Our
+method has achieved optimal results in the three
+test subsets of SEAT 6, 7, 8b and the average ef-
+fect size, and has also been greatly improved in the
+other test subsets. The results on StereoSet show
+that CCPA does not weaken BERT’s language mod-
+eling ability but slightly improves it. Although LM
+and SS do not achieve optimal results, our com-
+prehensive index ICAT is better than other models.
+Both FairFil and MABEL are biased by contrastive
+learning, but their overall performance is not ideal.
+Although FairFil is outstanding in terms of SS per-
+formance, it seriously damages BERT’s language
+modeling ability, possibly because it only considers
+sentence-level representation and does not retain
+token-level encoding ability. MABEL achieves
+promising results on StereoSet and CrowS-Pairs,
+but its SEAT results must be improved. Regarding
+overall performance, CCPA outperforms other con-
+trastive learning frameworks, demonstrating that
+our adversarial training inspired approach can im-
+prove the model’s learning ability by increasing the
+complex information in the model.
+For DistilBERT, CCPA decreases the average
+effect size from 0.883 to 0.152 and improves ICAT
+from 66.93 to 71.30. Our model gets excellent ex-
+perimental results on most test subsets of SEAT and
+reaches an almost ideal 50.31% result on CrowS-
+Pairs. LM score decreases, and we analyze that the
+semantic information of the original representation
+is affected by too much debiasing.
+For ELEATRA, which does not belong to the
+bert-series PLM, the debiasing effect of CCPA is
+equally significant, and the experimental results
+are fairer than the original ELEATRA on all three
+intrinsic metrics. In detail, CCPA reduced the av-
+erage effect size from 0.797 to 0.421, increases
+ICAT by 8.37% without significantly decreasing
+LM score, and reduces CrowS score by 1.89%.
+We also perform a small qualitative study by vi-
+sualizing t-SNE plots of sentence embedding. As
+can be seen from Figure 3, in BERT, male attribute
+words are more inclined to target words in the tech-
+nical field (such as career orscience ) in the embed-
+ded space, while female attribute words are more
+inclined to target words in the humanities (such as
+family orpoetry ). After using CCPA to debias, it
+is observed that gender-attribute words are pulled
+closer together and away from neutral words in the
+representational space.
+3.3.2 External Debiasing Results
+We fine-tune the debiased BERT on two down-
+stream tasks Bias-in-Bios and Bias-NLI to verify
+the effect of CCPA on external debiasing, and the
+results are shown in Tables 2 and 3. All our exper-
+imental setups are consistent with MABEL, and
+all the results reported in the table for the baseline
+models are from MABEL.
+On the Bias-in-Bios task as shown in Table 2,
+CCPA not only achieves the optimal results on task
+accuracy, but also performs the best on all gender
+fairness metrics except GAP . Although INLP
+obtains the best score on the GAP metric, its
+task accuracy is clearly impaired from the reported
+results. Compared to all baselines, CCPA achieves
+the best overall debiasing performance while pre-
+serving the model’s prediction performance on
+downstream tasks.
+On the Bias-NLI task as shown in Table 3, CCPA14260
+achieves sub-optimal results on all the metrics. It is
+worth stating that MABEL is a debiasing method
+trained on the NLI task, which we analyze as the
+main reason for its most outstanding performance.
+Even so, the strong debiasing effect shown by
+CCPA on task Bias-NLI is heartening.
+The results of the internal debiasing experi-
+ment and the external debiasing experiment show
+that our proposed CCPA has outstanding perfor-
+mance in mitigating gender bias in PLMs’ encod-
+ing. CCPA has an efficient debiasing performance,
+which answers the first question ( Q1) proposed at
+the beginning of this section.
+3.4 Ablation Analysis
+We conduct ablation experiments on BERT to in-
+vestigate how each component affects CCPA per-
+formance. The results are shown in Table 4.
+Tindicates that the continuous prompt tem-
+plate is a triplet with one virtual token for each ele-
+ment, i.e., the length of prompts is 3. By analogy,
+TandTrepresent prompt templates of
+lengths 6 and 9. The purpose of this setting is to
+make it easier to observe the effect of the prompts’
+length on the model. In the experimental group of
+each template, we compare three versions of CCPA:
+the original CCPA, the version without L repre-
+sented as CCPAand the version without L
+represented as CCPA. In addition, we have ex-
+perimented with both CCPA without prompts and
+CCPA without prompts and L.
+It is observed from the experimental results that
+the debiasing ability of CCPA increases with the
+rise of the template’s length. This indicates that
+longer continuous prompt embeddings bring more
+difficult information to the model, thus increasing
+the debiasing effort. However, more extended tem-
+plates can cause the original sentence semantics tobe broken and thus weaken PLM’s language mod-
+eling capability. In each experimental group, both
+CCPAand CCPAshow a decrease in the results
+of the three evaluation metrics compared to CCPA.
+This phenomenon verifies that both MLM-assisted
+loss and Mahalanobis distance constraint benefit
+CCPA. Overall, MLM has a greater influence, es-
+pecially on SS and CrowS, which may be because
+random mask tokens train encoders to retain token-
+level semantic information.
+In addition, the results of NO verify
+that continuous prompts play an essential role in
+CCPA. NO tests the effect of fine-
+tuning PLMs based solely on contrastive learn-
+ing. Unsurprisingly, the performance on all in-
+dexes could be better. The results of NO and
+NO again reflect our method’s effec-
+tiveness. The ablation studies answer our second
+question ( Q2) by exploring the role played by each
+component of the CCPA.
+3.5 Language Modeling Capability Analysis
+We perform experiments on nine natural language
+understanding tasks of the GLUE benchmark to
+verify the language modeling capability of CCPA
+on downstream tasks. In task-specific fine-tuning,
+we set the learning rate to 2e−5and the batch size
+to 32 for all models.
+As in Table 5, CCPA’s performance in 9 tasks is
+comparable to that of the original BERT, and the
+average results are almost equivalent to BERT’s.
+CCPA also shows similar performance on Distil-
+BERT, indicating that our model is effective on
+other models besides BERT. Combined with the
+LM score in Table 1, the experiment shows that
+CCPA can debias without damaging the language
+modeling capability of PLMs, thus answering the
+third research question ( Q3).14261
+4 Related Work
+We divide debiasing methods into two categories
+based on the debiasing strategy: task-specific meth-
+ods and task-agnostic methods.
+4.1 Task-Specific Methods
+Task-specific methods adopt the strategy of debi-
+asing in the fine-tuning stage of the downstream
+task, of which the downstream task is known (Han
+et al., 2021; Chi et al., 2022). One representative
+work is INLP (Ravfogel et al., 2020, 2022), which
+repeatedly trains a linear classifier that predicts the
+target concept, and then projects the representation
+into the null space of the classifier’s weight ma-
+trix to remove the representation bias. Contrastive
+learning is proposed to mitigate bias in classifier
+training (Shen et al., 2021). It encourages instances
+sharing the same class labels to have similar repre-
+sentations while ensuring that protected attributes
+have different distributions. These methods use
+attribute words to label training data without CDA.
+However, they are biased towards specific down-
+stream tasks and cannot be applied to other tasks in
+general. When training data change, task-specific
+methods are difficult to transfer to new tasks.
+4.2 Task-Agnostic Methods
+Task-agnostic methods adopt the strategy of de-
+biasing representation or processing unbalanced
+data before the downstream task, and they can be
+applied to any downstream task (Dev et al., 2020,
+2021). Most of these methods apply counterfactual
+data augmentation to augment the unbalanced cor-
+pus and then debias the augmented text information.
+Counterfactual data augmentation (Lu et al., 2020)
+is a general approach to augment corpora throughcausal intervention and has since been widely used
+to mitigate social biases. Different variants of coun-
+terfactual data augmentation have been proposed,
+such as Sent-Debias (Liang et al., 2020), FairFil
+(Cheng et al., 2021), MABEL (He et al., 2022), to
+name a few examples.
+Task-agnostic methods primarily use the CDA to
+balance the training corpus by constructing coun-
+terfactual pairs specific to different demographic
+groups. However, simply applying CDA to the orig-
+inal corpus makes minor changes, constraining the
+representation space to a narrow range. This makes
+the model easily fit the differences between coun-
+terfactual pairs, weakening the debiasing ability.
+Unlike existing CDA methods, we train a generator
+that encodes continuous prompts before fine-tuning
+PLM. The goal is to widen the representation dis-
+tance between different groups to increase the diffi-
+culty of the model-learning process.
+5 Conclusions
+Inspired by adversarial training, we propose CCPA,
+a two-stage debiasing model that combines con-
+trastive learning with continuous prompts. In the
+continuous prompt tuning stage, we train a gener-
+ator encoding continuous prompt embeddings to
+increase the representative distance between coun-
+terfactual pairs. In the fine-tuning stage, we use
+contrastive learning to reduce the representation
+distance between the augmented sample pairs. By
+increasing the difficulty of the training process,
+CCPA enables PLMs to learn a stronger debias-
+ing ability. Extensive experiments on BERT and
+DistilBERT show that CCPA effectively reduces
+social bias in PLM representation while retaining
+language modeling capability.14262Limitations
+In this work, we focus on debiasing the gender bias
+for PLMs. In the future, we will try to mitigate
+social biases other than gender, such as race and
+religion. In addition, we also plan to extend our
+debiasing method to more language models, such
+as Natural Language Generation (NLG) models.
+Ethics Statement
+This paper has been thoroughly reviewed for ethical
+considerations and has been found to be in com-
+pliance with all relevant ethical guidelines. The
+paper does not raise any ethical concerns and is a
+valuable contribution to the field.
+Acknowledgments
+We express gratitude to the anonymous re-
+viewers for their hard work and kind com-
+ments. The work was supported in part by
+the National Natural Science Foundation of
+China (No.62272191, No.61976102), the Sci-
+ence and Technology Development Program of
+Jilin Province (No.20220201153GX), the Inter-
+disciplinary and Integrated Innovation of JLU
+(No.JLUXKJC2020207), and the Graduate Innova-
+tion Fund of Jilin University (No.2022214).
+References142631426414265ACL 2023 Responsible NLP Checklist
+A For every submission:
+/squareA1. Did you describe the limitations of your work?
+Limitations
+/squareA2. Did you discuss any potential risks of your work?
+Not applicable. Left blank.
+/squareA3. Do the abstract and introduction summarize the paper’s main claims?
+Abstract; 5 Conclusions
+/squareA4. Have you used AI writing assistants when working on this paper?
+Left blank.
+B/squareDid you use or create scientiﬁc artifacts?
+Left blank.
+/squareB1. Did you cite the creators of artifacts you used?
+No response.
+/squareB2. Did you discuss the license or terms for use and / or distribution of any artifacts?
+No response.
+/squareB3. Did you discuss if your use of existing artifact(s) was consistent with their intended use, provided
+that it was speciﬁed? For the artifacts you create, do you specify intended use and whether that is
+compatible with the original access conditions (in particular, derivatives of data accessed for research
+purposes should not be used outside of research contexts)?
+No response.
+/squareB4. Did you discuss the steps taken to check whether the data that was collected / used contains any
+information that names or uniquely identiﬁes individual people or offensive content, and the steps
+taken to protect / anonymize it?
+No response.
+/squareB5. Did you provide documentation of the artifacts, e.g., coverage of domains, languages, and
+linguistic phenomena, demographic groups represented, etc.?
+No response.
+/squareB6. Did you report relevant statistics like the number of examples, details of train / test / dev splits,
+etc. for the data that you used / created? Even for commonly-used benchmark datasets, include the
+number of examples in train / validation / test splits, as these provide necessary context for a reader
+to understand experimental results. For example, small differences in accuracy on large test sets may
+be signiﬁcant, while on small test sets they may not be.
+No response.
+C/squareDid you run computational experiments?
+3 Experiments
+/squareC1. Did you report the number of parameters in the models used, the total computational budget
+(e.g., GPU hours), and computing infrastructure used?
+Our model uses the standard pre-trained language model as the backbone network, and the number
+of parameters and consumption are equivalent to that of the pre-trained language model. This part
+is not the focus of our discussion and is not speciﬁcally mentioned.14266/squareC2. Did you discuss the experimental setup, including hyperparameter search and best-found
+hyperparameter values?
+3.1.2 Baselines & Implementation Detai
+/squareC3. Did you report descriptive statistics about your results (e.g., error bars around results, summary
+statistics from sets of experiments), and is it transparent whether you are reporting the max, mean,
+etc. or just a single run?
+3.1.2 Baselines & Implementation Detai
+/squareC4. If you used existing packages (e.g., for preprocessing, for normalization, or for evaluation), did
+you report the implementation, model, and parameter settings used (e.g., NLTK, Spacy, ROUGE,
+etc.)?
+3.1.2 Baselines & Implementation Detai
+D/squareDid you use human annotators (e.g., crowdworkers) or research with human participants?
+Left blank.
+/squareD1. Did you report the full text of instructions given to participants, including e.g., screenshots,
+disclaimers of any risks to participants or annotators, etc.?
+No response.
+/squareD2. Did you report information about how you recruited (e.g., crowdsourcing platform, students)
+and paid participants, and discuss if such payment is adequate given the participants’ demographic
+(e.g., country of residence)?
+No response.
+/squareD3. Did you discuss whether and how consent was obtained from people whose data you’re
+using/curating? For example, if you collected data via crowdsourcing, did your instructions to
+crowdworkers explain how the data would be used?
+No response.
+/squareD4. Was the data collection protocol approved (or determined exempt) by an ethics review board?
+No response.
+/squareD5. Did you report the basic demographic and geographic characteristics of the annotator population
+that is the source of the data?
+No response.14267

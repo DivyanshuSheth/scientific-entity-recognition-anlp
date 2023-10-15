@@ -1,1 +1,792 @@
-583 Proceedings of the 60th Annual Meeting of the Association for Computational Linguistics Volume 1 : Long Papers , pages 583 595 May 22 - 27 , 2022 c(cid:13)2022 Association for Computational Linguistics 584 585 586 587 588 589 590 591 592 593 594 595 
+
+Yingxiu Zhao, Zhiliang Tian, Huaxiu Yao, Yinhe Zheng, Dongkyu Lee
+Yiping Song, Jian Sun, Nevin L. ZhangThe Hong Kong University of Science and Technology, Hong Kong SAR, ChinaStanford University,Alibaba GroupDepartment of Computer Science, Peking University, Beijing, China ,
+Abstract
+Building models of natural language process-
+ing (NLP) is challenging in low-resource sce-
+narios where only limited data are available.
+Optimization-based meta-learning algorithms
+achieve promising results in low-resource sce-
+narios by adapting a well-generalized model
+initialization to handle new tasks. Nonetheless,
+these approaches suffer from the memoriza-
+tion overﬁtting issue, where the model tends to
+memorize the meta-training tasks while ignor-
+ing support sets when adapting to new tasks.
+To address this issue, we propose a memory
+imitation meta-learning (MemIML) method
+that enhances the model’s reliance on support
+sets for task adaptation. Speciﬁcally, we intro-
+duce a task-speciﬁc memory module to store
+support set information and construct an im-
+itation module to force query sets to imitate
+the behaviors of some representative support-
+set samples stored in the memory. A theo-
+retical analysis is provided to prove the effec-
+tiveness of our method, and empirical results
+also demonstrate that our method outperforms
+competitive baselines on both text classiﬁca-
+tion and generation tasks.
+1 Introduction
+Building natural language processing (NLP) mod-
+els in low-resource scenarios is of great importance
+in practical applications because labeled data are
+scarce. Meta-learning-based methods (Thrun and
+Pratt, 2012) have been commonly used in such
+scenarios owing to their fast adaptation ability.
+Notable successes have been achieved by meta-
+learning on low-resource NLP tasks, such as multi-
+domain sentiment classiﬁcation (Yu et al., 2018;
+Geng et al., 2019) and personalized dialogue gen-
+eration (Madotto et al., 2019; Song et al., 2020;
+Zheng et al., 2020).
+Among different meta-learning approaches
+(Hospedales et al., 2021), optimization-based ap-proaches have been widely used in various low-
+resource NLP scenarios (Madotto et al., 2019; Qian
+and Yu, 2019; Li et al., 2020; Mi et al., 2019) be-
+cause they are model-agnostic and easily applica-
+ble. Concretely, optimization-based meta-learning
+algorithms aim to learn a well-generalized global
+model initialization that can quickly adapt to new
+tasks within a few steps of gradient updates. In the
+meta-training process, we ﬁrst train on a support
+set(i.e., a few training samples of a new task i) to
+obtain task-speciﬁc parameters . Then, we opti-
+mizebased on the performance of on a query
+set(i.e., another set of samples in task i).
+Despite its effectiveness, optimization-based
+meta-learning algorithms usually suffer from the
+memorization overﬁtting issue(Yin et al., 2020;
+Rajendran et al., 2020), where the learned model
+tends to solve all the meta-training tasks by memo-
+rization, rather than learning how to quickly adapt
+from one task to another via support sets. This is
+acceptable for training process, but results in poor
+generalization on the meta-testing sets, because
+the memorized model does not have knowledge
+of those tasks and does not know how to utilize
+the base learner to learn new tasks. Hence, this is-
+sue hinders the model from capturing task-speciﬁc
+characteristics from support sets and thus prevents
+the model from adapting to distinct new tasks (Ra-
+jendran et al., 2020). For instance, in personalized
+dialogue generation, this implies that the dialog
+model cannot adapt to individual users based on
+short conversation histories and hence fails to gen-
+erate personalized responses.
+Several works have been proposed to tackle the
+memorization overﬁtting issue for regression and
+image classiﬁcation tasks. Some studies try to ex-
+plicitly regularize the model parameters (Yin et al.,5832020; Rajendran et al., 2020), but this restricts the
+complexity of model initialization and reduces the
+model capacity. Another line of research integrates
+samples from support sets into the corresponding
+query sets via data augmentation (Yao et al., 2021).
+However, data augmentation on textual data may
+result in noisy labels or distribution shifts, which
+impairs the model performance (Chen et al., 2021).
+In this paper, we address the memorization over-
+ﬁtting issue by enhancing the model’s dependence
+on support sets when learning the model initial-
+ization, which forces the model to better leverage
+information from support sets. As an analogy, con-
+sider a young investor who has the ability to adapt
+to new circumstances rapidly but little memory of
+learned experiences, and an old investor who is
+experienced but refuses to be ﬂexible. Our idea is
+to make the young investor adaptive to the various
+situations when he assesses his beneﬁts so that he
+can not only take advantage of the old one’s expe-
+rience but also learn from the old investor how to
+leverage the learned experience. In this paper, the
+young investor stands for a standard meta-learning
+algorithm (e.g., MAML), which is prone to memo-
+rization overﬁtting, and the old investor is a mem-
+ory module we integrate into the method, carrying
+information of support sets.
+Speciﬁcally, we propose a Mem ory-Imitation
+Meta-Learning (MemIML) method that forces
+query set predictions to depend on their correspond-
+ing support sets by dynamically imitating behav-
+iors of the latter. We therefore, introduce a memory
+module and an imitation module to enhance such
+dependence. The memory module is task-speciﬁc,
+storing representative information of support sets.
+The imitation module assists in predicting samples
+of query sets by dynamically imitating the memory
+construction. In this way, the model has to access
+the support set by memory imitation each time it
+makes a prediction on a query-set sample, hence
+it’s no longer feasible for the model to memorize
+all meta tasks.
+The contributions of this work are:
+1.A novel method MemIML is proposed to
+alleviate the memorization overﬁtting for
+optimization-based meta-learning algorithms. It
+encourages the utilization of support sets with
+the help of a memory module and an imitation
+module when adapting to new tasks.
+2.Comprehensive experiments on text classiﬁca-
+tion and generation tasks show that MemIMLsigniﬁcantly outperforms competitive baselines.
+3.Theoretical proofs are given to demonstrate the
+effectiveness of our method.
+2 Related Work
+Meta-Learning. Meta-Learning aims to im-
+prove the learning algorithm itself based on the pre-
+viously learned experience (Thrun and Pratt, 1998;
+Hospedales et al., 2021). In general, there are three
+categories of meta-learning methods: model-based
+methods, (Santoro et al., 2016; Obamuyide et al.,
+2019) which depend on the particular model design
+to facilitate fast learning; metric-based methods,
+(Vinyals et al., 2016; Snell et al., 2017; Geng et al.,
+2019) which encode samples into an embedding
+space and classify them based on the learned dis-
+tance metric; optimization-based methods (Finn
+et al., 2017; Mi et al., 2019) that learn a well-
+generalized model initialization which allows for
+fast adaptation to new tasks. For low-resource sce-
+narios in NLP, optimization-based meta-learning
+methods achieved promising results on tasks such
+as personalized dialog generation (Madotto et al.,
+2019; Song et al., 2020; Tian et al., 2021), low-
+resource machine translation (Gu et al., 2018;
+Sharaf et al., 2020) and question answering (Yan
+et al., 2020), few-shot slot tagging (Wang et al.,
+2021), and so on.
+Memorization overﬁtting of Meta-learning.
+Meta-learning algorithms suffer from memoriza-
+tion overﬁtting. Yin et al. (2020) build an informa-
+tion bottleneck to the model, while this approach
+decreases the model performance with this pas-
+sive regularization. Rajendran et al. (2020) inject
+random noise to the ground truth of both support
+and query sets, while little extra knowledge is in-
+troduced to learn a good initialization. Yao et al.
+(2021) address overﬁtting issues by augmenting
+meta-training tasks through mixing up support and
+query sets. However, such augmentation for text
+needs to be based on the assumption of keeping the
+label and the data distribution unchanged, which
+is often not true in practice (Chen et al., 2021). In-
+stead of regularization and data augmentation, we
+leverage the support sets information stored in the
+memory to augment the meta-learning.
+External Memory for Few-shot Learning.
+Memory mechanism has proven to be powerful for
+few-shot learning (Geng et al., 2019; Santoro et al.,
+2016; Munkhdalai et al., 2019). Current methods584either reﬁne representations stored in the memory
+(Ramalho and Garnelo, 2018) or reﬁning parame-
+ters using the memory (Munkhdalai and Yu, 2017;
+Cai et al., 2018; Wang et al., 2020). In the NLP
+domain, some methods store encoded contextual
+information into a memory (Kaiser et al., 2017;
+Holla et al., 2020; Zheng et al., 2019). Geng et al.
+(2019) propose a memory induction module with a
+dynamic routing algorithm for few-shot text classi-
+ﬁcation tasks. Munkhdalai et al. (2019) augment
+the model with an external memory by learning a
+neural memory. Wang et al. (2021) reuse learned
+features stored in the memory on the few-shot slot
+tagging.
+3 Preliminaries
+We ﬁrst formulate model-agnostic meta-learning
+(MAML) (Finn et al., 2017). Speciﬁcally, denote
+the base model used in MAML as fand assume
+each taskTsampled from a task distribution p(T)
+associates with a dataset D. Each datasetDcon-
+sists of a support set D=f(X;Y)gand
+a query setD=f(X;Y)g, whereXand
+Ydenote the input and ground truth of a sample,
+respectively. During the meta-training stage, a task-
+speciﬁc (a.k.a., post-update) model fis ﬁrst ob-
+tained for each task Tvia gradient descent over
+its support setD. Then MAML updates its ini-
+tialization (a.k.a., pre-update) according to the
+performance of fon the query setDas in Eq.1:
+= minEh
+L
+f(X);Yi
+(1)
+s.t.= rL(f(X);Y)(2)
+whereis the inner loop learning rate. During the
+meta-testing stage, the learned initialization is
+ﬁne-tuned on the support set Dfor taskT, and
+the resulting model is evaluated on the query set
+Dwith the post-update parameters .
+4 Methodology
+To alleviate the memorization overﬁtting issue in
+meta-learning, we propose MemIML, which in-
+cludes a memory module and an imitation module
+on the grounds of a base model. The memory mod-
+ule is task-speciﬁc, recording the mapping behav-
+iors between inputs and outputs of support sets for
+each task. The imitation module is shared across
+tasks and predicts values for each query-set sample
+by dynamically imitating the memory construction.
+The acquired support set information leveraged bythe imitation module augments the model initial-
+ization learning, enhancing the dependence of the
+model’s task adaptation on support sets. Fig. 1
+shows our model architecture.
+4.1 Memory Module
+We design a memory module Mfor each taskT
+and incorporate it in the MAML framework. In or-
+der to fully leverage information from support sets,
+we construct key-value pairs from support-set sam-
+ples and store them in the memory module. The
+key is the sentence representation of a sample input
+from support sets obtained from an introduced key
+network. The corresponding value is constructed to
+store the information of the sample output (ground
+truth) as in Sec. 4.3: in NLG tasks, the value is
+the sentence embedding of the output sentence; in
+NLU tasks, the value is the one hot embedding
+of the class label (a scalar) of the sample. Our
+memory has two operations: memory writing that
+constructs the memory and memory reading that ac-
+quires information from memory. In the following,
+we elaborate on these contents in detail.
+Key Network represents a sample with a vec-
+tor. Speciﬁcally, we use a frozen pre-trained BERT
+model (Devlin et al., 2019) as the key network. The
+input of the key network is the sample input sen-
+tenceX2D(X2D), and the output is the
+encoded representation of the ﬁrst token (i.e. [CLS]
+token) of the sentence. The acquired representation
+is regarded as the key KforX(KforX).
+Memory Writing constructs the memory using
+the information of samples in the support set D.
+For each taskT, the task-speciﬁc memory M
+consists ofNmemory slots (i.e. key-value pairs
+fK;Vg). To build these memory slots, we
+select samples from support sets and write their
+information into the memory. The sample selection
+is according to a diversity-based selection criterion
+(Xie et al., 2015) to ensure the diversity and repre-
+sentativeness of the memory content. The detailed
+description of this criterion is in Appendix. D.
+For each task-speciﬁc memory module M, we
+adopt the diversity score as S(M)on the stored
+keys. Here, a more diverse memory gets a higher
+diversity score. When the memory is not full, we
+directly write support-set samples without selec-
+tion; otherwise, we compute the diversity score
+of the current memory and scores after every old
+key-value pair is replaced with a new key-value
+pair. Then we replace the old pair with the new one585
+where the replacement can maximize the diversity
+score. In this way, the memory we build can carry
+more distinguishable and representative informa-
+tion and efﬁciently utilize the storage space.
+Memory Reading obtains information from
+memory to enhance the meta-learning. The input is
+the sentence representation of the sample in query
+sets encoded by the key network, and the output
+is the memory slots similar to the query sample.
+Speciﬁcally, given the key representation Kof a
+sampleX2D, we retrieve the top Nmost sim-
+ilar slots from its task-speciﬁc memory M. The
+similarity is measured based on the Euclidean dis-
+tance between Kand each key Kin the memory
+slots. The retrieved key-value pairs fK;Vg
+act as the output of memory reading.
+4.2 Imitation Module
+In order to better leverage the retrieved memory and
+enhance the dependence of our model on support
+sets, we propose an imitation module to encour-
+age the imitation of support sets behaviors when
+making predictions on query sets. For each sam-
+pleXin the query set, the inputs of the imitation
+module are the key Kand its retrieved Nmemory
+slots, and the output is the predicted value ^Vfor
+X. To achieve the imitation, we construct a value
+predictor that can model the behaviors of support-
+set samples (i.e. key-value matching) stored in the
+memory. For estimating the value of each query-set
+sample, we conduct local adaptation on the value
+predictor to adapt the matching.
+In this way, the proposed imitation module is
+customized for each query-set sample, which fa-
+cilitates better capture of speciﬁc task informationthan directly using the memory reading output, es-
+pecially when tasks are versatile. The reason is
+that the similarity measurement of previous mem-
+ory reading operations is based on the ﬁxed BERT
+representations, which ignores the task-speciﬁc in-
+formation.
+4.2.1 Value Predictor
+In MemIML, the proposed value predictor aims to
+build a mapping from keys to values of the mem-
+ory module mentioned in Sec. 4.1. The input of
+the value predictor is a key obtained from the key
+network, and the output is the associated value.
+Speciﬁcally, we use a two-layer fully-connected
+networkgwith parameters !to build the mapping.
+The value predictor is learned over constructed key-
+value pairs of support sets across all tasks. Given
+the keyKof a query-set sample input X, we can
+then estimate its associated value as ^V.
+4.2.2 Training of The Value Predictor
+To train the value predictor, we minimize the recon-
+struction lossL(^V;V)to make the predicted val-
+ues as close as possible to values constructed from
+the ground truths of support-set samples, where
+Lis the cross-entropy loss if the value Vis a
+label and is the mean square loss if Vis a vector.
+The training procedure includes the global op-
+timization shared across tasks and the local adap-
+tation for each speciﬁc task. Speciﬁcally, we ﬁrst
+train the value predictor with samples from support
+sets of all tasks. After feeding the memory reading
+output of a query-set sample to this network, we
+perform local adaptation and employ the adapted
+network to estimate the value for the query sample.586Global Optimization. To obtain the task-
+independent global parameters !, we train the
+value predictor over constructed keys (i.e., as in-
+puts) and values (i.e., as outputs) from support-set
+samples of all tasks. The global optimization keeps
+updating in the whole meta-training phase.
+Local Adaptation. To make the value predictor
+adaptive to each query-set sample X, inspired
+by (Sprechmann et al., 2018), we propose local
+adaptation that ﬁne-tunes the global value predictor
+gto get an adapted one with parameters !. The
+local adaptation only works when predicting X.
+Based on the initial parameters !from the global
+optimization, we perform several gradient descent
+steps to minimize the loss L, which is:
+L=k~! !k+1
+NXL(^V;V)(3)
+Here, ^V=g(K),fK;Vgis the mem-
+ory reading output of the query-set sample, and
+the factorrestricts the distance between !
+and!. Minimizing the second term encourages
+gto better estimate the retrieved memory val-
+uesfVg. Then we can acquire the locally
+adapted value prediction network gwith parame-
+ters!= arg minL(~!). Given a query-sample
+keyK, we can thus predict its associated value as
+^V=g(K); (4)
+where the adapted parameters !are discarded
+thereafter, and the model does not back-propagate
+through ^V.
+In this sense, besides the task-speciﬁc parame-
+terprovided by MAML, there will also be !
+learned from support sets speciﬁc to each query-set
+sample. This guarantees that the model relies more
+on support sets for task adaptation. Fig. 1 (right
+part) illustrates the mechanism of local adaptation.
+4.3 MemIML on NLP Applications
+In this part, we will elaborate on two few-shot ap-
+plications in NLP (i.e., text generation and text
+classiﬁcation) to solve the memorization overﬁt-
+ting problem of MAML. The model structures of
+these applications are basically the same, except for
+the following three points: the base model, the way
+to get the value Vstored in the memory module,
+and the way to leverage the output ^Vof Sec. 4.2.Personalized Dialogue Generation. The base
+model is the transformer (Vaswani et al., 2017)
+consisting of an encoder and a decoder. In this
+task, each sample consists of an input utterance
+and a ground truth utterance, so the value V
+stored in the memory is obtained from the ground
+truth utterance Yof a support-set sample, which
+is embedded by the key network followed by an
+LSTM (Hochreiter and Schmidhuber, 1997). This
+LSTM is optimized with the base model. The
+^V, concatenated with the encoder outputs, serves
+as a new input for the decoder. Hence, we ac-
+quire the prediction of a query-set sample via
+^Y=Decoder ([^V;Encoder (X)]).
+Multi-domain Sentiment Classiﬁcation. The
+base model is a BERT (Devlin et al., 2019) fol-
+lowed by a fully-connected network. Each sample
+consists of an input sentence and a sentiment label
+(ground truth), so the memory value Vis the sen-
+timent label. To leverage ^V, we interpolate it with
+the original output of the base model ~Yas
+^Y=~Y+ (1 )^V (5)
+wherebalances ~Yand^V. Notice that the inter-
+polation not only works on the prediction output
+but also guides the training via gradient descent
+based on the interpolated output. We verify the
+effectiveness of the interpolation in Appendix. C.
+Algorithm 1 Memory Imitation Meta-training587
+4.4 Theoretical Analysis
+We theoretically investigate how our method helps
+to alleviate the memorization overﬁtting problem.
+Following Yin et al. (2020), we use mutual infor-
+mationI(^Y;Dj;X)to measure the level of
+the memorization overﬁtting. When the learned
+model ignores support sets to predict query sets,
+I(^Y;D)j;X) = 0 occurs, which indicates
+the complete memorization overﬁtting in meta-
+learning (Yin et al., 2020). Hence, lower mutual in-
+formation means more serious memorization over-
+ﬁtting issues.
+We propose a criterion similar to (Yao et al.,
+2021) to measure the validity of our method for
+tackling this problem. For a task T=fD;Dg,
+the criterion aims to mitigate the memorization
+overﬁtting by enhancing the model’s dependence
+on the support set D, i.e. increasing the mutual
+information between support set and ^Yas follows:
+I(^Y;[D;M]j;X)>I(^Y;Dj;X);(6)
+whereMmeans additional memory information
+we provide, which contains support sets informa-
+tion to augment the inference of the sample Xin
+D. We demonstrate our method MemIML meets
+the above criterion (See details in Appendix. A.).
+4.5 The Procedure of Training and Testing
+In the meta-training phase (shown in Alg. 1),
+MemIML ﬁrst constructs an empty memory for
+each task and then follows the bi-level optimiza-
+tion process of MAML. In the inner loop, MemIML
+adapts the base model initialization to task-
+speciﬁc parameters via training on the support set.
+At the same time, from each support-set sample,
+MemIML obtains a key-value pair and determines
+whether to write it into the memory or not. Then,
+MemIML conducts the global optimization of the
+value predictor over these key-value pairs. In the
+outer loop, each sample of the query set readsthe memory to retrieve the most similar memory
+slots. Local adaptation ﬁne-tunes the value pre-
+dictor on those retrieved slots. Next, the adapted
+value predictor estimates the value of each query
+sample and uses it to augment the learning of the
+model initialization. The total loss function in
+the inner loop isL=L+L, where
+L=L(f(X);Y)is the cross-entropy loss.
+The procedure of meta-training and meta-testing
+are almost the same except that meta-testing does
+not optimize the learned model initialization and
+the initial parameter !of the value predictor. For
+each taskTin the meta-testing phase, MemIML
+also adaptsto task-speciﬁc parameters in the
+inner-loop and constructs the task-speciﬁc memory.
+In the outer-loop, MemIML retrieves key-value
+pairs from the memory to conduct local adapta-
+tion based on the initial parameter !. The esti-
+mated value ^Vfrom local adaptation helps the
+base model to infer the ﬁnal output ^Y.
+5 Experiments and Analysis
+Experiments on personalized dialogue generation
+and multi-domain sentiment classiﬁcation verify
+our model on text generation and classiﬁcation, re-
+spectively, where we use Persona-Chat and ARSC
+datasets.
+5.1 Personalized Dialogue Generation
+Dataset. Following (Zhang et al., 2018), we use
+Persona-chat (Madotto et al., 2019) by regarding
+building a dialog model for each person as a task.
+The dataset consists of a training/validation/testing
+set with 1137/99/100 persons (tasks) separately. In
+the Persona-Chat dataset, each persona description
+has 8.3 unique dialogues on average, and each task
+consists of three samples.
+Baselines. We compare our methods with the
+following baselines: Base Model : We pretrain a
+conventional transformer-based dialog generation588
+model over all the training tasks ignoring the speak-
+ers’ personality. Fine-tune : We ﬁne-tune the pre-
+trained base model on the support sets of each meta-
+testing task. MAML : We apply MAML (Madotto
+et al., 2019) to the base model. MR-MAML : Yin
+et al. (2020) tackle the memorization overﬁtting of
+MAML via regularization.
+Metrics. Automatic evaluation has three aspects,
+•Quality :BLEU-n (Papineni et al., 2002), CIDEr
+(Vedantam et al., 2015), and ROUGE (Lin, 2004)
+measures the n-gram matching between the gen-
+erated response and ground truth. PPL (perplex-
+ity) measures the sentence ﬂuency.
+•Diversity. Dist-n (Li et al., 2016) evaluates the
+response diversity by counting unique n-grams.
+•Consistency :C score (Madotto et al., 2019) mea-
+sures the consistency between the generated re-
+sponses and persona descriptions through a pre-
+trained natural language inference model.
+Human evaluation consists of Quality andConsis-
+tency . (See details in Appendix. B.1).
+Overall Performance. As shown in Table 1.
+Fine-tune outperforms Base Model in all metrics,
+which veriﬁes that the task-speciﬁc data is helpful
+to its performance on speciﬁc tasks. Compared
+toFine-tune ,MAML behaves better on diversity
+and consistency but behaves worse on quality. Pre-
+training the base model achieves the best perplex-
+ity (lowest PPL) as shown by Base Model and
+Fine-tune . We analyze that it’s because pretraining
+leads to a considerable degree of ﬂuency in their
+generated utterances and is careless about each
+task’s speciﬁc information, resulting in low consis-
+tency with tasks. Our model, MemIML , performsthe best in most aspects, including quality, diver-
+sity, and task consistency. In particular, MemIML
+signiﬁcantly improves MR-MAML in alleviating
+the memorization overﬁtting issue, suggesting that
+memory imitation is more effective than only regu-
+larizing model initialization.
+5.2 Multi-domain Sentiment Classiﬁcation
+Dataset. Amazon Review sentiment classiﬁca-
+tion dataset (ARSC) (Yu et al., 2018) contains 69
+tasks in total. Following (Geng et al., 2019), we
+build a 2-way 5-shot meta-learning with 57 tasks
+for meta-training and 12 tasks for meta-testing.
+We conduct experiments on the ARSC (Yu et al.,
+2018). It contains English reviews of 23 types of
+Amazon products, where each product consists of
+three different binary classiﬁcation tasks. Follow-
+ing Geng et al. (2019), we select 12 tasks from 4
+domains ( Books, DVD, Electronics, Kitchen ) for
+meta-testing tasks, and the support sets of these
+tasks are ﬁxed (Yu et al., 2018).
+Baselines. We compare our methods with the
+following baselines: Fine-tune : We ﬁne-tune a
+pre-trained BERT on the support set of meta-
+testing tasks (non-meta-learning method) as in
+Appendix. B.2. We choose ﬁve metric-based
+meta-learning baselines: Matching Net (Vinyals
+et al., 2016), Prototypical Net (Snell et al., 2017),
+Proto ++ , (Ren et al., 2018), Relation Net (Sung
+et al., 2018), and Induction Net (Geng et al.,
+2019). We apply an optimization-based baseline
+(MAML ) (Finn et al., 2017) to the base model, and
+implement some approaches tackling the memo-
+rization overﬁtting problem based on MAML: MR-
+MAML (Yin et al., 2020), MetaMix , (Yao et al.,
+2021) and Meta-Aug (Rajendran et al., 2020).
+Overall Performance. Table 2 shows the per-
+formance measured by the mean accuracy of
+meta-testing tasks. Our model, MemIML out-
+performs all competing approaches including non-
+meta-learning, metric-based meta-learning, and
+optimization-based meta-learning methods. Par-
+ticularly, our model surpasses the current solu-
+tions to the memorization overﬁtting problem ( MR-
+MAML, Meta-Aug, MetaMix ), indicating that
+our method is more effective compared to regu-
+larization and textual augmentation.
+5.3 Memorization Overﬁtting Analysis
+In Figure 2, the gaps of the losses on query sets be-
+tween pre-update (before training on support sets)589
+and post-update (after training on support sets)
+indicate the memorization overﬁtting problem. The
+gap between sky-blue and blue curves measures
+the memorization overﬁtting of meta-training (the
+gap between pink and red curves measures meta-
+testing). Small loss gaps indicate a severe memo-
+rization overﬁtting where support sets are almost
+useless for task adaptation. Those loss gaps be-
+tweenandcollapse in MAML and MR-MAML
+after about 3000 steps. This indicates that the post-
+updatebarely beneﬁts from the support set, and
+thus the memorization overﬁtting issue is severe.
+In Figure 2 (c), MemIML has large gaps between
+and, implying that better leverages support
+sets when adapting to new tasks and thus alleviates
+the memorization overﬁtting issue.
+5.4 Ablation Studies
+In Table 3, we conduct ablation studies to verify
+the effectiveness of each component. Removing
+Similarity-Search means the memory reading op-
+eration randomly outputs memory slots instead of
+searching for similar memory slots. This variant
+underperforms MemIML, indicating that similar
+samples stored in the memory provide more use-
+ful information to improve the model performance.
+Removing the value predictor means directly using
+the memory output without a learnable network. Its
+results are not too bad, indicating that the memory
+module helps to mitigate the memorization overﬁt-
+ting problem. However, this usage simply aggre-gates the support set information into the query set,
+which is not as precise as learning the information
+required by the query set itself. Therefore, it is still
+inferior to our model. Removing Local adaptation
+means we only use the global value predictor to es-
+timate the memory output. It is crucial to the value
+predictor since removing it from the value predictor
+results in an even worse performance than remov-
+ing the value predictor . Besides, the signiﬁcant
+drop in task consistency (C-score) shows that local
+adaptation contributes a lot to making the model
+adaptive to speciﬁc tasks, as it learns to adapt to
+each query-set sample.
+5.5 Analysis of Memory Operations
+Memory Size. In Table 4 and 5, we investigate
+the variants of our task-speciﬁc memory module
+of different sizes. We control the memory size
+throughjMj=store ratiojDj. The results
+demonstrate that our model is able to maintain high
+performance even with only a 20% memory size
+by storing diverse and representative samples of
+support sets. Besides, as the ratio of stored samples
+increases, the model’s performance is improved
+since it provides more information for the infer-
+ence of query samples and the optimization of the
+model initialization. Storing all the encountered
+samples (i.e., with store ratio 100%) in the mem-
+ory instead introduces some noise that damages the
+model performance.590
+Number of Neighbors. We also investigate the
+effects of different numbers of neighbors for the
+model performance in Table 4 and Table 5. In both
+datasets, the model performs better with a larger
+number of neighbors. However, when the number
+of neighbors is too large, the model retrieves some
+dissimilar slots from the memory module. These
+dissimilar slots bring much noise, which makes the
+predictions of query samples inaccurate.
+5.6 Case Study
+We present two generated cases in personalized
+dialog in Table. 6. Base Model ,Fine-tune , and
+MAML generate general responses with little use-
+ful information or responses that are not consis-
+tent with the personality of personas. MR-MAML
+generates irrelevant responses to the dialogue con-
+text. Our model not only responds coherently to
+the dialog history but also caters to the persona
+descriptions of each user.
+6 Conclusion
+In this paper, we tackle the memorization overﬁt-
+ting problem of meta-learning for text classiﬁcation
+and generation applications. We propose MemIML
+to enhance the dependence of the model on the
+support sets for task adaptation. MemIML intro-
+duces a memory module storing the information of
+support sets, and propose an imitation module to
+better leverage the support set information by imi-
+tating the behaviors of the memory. Both empirical
+and theoretical results demonstrate that our method
+MemIML effectively alleviates the memorization
+overﬁtting problem.
+7 Ethical Considerations
+The persona-based dialogue generation task aims
+to build a dialogue model which generates mean-
+ingful, ﬂuent, and consistent responses. It will
+facilitate human-computer interactions in practice.
+However, the training of the model for personalized
+dialogues may lead to the leakage of personal pri-
+vacy information. In this work, the data source we
+use is from a published dataset and does not involve
+privacy issues for the data collection. Our proposed
+method does not include inference or judgments
+about individuals and does not generate any dis-
+criminatory, insulting responses. Our work vali-
+dates the proposed method and baseline models
+on human evaluation which involves manual la-
+bor. We hire ﬁve annotators to score 750 generated
+sentences in total (250 sentences for each model
+we evaluate). The hourly pay is set to 15 US$
+per person, which is higher than the local statutory
+minimum wage.
+Acknowledgements
+Research on this paper was supported by Hong
+Kong Research Grants Council (Grant No.
+16204920) and National Natural Science Founda-
+tion of China (Grant No. 62106275).591References592593A Validity of Memory Imitation Strategy
+Proof of inequality in Eqn. 6. We check the valid-
+ity of memory imitation by examining whether the
+criterion in Section 4.4 is met. We check the in-
+crease of mutual information between predictions
+of query sets with the provided support-set informa-
+tion after augmented with the memory information
+M.
+I(^Y; [D;M]j;X) I(^Y;Dj;X)
+=H(^Yj;X) H(^YjD;M;;X)
+ H(^Yj;X) +H(^YjD;;X)
+= H(^YjX;X;Y;M;)
++H(^YjX;X;Y;): (7)
+For short, we use notation Z= (X;X;Y;)to
+denote a set of variables. Then we can rewrite (7)
+as
+ H(^YjZ;M) +H(^YjZ)
+=Eh
+logp(^YjZ;M)i
+ Eh
+logp(^YjZ)i
+:
+Note that trivially, we have E[1] = 1 , so we get
+Eh
+p(^YjZ)i
+=Eh
+p(^YjZ)i
+sincep(^Y;Z)does not rely on the variable M.
+Hence, we can just write EasEfor short.
+Then the equation (7) will become to
+E[logp(^YjZ;M)] E[logp(^YjZ)]
+=E[logp(^YjM;Z)
+p(^YjZ)]
+=Xp(Z)p(^Y;MjZ) logp(^Y;MjZ)
+p(^YjZ)p(MjZ)
+=E[KL(p(M;^YjZ)jjp(^YjZ)p(MjZ))]
+>0
+where the last inequality holds due to ^Yis depen-
+dent onM.
+We also investigate that memory imitation im-
+proves the learning of model initialization via an-
+other criterionI(; [D;M]jD)>0following
+Yao et al. (2021). This criterion guarantees that
+the additional memory knowledge contributes to
+updating the initialization in the outer loop. Since594all the meta-training tasks satisfy this criterion, the
+generalization ability of the model initialization
+improves.
+Proof.
+I(; [D;M]jD)
+=H(jD) H(jD;M)
+=E[ logP(jD)] +E[logp([jD;M)])]
+=E[logp(jD;M)
+p(jD)]>0
+B Experimental Details
+B.1 Personalized Dialogue Generation
+Experimental Setup. We implement our model
+based on the transformer (Dehghani et al., 2018;
+Vaswani et al., 2017) with pre-trained Glove embed-
+ding (Pennington et al., 2014) following (Madotto
+et al., 2019). The hidden dimensions of the LSTM
+unit are set to 1024. We set the number of neigh-
+borsN= 10 and the number of local adaptation
+stepsL= 20 . We follow all other hyperparameter
+settings in Madotto et al. (2019): we use SGD for
+the inner loop training and Adam for the outer loop
+update with learning rates 0:01and0:0003 , respec-
+tively. We set batch size as 16 and use beam search
+with beam size 5.
+Human Evaluation We conduct human evalua-
+tion following Song et al. (2020) considering two
+aspects Quality andConsistency where ﬁve well-
+educated volunteers annotate 250 generated re-
+sponses for each model. The annotators score each
+response from two aspects: Quality andConsis-
+tency in a 3-point scale: 2 for good, 1 for fair, and 0
+for bad. Quality measures coherence, ﬂuency, and
+informativeness. Consistency measures the task
+consistency between the generated responses and
+the person’s persona description.
+B.2 Multi-domain Sentiment Classiﬁcation
+Experimental Setup. We utilize a BERT (De-
+vlin et al., 2019) as the encoder. We ﬁne-tune the
+off-the-shelf pre-trained BERT on the masked lan-
+guage modeling task following (Dopierre et al.,
+2021) as it greatly improves embeddings’ quality
+(Sun et al., 2019). The ﬁne-tuned BERT is then
+used as the initialization for all few-shot models.
+We use Adam (Kingma and Ba, 2015) optimizer forboth inner and outer loop update with learning rate
+2eand1erespectively, and we set = 0:2in
+Eqn. 5, the number of neighbors N= 20 and the
+number of local adaptation steps L= 5.
+C Effectiveness of the Interpolation
+To measure whether MemIML improves the
+learned model initialization, we add an experiment
+that does not incorporate the memory module dur-
+ing meta-testing (i.e., = 1 in Eq. 5) for the
+multi-domain sentiment classiﬁcation task. The
+better result of MemIML than MAML and other
+regularization methods demonstrate the superiority
+of our model.
+D Diversity-selection Criterion
+For each task-speciﬁc memory module M, fol-
+lowing Xie et al. (2015), we adopt the diversity
+score asS(M) =(M) (M)on the stored
+keys, where (M) =PP(K;K)
+denotes the mean of angles between every
+two stored key representations and (M) =PP((K;K) (M))denotes
+the variance of those angles.595

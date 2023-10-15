@@ -1,1 +1,735 @@
-2376 Proceedings of the 2022 Conference of the North American Chapter of the Association for Computational Linguistics : Human Language Technologies , pages 2376 2394 July 10 - 15 , 2022 © 2022 Association for Computational Linguistics 2377 2378 2379 2380 2381 2382 2383 2384 2385 2386 2387 2388 2389 2390 2391 2392 2393 2394 
+
+Patrick Huber and Giuseppe Carenini
+Department of Computer Science
+University of British Columbia
+Vancouver, BC, Canada, V6T 1Z4
+{huberpat, carenini}@cs.ubc.ca
+Abstract
+With a growing number of BERTology works
+analyzing different components of pre-trained
+language models, we extend this line of re-
+search through an in-depth analysis of dis-
+course information in pre-trained and fine-
+tuned language models. We move beyond prior
+work along three dimensions: First, we de-
+scribe a novel approach to infer discourse struc-
+tures from arbitrarily long documents. Second,
+we propose a new type of analysis to explore
+where and how accurately intrinsic discourse
+is captured in the BERT and BART models.
+Finally, we assess how similar the generated
+structures are to a variety of baselines as well as
+their distributions within and between models.
+1 Introduction
+Transformer-based machine learning models are
+an integral part of many recent improvements in
+Natural Language Processing (NLP). With their
+rise spearheaded by Vaswani et al. (2017), the
+pre-training/fine-tuning paradigm has gradually
+replaced previous approaches based on architec-
+ture engineering, with transformer models such as
+BERT (Devlin et al., 2019), BART (Lewis et al.,
+2020), RoBERTa (Liu et al., 2019) and others deliv-
+ering state-of-the-art performance on a wide variety
+of tasks. Besides their strong empirical results on
+most real-world problems, such as summarization
+(Zhang et al., 2020; Xiao et al., 2021a), question-
+answering (Joshi et al., 2020; O ˘guz et al., 2021)
+and sentiment analysis (Adhikari et al., 2019; Yang
+et al., 2019), uncovering what kind of linguistic
+knowledge is captured by this new type of pre-
+trained language models (PLMs) has become a
+prominent question by itself. As part of this line of
+research, called BERTology (Rogers et al., 2020),
+researchers explore the amount of linguistic under-
+standing encapsulated in PLMs, exposed through
+either external probing tasks (Raganato and Tiede-
+mann, 2018; Zhu et al., 2020; Koto et al., 2021a)or unsupervised methods (Wu et al., 2020; Pandia
+et al., 2021). Previous work thereby either focuses
+on analyzing the syntactic structures (e.g., Hewitt
+and Manning (2019); Wu et al. (2020)), relations
+(Papanikolaou et al., 2019), ontologies (Michael
+et al., 2020) or, to a more limited extend, discourse
+related behaviour (Zhu et al., 2020; Koto et al.,
+2021a; Pandia et al., 2021).
+Generally speaking, while most previous
+BERTology works has focused on either sentence
+level phenomena or connections between adja-
+cent sentences, large-scale semantic and pragmatic
+structures (oftentimes represented as discourse
+trees or graphs) have been less explored. These
+structures (e.g., discourse trees) play a fundamen-
+tal role in expressing the intent of multi-sentential
+documents and, not surprisingly, have been shown
+to benefit many NLP tasks such as summarization
+(Gerani et al., 2019), sentiment analysis (Bhatia
+et al., 2015; Nejat et al., 2017; Hogenboom et al.,
+2015) and text classification (Ji and Smith, 2017).
+With multiple different theories for discourse
+proposed in the past, the RST discourse theory
+(Mann and Thompson, 1988) and the lexicalized
+discourse grammar (Webber et al., 2003) (underly-
+ing PDTB (Prasad et al., 2008)) have received most
+attention. While both theories propose tree-like
+structures, the PDTB framework postulates par-
+tial trees up to the between-sentence level, while
+RST-style discourse structures consist of a single
+rooted tree covering whole documents, comprising
+of: (1) The tree structure, combining clause-like
+sentence fragments (Elementary Discourse Units,
+short: EDUs) into a discourse constituency tree,
+(2) Nuclearity, assigning every tree-branch primary
+(Nucleus ) or peripheral ( Satellite ) importance in a
+local context and (3) Relations, defining the type
+of connection holding between siblings in the tree.
+Given the importance of large-scale discourse
+structures, we extend the area of BERTology re-
+search with novel insights regarding the amount of2376intrinsic discourse information captured in estab-
+lished PLMs. More specifically, we aim to better
+understand to what extend RST-style discourse in-
+formation is stored as latent trees in encoder self-
+attention matrices. While we focus on the RST
+formalism in this work, our presented methods are
+theory-agnostic and, hence, applicable to discourse
+structures in a broader sense, including other tree-
+based theories, such as the lexicalized discourse
+grammar. Our contributions in this paper are:
+(1)A novel approach to extract discourse informa-
+tion from arbitrarily long documents with standard
+transformer models, inherently limited by their in-
+put size. This is a non-trivial issue, which has been
+mostly by-passed in previous work through the use
+of proxy tasks like connective prediction, relation
+classification, sentence ordering, EDU segmenta-
+tion, cloze story tests and others.
+(2)An exploration of discourse information locality
+across pre-trained and fine-tuned language models,
+finding that discourse structures are consistently
+captured in a fixed subset of self-attention heads.
+(3)An in-depth analysis of the discourse quality in
+pre-trained language models and their fine-tuned
+extensions. We compare constituency and depen-
+dency structures of 2 PLMs fine-tuned on 4 tasks
+and 7 fine-tuning datasets to gold-standard dis-
+course trees, finding that the captured discourse
+structures outperform simple baselines by a large
+margin, even showing superior performance com-
+pared to distantly supervised models.
+(4)A similarity analysis between PLM inferred dis-
+course trees and supervised, distantly supervised
+and simple baselines. We reveal that PLM con-
+stituency discourse trees do align relatively well
+with previously proposed supervised models, but
+also capture complementary information.
+(5)A detailed look at information redundancy in
+self-attention heads to better understand the struc-
+tural overlap between self-attention matrices and
+models. Our results indicate that similar discourse
+information is consistently captured in the same
+heads, even across fine-tuning tasks.
+2 Related Work
+At the base of our work are two of the most pop-
+ular and frequently used PLMs: BERT (Devlin
+et al., 2019) and BART (Lewis et al., 2020). We
+choose these two popular approaches in our studydue to their complementary nature (encoder-only
+vs. encoder-decoder) and based on previous work
+by Zhu et al. (2020) and Koto et al. (2021a), show-
+ing the effectiveness of BERT and BART models
+for discourse related tasks.
+Our work is further related to the field of dis-
+course parsing. With a rich history of traditional
+machine learning models (e.g., Hernault et al.
+(2010); Ji and Eisenstein (2014); Joty et al. (2015);
+Wang et al. (2017) , inter alia ), recent approaches
+slowly shifted to successfully incorporate a vari-
+ety of PLMs into the process of discourse predic-
+tion, such as ELMo embeddings (Kobayashi et al.,
+2019), XLNet (Nguyen et al., 2021), BERT (Koto
+et al., 2021b), RoBERTa (Guz et al., 2020) and
+SpanBERT (Guz and Carenini, 2020). Despite
+these works showing the usefulness of PLMs for
+discourse parsing, all of them cast the task into
+a “local" problem, using only partial information
+through the shift-reduce framework (Guz et al.,
+2020; Guz and Carenini, 2020), natural document
+breaks (e.g. paragraphs Kobayashi et al. (2020))
+or by framing the task as an inter-EDU sequence
+labelling problem on partial documents (Koto et al.,
+2021b). However, we believe that the true benefit
+of discourse information emerges when complete
+documents are considered, leading us to propose
+a new approach to connect PLMs and discourse
+structures in a “global” manner, superseding the lo-
+cal proxy-tasks with a new methodology to explore
+arbitrarily long documents.
+Aiming to better understand what information
+is captured in PLMs, the line of BERTology re-
+search has recently emerged (Rogers et al., 2020),
+with early work mostly focusing on the syntac-
+tic capacity of PLMs (Hewitt and Manning, 2019;
+Jawahar et al., 2019; Kim et al., 2020), in parts
+also exploring the internal workings of transformer-
+based models (e.g., self-attention matrices (Ra-
+ganato and Tiedemann, 2018; Mare ˇcek and Rosa,
+2019)). More recent work started to explore the
+alignment of PLMs with discourse information, en-
+coding semantic and pragmatic knowledge. Along
+those lines, Wu et al. (2020) present a parameter-
+free probing task for both, syntax and discourse.
+With their tree inference approach being computa-
+tionally expensive and limited to the exploration of
+the outputs of the BERT model, we significantly
+extend this line of research by exploring the inter-
+nal self-attention matrices of PLMs with a more
+computationally feasible approach. More tradi-2377
+tionally, Zhu et al. (2020) use 24hand-crafted
+rhetorical features to execute three different su-
+pervised probing tasks, showing promising per-
+formance of the BERT model. Similarly, Pan-
+dia et al. (2021) aim to infer pragmatics through
+the prediction of discourse connectives by analyz-
+ing the model inputs and outputs and Koto et al.
+(2021a) analyze discourse in seven PLMs through
+seven supervised probing tasks, finding that BART
+and BERT contain most information related to dis-
+course. In contrast to the approach taken by both
+Zhu et al. (2020) and Koto et al. (2021a), we use
+an unsupervised methodology to test the amount
+of discourse information stored in PLMs (which
+can also conveniently be used to infer discourse
+structures for new and unseen documents) and ex-
+tend the work by Pandia et al. (2021) by taking
+a closer look at the internal workings of the self-
+attention component. Looking at prior work an-
+alyzing the amount of discourse information in
+PLMs, structures are solely explored through the
+use of proxy tasks, such as connective prediction
+(Pandia et al., 2021), relation classification (Kur-
+falı and Östling, 2021), and others (Koto et al.,2021a). However, despite the difficulties of en-
+coding arbitrarily long documents, we believe that
+to systematically explore the relationship between
+PLMs and discourse, considering complete docu-
+ments is imperative. Along these lines, recent work
+started to tackle the inherent input-length limitation
+of general transformer models through additional
+recurrence in the Transformer-XL model (Dai et al.,
+2019), compression modules (Rae et al., 2020) or
+sparse patterns (e.g., as in the Reformer (Kitaev
+et al., 2020), BigBird (Zaheer et al., 2020), and
+Longformer (Beltagy et al., 2020) models). While
+all these approaches to extend the maximum doc-
+ument length of transformer-based models are im-
+portant to create more globally inspired models, the
+document-length limitation is still practically and
+theoretically in place, with models being limited
+to a fixed number of pre-defined tokens the model
+can process. Furthermore, with many proposed
+systems still based on more established PLMs (e.g.,
+BERT) and with no single dominant solution for
+the general problem of the input length-limitation
+yet, we believe that even with the restriction being
+actively tackled, an in-depth analysis of traditional
+PLMs with discourse is highly valuable to establish
+a solid understanding of the amount of semantic
+and pragmatic information captured.
+Besides the described BERTology work, we got
+encouraged to explore fine-tuned extensions of stan-
+dard PLMs through previous work showing the
+benefit of discourse parsing for many downstream
+tasks, such as summarization (Gerani et al., 2019),
+sentiment analysis (Bhatia et al., 2015; Nejat et al.,
+2017; Hogenboom et al., 2015) and text classifica-
+tion (Ji and Smith, 2017). Conversely, we recently
+showed promising results when inferring discourse
+structures from related downstream tasks, such as
+sentiment analysis (Huber and Carenini, 2020) and
+summarization (Xiao et al., 2021b). Given this
+bidirectional synergy between discourse and the
+mentioned downstream tasks, we move beyond tra-
+ditional experiments focusing on standard PLMs
+and additionally explore discourse structures of
+PLMs fine-tuned on a variety of auxiliary tasks.
+3 Discourse Extraction Method
+With PLMs rather well analyzed according to their
+syntactic capabilities, large-scale discourse struc-
+tures have been less explored. One reason for this is
+the input length constraint of transformer models.
+While this is generally not prohibitive for intra-2378sentence syntactic structures (e.g., presented in Wu
+et al. (2020)), it does heavily influence large-scale
+discourse structures, operating on complete (poten-
+tially long) documents. Overcoming this limitation
+is non-trivial, since traditional transformer-based
+models only allow for fixed, short inputs.
+Aiming to systematically explore the ability of
+PLMs to capture discourse, we investigate a novel
+way to effectively extract discourse structures from
+the self-attention component of the BERT and
+BART models. We thereby extend our previously
+proposed tree-generation methodology (Xiao et al.,
+2021b) to support the input length constraints of
+standard PLMs using a sliding-window approach in
+combination with matrix frequency normalization
+and an EDU aggregation method. Figure 1 visual-
+izes the complete process on a small scale example
+with 3 EDUs and 7 sub-word embeddings.
+The Tree Generation Procedure we previously
+proposed in Xiao et al. (2021b) explores a two-
+stage approach to obtain discourse structures from
+a transformer model, by-passing the input-length
+constraint. Using the intuition that the self-
+attention score between any two EDUs is an in-
+dicator of their semantic/pragmatic relatedness, in-
+fluencing their distance in a projective discourse
+tree, they use the CKY dynamic programming
+approach (Jurafsky and Martin, 2014) to gener-
+ate constituency trees based on the internal self-
+attention of the transformer model. To generate
+dependency trees, we apply the same intuition used
+to infer discourse trees with the Eisner algorithm
+(Eisner, 1996). Since we explore the discourse
+information captured in standard PLMs, we can’t
+directly transfer our two-stage approach in Xiao
+et al. (2021b), first encoding individual EDUs us-
+ing BERT and subsequently feeding the dense rep-
+resentations into a fixed-size transformer model.
+Instead, we propose a new method to overcome the
+length-limitation of the transformer model.
+The Sliding-Window Approach is at the core
+of our new methodology to overcome the input-
+length constraint. We first tokenize arbitrarily long
+documents with nEDUs E={e, ..., e}into the
+respective sequence of msub-word tokens T=
+{t, ...t}withn≪m, according to the PLM
+tokenization method (WordPiece for BERT, Byte-
+Pair-Encoding for BART), as show at the top ofFigure 1. Using the sliding window approach, we
+subdivide the msub-word tokens into sequences of
+maximum input length t, defined by the PLM
+(t= 512 for BERT, t= 1024 for BART).
+Using a stride of 1, we generate (m−t) + 1
+sliding windows W, feed them into the PLM, and
+extract the resulting t×tpartial square self-
+attention matrices ( Min Figure 1) for a specific
+self-attention head.
+The Frequency Normalization Method allows
+us to combine the partially overlapping self-
+attention matrices Minto a single document-level
+matrix Mof size m×m. To this end, we combine
+multiple overlapping windows, generated due to
+the stride size of 1, by adding up the self-attention
+cells, while keeping track of the number of over-
+laps in a separate m×mfrequency matrix M.
+We then divide Mby the frequency matrix M,
+to generate a frequency normalized self-attention
+matrix M(see bottom of Figure 1).
+The EDU Aggregation is the final processing
+step to obtain the document-level self-attention
+matrix. In this step, the msub-word tokens
+T={t, ...t}are aggregated back into nEDUs
+E={e, ..., e}by computing the average bidirec-
+tional self-attention score between any two EDUs
+inM. For example, in Figure 1, we aggregate
+the scores in cells M[0:1,5:6]to compute the fi-
+nal output of cell [0,2](purple matrix in Figure 1)
+andM[5:6,0:1]to generate the value of cell [0,2].
+This way, we obtain the average bidirectional self-
+attention scores between EDUandEDU. We
+use the resulting n×nmatrix as the input to the
+CKY/Eisner discourse tree generation methods.
+4 Experimental Setup
+4.1 Pre-Trained Models
+We select the BERT-base (110million parameters)
+andBART-large (406million parameters) models
+for our experiments. We choose these models for
+their diverse objectives (encoder-only vs. encoder-
+decoder), popularity for diverse fine-tuning tasks,
+and their prior successful exploration in regards to
+discourse information (Zhu et al., 2020; Koto et al.,
+2021a). For the BART-large model, we limit our
+analysis to the encoder, as motivated in Koto et al.
+(2021a), leaving experiments with the decoder and
+cross-attention for future work.2379
+4.2 Fine-Tuning Tasks and Datasets
+We explore the BERT model fine-tuned on two
+classification tasks, namely sentiment analysis and
+natural language inference (NLI). For our analysis
+on BART, we select the abstractive summarization
+and question answering tasks. Table 1 summarizes
+the 7 datasets used to fine-tune PLMs in this work,
+along with their underlying tasks and domains.
+4.3 Evaluation Treebanks
+RST-DT (Carlson et al., 2002) is the largest En-
+glish RST-style discourse treebank, containing 385
+Wall-Street-Journal articles, annotated with full
+constituency discourse trees. To generate addi-
+tional dependency trees, we apply the conversion
+algorithm proposed in Li et al. (2014).
+GUM (Zeldes, 2017) is a steadily growing treebank
+of richly annotated texts. In the current version 7.3,
+the dataset contains 168documents from 12gen-
+res, annotated with full RST-style constituency and
+dependency discourse trees.
+All evaluations shown in this paper are executed
+on the 38and20documents in the RST-DT and
+GUM test-sets, to be comparable with previous
+baselines and supervised models. A similarly-sized
+validation-set is used where mentioned to deter-
+mine the best performing self-attention head.
+4.4 Baselines and Evaluation Metrics
+Simple Baselines: We compare the inferred con-
+stituency trees against right- and left-branching
+structures. For dependency trees, we evaluate
+against simple chain and inverse chain structures.
+Distantly Supervised Baselines: We compare our
+results obtained in this paper against our previous
+approach presented in Xiao et al. (2021b), using
+similar CKY and Eisner tree-generation methods to
+infer constituency and dependency tree structures
+from a summarization model trained on the CNN-
+DM and New York Times (NYT) corpora (referred
+to as Sum andSum).
+Supervised Baseline: We select the popular Two-
+Stage discourse parser (Wang et al., 2017) as our
+supervised baseline, due to its strong performance,
+available model checkpoints and code, as well as
+the traditional architecture. We use the published
+Two-Stage parser checkpoint on RST-DT (from
+here on called Two-Stage ) and re-train the
+discourse parser on GUM ( Two-Stage). We
+convert the generated constituency structures into
+dependency trees following Li et al. (2014).
+Evaluation Metrics: We apply the original parse-
+val score to compare discourse constituency struc-
+tures with gold-standard treebanks, as argued in
+Morey et al. (2017). To evaluate the generated
+dependency structures, we use the Unlabeled At-
+tachment Score (UAS).
+5 Experimental Results
+5.1 Discourse Locality
+Our discourse tree generation approach described
+in section 3 directly uses self-attention matrices
+to generate discourse trees. The standard BERT2380model contains 144of those self-attention matri-
+ces (12layers, 12self-attention heads each), all
+of which potentially encode discourse structures.
+For the BART model, this number is even higher,
+consisting of 12layers with 16self-attention heads
+each. With prior work suggesting the locality of
+discourse information in PLMs (e.g., Raganato and
+Tiedemann (2018); Mare ˇcek and Rosa (2019); Xiao
+et al. (2021b)), we analyze every self-attention ma-
+trix individually to gain a better understanding of
+their alignment with discourse information.
+Besides investigating standard PLMs, we also
+explore the robustness of discourse information
+across fine-tuning tasks. We believe that this is an
+important step to better understand if the captured
+discourse information is general and robust, or if it
+is “re-learned” from scratch for downstream tasks.
+To the best of our knowledge, no previous analysis
+of this kind has been performed in the literature.
+To this end, Figure 2 shows the constituency and
+dependency structure overlap of the generated dis-
+course trees from individual self-attention heads
+with the gold-standard tree structures of the GUM
+dataset. The heatmaps clearly show that con-
+stituency discourse structures are mostly captured
+in higher layers, while dependency structures are
+more evenly distributed across layers. Comparing
+the patterns between models, we find that, despite
+being fine-tuned on different downstream tasks, the
+discourse information is consistently encoded in
+the same self-attention heads. Even though the
+best performing self-attention matrix is not con-
+sistent, discourse information is clearly captured
+in a “local" subset of self-attention heads across
+all presented fine-tuning tasks. This plausibly sug-
+gests that the discourse information in pre-trained
+BERT and BART models is robust and general, re-
+quiring only minor adjustments depending on the
+fine-tuning task.
+5.2 Discourse Quality
+We now focus on assessing the discourse informa-
+tion captured in the single best-performing self-
+attention head. In Table 2, we compare the dis-
+course structure quality of pre-trained and fine-
+tuned PLMs in the context of supervised models,
+distantly supervised approaches and simple base-
+lines. We show the oracle-picked best head on the
+test-set, analyzing the upper-bound for the poten-
+tial performance of PLMs on RST-style discourse
+structures. This is not a realistic scenario, as the
+best performing head is generally not known a-
+priori. Hence, we also explore the performance
+using a small-scale validation set to pick the best-
+performing self-attention matrix. In this more re-
+alistic scenario for discourse parsing, we find that
+scores on average drop by 1.55points for BERT
+and1.33% for BART compared to the oracle-
+picked performance of a single self-attention ma-
+trix. We show detailed results of this degradation in
+Appendix C. Our results in Table 2 are separated
+into three sub-tables, showing the results for BERT,
+BART and baseline models on the RST-DT and
+GUM treebanks, respectively. In the BERT and
+BART sub-table, we further annotate each perfor-
+mance with ↑,•,↓, indicating the relative perfor-
+mance to the standard pre-trained model as supe-2381rior, equal, or inferior.
+Taking a look at the top sub-table (BERT) we
+find that, as expected, the randomly initialized
+transformer model achieves the worst performance.
+Fine-tuned models perform equal or worse than the
+standard PLM. Despite the inferior results of the
+fine-tuned models, the drop is rather small, with
+the sentiment analysis models consistently outper-
+forming NLI. This seems reasonable, given that
+the sentiment analysis objective is intuitively more
+aligned with discourse structures (e.g., long-form
+reviews with potentially complex rhetorical struc-
+tures) than the between-sentence NLI task, not in-
+volving multi-sentential text.
+In the center sub-table (BART), a different trend
+emerges. While the worst performing model is still
+(as expected) the randomly initialized system, fine-
+tuned models mostly outperform the standard PLM.
+Interestingly, the model fine-tuned on the CNN-
+DM corpus consistently outperforms the BART
+baseline, while the XSUM model performs bet-
+ter on all but the GUM dependency structure eval-
+uation. On one hand, the superior performance
+of both summarization models on the RST-DT
+dataset seems reasonable, given that the fine-tuning
+datasets and the evaluation treebank are both in the
+news domain. The strong results of the CNN-DM
+model on the GUM treebank, yet inferior perfor-
+mance of XSUM, potentially hints towards depen-
+dency discourse structures being less prominent
+when fine-tuning on the extreme summarization
+task, compared to the longer summaries in the
+CNN-DM corpus. The question-answering task
+evaluated through the SQuAD fine-tuned model un-
+derperforms the standard PLM on GUM, however
+reaches superior performance on RST-DT. Since
+the SQuAD corpus is a subset of Wikipedia articles,
+more aligned with news articles than the 12 genres
+in GUM, we believe the stronger performance on
+RST-DT (i.e., news articles) is again reasonable,
+yet shows weaker generalization capabilities across
+domains (i.e., on the GUM corpus). Interestingly,
+the question-answering task seems more aligned
+with dependency than constituency trees, in line
+with what would be expected from a factoid-style
+question-answering model, focusing on important
+entities, rather than global constituency structures.
+Directly comparing the BERT and BART mod-
+els, the former performs better on three out of four
+metrics. At the same time, fine-tuning hurts the
+performance for BERT, however, improves BART
+models. Plausibly, these seemingly unintuitive re-
+sults may be caused by the following co-occurring
+circumstances: (1) The inferior performance of
+BART can potentially be attributed to the decoder
+component capturing parts of the discourse struc-
+tures, as well as the larger number of self-attention
+heads “diluting” the discourse information. (2)
+The different trends regarding fine-tuned models
+might be directly influenced by the input-length
+limitation to 512(BERT) and 1024 (BART) sub-
+word tokens during the fine-tuning stage, hamper-
+ing the ability to capture long-distance semantic
+and pragmatic relationships. This, in turn, limits
+the amount of discourse information captured, even
+for document-level datasets (e.g., Yelp, CNN-DM,
+SQuAD). With this restriction being more promi-
+nent in BERT, it potentially explains the compara-
+bly low performance of the fine-tuned models.
+Finally, the bottom sub-table puts our results
+in the context of previously proposed supervised
+and distantly-supervised models, as well as sim-
+ple baselines. Compared to simple right- and left-
+branching trees (Span), the PLM-based models
+reach clearly superior performance. Looking at
+the chain/inverse chain structures (UAS), the im-
+provements are generally lower, however, the vast
+majority still outperforms the baseline. Comparing
+the first two sub-tables against completely super-
+vised methods (Two-Stage , Two-Stage),
+the BERT- and BART-based models are, unsurpris-
+ingly, inferior. Lastly, compared to the distantly
+supervised Sum and Summodels, the
+PLM-based discourse performance shows clear im-
+provements over the 6-layer, 8-head standard trans-
+former.2382
+5.3 Discourse Similarity
+Further exploring what kind of discourse informa-
+tion is captured in the PLM self-attention matrices,
+we directly compare the emergent discourse struc-
+tures with trees inferred from existing discourse
+parsers and simple baselines. This way, we aim to
+better understand if the information encapsulated
+in PLMs is complementary to existing methods, or
+if the PLMs solely capture trivial discourse phe-
+nomena and simple biases (e.g., resemble right-
+branching constituency trees). Since the GUM
+dataset contains a more diverse set of test docu-
+ments (12 genres) than the RST-DT corpus (exclu-
+sively news articles), we perform our experiments
+from here on only on the GUM treebank.
+Figure 3 shows the micro-average structural over-
+lap of discourse constituency (left) and dependency
+(right) trees between the PLM-generated discourse
+structures and existing methods, baselines, as well
+as gold-standard trees. Noticeably, the generated
+constituency trees (on the left) are most aligned
+with the structures predicted by supervised dis-
+course parsers, showing only minimal overlap to
+simple structures (i.e., right- and left-branching
+trees). Taking a closer look at the generated de-
+pendency structures presented on the right side
+in Figure 3, the alignment between PLM inferred
+discourse trees and the simple chain structure is
+predominant, suggesting a potential weakness in
+regards to the discourse exposed by the Eisner algo-
+rithm in the BERT and BART model. Not surpris-
+ingly, the highest overlap between PLM-generated
+trees and the chain structure occurs when fine-
+tuning on the CNN-DM dataset, well-known to
+contain a strong lead-bias (Xing et al., 2021).
+To better understand if the PLM-based con-
+stituency structures are complementary to existing,
+supervised discourse parsers, we further analyze
+the correctly predicted overlap. More specifically,
+we compute the intersection between PLM gener-
+ated structures and gold-standard trees as well as
+previously proposed models and the gold-standard.
+Subsequently, we intersect the two resulting sets
+(e.g., BERT ∩Gold Trees ↔Two-Stage (RST-DT)
+∩Gold Trees). This way, we explore if the cor-
+rectly predicted PLM discourse structures are a
+subset of the correctly predicted trees by super-
+vised approaches, or if complementary discourse
+information is captured. We find that >20% and
+>16% of the correctly predicted constituency and
+dependency structures of our PLM discourse in-
+ference approach are not captured by supervised
+models, making the exploration of ensemble meth-
+ods a promising future avenue. A detailed version
+of Fig. 3 as well as more specific results regarding
+the correctly predicted overlap of discourse struc-
+tures are shown in Appendix E.
+5.4 Discourse Redundancy
+Up to this point, our quantitative analysis of the
+ability of PLMs to capture discourse information
+has been limited to the single best-performing head.
+However, looking at individual models, the dis-
+course performance distribution in Figure 2 sug-
+gests that a larger subset of self-attention heads
+performs similarly well (i.e., there are several dark
+purple cells in each heatmap). This leads to the
+interesting questions if the information captured2383in different, top-performing self-attention heads is
+redundant or complementary. Similarly, Figure 2
+indicates that the same heads perform well across
+different fine-tuning tasks, leading to the question
+if the discourse structures captured in a single self-
+attention matrix of different fine-tuned models is
+consistent, or varies depending on the underlying
+task. Hence, we take a detailed look at the simi-
+larity of model self-attention heads in regards to
+their alignment with discourse information and ex-
+plore if (1) the top performing heads h, ..., hof
+a specific model mcapture redundant discourse
+structures, and if (2) the discourse information cap-
+tured by a specific head hacross different models
+m, ..., mcontain similar discourse information.
+Specifically, we pick the top 10best performing
+self-attention matrices of each model, remove self-
+attention heads that don’t appear in at least two
+models (since no comparisons can be made), and
+compare the generated discourse structures in a
+nested aggregation approach.
+Figure 4 shows a small-scale example of our
+nested visualization methodology. For the self-
+attention head-aligned approach (Figure 4 (a)),
+high similarity values (calculated as the micro-
+average structural overlap) along the diagonal (grey
+cells) would be expected if the same head hen-
+codes consistent discourse information across dif-
+ferent fine-tuning tasks and datasets. Inversely, the
+model-aligned matrix (Figure 4 (b)) should show
+high values along the diagonal if different heads
+h, ..., hin the same model mcapture redundant
+discourse information. Besides the visual inspec-
+tion methodology presented in Figure 4, we also
+compare aggregated similarities between the same
+head (=Head) against different heads ( ̸=Head) and
+between the same model (=Model) against dif-
+ferent models ( ̸=Model) (i.e., grey cells (=) and
+white cells ( ̸=) in Figure 4 (a) and (b)). In order
+to assess the statistical significance of the result-
+ing differences in the underlying distributions, we
+compute a two-sided, independent t-test between
+same/different models and same/different heads.
+The resulting redundancy evaluations for BERT
+are presented in Figure 5. It appears that the
+same self-attention heads hconsistently encode
+similar discourse information across models indi-
+cated by: (1) High similarities (yellow) along the
+diagonal in heatmaps I&IIIand (2) through thestatistically significant difference in distributions
+at the bottom of Figure 5 (a) and (b). However,
+different self-attention heads h, ..., hof the same
+model mencode different discourse information
+(heatmaps II&IV). While the trend is stronger
+for constituency tree structures, there is a single
+dependency self-attention head which does gen-
+erally not align well between models and heads
+(purple line in heatmap III). Plausibly, this spe-
+cific self-attention head encodes fine-tuning task
+specific discourse information, making it a prime
+candidate for further investigations in future work.
+Furthermore, the similarity patterns observed in
+Figure 5 (a) and (b) point towards an opportunity to
+combine model self-attention heads to improve the
+discourse inference performance compared to the
+scores shown in Table 2, where each self-attention
+head was assessed individually, in future work.
+6 Conclusions
+In this paper, we extend the line of BERTology work
+by focusing on the important, yet less explored,
+alignment of pre-trained and fine-tuned PLMs with
+large-scale discourse structures. We propose a
+novel approach to infer discourse information for
+arbitrarily long documents. In our experiments,
+we find that the captured discourse information is
+consitently local and general, even across a collec-
+tion of fine-tuning tasks. We compare the inferred
+discourse trees with supervised, distantly super-
+vised and simple baselines to explore the structural
+overlap, finding that constituency discourse trees
+align well with supervised models, however, con-
+tain complementary discourse information. Lastly,
+we individually explore self-attention matrices to
+analyze the information redundancy. We find that
+similar discourse information is consistently cap-
+tured in the same heads.
+In the future, we intend to explore additional dis-
+course inference strategies based on the insights we
+gained in this analysis. Specifically, we want to ex-
+plore more sophisticated methods to extract a single
+discourse tree from multiple self-attention matrices,
+rather than only the single best-performing head.
+Further, we want to investigate the relationship
+between supervised discourse parsers and PLM
+generated discourse trees and more long term, we
+plan to analyze PLMs with enhanced input-length
+limitations.2384Acknowledgements
+We thank the anonymous reviewers and the UBC
+NLP group for their insightful comments and sug-
+gestions. This research was supported by the Lan-
+guage & Speech Innovation Lab of Cloud BU,
+Huawei Technologies Co., Ltd and the Natural
+Sciences and Engineering Research Council of
+Canada (NSERC). Nous remercions le Conseil de
+recherches en sciences naturelles et en génie du
+Canada (CRSNG) de son soutien.
+References2385238623872388A Huggingface Models
+We investigate 7 fine-tuned BERT and BART models from the huggingface model library, as well as the
+two pre-trained models. The model names and links are provided in Table 3
+B Test-Set Results on RST-DT and GUM23892390C Oracle-picked self-attention head compared to validation-picked matrix2391D Detailed Self-Attention Statistics2392E Details of Structural Discourse Similarity2393F Intra- and Inter-Model Self-Attention Comparison2394

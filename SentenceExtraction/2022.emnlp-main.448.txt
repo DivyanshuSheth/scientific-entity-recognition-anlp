@@ -1,1 +1,797 @@
-6686 Proceedings of the 2022 Conference on Empirical Methods in Natural Language Processing , pages 6686 6698 December 7 - 11 , 2022 © 2022 Association for Computational Linguistics 6687 6688 6689 6690 6691 6692 6693 6694 6695 6696 6697 6698 
+
+Jie HuangKerui ZhuKevin Chen-Chuan Chang
+Jinjun XiongWen-mei HwuUniversity of Illinois at Urbana-Champaign, USAUniversity at Buffalo, USANVIDIA, USA
+{jeffhj, keruiz2, kcchang, w-hwu}@illinois.edu
+jinjun@buffalo.edu
+Abstract
+We propose DEER (Descriptive Knowledge
+Graph for Explaining Entity Relationships) –
+an open and informative form of modeling en-
+tity relationships. In DEER , relationships be-
+tween entities are represented by free-text rela-
+tion descriptions. For instance, the relationship
+between entities of machine learning andalgo-
+rithm can be represented as “ Machine learning
+explores the study and construction of algo-
+rithms that can learn from and make predic-
+tions on data.” To construct DEER , we pro-
+pose a self-supervised learning method to ex-
+tract relation descriptions with the analysis of
+dependency patterns and generate relation de-
+scriptions with a transformer-based relation de-
+scription synthesizing model, where no human
+labeling is required. Experiments demonstrate
+that our system can extract and generate high-
+quality relation descriptions for explaining en-
+tity relationships. The results suggest that we
+can build an open and informative knowledge
+graph without human annotation.
+1 Introduction
+Relationships exist widely between entities. For
+example, a person may be related to another person
+or an institution, and a scientific concept can be
+connected to another concept. At the same time,
+relationships between entities can be subtle or com-
+plex, e.g., the relationship between machine learn-
+ingandalgorithm .
+To model relationships between entities, re-
+searchers usually construct knowledge graphs
+(KGs) (Ji et al., 2021; Hogan et al., 2021), where
+nodes are entities, e.g., machine learning , and
+edges are relations, e.g., subclass of (Figure 2).
+However, KGs usually require a pre-specified set
+of relation types, and the covered relation types
+are usually coarse-grained and simple. This indi-
+cates existing KGs lack two desired features. Thefirst is openness : for entities with a relationship
+not covered by the type set, KGs cannot handle
+their relationship directly. Besides, in many cases,
+the relationship between entities is complex or id-
+iosyncratic that it cannot be simply categorized to a
+relation type. For instance, for related entities ma-
+chine learning andalgorithm , Wikidata (Vrande ˇci´c
+and Krötzsch, 2014) does not include a relation
+for them, and it is also not easy to come up with a
+relation type to describe their relationship.
+The second feature is about informativeness .
+With the relational facts in KGs, humans may still
+have difficulty in understanding entity relationships.
+For instance, from fact “(data mining, facet of ,
+database)” in Wikidata, humans may guess data
+mining anddatabase are related fields, but they
+cannot understand how exactly they are related, e.g,
+why is it a facet? andwhat is the facet?
+Although techniques like knowledge graph rea-
+soning (Lao et al., 2011; Xiong et al., 2017; Chen
+et al., 2018) or open relation extraction (Etzioni
+et al., 2008) can represent more complex relation-
+ships to some extent, they do not fundamentally
+solve the limitations as discussed in Huang et al.
+(2022a). For instance, neither a multi-hop reason-
+ing path in KGs nor a triple extracted by open
+relation extraction, e.g., (data mining methods, to
+be integrate within , the framework of traditional
+database systems), is easy to interpret.
+Based on the above analysis, we propose a
+new form of modeling relationships between en-
+tities: DEER (Descriptive Knowledge Graph
+forExplaining Entity Relationships). We define
+DEER as a graph, where nodes are entities and
+edges are descriptive statements of entity relation-
+ships (refer to Figure 1 for an example). DEER is
+open since it does not require a pre-specified set
+of relation types. In principle, all entity relation-
+ships, either explicit or implicit, can be represented
+byDEER , as long as they can be connected in a
+sentence – which is not possible for KGs. It is in-6686
+formative since the relationships between entities
+are represented by informative free-text relation
+descriptions, instead of simple short phrases like
+“facet of”.
+DEER has great potential to help users under-
+stand entity relationships more easily and intu-
+itively by providing relation descriptions for any
+two related entities and facilitate downstream tasks
+on entities and entity relationships such as entity
+profiling (Noraset et al., 2017; Cheng et al., 2020;
+Huang et al., 2022b), relation extraction (Bach and
+Badaskar, 2007), and knowledge graph comple-
+tion (Lin et al., 2015). For example, in Figure 1,
+we can understand the semantic meaning of the
+terms by connecting them with familiar ones. In
+e-commerce, the system (e.g., Amazon online shop-
+ping website) may recommend tripods to a photog-
+raphy novice who is browsing cameras . An expla-
+nation in DEER , e.g., “ tripods are used for both
+motion and still photography to prevent camera
+movement and provide stability”, could not only
+help users make a better purchase decision but also
+justify the recommendation. In KG construction
+and completion, the relation descriptions can serveas knowledge to improve the performance or as
+explanations to justify the relations in KGs.
+The key to building DEER is to acquire high-
+quality relation descriptions. However, writing or
+collecting relation descriptions manually requires
+enormous human efforts and expertise (in our hu-
+man evaluation in Section 6.1, it takes ∼3 min-
+utes to evaluate whether a sentence is a good rela-
+tion description). Considering this, we propose a
+novel two-step approach to construct DEER with
+Wikipedia, where no manual annotation is required.
+Specifically, we first extract relation descriptions
+from corpus in a self-supervised manner, where
+a scoring function is introduced to measure the
+explicitness , i.e., how explicit is the relationship
+represented by the sentence, and significance , i.e.,
+how significant is the relationship represented, with
+the analysis of dependency patterns. Second, based
+on the extracted graph, a transformer-based rela-
+tion description synthesizing model is introduced to
+generate relation descriptions for interesting entity
+pairs whose relation descriptions are not extracted
+in the first step. This allows DEER to handle a
+large number of entity pairs, including those that
+do not co-occur in the corpus.
+Both quantitative and qualitative experiments
+demonstrate the effectiveness of our proposed
+methods. We also conduct case study and error
+analysis and suggest several promising directions
+for future work – DEER not only serves as a valu-
+able application in itself to help understand entity
+relationships, but also has the potential to serve as
+a knowledge source to facilitate various tasks on
+entities and entity relationships.66872 Related Work
+There are several previous attempts on acquiring en-
+tity relation descriptions. For instance, V oskarides
+et al. (2015) study a learning to rank problem of
+ranking relation descriptions by training a Ran-
+dom Forest classifier with manually annotated data.
+Subsequently, Huang et al. (2017) build a pair-
+wise ranking model based on convolutional neural
+networks by leveraging query-title pairs derived
+from clickthrough data of a Web search engine,
+and V oskarides et al. (2017) attempt to generate
+descriptions for relationship instances in KGs by
+filling created sentence templates with appropriate
+entities. However, all these methods are not “open”.
+First, they rely and demand heavily on features of
+entities and relations. Second, these models only
+deal with entities with several pre-specified rela-
+tion types, e.g., 9 in V oskarides et al. (2015) and
+10 in V oskarides et al. (2017), and only explicit
+relation types, e.g., isMemberOfMusicGroup , are
+covered. Notably, Handler and O’Connor (2018)
+propose to extract relation statements, i.e., natural
+language expressions that begin with one entity and
+end with the other entity, from a corpus to describe
+entity relationships. However, the “ acceptability ”
+used in their work cannot ensure a good relation
+description. Moreover, these works do not system-
+atically analyze and define what constitutes a good
+relational description.
+The work most relevant to ours is Open Rela-
+tion Modeling (Huang et al., 2022a), which aims
+to generate relation descriptions for entity pairs.
+To achieve this, the authors propose to fine-tune
+BART (Lewis et al., 2020) to reproduce definitions
+of entities. Compared to their problem, i.e., text
+generation, the focus of this paper is on graph con-
+struction. Besides, their relation descriptions are
+limited to definitional sentences, which assumes
+that one entity appears in the other’s definition;
+however, the assumption is not true for many re-
+lated entities. In addition, their methodology does
+not incorporate sufficient knowledge about entities
+and relations for generation.
+There are also some other works that can be re-
+lated. For example, Lin et al. (2020); Liu et al.
+(2021) study CommonGen , which aims to gener-
+ate coherent sentences containing the given com-
+mon concepts. Dognin et al. (2020); Agarwal et al.
+(2021) study the data-to-text generation (Kukich,
+1983), which aims to convert facts in KGs into nat-
+ural language. Gunaratna et al. (2021) propose toconstruct an entity context graph with contexts as
+random paragraphs containing the target entities to
+help entity embedding. None of them meets the
+requirements for high-quality relation descriptions.
+3 Descriptive Knowledge Graph for
+Explaining Entity Relationships
+DEER is a graph representing entity relationships
+with sentence descriptions. Formally, we define
+DEER as a directed graph G={E,R}, where E
+is the set of entities and Ris the set of relation
+description facts. A relation description fact is a
+triple (x, s, y ), where x, y∈ Eare the subject and
+object ofs, respectively. sis a sentence describing
+the relationship between xandy(Figure 1).
+To build DEER , the first step is to collect en-
+tities and identify related entity pairs, which can
+be simply achieved by utilizing existing resources,
+e.g., Wikipedia, and entity relevance analysis,
+e.g., cosine similarity of entity embeddings in
+Wikipedia2vec (Yamada et al., 2020). And then,
+we need to acquire high-quality relation descrip-
+tions for entity pairs. Taking entity pair ( machine
+learning ,algorithm ) as an example, a relation de-
+scription of them can be sin Table 1. From the
+perspective of human understanding, we identify
+three requirements for a good relation description:
+•Explicitness : The relationship of the target enti-
+ties is described explicitly. E.g., in s, “machine
+learning explores the study and construction of
+algorithms ” describes the relationship explicitly;
+while in s, the relationship between machine
+learning andalgorithm is expressed implicitly so
+that the relationship is difficult to reason.
+•Significance : The relationship of the target en-
+tities is the point of the sentence. In s, all the
+tokens in the sentence are associated with the
+relationship between machine learning andal-
+gorithm ; while in s, although the description
+is explicit, “ which ... far ” mainly characterizes
+algorithm , but not the target entity relationship.
+•Correctness : The relationship between target
+entities is described correctly.
+There are other requirements to ensure a good
+relation description, e.g., the sentence is coherent,
+grammatical, of reasonable length. Compared to
+the above ones, these requirements are general re-
+quirements for any sentence, but not specific to our
+problem; therefore, we put less emphasis on them.
+To acquire relation descriptions that satisfy the
+above requirements, we propose a novel two-step6688
+approach: first extracting relation descriptions from
+a corpus with the analysis of dependency patterns
+(Section 4), and then generating relation descrip-
+tions for interesting entity pairs whose relation de-
+scriptions are not extracted in the previous step
+(Section 5).
+4 Relation Description Extraction
+In this section, we introduce our approach for ex-
+tracting entity relation descriptions from Wikipedia
+according to the requirements discussed in Sec-
+tion 3.
+4.1 Preprocessing and Filtering
+The goal of preprocessing and filtering is to col-
+lect entities and map entity pairs to candidate re-
+lation descriptions. To ensure correctness, we use
+Wikipedia as the source corpus, which is a high-
+quality corpus covering a wide range of domains.
+Because this process mainly relies on heuristic
+rules and existing tools, to save space, we refer
+the readers to Appendix A for the details.
+4.2 Scoring
+In this section, we design a scoring function to mea-
+sure the quality of relation descriptions. Since we
+use Wikipedia as the source corpus, the correctness
+of the extracted sentences can be largely guaran-
+teed; thus, we focus on measuring explicitness and
+significance of candidate relation descriptions.
+4.2.1 Shortest Dependency Path as Relation
+Inspired by Wu and Weld (2010), we use the short-
+est dependency path to represent the relation pat-
+tern between the target entities in a sentence. For
+instance, Figure 3 shows the dependency tree of
+sprocessed by spaCy. The shortest path be-
+tween machine learning andalgorithm is: “learn-
+ing← − − −nsubj explores− − →dobj study− − →prep of− − →pobj algo-
+rithms”. Following their notation, we call such a
+path a corePath . To represent the relation pattern,we collect dependencies in the path and append
+“i_” to the dependencies with an inversed direc-
+tion. E.g., the relation pattern for the above path
+is [i_nsubj, dobj, prep, pobj ]. We remove depen-
+dencies that do not affect human understanding.
+Specifically, we drop the conj andappos dependen-
+cies and replace two consecutive prep with one.
+Besides corePath , we also collect the shortest
+paths between the corePath and the tokens out-
+side the corePath to represent the relationships be-
+tween entity relationships and tokens. For instance,
+in Figure 3, construction is a token outside the
+corePath between machine learning andalgorithm .
+The shortest path between it and the corePath is:
+“study− − →conj construction”. We call this kind of path
+assubPath . Similar to corePath , we generate the
+relation pattern from subPath and drop the conj,
+appos andcompound dependencies.
+4.2.2 Explicitness
+Given two entities and a candidate relation descrip-
+tions, we measure the explicitness by calculating
+the normalized logarithmic frequency of the rela-
+tion pattern of the corePath :
+ExpScore (s) =log(f+ 1)
+log(f+ 1), (1)
+where fis the frequency of the most frequent
+corePath relation pattern and fis the frequency
+of the relation pattern in the present corePath . The
+intuition here is that humans tend to use explicit
+structure to explain relations. Thus, we assume that
+a relation description is more explicit if its relation
+pattern is more frequent. Intuitively, if a relation
+pattern is unpopular, it is likely that this pattern is
+either too complicated or contains some rarely used
+dependencies. Both of these cases may increase
+the difficulty in reasoning.
+Similar to Wu and Weld (2010), we only con-
+sider patterns that start with nsubj ornsubjpass ,
+indicating that one of the target entities is the sub-
+ject of the sentence. This restriction helps increase
+the explicitness of the selected relation description
+sentences because if one entity is the subject, the
+sentence is likely to contain a “argument-predicate-
+argument” structure connecting the target entities.
+4.2.3 Significance
+We measure the significance as the proportion of in-
+formation that is relevant to the entity relationship
+in a sentence. To measure the relevance of each
+token in the sentence to the entity relationship, we6689
+divide tokens into three categories: 1) core token
+if the token is in the corePath ; 2)modifying token
+if the token is in a subPath that is connected to the
+corePath through a modifying dependency; and 3)
+irrelevant token for the rest tokens. The intuition
+here is that a sub-dependency tree connected to the
+corePath with a modifying dependency is supposed
+to modify the relationship. We predefined a set of
+modifying dependencies in Table 7.
+We calculate a score for each token in the sen-
+tence based on its category and dependency anal-
+ysis. Then, the significance score is the average
+of all the token’s scores. Formally, for a candidate
+relation description s, the significance score is
+SigScore (s) =/summationtextw(t)
+|s|, (2)
+where
+w(t) =
+
+1 ift∈ctift∈mt
+0 otherwise, (3)
+where ctis the set of core tokens andmtis the set
+ofmodifying tokens .fis the frequency of the
+subPath relation pattern from the corePath to the
+present token tandf is the frequency of the
+most frequent subPath relation pattern. The intu-
+ition is: with higher relation pattern frequency, the
+modifying token is more explicitly related to the
+entity relationship, and thus, should have a higher
+score. This also comes with another useful charac-
+teristic: the score will decrease token by token as
+we move along the subPath because the frequency
+of asubPath relation pattern cannot be greater than
+the frequency of its parent. With this characteristic,
+we can penalize the long modifying subPath as it
+will distract the focus from the entity relationship
+and is less explicitly related to the relationship.
+4.2.4 Relation Descriptive Score
+To calculate the explicitness and significance, we
+need to build a database of relation patterns for both
+corePath andsubPath . We construct both databases
+with the candidate relation descriptions and corre-
+sponding entity pairs collected from Section 4.1
+with spaCy. We also require the two target entitiesin the sentence are related to a certain threshold.
+Intuitively, if two entities are more related, the sen-
+tences containing them are more likely to be rela-
+tion descriptions; therefore, the extracted corePath
+relation patterns are more likely to indicate entity
+relationships. We measure the relevance of two
+entities by calculating the cosine similarity of the
+entity embeddings in Wikipedia2Vec. We filter out
+entity pairs (and the associated sentences) with a
+relevance score <0.5. This leads to a collection of
+7,186,996 corePaths and 83,265,285 subPaths .
+With the databases of relation patterns, we can
+calculate the explicitness and significance scores
+for a candidate relation description. The final score,
+named Relation Descriptive Score (RDScore) , is
+computed as the harmonic mean:
+RDScore (s) = 2·ExpScore (s)·SigScore (s)
+ExpScore (s) +SigScore (s).
+(4)
+For each entity pair, we calculate RDScore for
+all the candidate relation descriptions and select
+the candidate with the highest score as the final
+relation description. To build an initial DEER , we
+keep edges with an entity relevance score ≥0.5
+and with a relation description whose RDScore
+≥0.75. We refer to this graph as Wiki- DEER.
+5 Relation Description Generation
+In the previous section, we extract relation descrip-
+tions for entity pairs with the analysis of depen-
+dency patterns and build an initial DEER with
+Wikipedia automatically. However, for some re-
+lated entity pairs, there may not exist a sentence
+that contains both entities; and although such a sen-
+tence exists, it may not be extracted by the system.
+To solve this problem, in this section, we intro-
+duce Relation Description Generation – generating
+relation descriptions for interesting entity pairs.
+We form relation description generation as a
+conditional text generation task: given two en-
+tities, generating a sentence describing the rela-
+tionship between them with the initial DEER . For-6690
+mally, we apply the knowledge-enhanced sequence-
+to-sequence formulation (Yu et al., 2020): given
+an entity pair (x, y)and an initial DEER G, the
+probability of the output relation description sis
+computed auto-regressively:
+P(s|x, y,G) =/productdisplayP(s|s, x, y,G),(5)
+where mis the length of s,sis the ith token of s,
+andsis a special start token.
+To incorporate Gfor generation, we propose
+Relation Description Synthesizing (RelationSyn) .
+RelationSyn consists of two processes: first retriev-
+ing relevant relation descriptions (reasoning paths)
+from the graph and then synthesizing them into a
+final relation description (Figure 4).
+5.1 Retrieval
+To generate a relation description, the model needs
+knowledge about the target entities and their rela-
+tionship. To provide knowledge, we retrieve rea-
+soning paths of the target entities from the graph.
+InDEER , we define a reasoning path qas a
+path connecting the target entities, which is called
+k-hop if it is connected by kedges. For in-
+stance, in Figure 4, there are two 2-hop reason-
+ing paths between xandy:(x, s, e, s, y)
+and (x, s, e, s, y), and two 3-hop rea-
+soning paths: (x, s, e, s, e, s, y)and
+(x, s, e, s, e, s, y)in the graph. To mea-
+sure the quality of reasoning paths, we define Path-
+Score as the harmonic mean of RDScore of relation
+descriptions in the path:
+PathScore (q) =|S|/summationtext,(6)whereSis the set of relation descriptions in q, and
+|S|=k.
+Reasoning paths are helpful for relation de-
+scription generation. For instance, from reason-
+ing path (deep learning , s,machine learning , s,
+artificial intelligence )(refer to Figure 1 for sand
+s), we can infer the relationship between deep
+learning andAI:deep learning is the dominant ap-
+proach for ML, while MLgrew out of the quest for
+AI; therefore, deep learning is an important technol-
+ogy for the development of artificial intelligence .
+However, not all reasoning paths are equally
+useful. Longer reasoning paths are usually more
+difficult to reason, while paths with higher Path-
+Score usually contain more explicit and significant
+relation descriptions. Therefore, when retrieving
+reasoning paths for an entity pair, we first sort the
+paths by their length (shorter first) and then by their
+PathScore (higher first).
+5.2 Synthesizing
+According to Section 5.1, we may retrieve multi-
+ple reasoning paths for an entity pair whose rela-
+tion description is missed in the initial DEER . In
+this section, we focus on synthesizing relation de-
+scriptions in the retrieved reasoning paths into a
+final relation description of the target entities based
+on T5 (Raffel et al., 2020) and Fusion-in-Decoder
+(Izacard and Grave, 2021).
+We first convert each reasoning path to a se-
+quence using the following encoding scheme: e.g.,
+(x, s, e, s, e, s, y)→“entity1: xentity2:
+ypath: x;e;e;ysentence1: ssentence2: s
+sentence3: s”. And then, we encode the sequence
+with the encoder of T5. In this way, the relation
+descriptions in each reasoning path are synthesized
+into a latent vector, named “ local synthesizing ”.
+After local synthesizing, we concatenate the la-6691
+tent vectors of all the retrieved reasoning paths to
+form a global latent vector. The decoder of T5 per-
+forms attention over the global latent vector and
+produces the final relation description. We name
+this process as “ global synthesizing ”.
+Combining retrieval and synthesizing, given two
+entities, we first retrieve mreasoning paths con-
+necting the target entities according to their length
+andPathScore , and then synthesize them to pro-
+duce the target relation description. We refer to this
+model as RelationSyn- m.
+6 Evaluation
+In this section, we verify the proposed methods
+for building DEER by conducting experiments on
+relation description extraction and generation.
+6.1 Relation Description Extraction
+We first present the statistics of the initial DEER
+built with Wikipedia in Table 2.
+To evaluate the quality of relation descriptions
+in the graph, we randomly sample 100 entity pairs
+from the graphand ask three human annotators
+(graduate students doing research on computational
+linguistics) to assign a graded value (1-5) for each
+relation description according to Table 8.
+Since previous works on relation description ex-
+traction are supervised and only limited to several
+explicit relation types, e.g., 9 in V oskarides et al.
+(2015), it is impractical and meaningless to com-
+pare with them. For instance, the relationship of
+(Arthur Samuel ,Machine Learning ) is not available
+or even not considered by the previous methods.
+Therefore, we verify the effectiveness of our model
+by comparing different variants of the model:
+•Random : A sentence containing the target enti-
+ties is randomly selected as the relation descrip-
+tion.
+•ExpScore : The sentence with the highest explic-
+itness is selected according to Eq. (1).
+•SigScore : The sentence with the highest signifi-
+cance is selected according to Eq. (2).
+•RDScore : The sentence with the highest RD-
+Score is selected according to Eq. (4).
+Table 3 shows the human evaluation results for
+relation description extraction, with an average pair-
+wise Cohen’s κof 0.66 (good agreement). From
+the results, we observe that both our explicitness
+and significance measurements are important to
+ensure a good relation description. In addition, RD-
+Score achieves an average rating of 4.18, which
+means that most of the selected sentences are high-
+quality relation descriptions, further indicating that
+the quality of Wiki- DEERis high.
+6.2 Relation Description Generation
+6.2.1 Experimental Setup
+Data construction . We build a dataset for relation
+description generation as follows: for an entity pair
+with a relation description in Wiki- DEER, we hide
+the relation description and consider it as the target
+for generation. The goal is to recover/generate
+the target relation description with the rest of the
+graph. For instance, in Figure 4, we hide the edge
+(relation description s) between xandyand use
+the remaining reasoning paths to recover s. We
+train and test on entity pairs with ≥5reasoning
+paths connecting them. The statistics of the data
+are reported in Table 4.
+Models . The task of relation description genera-
+tion is relevant to Open Relation Modeling (Huang
+et al., 2022a) – a recent work aimed at generating
+sentences capturing general relations between enti-
+ties conditioned on entity pairs. To the best of our
+knowledge, no other existing work can generate
+relation descriptions for any two related entities
+(since open relation modeling has only just been
+introduced). Therefore, we mainly compare the
+models proposed in Huang et al. (2022a) with sev-
+eral variants of our model:6692
+•RelationBART (Vanilla) : The vanilla model pro-
+posed in Huang et al. (2022a) for generating en-
+tity relation descriptions, where BART (Lewis
+et al., 2020) is fine-tuned on a training data whose
+inputs are entity pairs and outputs are correspond-
+ing relation descriptions.
+•RelationBART-MP + PS : The best model pro-
+posed in Huang et al. (2022a), which incorporates
+Wikidata by selecting the most interpretable and
+informative reasoning path in the KG automati-
+cally for helping generate relation descriptions.
+•RelationSyn- 0: A reduced variant of our model,
+where the encoding scheme of the input is only
+“entity1: xentity2: y”, i.e., no reasoning path and
+relation description is fed to the encoder.
+•RelationSyn- m: The proposed relation descrip-
+tion synthesizing model (Section 5), where m
+is the maximum number of retrieved reasoning
+paths for an entity pair.
+Metrics . We perform both quantitative and qualita-
+tive evaluation. Following Huang et al. (2022a),
+we apply several automatic metrics, including
+BLEU (Papineni et al., 2002), ROUGE-L (Lin,
+2004), METEOR (Banerjee and Lavie, 2005), and
+BERTScore (Zhang et al., 2019). Among them,
+BLEU, ROUGE, and METEOR focus on measur-
+ing surface similarities between the generated re-
+lation descriptions and the target relation descrip-
+tions, and BERTScore is based on the similarities
+of contextual token embeddings. We also ask three
+human annotators to evaluate the output relation
+descriptions with the same rating scale in Table 8.
+Implementation details . We train and evalu-
+ate all the baselines and variants on the same
+train/valid/test split. For RelationBART (Vanilla)
+andRelationBART-MP + PS , we apply the official
+implementationand adopt the default hyperparam-
+eters. The training converges in 50 epochs. For our
+models, we modify the implementation of Fusion-
+in-Decoderand initialize the model with the T5-
+base configuration. All the baseline models for
+RelationSyn are trained under the same batch size
+of 8 with a learning rate of 0.0001 and evaluated
+on the validation set every 5000 steps. The train-
+ing is considered converged and terminated with
+no better performance on the validation set in 20
+evaluations. The training of all models converges
+in 20 epochs. The training time is about one week
+on a single NVIDIA A40 GPU. For evaluation, the
+signature of BERTScore is: roberta-large-mnli L19
+no-idf version=0.3.11(hug trans=4.15.0).
+6.2.2 Quantitative Evaluation
+Table 5 reports the results of relation description
+generation with the automatic metrics. We observe
+that our best model RelationSyn- 5outperforms the
+state-of-the-art model for open relation modeling
+significantly. We also observe that RelationSyn- 1
+performs better than RelationSyn- 0, which means
+that reasoning paths in DEER are helpful for re-
+lation description generation. In addition, as the
+number of reasoning paths, i.e., m, increases, the
+performance of RelationSyn- mimproves. This
+demonstrates that the proposed model can synthe-
+size multiple relation descriptions in different rea-
+soning paths into a final relation description.
+6.2.3 Qualitative Evaluation
+We also conduct qualitative experiments to mea-
+sure the quality of generated relation descriptions.
+For a better comparison with extraction, we sample
+the same 100 entity pairs from the test set as in Sec-6693tion 6.1. From the results in Table 6, we observe
+that the quality of generated relation descriptions
+is higher than that of random sentences containing
+the target entities. The best model, RelationSyn- 5,
+achieves a rating of 3.47, which means the model
+can generate reasonable relation descriptions. How-
+ever, the performance is still much worse than Ora-
+cle, i.e., relation descriptions extracted by our best
+extraction model ( RDScore ). This indicates that
+generating high-quality relation descriptions is still
+a challenging task.
+6.3 Case Study and Error Analysis
+In Table 9 of Appendix B, we show some sam-
+ple outputs in the test set of relation description
+generation of three extraction models: ExpScore ,
+SigScore ,RDScore , and three generation models:
+RelationSyn- 0,RelationSyn- 1,RelationSyn- 5.
+For extraction, we observe that if we only con-
+sider the explicitness of the sentence, the selected
+sentence may contain a lot of stuff that is irrelevant
+to the entity relationship, e.g., ( Mucus ,Stomach ).
+And if we only consider the significance, the rela-
+tionship between entities may be described implic-
+itly; thus the relationship is difficult to reason out,
+e.g., ( Surfers Paradise ,Queensland ) and ( Knowl-
+edge,Epistemology ). And the combination of them,
+i.e.,RDScore , yields better relation descriptions.
+For generation, we notice that RelationSyn- 0suf-
+fers severely from hallucinations , i.e., generating
+irrelevant or contradicted facts. E.g., the relation
+descriptions generated for ( Dayan Khan ,Oirats ) is
+incorrect. By incorporating relation descriptions in
+the reasoning paths as knowledge, hallucination is
+alleviated to some extent, leading to better perfor-
+mance of RelationSyn- 1andRelationSyn- 5.
+From the human evaluation results, we also find
+that the correctness of relation descriptions ex-
+tracted by RDScore is largely guaranteed. How-
+ever, sometimes, the extracted sentences are still
+a bit implicit or not significant. In contrast to this,
+the relation descriptions generated by RelationSyn
+are usually explicit and significant (the average
+RDScore of the relation descriptions generated by
+RelationSyn- 5is 0.886, compared to 0.853 of Ora-
+cle), but contain major or minor errors. We think
+this is because most of the relation descriptions ex-
+tracted by RDScore are explicit and significant, and
+the generation model can mimic the dominant style
+of relation descriptions in the training set. However,
+it is still challenging to generate fully correct rela-tion descriptions by synthesizing existing relation
+descriptions.
+We also attempted to find the eight entity pairs
+in Table 9 in Wikidata. Among them, only ( Surfers
+Paradise ,Queensland ) is present in Wikidata. This
+further confirms that DEER can model a wider
+range of entity relationships.
+7 Conclusion and Discussion
+In this paper, we propose DEER – an open and in-
+formative form of modeling relationships between
+entities. To avoid tremendous human efforts, we
+design a novel self-supervised learning approach
+to extract relation descriptions from Wikipedia. To
+provide relation descriptions for related entity pairs
+whose relation descriptions are not extracted in the
+previous step, we study relation description gener-
+ation by synthesizing relation descriptions in the
+retrieved reasoning paths. We believe that DEER
+can not only serve as a direct application to help un-
+derstand entity relationships but also be utilized as
+a knowledge source to facilitate related tasks such
+as relation extraction (Bach and Badaskar, 2007)
+and knowledge graph completion (Lin et al., 2015).
+Limitations
+In this paper, we focus on designing methods to
+construct DEER and evaluating DEER on serving
+as a system for entity relationship understanding,
+which has direct applications in, e.g., encyclopedias
+and concept maps. Due to limited space, we do not
+fully investigate its use as a knowledge source to
+facilitate other tasks, e.g., relation extraction and
+knowledge graph completion, which we leave as
+future work for the whole research community.
+Acknowledgements
+We thank the reviewers for their constructive feed-
+back. This material is based upon work supported
+by the National Science Foundation IIS 16-19302
+and IIS 16-33755, Zhejiang University ZJU Re-
+search 083650, IBM-Illinois Center for Cognitive
+Computing Systems Research (C3SR) – a research
+collaboration as part of the IBM Cognitive Horizon
+Network, grants from eBay and Microsoft Azure,
+UIUC OVCR CCIL Planning Grant 434S34, UIUC
+CSBS Small Grant 434C8U, and UIUC New Fron-
+tiers Initiative. Any opinions, findings, and conclu-
+sions or recommendations expressed in this publi-
+cation are those of the author(s) and do not neces-
+sarily reflect the views of the funding agencies.6694References66956696
+A Preprocessing and Filtering
+We introduce our preprocessing to the raw
+Wikipedia dump. For each article, we extract
+the plain text by WikiExtractor. We split the
+Wikipedia articles into sentences with the NLTK
+libraryand map entity pairs to candidate relation
+descriptions with the following steps:
+Entity collection . We collect Wikipedia page titles
+(surface form) as our entities. To acquire knowl-
+edge and utilize the pre-trained entity embeddings
+in Wikipedia2Vec (Yamada et al., 2020) in the later
+steps, we only keep entities that can be recognized
+by Wikipedia2Vec.
+Local mention-entity mapping . Wikipedia2Vec
+uses hyperlinks to collect a global mention-entity
+dictionary to map the entity mention to the referent
+entities, like mapping “apple” to “Apple Inc” or
+“Apple (food)”. In this work, we follow a similar
+approach to build the mapping. To maintain high
+accuracy and low ambiguity, we craft the entity
+mention from the entity by removing the content
+wrapped by parenthesis and the content after the
+first comma. For example, a mention-entity pair
+could be (“Champaign”, “Champaign, Illinois”)
+or (“Python”, “Python (programming language)”).
+Unlike Wikipedia2Vec, we create a local dictio-
+nary for each Wikipedia page. When processing a
+page, we dynamically update the dictionary with
+mention-entity pairs collected from the hyperlinks,
+and extract the entity occurrence with the updating
+dictionary in one pass. This can reduce the ambigu-
+ity when two entities with the same entity mention
+co-occur on one page and also avoid collecting
+trivial entity occurrence on the page.
+Hyperlink mapping correction . Using hyperlinks
+to collect entities will lead to errors under some
+conditions: 1) The original link is redirected to
+a new page, where the title does not match with
+the entity in the link; 2) The entity in the link is
+lower-cased and thus, does not match with any title.
+Under the first condition, we just skip this entity
+because we require that the entity mention must ap-
+pear in the sentence to prove its occurrence. Under
+the second situation, if there is only one page title
+matching with the entity under the case-insensitive
+setting, we correct the entity to this page title. Oth-
+erwise, if there is more than one match, we use the
+entity embeddings in Wikipedia2Vec to measure
+the cosine similarity between each matched title
+and the title of the current page and correct the
+entity with the most relevant one.
+Filtering . Sometimes the entity mention extracted
+from the sentence may be part of a bigger noun
+phrase, which is not an entity mention. For exam-
+ple, suppose we recognize “algorithm” and “graph”
+as entity mentions in the sentence “The breadth-6697
+first-search algorithm is a way to explore the ver-
+texes of a graph layer by layer.” However, this is
+not a good relation description between“algorithm”
+and “graph” because the subject is “breadth-first-
+search algorithm” rather than “algorithm”. There-
+fore, it is necessary to determine the completed
+noun phrase for each entity mention. With the de-
+pendency tree of the sentence, we recursively find
+all the child tokens and the ancestor tokens that are
+connected to the entity mention with a compound
+dependency. To avoid any confusion, we simply
+reject the entity occurrence if its completed noun
+phrase and entity mention are different.
+Besides, to ensure that the length of relation de-scriptions is reasonable, we only keep the sentences
+with the number of tokens ∈[5,50]. We also only
+keep sentences whose shortest dependency path
+pattern between two target entities starts with nsubj
+ornsubjpass (more details are in Section 4.2.2).
+B Generation Examples
+We present sample outputs of the models in Table 9,
+with analysis of the results in Section 6.3.6698

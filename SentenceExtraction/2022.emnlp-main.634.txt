@@ -1,1 +1,733 @@
-9349 Proceedings of the 2022 Conference on Empirical Methods in Natural Language Processing , pages 9349 9360 December 7 - 11 , 2022 © 2022 Association for Computational Linguistics 9350 9351 9352 9353 9354 9355 9356 9357 9358 9359 9360 
+
+Minh Van Nguyen, Bonan Min, Franck Dernoncourt, and Thien Huu NguyenDept. of Computer Science, University of Oregon, Eugene, OR, USAAmazon AWS AI LabsAdobe Research, Seattle, WA, USAVinAI Research, Vietnam
+{minhnv,thien}@cs.uoregon.edu ,
+bonanmin@amazon.com ,dernonco@adobe.com
+Abstract
+Extracting entities, events, event arguments,
+and relations (i.e., task instances) from text rep-
+resents four main challenging tasks in informa-
+tion extraction (IE), which have been solved
+jointly (JointIE) to boost the overall perfor-
+mance for IE. As such, previous work often
+leverages two types of dependencies between
+the tasks, i.e., cross-instance and cross-type de-
+pendencies representing relatedness between
+task instances and correlations between infor-
+mation types of the tasks. However, the cross-
+task dependencies in prior work are not optimal
+as they are only designed manually according
+to some task heuristics. To address this issue,
+we propose a novel model for JointIE that aims
+to learn cross-task dependencies from data. In
+particular, we treat each task instance as a node
+in a dependency graph where edges between
+the instances are inferred through information
+from different layers of a pretrained language
+model (e.g., BERT). Furthermore, we utilize
+the Chow-Liu algorithm to learn a dependency
+tree between information types for JointIE by
+seeking to approximate the joint distribution
+of the types from data. Finally, the Chow-Liu
+dependency tree is used to generate cross-type
+patterns, serving as anchor knowledge to guide
+the learning of representations and dependen-
+cies between instances for JointIE. Experimen-
+tal results show that our proposed model sig-
+nificantly outperforms strong JointIE baselines
+over four datasets with different languages.
+1 Introduction
+Entity mention recognition (EMR), event trigger
+detection (ETD), event argument extraction (EAE),
+and relation extraction (RE) are four main chal-
+lenging tasks in information extraction (IE), which
+aim to extract entities (e.g., a person), events (e.g.,
+an attack), event arguments (e.g., a victim in an
+attack), and relations (e.g., work-for) mentionedin text. These IE tasks have been solved mostly
+in pipelined approaches (Li et al., 2013; Nguyen
+and Grishman, 2015; Chen et al., 2015; Lai et al.,
+2020; Du and Cardie, 2020; Veyseh et al., 2020;
+Li et al., 2020; Pouran Ben Veyseh et al., 2021;
+Nguyen et al., 2021b), where input to a model per-
+forming an IE task involves predictions from other
+models performing other IE tasks. As a result, er-
+rors in predictions by a model can be propagated
+to subsequent models in the pipeline to hurt overall
+performance.
+To avoid error propagation, the four IE tasks can
+be solved jointly (JointIE) in a single model (Lin
+et al., 2020; Nguyen et al., 2021a; Zhang and Ji,
+2021). As such, a key challenge for JointIE models
+is to effectively capture dependencies between the
+IE tasks to boost overall extraction performance.
+In particular, two types of task dependencies are
+important for JointIE, i.e., cross-instance and cross-
+type dependencies. First, for cross-instance de-
+pendencies, JointIE models use instances to re-
+fer to word spans for event triggers/entity men-
+tions (for EMR and ETD) or pair of word spans of
+event triggers/entity mentions (for EAE and RE)
+that should be classified according to predefined
+information types for IE. Accordingly, an impor-
+tant insight from previous JointIE models is to en-
+rich the representation for one instance with those
+from related instances in different IE tasks to facili-
+tate the type prediction (Lin et al., 2020; Nguyen
+et al., 2021a). To this end, a typical approach to
+encode cross-instance dependencies for representa-
+tion learning in previous work involves creating de-
+pendency graphs between instances to connect re-
+lated instances to facilitate representation learning
+(Nguyen et al., 2021a; Zhang and Ji, 2021). How-
+ever, as the instance dependency graphs in previous
+work are only created manually using some heuris-
+tics, e.g., connecting instances that share an entity
+mention or event trigger (Nguyen et al., 2021a),
+they might be suboptimal for a given dataset and9349hinder further performance improvement for IE.
+Consequently, to improve representation enrich-
+ment with information from related instances for
+JointIE, our work proposes to automatically learn
+cross-instance dependency graphs for IE tasks from
+data. To enable maximal flexibility, we explore a
+fully connected graph between all task instances in
+a sentence where a dependency weight is assigned
+to each edge to quantify the relatedness between
+two instances. In our method, we argue that depen-
+dency weights between task instances should be
+computed over multiple sources of information to
+produce optimal and comprehensive dependency
+graphs. To this end, motivated by the encoding of
+different linguistic structures (e.g., semantics, syn-
+tax) in the layers of pre-trained language models
+(PLMs), e.g., BERT (Devlin et al., 2019; Jawahar
+et al., 2019), we propose to leverage the represen-
+tations of instances at different layers of PLMs to
+compute dependency weights for the instances. In
+particular, given two instances for JointIE, their
+representation vectors at each layer of a PLM are
+consumed to produce a layer-specific dependency
+weight, which will be combined across layers to
+obtain an overall weight for our dependency graph.
+Graph Convolutional Networks (GCNs) (Kipf and
+Welling, 2017; Nguyen and Grishman, 2018) will
+then be used to induce enriched representations for
+the instances based on the computed cross-instance
+dependency graph.
+In addition, cross-type dependencies/patterns
+in JointIE systems characterize co-occurrences/co-
+relations of information types of different IE tasks
+(e.g., entity/event types and argument roles) in a sin-
+gle input sentence. For instance, in the ACE 2005
+dataset (Walker et al., 2006), a “Victim” argument
+for an “Attack” event is likely to be the “Victim”
+argument for a “Die” event in the same sentence.
+Accordingly, previous JointIE models have lever-
+aged cross-type dependencies either in the decod-
+ing phase, i.e., to form global type patterns/graphs
+to constrain the type prediction (Lin et al., 2020),
+or in the training phase, i.e., to form type depen-
+dency graphs to aid consistency regularization of
+golden and predicted types (Nguyen et al., 2021a).
+However, as in cross-instance dependencies, the
+dependency graphs between information types in
+IE in previous work are also designed manually,
+e.g., by linking types that are involved in the same
+instance for some IE task (Nguyen et al., 2021a).
+This is not desirable as manual designs might missimportant cross-type patterns that cannot guarantee
+optimal performance for JointIE.
+To this end, we propose to further learn cross-
+type dependencies/patterns from data to better sup-
+port type predictions of JointIE instances. As
+such, we view each information type in our IE
+tasks as a binary random variable, which is 1 if
+the type appears in the sentence, and 0 otherwise.
+This formulation enables us to employ Bayesian
+structure learning algorithms to infer dependency
+structures from data. In particular, we propose to
+leverage the Chow-Liu algorithm (Chow and Liu,
+1968) that measures mutual information between
+any two types (variables) in training data to learn a
+first-order dependency tree, aiming to approximate
+the underlying joint distribution of the information
+types (types) for JointIE. Afterward, the resulting
+Chow-Liu tree containing induced dependencies
+between information types will be used to generate
+global cross-type patterns for JointIE.
+To incorporate the learned cross-type dependen-
+cies into the JointIE model, our goal is to leverage
+such global patterns to obtain additional features
+to further enrich the GCN-induced representations
+for type prediction. Our intuition is to treat the
+induced cross-type patterns as anchor knowledge
+to which the information types, representations,
+and dependencies of IE instances in a sentence
+should adhere to exploit consistency and improve
+predictions for JointIE in the data. To this end, for
+each learned cross-type pattern, we seek to com-
+pute a similarity score between the computed cross-
+instance dependency graph for an input sentence
+and the cross-type pattern that can be included
+into the representations for the instances to predict
+types. Accordingly, we propose to leverage ran-
+dom walk graph kernels (Gärtner et al., 2003; Feng
+et al., 2022) that facilitate similarity computation
+between two graphs (i.e., the cross-instance depen-
+dency graph and cross-type pattern) via counting
+common random walks on the graphs to enrich rep-
+resentations for JointIE. Finally, we evaluate the
+proposed model with induced cross-task and cross-
+type dependencies for JointIE in both monolingual
+and cross-lingual learning settings. Experimental
+results show that our model consistently outper-
+forms strong baselines in all the settings across
+four different datasets and languages.9350
+2 Model
+There are four tasks in our IE pipeline, i.e., entity
+mention recognition (EMR), event detection (ED),
+event argument extraction (EAE), and relation ex-
+traction (RE). EMR and ED seek to identify word
+spans and types for entities (e.g., a “Person” ) and
+events (e.g., an “Attack” ) in text, respectively. On
+the other hand, EAE aims to identify whether each
+entity mention plays an argument role (e.g., an “At-
+tacker” ) in a given event mention. A special type
+“Other-role” is used to indicate that an entity does
+not play any role in a given event. For RE, the task
+is to determine if a relation (e.g., an “Affiliation”
+relation) exists between two given entity mentions.
+Similar to EAE, an special type “Other-relation”
+is used in RE to indicate no relation between two
+given entities. Joint information extraction (Join-
+tIE) is the joint task of EMR, ED, EAE, and RE
+(Lin et al., 2020; Nguyen et al., 2021a; Zhang and
+Ji, 2021), which aims to simultaneously predict en-
+tity mentions, event triggers, event arguments and
+relations for an input text in an end-to-end fashion.
+Our proposed model (called “DepIE” ) for Join-
+tIE consists of three main components: (i) Instance
+Detection, (ii) Cross-Instance Dependencies, and
+(iii) Cross-type Dependencies. Figure 1 presents
+an overview for our model.
+2.1 Instance Detection
+The first step in our model is to identify candidate
+instances for all the four IE tasks. In particular,
+candidate instances for EMR and ED involve spans
+of words for entity mentions and event triggersin text. For EAE, a candidate instance is formed
+by a pair of an event trigger span and an entity
+mention span. Similarly, we can obtain candidate
+instances for RE by pairing entity mention spans.
+Note that this step only performs candidate instance
+identification. Information types for the instances
+will be predicted in the next steps.
+Event Triggers and Entity Mentions: Given
+an input sentence w= [w, . . . , w]with N
+words, we employ a pretrained language model
+(PLM), e.g., RoBERTa (Liu et al., 2019), to pro-
+duce a sequence of contextualized embeddings
+X= [x, . . . , x]for the words (using average of
+hidden vectors for word-pieces in the last layer of
+the PLM). The vector sequence Xis then consumed
+by two different conditional random fields (CRFs)
+layers to predict two BIO tag sequences; each se-
+quence aims to captures spans of event triggers (or
+entity mentions) for ED (or EMR). The negative
+log-likelihoods LandLreturned by the CRFs
+for the ground-truth tag sequences of the spans for
+EMR and ED will then be included into the overall
+loss function. At test time, Viterbi algorithm is
+used to search for most probable tag sequences to
+find spans for event triggers V={v}and entity
+mentions V={v}(i.e., candidate instances) in
+the sentence. Each event trigger/entity mention is
+represented by a vector v(∗ ∈ { t, e}), computed
+via the average of contextualized embeddings for
+the words inside its corresponding spans v.
+Event Arguments and Relations: While it is pos-
+sible to use all pairs of entity mention and event
+trigger spans for the candidate instances of EAE
+and RE for type prediction, the large number of
+possible pairs will increase necessary computa-
+tional resources. To this end, we first send the
+pairs into binary classifiers to determine if they
+are positive examples (i.e., corresponding to some
+actual types of interest for EAE and RE). In par-
+ticular, to decide if an entity mention v∈V
+plays any role with an event trigger v∈V, we
+concatenate their span vectors (i.e., vandv)
+and feed the concatenation into a feed-forward
+network ( FFN ) with a sigmoid function in the
+end: p=σ(FFN([v;v])). Here, the score
+p∈(0,1)represents the likelihood for vto be
+an argument of some role for v. Similarly, we
+can compute a score p∈(0,1)for all pairs of
+entity mentions v, v∈Vto estimate the likeli-
+hood that there exists a relation between the entity
+mentions. In the training process, we obtain the9351binary cross-entropy losses LandLcomputed
+with the probability scores p,pto include in the
+overall loss function. In test time, we employ a
+threshold of 0.5for the scores p,pto determine
+positive pairs V={v= (v, v)}for event ar-
+guments and V={v= (v, v)}for relations.
+Only positive pairs are retained for our next steps
+of type prediction. Finally, each positive event ar-
+gument/relation is also represented by the average
+of representations of the involving event trigger
+and entity mention instances, called vandv.
+2.2 Cross-Instance Dependencies
+Given the detected instances for the four IE tasks
+inw, we aim to enrich the representation for each
+instance with information from other related in-
+stances to facilitate type prediction. As such, our
+model first learns a dependency graph G=
+(V, E)to capture the relatedness for the instances
+(called cross-instance dependency graph). In par-
+ticular, the node set VofGinvolves all the
+detected instances, i.e., V=V∪V∪V∪V. To
+enable information flow across different instances,
+our edge set Ewill include an edge for each pos-
+sible pair of instances in V; a weight αwill be
+assigned to each pair (v, v)to quantify the depen-
+dency between vandvinV.
+To learn the dependency weights α, our in-
+tuition is to exploit information from different
+sources (e.g., semantics, syntax) to ensure compre-
+hensive coverage of relatedness aspects for JointIE.
+Motivated by different linguistic features encoded
+in different transformer layers of PLMs (Jawahar
+et al., 2019), we propose to treat each layer of
+BERT (with Llayers) as a source of information. In
+particular, each word in the input sentence will be
+represented by Ldifferent embeddings returned by
+each layer of the PLM. In this way, for each node in
+V, we can obtain Ldifferent node representations
+computed at each layer of BERT (by averaging rep-
+resentations for word-pieces). Let v,vbe the rep-
+resentations for the nodes v, v∈Vat layer lof
+the PLM. The dependency weight α∈(0,1)be-
+tween the instance nodes v, vat layer lof BERT
+is computed by: α=FFN([v;v]), where
+FFNis a feed-forward network with a sigmoid
+function in the end.
+To this end, each instance v∈Vis associ-
+ated with Lsets of weights {α}capturing its
+dependencies on the other instances according to
+Ldifferent sources of information from BERT.The importance of the l-th information source
+to representation learning of vis then measured
+by sending its l-th representation vto a feed-
+forward network FFN(v). Afterward, we nor-
+malize the layer-specific importance scores for
+vacross layers with softmax, leading to s=
+softmax(FFN(v)). The dependency weight
+between vandvin our cross-instance graph is
+then determined via: α=/summationtextsα.
+Finally, the induced dependency graph with
+weights αis used to enhance the representations
+forv∈Vvia a Graph Convolutional Network
+(GCN) (Kipf and Welling, 2017; Nguyen and Gr-
+ishman, 2018) with Klayers:=(/summationtextα+
+/summationtextα),1≤k≤K
+where his the representation for vat the k-th
+layer of GCN ( h=v). For convenience, let h
+be the representation for the instance vat the final
+layer of the GCN, i.e., h=h.
+2.3 Cross-Type Dependencies
+As discussed in the introduction, to further improve
+the representations for the instances vfor type pre-
+diction, our method proposes to induce global de-
+pendencies between information types for different
+IE tasks (called cross-type dependencies) from data
+and use them as knowledge to generate additional
+features for instance representations.
+Cross-type Dependency Induction : For conve-
+nience, let Tbe the set of all information types
+for our four IE tasks, i.e., including entity types,
+event types, event argument roles, and relations.
+To infer dependencies/patterns between the types
+inT, our goal is to leverage their co-occurrences
+in the sentences of training data for the computa-
+tion. As such, we consider the information types
+inTas random variables and leverage the well-
+known Chow-Liu algorithm (Chow and Liu, 1968)
+in Bayesian structure learning to find meaningful
+relationships/patterns among the types. The Chow-
+Liu algorithm approximates the underlying joint
+distribution of random variables by finding a first-
+order dependency tree among the variables (i.e.,
+tree nodes correspond to the variables).
+LetX∈ {0,1}be the binary random variable
+for the information type t∈Twhere X= 1 if
+there exists one instance with type tin the current
+sentence, and X= 0 otherwise. The algorithm9352then computes mutual information (MI) scores be-
+tween any two random variables X, Xvia:
+I(X, X) =/summationdisplayˆP(x, x)ˆP(x, x)
+ˆP(x)ˆP(x)
+where ˆP(x, x) =is the em-
+pirical joint distribution between XandXcom-
+puted by counting across training data ( Mis the
+total number of sentences in the training data).
+Similarly, we can compute the marginal distribu-
+tions ˆP(x)andˆP(x). Afterwards, we construct
+a cross-type dependency tree Gfor informa-
+tion types as the spanning tree over the random
+variables that achieves maximum sum of the MI
+scores. The maximum spanning tree can be solved
+via Kruskal (Kruskal, 1956) or Prim (Prim, 1957)
+algorithms.
+To make it more manageable, we collect the set
+of connected sub-graphs (i.e., trees) Uthat have
+at least two nodes and less than nnodes in G
+(2≤n≤ |T|is a hyper-parameter) to serve as the
+global cross-type patterns/dependencies induced
+by our method for JointIE.
+Feature Generation with Graph Kernels : Using
+the induced cross-type patterns G∈Ufrom
+data as anchor knowledge, we expect the informa-
+tion types, instance representations, and instance
+dependencies in an input sentence wto follow the
+patterns to exploit consistency in the data. In par-
+ticular, instance representations and dependencies
+in an input sentence will have higher quality for
+type prediction if they are more similar to the in-
+duced cross-type patterns from data. Accordingly,
+we propose to leverage similarity scores between
+the cross-instance dependency graph for wand the
+cross-type patterns in Uas additional features to
+improve representations for JointIE. Here, we can
+employ the cross-instance dependency graph G
+with dependency weights αcomputed in the pre-
+vious step for the feature computation.
+As such, to compute the similarity between
+GandG, we propose to employ random
+walk graph kernels (Gärtner et al., 2003) that can fa-
+cilitate similarity measurement between two graphs
+with different number of nodes. In particular, the
+random walk kernel is computed by counting the
+number of common random walks on the two
+graphs, which has been shown to be equivalent
+to performing a random walk on the direct product
+of the graphs (Vishwanathan et al., 2006). This en-
+ables the p-step random walk kernel between twographs GandGto be efficiently computed via:
+(Vishwanathan et al., 2006; Feng et al., 2022):
+K(G, G) =/summationdisplay/bracketleftbig
+()⊙(())/bracketrightbig
+where VandVare the node embedding matrices
+for the node sets; AandAare adjacency matrices
+for the graphs GandGrespectively; ⊙is the
+element-wise product, and Ais the p-th power of
+the matrix A(∗ ∈ { 1,2}).
+To adapt this random walk kernel for Gand
+G, we can obtain the adjacency matrix A
+forGfrom the dependency weights α, i.e.,
+A=α. The node embedding matrix V
+forGcan leverage the GCN-induced vectors by
+setting the i-th row of Vtohfor instance v∈
+V. Also, for each induced cross-type pattern/tree
+G∈U, we can use its binary adjacency matrix
+Afor the kernel computation. Its node embed-
+ding matrix Vwill be produced by looking up
+the corresponding types in a type embedding matrix
+Tfor all types in T. In our method, Tis initialized
+randomly so its embedding dimension is equal to
+those for the instance representation h. In this way,
+we can compute a kernel-based similarity score
+ks=K(G, G)between the cross-instance
+dependency graph Gand each cross-type pat-
+tern in U. Finally, the concatenation of such sim-
+ilarity scores, i.e., m= [ks, ks, . . . , ks],
+can be used to provide additional global features
+for the instance representations for type predictions.
+Note that in this way, our cross-type patterns can
+support both training and test phases for JointIE
+models. This is in contrast to previous methods
+that can only utilize manually designed patterns
+in either training (e.g., FourIE) or decoding (e.g.,
+OneIE) phase.
+Training: To predict type for each instance v∈V,
+we compute an overall representation vector r
+forvby concatenating its GCN-induced repre-
+sentation hand the global features m:r=
+FFN(concat (h,m)). Here, FFN is
+a feed-forward network to ensure that rhas the
+same dimension as the type embeddings T. The
+type distribution vis then estimated by normal-
+izing the similarity of rand the type embed-
+dings: ˆy=softmax (rt|t∈T)where Tis
+the set of embeddings for all possible types T
+forvinT. The negative log-likelihood of the
+ground-truth types tis then used to train our
+model: L=−/summationtextlog(ˆy[t]). In sum-9353mary, the overall training loss for our model is:
+L=L+L+L+L+L.
+3 Experiments
+Datasets: Following previous work (Lin et al.,
+2020; Nguyen et al., 2021a), we conduct exper-
+iments on four datasets with different languages,
+i.e., ACE05-E+ (English), ACE05-CN (Chinese),
+ACE05-AR (Arabic), and ERE-ES (Spanish). The
+three ACE05 datasets are created by the Automatic
+Content Extraction program (Walker et al., 2006)
+with 33 event types, 7 entity types, 6 relation types,
+and 22 argument roles; and the ERE-ES dataset is
+from the Deep Exploration and Filtering of Text
+program (DEFT) (Song et al., 2015) with a similar
+schema to ACE05 datasets. For a fair comparison,
+we use the same preprocessing and train/dev/test
+splits for ACE05-E+, ACE05-CN, and ERE-ES as
+provided by prior work (Lin et al., 2020; Nguyen
+et al., 2021a). The ACE05-AR dataset does not
+have a standard split for JointIE so we follow the
+data split by (M’hamdi et al., 2019) for ETD in Ara-
+bic and apply the same preprocessing code from
+previous work (Lin et al., 2020) to produce the
+train/dev/test sets for ACE05-AR. Additionally, we
+perform experiments on the IARPA BETTER pro-
+gram’s Basic Event Extraction datasets, which
+feature 118 event types, 3 mention types, and 3
+argument roles. The BETTER-EN dataset is ob-
+tained by respectively combining the official train-
+ing, development, and test parts of Phase 1, 2, and
+3 English data. For the BETTER-FA dataset, we
+randomly split the Phase 2 Farsi evaluation data
+into training, development, and test portions with
+a ratio of 70/15/15 as no standard split is provided.
+Statistics for all the datasets are shown in Table 2.
+Hyper-Parameters: For the PLMs, we use
+RoBERTa large (Liu et al., 2019) and its multilin-
+gual version XLM-RoBERTa large (Conneau et al.,
+2020) for English and non-English datasets respec-
+tively. We tune hyper-parameters for our model on
+ACE05-E+ development data and apply the best
+hyper-parameters to the other datasets for consis-
+tency. In particular, we select: 5 e-6 for learning
+rate with Adam optimizer; 10 for batch size; 300
+for the hidden vector sizes for all the feed-forward
+networks and the GCN model; 2 for the number
+of layers for the feed-forward and GCN networks;
+n= 4 for the sizes of cross-type patterns in U;andp= 2for the kernel computation. The model
+performance is obtained by averaging over three
+runs with different random seeds.
+Baselines: We compare our method (i.e., De-
+pIE) with recent models that jointly perform
+our four IE tasks, including OneIE (Lin et al.,
+2020), AMRIE (Zhang and Ji, 2021), and FourIE
+(Nguyen et al., 2021a). FourIE is the current
+state-of-the-art method for JointIE. Among mod-
+els, OneIE, FourIE, and our model DepIE are
+language-agnostic so they can be directly applied
+to non-English datasets. In contrast, AMRIE is
+only designed for English as it requires an En-
+glish AMR parser. To be comprehensive, we
+also consider recent event extraction methods, i.e.,
+Text2event (Lu et al., 2021), DEGREE-E2E (Hsu
+et al., 2021), Query&Extract (Wang et al., 2022),
+GTEE-DYNPREF (Liu et al., 2022), which per-
+form only ETD and EAE.
+Monolingual Performance: We first compare the
+models in monolingual settings across the four
+datasets in Tables 1 and 3 where models are trained
+and tested on data of the same language. As can
+be seen, our model performs significantly better
+than the baselines across the datasets. Among the
+four IE tasks, the EAE and RE tasks appear to gain
+largest performance improvements. Further, as the
+improvements are consistent across languages, it
+highlights the portability to different languages of
+the induced cross-instance and cross-task depen-
+dencies in our proposed model for JointIE.
+Crosslingual Performance: To further investigate
+the cross-lingual generalization of the JointIE mod-
+els, we compare OneIE, FourIE, and DepIE in
+the cross-lingual transfer learning settings where
+the models are trained on training data of English
+datasets and evaluated on the test data of the other
+languages. As shown in Table 4, our model DepIE
+is still the best performer in the crosslingual set-
+tings over different tasks and test languages. The
+performance improvement is significant on almost
+all tasks ( p <0.01), thus demonstrating language-
+invariant advantages of our designed cross-task de-
+pendencies for JointIE. In addition, we note that
+this is the first comprehensive evaluation of Join-
+tIE models in cross-lingual transfer learning. As
+the performance of the current models is still not
+satisfactory, it emphasizes the challenges of Join-
+tIE with cross-lingual transfer learning and call for
+future research efforts in this important direction.
+Ablation Study: To study the impact of each pro-9354
+posed component for DepIE, Table 5 evaluates the
+ablated models over ACE05-E+ development data.
+In particular, for cross-instance dependencies,
+we first remove the cross-instance dependency
+graph from DepIE. The ablated model “- cross-
+instance” shows significant performance drops
+across all the four IE tasks, demonstrating the im-
+portance of the cross-instance dependency com-
+ponent to our model. In addition, we evaluate
+a simplified version of this component where a
+single source of information is used to induce de-
+pendencies between instances. Particularly, the
+cross-instance dependency weights αin this case
+are computed with only the last layer of the PLM
+instead of all the layers. As the performance of
+the ablated model “+single-source graph” is sub-
+stantially worse than the full model, it confirms
+the benefits of using multiple information sources
+from PLM to compute cross-instance dependencies
+for FourIE. Moreover, we replace our induced de-
+pendency weights for instances with the heuristic-
+based dependency weights produced by the best
+baseline model FourIE (i.e., α= 1 if instances
+vandvshare an event trigger or entity mention).
+The inferior performance of the resulting model9355
+“+heuristic graph” compared to “+single-source
+graph” and DepIE strongly indicates the strength
+of automatically learned dependency graphs for
+JointIE. Finally, we report the performance of De-
+pIE where the GCN model is removed while still
+preserving the cross-instance and cross-type depen-
+dencies (i.e., “- GCN” ). As such, the contextual-
+ized embeddings xwill replace the GCN-induced
+vectors hin the computation. It is clear from the
+table that the GCN model is necessary for DepIE
+as“- GCN” has significantly worse performance.
+Next, we study the effect of the cross-type depen-
+dency component for DepIE. As shown in the ta-
+ble, removing cross-type dependencies from DepIE
+(i.e., “- cross-type” ) significantly hurts model per-
+formance. To understand the benefit of the Chow-
+Liu algorithm, we examine a simpler method to pro-
+duce the cross-type dependency graph Gwhere
+two information types in Tare connected if they
+are both expressed in a sentence in training data.
+The resulting model (i.e., “+ naive cross-type” )
+performs much poorer than our full model with
+the Chow-Liw tree. To investigate the effective-
+ness of the random walk kernels, we examine a
+similar method to the type dependency regulariza-
+tion in FourIE to compute the similarity between
+the cross-instance graph Gand the cross-type
+patterns Gfor the global features m. In partic-
+ular, we use a GCN model to consume the graphs
+GandGalong with their node embeddings;
+the resulting vectors for each graph are then max-
+pooled to obtain a representation vector for the
+graph. The similarity between the two graphs is
+then computed via the cosine similarity between
+their representations. As the corresponding model
+“+ cosine similarity” is worse than the full model
+over different tasks, it demonstrates the necessity
+of the random walk kernels for DepIE.
+Finally, we remove the cross-type dependency
+component (i.e., with Chow-Liu and graph kernels)
+and integrate alternative methods to generate and
+apply cross-type dependencies from previous Join-
+tIE methods into DepIE, i.e., the type regularization
+in FourIE for training or the global type features
+for decoding in OneIE. Both the models “+type
+regularization” and“+global features” in Table 5
+observe large decreased performance, further con-
+firming the benefit of the cross-type dependency
+components for JointIE in DepIE.
+Analysis: To understand the effect of the cross-
+instance dependency graph learned by DepIE com-
+pared to the heuristic-based dependency graph pro-
+duced by FourIE, we examine examples on the
+ACE05-E+ development data for which DepIE can
+have correct predictions while FourIE fails to do
+so. Figure 2 presents some examples of this type.
+As can be seen, by computing dependency weights
+for all possible pairs of instances, DepIE can dis-9356cover important related instances that do not share
+any entity mentions/event triggers with the instance
+of interest (e.g., the related instance “suicide” for
+“blew” ), thus allow DepIE to correct the wrong pre-
+dictions in FourIE to improve the performance.
+Finally, Figure 3 presents some cross-type pat-
+terns learned DepIE. We observe that 3-node and 4-
+node patterns can capture subtle structures between
+information types for JointIE (e.g., the “Charge-
+Indict” ,“Convict” , and “Trial-Hearring” event
+types and the “Defendant” argument role).
+4 Related Work
+IE tasks have been performed jointly to capture de-
+pendency between the tasks via feature engineering
+(Roth and Yih, 2004; Yu and Lam, 2010; Li et al.,
+2013; Yang and Mitchell, 2016) or deep learning
+(Nguyen et al., 2016; Zheng et al., 2017; Bekoulis
+et al., 2018; Luan et al., 2019) methods. However,
+most previous work only jointly solves two or three
+IE tasks (Nguyen and Nguyen, 2019; Lu et al.,
+2021). Recently, there have been growing inter-
+est in performing all the four IE tasks jointly (i.e.,
+JointIE) (Wadden et al., 2019; Zhang and Ji, 2021;
+Nguyen et al., 2022) to exploit manually designed
+dependency graphs for IE instances (Nguyen et al.,
+2021a) or handcrafted global features for informa-
+tion types (Lin et al., 2020). Our work is different
+from previous JointIE models as we learn cross-
+instance and cross-type dependencies from data to
+provide better structures for representation learning.
+Finally, we note that our cross-type dependency
+component is related to structure learning meth-
+ods for Bayesian networks (Eaton and Murphy,
+2012; Banerjee and Ghosal, 2015; Scutari et al.,
+2019) and graph kernels to compute graph similar-
+ity (Gärtner et al., 2003; Vishwanathan et al., 2006;
+Shervashidze et al., 2009; Kondor and Pan, 2016a;
+Feng et al., 2022). However, these approaches have
+not been explored for JointIE.
+5 Conclusion
+We present a novel model to jointly solve four
+IE tasks (EMR, ETD, EAE, and RE). Our model
+learns cross-instance dependencies through differ-
+ent layers of a PLM and cross-type dependencies
+via the Chow-Liu algorithm. The cross-task depen-
+dencies are exploited via GCNs and random walk
+kernels to improve representation learning. Exten-
+sive experiments demonstrate the state-of-the-art
+performance of our model across four datasets withdifferent languages and settings. In the future, we
+plan to extend our model to include more IE tasks.
+Limitations
+In this work we propose a novel model to jointly
+solve four tasks in information extraction, i.e., en-
+tity mention recognition, event trigger detection,
+event argument extraction, and relation extraction
+(JointIE). Although our experiments demonstrate
+the effectiveness of the proposed method, there
+are still some limitations that can be improved in
+future work. First, other graph kernels to com-
+pute graph similarity such as subgraph matching
+kernels (Kriege and Mutzel, 2012) or multiscale
+Laplacian graph kernels (Kondor and Pan, 2016b)
+are not yet explored in the current work. Future
+work can explore such alternatives for graph ker-
+nels to improve the effectiveness of graph com-
+parison for representation learning. Second, the
+Chow-Liu algorithm employed by our model is
+a popular method in Bayesian structure learning;
+however, recent structure learning methods such as
+ordering-based search (Teyssier and Koller, 2005)
+and integer linear programming (Cussens et al.,
+2017) are not evaluated in our work. These meth-
+ods can be considered to improve the learning of
+cross-type dependencies in our work.
+Acknowledgement
+This research has been supported by the Army Re-
+search Office (ARO) grant W911NF-21-1-0112
+and the NSF grant CNS-1747798 to the IU-
+CRC Center for Big Learning. This research is
+also based upon work supported by the Office
+of the Director of National Intelligence (ODNI),
+Intelligence Advanced Research Projects Activ-
+ity (IARPA), via IARPA Contract No. 2019-
+19051600006 under the Better Extraction from Text
+Towards Enhanced Retrieval (BETTER) Program.
+The views and conclusions contained herein are
+those of the authors and should not be interpreted
+as necessarily representing the official policies, ei-
+ther expressed or implied, of ARO, ODNI, IARPA,
+the Department of Defense, or the U.S. Govern-
+ment. The U.S. Government is authorized to re-
+produce and distribute reprints for governmental
+purposes notwithstanding any copyright annotation
+therein. This document does not contain technol-
+ogy or technical data controlled under either the
+U.S. International Traffic in Arms Regulations or
+the U.S. Export Administration Regulations.9357References935893599360

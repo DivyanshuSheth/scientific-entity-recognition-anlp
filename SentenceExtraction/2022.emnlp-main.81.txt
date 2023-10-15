@@ -1,1 +1,824 @@
-1251 Proceedings of the 2022 Conference on Empirical Methods in Natural Language Processing , pages 1251 1265 December 7 - 11 , 2022 © 2022 Association for Computational Linguistics 1252 1253 1254 1255 1256 1257 1258 1259 1260 1261 1262 1263 1264 1265 
+
+Dheeru DuaShivanshu GuptaSameer SinghMatt GardnerUniversity of California, Irvine, USAAllen Institute for Artificial IntelligenceMicrosoft Semantic Machines
+{ddua,shivag5,sameer}@uci.edu, mattgardner@microsoft.com
+Abstract
+Answering complex questions that require mak-
+ing latent decisions is a challenging task, es-
+pecially when limited supervision is available.
+Recent works leverage the capabilities of large
+language models (LMs) to perform complex
+question answering in a few-shot setting by
+demonstrating how to output intermediate ra-
+tionalizations while solving the complex ques-
+tion in a single pass. We introduce “Succes-
+sive Prompting”, where we iteratively break
+down a complex task into a simple task, solve
+it, and then repeat the process until we get the
+final solution. Successive prompting decou-
+ples the supervision for decomposing complex
+questions from the supervision for answering
+simple questions, allowing us to (1) have multi-
+ple opportunities to query in-context examples
+at each reasoning step (2) learn question de-
+composition separately from question answer-
+ing, including using synthetic data, and (3) use
+bespoke (fine-tuned) components for reason-
+ing steps where a large LM does not perform
+well. The intermediate supervision is typically
+manually written, which can be expensive to
+collect. We introduce a way to generate a syn-
+thetic dataset which can be used to bootstrap a
+model’s ability to decompose and answer inter-
+mediate questions. Our best model (with suc-
+cessive prompting) achieves an improvement
+of∼5% absolute F1 on a few-shot version of
+the DROP dataset when compared with a state-
+of-the-art model with the same supervision.
+1 Introduction
+Compositional reading comprehension datasets
+like HotpotQA (Yang et al., 2018) and DROP (Dua
+et al., 2019) have inspired a range of model archi-
+tectures that learn to answer complex questions
+with weak supervision from the final answer. One
+recent direction is to leverage large language mod-
+els (LMs) to solve compositional tasks with very
+few examples by generating latent reasoning steps
+before answering the question (Wei et al., 2022;Who kicked the longest
+field goal in the first half?
+Figure 1: Example decomposition used by Successive
+Prompting’s questiondecomposition and questionan-
+swer ing stage on a DROP example. The model iterates
+between predicting a simple question to ask and answer-
+ing the simple question.
+Nye et al., 2021; Karpas et al., 2022). Given a
+complex question, this approach first finds nearest-
+neighbor training examples from a dataset of (ques-
+tion, reasoning, answer) triples and then concate-
+nates them to create an input for the LM. A large
+LM is then prompted with this input to generate
+the intermediate reasoning steps needed, while an-
+swering the complex question in a single pass.
+While promising, this approach discards many of
+the benefits of prior approaches to this task (Khot
+et al., 2021; Karpas et al., 2022) by coupling the
+supervision for question decomposition to the su-
+pervision for performing the intermediate steps.
+Moreover, its non-modular nature does not allow
+using alternate symbolic reasoning engines in cases
+where they perform better than LMs. Additionally,
+the model gets exposed to only a single set of in-
+context examples, selected based on their proximity
+to the complex question, which may not contain1251optimal supervision for the intermediate steps that
+need to be taken.
+We propose “Successive Prompting”, where we
+iteratively decompose the complex question into
+the next simple question to answer, answer it, and
+then repeat until the complex question is answered
+(Figure 1). Each of these steps is performed with
+separate a query to the LM. Since the decomposi-
+tion and answering steps are performed separately,
+we can decouple the supervision of each step, pro-
+viding two primary benefits. First, when perform-
+ing in-context learning, we get multiple opportuni-
+ties to select di fferent in-context examples, which
+can be tailored to the particular decomposition or
+answering step being performed, instead of select-
+ing a single set of examples based only on the com-
+plex question. Second, when fine-tuning (with or
+without in-context examples (Chen et al., 2022)),
+we can provide training examples for each step
+independently, so the model only has to learn to
+perform one step at a time.
+This decoupling additionally allows us to judi-
+ciously inject synthetic data into the learning pro-
+cess, e.g., to help the model answer a particular
+kind of simple question that it could not previously
+answer, or a new reasoning composition it did not
+know how to decompose. Because the steps are
+separate, we can isolate model failures and develop
+synthetic approaches to fill in the gaps. It also al-
+lows us to replace the LM with other, purpose-built
+components to perform symbolic reasoning when
+appropriate (Khot et al., 2021; Segal et al., 2020;
+Jin et al., 2021).
+We demonstrate the utility of successive prompt-
+ing using a few-shot variant of the DROP
+dataset (Dua et al., 2019), selecting 300 examples
+for training (either fine-tuning or in-context exam-
+ple selection). These 300 examples are manually
+annotated with simple QA pairs as decompositions.
+We find that performance of all models is quite low
+in this few-shot setting, so we develop a synthetic
+data generator that produces complex questions
+with their decompositions from semi-structured
+Wikipedia tables (Yoran et al., 2021). This syn-
+thetic data provides not just complex question su-
+pervision, but also supervision for the intermediate
+steps. We augment this data with the 300 (complex)
+training examples and their decompositions from
+DROP. In this few-shot setting, our best perform-
+ing successive prompting model shows a ∼5% im-
+provement in F1 when compared to state-of-the-artmodel on DROP. The code and data are available
+at
+2 Decomposing Complex Questions
+The goal of compositional question answering is to
+answer a complex question qin the context of a pas-
+sage p(together denoted as x) by reasoning through
+latent sequential decisions z=z,z, ...,zto reach
+the final answer, y. Many models have been pro-
+posed to accomplish this with varying amounts
+of supervision and interpretability. In prompting
+methods like Chain-of-Thought (CoT, Wei et al.,
+2022) the latent steps are supervised, interpretable
+sentences; in other models these latent steps might
+be a program (Gupta et al., 2020; Chen et al., 2020)
+or even just the (unsupervised) hidden states in the
+model (Segal et al., 2020; Andor et al., 2019)
+We focus on models that take in-context exam-
+ples and produce a discrete, language-encoded z,
+with CoT being the primary exemplar. We write
+the general form for CoT, given an input x, a lan-
+guage model encoder LandNin-context examples
+obtained from querying an index I—each contain-
+ing a triplet of passage with complex question ( x),
+latent steps ( z) and final answer ( y)—as follows:
+y,z←L/parenleftig
+x,/braceleftbig /parenleftbigx,y,z/parenrightbig|n∈[1,N]/bracerightbig/parenrightig
+.
+2.1 Successive prompting
+In successive prompting, we represent each la-
+tent step as a pair of simple question and answer,
+z=(q,a)(see Figure 1 for example QA pairs)
+unlike CoT which represents each latent step as a
+declarative sentence. Moreover, CoT queries the
+indexIfor in-context examples and prompts the
+language model Lfor generating output only once.
+However, in successive prompting, we separate z
+into multiple question and answering steps, which
+gives us many opportunities to prompt L, with po-
+tentially di fferent in-context examples that are more
+tailored to the simple question at each step. It also
+enables us to re-encode the context given the in-
+termediate state z, which can be useful in certain
+questions that need long chain referencing (e.g., the
+sort-count example in Figure 3). We can write a
+general form for successive prompting as follows:
+q←L/parenleftig
+x,/braceleftig/parenleftbigx,q/parenrightbig|n∈[1,N]/bracerightig/parenrightig
+a←L/parenleftig
+p,q,/braceleftbig /parenleftbigp,q,a/parenrightbig|m∈[1,M]/bracerightbig/parenrightig1252
+q←L/parenleftig
+x,q,a,/braceleftig/parenleftbigx,q,a,q/parenrightbig|n∈[1,N]/bracerightig/parenrightig
+a←L/parenleftig
+p,q,/braceleftbig /parenleftbigp,q,a/parenrightbig|m∈[1,M]/bracerightbig/parenrightig
+···
+y←L/parenleftig
+x,z,/braceleftbig /parenleftbigx,y,z/parenrightbig|n∈[1,N]/bracerightbig/parenrightig
+There are three kinds of model outputs in this gen-
+eral form: intermediate questions q, intermediate
+answers a, and the final answer y. We refer to
+the first kind of output as question decomposition
+(QD) and the second kind as question answering
+(QA). We treat final answer prediction as a special
+case of question decomposition, where the model
+decides that no more decomposition is necessary
+and outputs a final answer, so we iteratively alter-
+nate between question decomposition and question
+answering until the model terminates.
+2.2 Training paradigm
+We have so far described successive prompting in
+a setting where only in-context examples are given,
+so no model training is performed. However, suc-
+cessive prompting can also be used in conjuction
+with model fine-tuning, where each intermediate
+output is treated as a training example for L. In thissection, we first describe how in-context examples
+are selected at every step, followed by detailing
+how these examples are used for model fine-tuning.
+In-context Learning During in-context learning,
+a small number of training examples are provided
+directly in the prompt that is given to a large LM,
+before the test input. These examples are selected
+from an index based on their similarity with the test
+input. For successive prompting, we create two in-
+dices:I, for looking-up relevant demonstrations
+for QD, andI, for looking-up relevant demon-
+strations for QA. The index Icontains partially
+decomposed chains at each step k, demonstrating
+the next question qto be produced for every com-
+plex question in the training data. The index I
+contains all the simple QA pairs in the training data
+from all the complex questions.
+In the QD stage, the index Iis queried with the
+complex test question, qand current step number, k,
+to select demonstrations regarding how to generate
+the next question for the held-out example. In the
+QA stage, the index Iis queried with the simple
+question qgenerated during QD to select relevant
+simple QA pairs. Figure 2 shows a demonstration1253of how in-context learning is executed step-by-step
+in each stage until QD outputs the special phrase
+“There are no more questions left to ask”, along
+with a final answer.
+Successive prompting allows the QA stage to ac-
+cess simple questions derived from complex ques-
+tions that would not have been retrieved by Chain-
+of-Thought prompting because on the surface they
+are not similar to the held-out complex question,
+even though they share similar sub-questions.
+Model Fine-tuning For model fine-tuning, we
+use T5 (Ra ffel et al., 2020) based sequence-to-
+sequence models. Such models are typically
+trained with control codes in a multi-task set-
+ting (Ma et al., 2021; Rajagopal et al., 2022) to
+switch between QD and QA tasks with shared
+model parameters. We adapt and extend the control
+codes introduced by text modular networks (TMNs,
+Khot et al., 2021) for training with our synthetic
+data. TMNs are limited in terms of the operations
+they can handle as they do not go beyond first or-
+der reasoning. We use synthetically generated data,
+which allows us to deal with higher-order reasoning
+questions in DROP. Because we are fine-tuning the
+model, we can use special tokens to denote ques-
+tion decomposition and other separators, instead of
+the natural language prompts shown in Figure 2,
+though the content is the same. The specific tokens
+used for each step are listed in Appendix A.
+Specialized Modules Successive prompting also
+allows us to use specialized sub-modules for solv-
+ing di fferent QA tasks because we no longer per-
+form QD and QA in an end-to-end manner. Solv-
+ing arithmetic operations like counting, di fference,
+sorting, etc., can be challenging for language mod-
+els. As a result, we follow Khot et al. (2021) and
+construct a simple mathematical sub-module for
+QA which parses the generated simple question
+for symbolic operation type and its arguments and
+then executes them in a deterministic way. If the
+generated simple question cannot be parsed as a
+mathematical operation, we apply the language
+model to solve it.
+3 Synthetic Dataset
+Any method that prompts LMs to produce interme-
+diate reasoning steps to answer complex questions
+needs some amount of supervision for those rea-
+soning steps. This kind of annotation can be expen-
+sive to collect and often requires expert knowledge.
+Prior work has typically relied on a small handful
+of manually-written example decompositions. We
+find that such small collections lead to very poor
+performance on a dataset as varied as DROP, even
+for large models.
+To mitigate these data issues, we propose a way
+to synthetically generate complex questions and
+their decompositions using semi-structured data
+which is easy to parse. We show that we can boot-
+strap model learning with this out-of-domain, syn-
+thetically generated data so it can adapt better when
+fine-tuned with limited in-domain supervision.
+Generation Process: Inspired by Yoran et al.
+(2021), we use semi-structured data from tables
+in English Wikipedia which are available in plenty.
+We employ curated templates to convert the rows
+in the tables into paragraphs. We use single column
+headers to create first order simple questions and a
+combination of columns for higher order complex
+questions. We synthesize data for 10 simple opera-
+tions: COUNT ,TOP(k) ,BOTTOM(k) ,FILTER ,SUM,
+COMPARISON ,DIFFERENCE ,NEGATION ,GATHER ,
+andINTERSECTION .
+We generate higher order combinations of first-
+order operations, wherever possible. Figure 3
+shows examples of higher order combinations of
+the atomic operation COUNT with a few other simple
+operations using Table 1 as context. The complete
+list of all decompositions is provided in Appendix
+A. Depending on the model, we use either sym-
+bolic or natural language version of the arithmetic
+operations. If we are using an LM to perform arith-
+metic operations, we output natural language; if we
+are using a separate symbolic reasoning engine, we
+output symbolic operations. We generate approxi-
+mately 141K total complex questions which result
+in 525K examples for QD and 257K examples for
+QA. See Appendix A for more dataset statistics.1254
+4 Experiments and Results
+The DROP dataset contains a variety of reason-
+ing compositions which are not uniformly dis-
+tributed. In order to get a fair representation of
+DROP examples, we first embed the examples us-
+ing a sentence embedding method trained on the
+QQP dataset (Reimers and Gurevych, 2019). We
+then use cosine similarity to get the top-50 nearest
+neighbor questions for each training example. The
+connection graph between each training question
+to its neighbors is then used to obtain 300 ques-
+tions that cover the majority of the training data,
+via the vertex cover algorithm. We manually an-
+notate these 300 examples with decomposed QA
+pairs in the same format as our synthetic data (Fig-
+ure 3). For synthetic examples, since we know
+the reasoning types, we uniformly sample example
+demonstration from each reasoning type.
+4.1 In-context Learning
+Setup We use faissindex with the QQP-based
+sentence embedding (Reimers and Gurevych, 2019)
+for indexing all the questions. We use GPT-J (6B)
+which is the largest freely available model we could
+use with prompts containing 6 in-context examples.
+Results In Table 2, we compare performance
+of language models without any prompting (Stan-
+dard), with chain-of-thought prompting (CoT) and
+successive prompting. We observe that succes-
+sive prompting performs better than CoT by 3.5%
+when only synthetic data is available, and 4.3%
+better with synthetic data and 300 annotations from
+DROP. The best successive prompting version on
+the dev set (Synthetic +DROP) has a test set per-
+formance of 30.6% F1. We also perform an abla-
+tion where the symbolic calculator is replaced by
+language model and observe that the performance
+drops by 1.5% F1. This further shows that modular
+approach is better over a single model that tries to
+solve all the tasks.12554.2 Model Fine-tuning
+Setup We employ a shared question decompo-
+sition (QD) and answering model (QA) based on
+T5-large version of UnifiedQA (Khashabi et al.,
+2020), trained in a multi-task manner. We use the
+format described in Appendix A for prompting Uni-
+fiedQA. For symbolic questions, we use a simple
+calculator that parses the operator and arguments
+in the generated question and executes the discrete
+operator on the detected arguments.
+To deter the model from learning incorrect steps,
+we use contrastive estimation (Smith and Eisner,
+2005). In particular, we first train the model for two
+epochs with cross-entropy loss while generating the
+output sequence (simple question or answer). Then
+we continue training by adding an auxiliary loss
+term which increases the likelihood of the inter-
+mediate sub-question that would produce a correct
+sub-answer at the cost of one that does not (Dua
+et al., 2021). We sample up to 3 negative samples
+at each step. We use HuggingFace transformersto
+train our models, with a learning rate of 5e-5 and
+maximum input length of 768.
+Due to variance in the types of context tables
+present in Wikipedia, the synthetic dataset distri-
+bution is not uniform across di fferent reasoning
+types. To have a balanced representation of ques-
+tions pertaining to di fferent reasoning types, we
+employ dynamic sampling (Gottumukkala et al.,
+2020), where at the beginning of each epoch we
+select 80,000 instances from across all reasoning
+types in proportion to the drop in their current per-
+formance with respect to previous epoch on held-
+out synthetic data. For the first epoch we sample
+in proportion to original the size of each reasoning
+type. During inference, we use beam search with
+size 5 to generate decompositions, switching be-
+tween QD and QA stages until QD reaches end of
+decomposition (“EOQ”) or maximum number of
+steps which we set as 10.
+Baseline models We compare against a num-
+ber of di fferent baselines, both symbolic and non-
+symbolic. As non-symbolic baselines, we use
+UnifiedQA (Khashabi et al., 2020), which is pre-
+trained on a number of existing question answering
+datasets, and PReasM (Yoran et al., 2021), which
+is pre-trained on synthetically generated composi-
+tional QA pairs. We also include a baseline with
+symbolic components, TASE (Segal et al., 2020).This model (and others like it (Jin et al., 2021;
+Andor et al., 2019)) are capable of performing a
+combination of continuous and discrete operations,
+which is essential for DROP. TASE does not require
+expressing decomposition in a specific grammar
+and can work with natural language. We chose this
+model as it is close to state of the art on the full
+DROP dataset and has publicly available code.
+Results In Table 3, we use the DROP dev set
+to compare the performance of di fferent symbolic
+and non-symbolic models in three settings: (1)
+using no training data from DROP (0-shot), (2)
+using only question-answer supervision from the
+300 DROP examples, and (3) using both question-
+answer supervision and the decompositions for the
+300 DROP examples. In each of these settings, we
+can train the model with or without the synthetic
+data that we generated.
+We observe that our out-of-domain synthetic
+data universally improves model performance, and
+the improvement is most pronounced in TASE,
+nearing a 20% absolute improvement. Without syn-
+thetic data, PReasM is the best performing baseline,
+but TASE overtakes PReasM when synthetic data
+is available. Additionally, and unsurprisingly, in-
+creasing the amount of supervision from 0-shot to
+complex QA pairs to decompositions universally
+improves model performance.
+Finally, our method, which is a fine-tuned suc-
+cessive prompting model combined with a sym-
+bolic reasoning engine, achieves the best perfor-
+mance, giving an improvement of 5.4 F1 over the
+state-of-the-art model with similar supervision, i.e.
+TASE +Synthetic w /decomp. We follow the stan-
+dard practice of using test set for only our final best
+performing model (SP w /decomp). We observe
+that our best model with a test set performance of
+50.2 F1 is better than the state-of-the-art model
+with similar supervision (45.1 F1) by 5.1% F1.
+Overall, methods that learn to decompose com-
+plex questions into simple QA pairs adapt well to
+complex questions in new domain with little (SP
+w/decomp: 51.3 F1) to no in-domain supervision
+for decomposition (SP 0-shot: 49.8). If we have
+limited complex QA supervision (without any de-
+compositions), un-interpretable symbolic models
+result in the best performance (TASE +Synthetic
+w/o decomp: 44.1). This is because of two reasons.
+First, such models can capture domain specific an-
+swer priors which may result it decent held-out per-
+formance (Dua et al., 2020; Agrawal et al., 2018).1256
+Second, depending on the context, sometimes it
+may not be straight-forward to decompose the com-
+plex questions into QA pairs.
+4.3 In-context vs Fine-Tuning
+To understand the gap in performance between suc-
+cessive prompting with in-context learning and fine-
+tuning, we perform ablations across in-context and
+fine-tuned version of QD and QA modules. We
+observe that in-context learning is unable to do
+well on answering simple questions that result in
+a list of answers—which is especially important
+for DROP as symbolic aggregations are generally
+applied on a list of answers. On using a fine-tuned
+QA model we see an improvement of ∼10% in
+F1 with an in-context QD model. Moreover, since
+the final answer performance is dependent on how
+well the QA model performs, using a better QD
+model (fine-tuned) does not help the overall perfor-
+mance much unless the QA model can handle the
+decompositions produced by the QD model.
+4.4 Qualitative Examples
+To evaluate the correctness of decomposed QA
+pairs, we manually analyze a subset of predictions
+on the dev set with in-context (DROP-only) learn-
+ing and model fine tuning (few shot). We do this
+by randomly sampling 50 correct predictions to
+determine how often the incorrect decompositions
+result in correct answer. We observe that QD stage
+has an accuracy of 88% for in-context and 96%
+for fine-tuned model. The incorrect decomposi-tions are mainly because the decomposed question
+is identical to the original question. For instance,
+"Who made the longest field goal?" can sometimes
+be answered correctly without decomposing the
+question if the passage contains a single field goal
+mention.
+We also sample 50 incorrect predictions to as-
+certain the reason for incorrect predictions in both
+in-context and fine-tune setup. We observe that the
+final predictions are incorrect due to three main cat-
+egories of errors: incorrect QA model prediction,
+incorrect next question prediction (QD) and out-
+of-scope reasoning type. The QA model outputs
+incorrect answers to simple question 40% and 22%
+of the times for in-context and fine-tuned respec-
+tively. The second class of errors, due to incorrect
+decomposition, occur 30% of the times for both
+in-context and fine-tuned. The final class of errors,
+due to compositional questions that are not covered
+by synthetically generated annotations, occur 28%
+(in-context) and 46% (fine-tune) of the times.
+In Figure 4, we show a few examples of cor-
+rect and incorrect predictions and point out the
+strengths and weaknesses of successive prompt-
+ing. The main strength of successive prompting is
+that, by breaking down the question, we are able
+to get improved supervision for QA. As a result, it
+is able to correctly identify the goals kicked in the
+first half while answering the question “How many
+field goals did both teams kick in the first half?",
+unlike CoT that returns goals for the entire game.
+One of the limitations of in-context learning,
+when compared with fine-tuning (irrespective of
+the type of prompting), is that examples are cho-
+sen based on the question alone, overlooking the
+context. For instance, DROP has questions like
+“How many people were not Germans, in terms of
+percentage?” where we first need to answer “How
+many people were Germans, in terms of percent-
+age?" and then perform a negation operation (i.e,
+subtract from 100). The word “not" influences the
+example lookup to choose decomposition that in-
+volves a negation even when the question being
+answered requires a di fferent operation.
+A limitation of successive prompting is that it
+is sometimes challenging to decompose a ques-
+tion, especially when it involves implicit reasoning
+from the passage. For instance, for “Which port
+did the Korean immigrants leave first Chemulpo
+or Veracruz?”, it is di fficult to explicitly define a
+comparison style decomposition from the sentence,12571258“After which they took a train to Veracruz”.
+5 Related Work
+Prompting methods Prompting was introduced
+as a way to test the reasoning capabilities of large
+language models (Brown et al., 2020). In follow-
+up works (Schick, 2022; Chowdhery et al., 2022;
+Marasovi ´c et al., 2021) prompting techniques have
+been used as a mechanism to supervise the model
+decision with few demonstrations as a conditioning
+context to guide its predictions on an unseen exam-
+ple. Works like Chain-of-Thought reasoning (Wei
+et al., 2022; Zelikman et al., 2022) especially focus
+on compositional questions where they provide a
+chain of reasoning as demonstrations. In concur-
+rent work, Least-to-Most prompting (Zhou et al.,
+2022) takes a similar view as ours to break down
+the problem into sub-problems. However, in Suc-
+cessive Prompting the question decomposition and
+answering stages are interleaved, unlike Least-to-
+Most where the problem is first reduced into sub-
+problem and then executed in a sequence. In our
+method, the next question prediction has access to
+previously answered sub-questions, which is use-
+ful in questions that need long chain referencing.
+Other contemporaneous works (Press et al., 2022;
+Khot et al., 2022) use very large language mod-
+els (more than twice the size we used) and show
+better few-shot generalization. Works like Perez
+et al. (2021) have shown the importance of hav-
+ing the right in-context examples for downstream
+performance leading to works that learn to retrieve
+relevant in-context examples (Rubin et al., 2021).
+Non-symbolic methods Most non-symbolic
+methods are sequence-to-sequence models trained
+on a large amount of question answering
+data (Khashabi et al., 2020; Yoran et al., 2021).
+Symbolic methods Neural module networks like
+approaches parse complex questions into a pre-
+specified grammar and learn neural components to
+handle symbolic mathematical operations (Gupta
+et al., 2020; Chen et al., 2020; Nye et al., 2021)
+which are recursively executed. State-of-the-art
+models on DROP, however, use a combination of
+BERT-based contextual models along with a cal-
+culator that performs discrete operations (Andor
+et al., 2019; Segal et al., 2020; Hu et al., 2019).
+Works like Text Modular networks (Khot et al.,
+2021) and MRKL (Karpas et al., 2022) are clos-
+est to our work. However, they are limited in theterms of types of simple questions they can answer
+(single-span only) and the complexity of reasoning
+they can do (single-order only). TMNs, addition-
+ally, use a classifier that scores the generated chains
+module and filters out incorrect question decom-
+positions, while we use contrastive estimation to
+learn a better question decomposer and as a result
+do not need a chain scorer.
+6 Conclusion
+We present a way to successively decompose com-
+plex questions into simple QA pairs, which al-
+lows for modular QD and QA systems that can be
+trained and queried independently. When perform-
+ing in-context learning, we showed that successive
+prompting yields an improvement of 4.6 F1 over
+chain-of-thought prompting. When replacing just
+the in-context QA module with a fine-tuned one,
+which is adept at handling list type questions, we
+further improve the overall performance by 9.5 F1.
+We believe that modular systems that decompose
+and delegate tasks to the most appropriate model,
+whether that is a large LM or a tailored component,
+are more e ffective at solving complex tasks than
+trying to have a large LM solve the entire task on
+its own. Successive prompting shows one way this
+decomposition and delegation can be done.
+Acknowledgements
+We would like to thank Anthony Chen, Catarina
+Belem and the anonymous reviewers for the discus-
+sions and feedback. This material is based upon
+work sponsored in part by the DARPA MCS pro-
+gram under Contract No. N660011924033 with the
+United States O ffice Of Naval Research, in part by
+funding by AI2 and NSF IIS-1817183. We would
+also like to thank Hasso Plattner Institute(HPI) for
+supporting the first author through UCI-HPI fellow-
+ship. The views in this work are of authors and not
+the sponsors.
+Limitations
+We propose a way to decompose complex ques-
+tions into interpretable simple QA pairs as latent
+steps that get successively asked and answered by
+large pretrained models. The notion of performing
+complex tasks by iteratively finding and then filling
+information needs is very general, but we have only
+shown the applicability of one specific version of
+this idea in one specific setting. There are many1259potential challenges in applying successive prompt-
+ing more broadly. The biggest is that it requires at
+least some decomposition data, which may be hard
+or even impossible to obtain. Some complex ques-
+tions are not easily decomposed, and some domains
+can be very challenging to write synthetic data gen-
+erators for. We were able to generate synthetic data
+that covered most of the reasoning types in DROP,
+but other kinds of complex questions would not
+be covered by our generator (e.g., questions that
+require commonsense or causal reasoning).
+There is also significant di fficulty in choosing a
+level of granularity for decomposition. If a large
+pretrained model can directly answer a question as
+complex as “What was Barth’s second field goal?”,
+we should let the model answer the question instead
+of trying to decompose it further. The right gran-
+ularity for the decomposition thus depends on the
+capabilities of the underlying model, and those ca-
+pabilities are rapidly changing as newer and larger
+pretrained models are released. There is the possi-
+bility that newer model iterations will not need any
+decomposition to answer the complex questions
+covered by our synthetic data generator, making
+that generator obsolete. However, it seems unlikely
+that pretrained models will be able to handle all
+complex scenarios in the near future, so the ideas
+of successive prompting and generating synthetic
+data to bridge reasoning gaps should still be appli-
+cable even when our particular application of them
+becomes obsolete.
+This method also increases the computational
+requirements for answering complex questions, as
+instead of making one query to a large LM, suc-
+cessive prompting makes many queries to answer
+a single question.
+Ethics Statement
+This work focuses on improving complex ques-
+tion answering with limited data. It uses existing
+training data and conventional methods of testing
+model performance. This work does not deal with
+any social impacts or biases in natural language
+processing systems.
+References12601261
+A Appendix
+A.1 Control codes for Model Fine-tuning
+To generate a simple question given complex ques-
+tion and previously generated latent steps, we ap-
+pend the input with control code “QS:”
+{x} QI: qA:a···QI: qA:a
+QS:
+To answer the simple question we prompt the
+model again with only the simple question this time
+and control code “A:” to generate answer, a
+{p} QS: qA:
+We alternate between the two stages till we reach
+the end of decomposition marker “EOQ"
+{x} QI: qA:a···QI: qA:a
+QS: EOQ
+A.2 Synthetic Dataset StatisticsReasoning Number of Examples
+Filter 9634
+Count 11019
+Comparison 12239
+Difference 15433
+Negation 2020
+Intersection 9089
+Sum 18754
+Sort 10663
+Sort-Filter 5827
+Difference-Sort 13872
+Sum-Sort 3212
+Count-Filter 7382
+Gather-Count 1506
+Sum-Count 4138
+Difference-Count 4216
+Sort-Count 6328
+Comparison-Count 5998
+Total 141,3301262Round Date Opponent Venue Attendance
+R2 1st Leg 26 September 1990 Walsall A 5,666
+R2 2nd Leg 10 October 1990 Portsmouth H 10,037
+QFR 23 October 1990 Liverpool H 18,246
+SF 1st Leg 24 February 1991 She ffield Wednesday H 14,074
+SF 2nd Leg 27 February 1991 Oxford United A 34,669
+QFR 23 January 1991 Walsall A 33,861
+Reasoning Complex Question Decomposition (Question, Answer)
+Filter What are the opponents
+when date was later than
+21 January 1991 and atten-
+dance was less than 20000?•Q: What are the opponents when date was
+later than 21 January 1991? A: She ffiedl
+Wednesday; Oxford United; Walsall
+•Q: Out of She ffield Wednesday, Oxford
+United and Walsall, which opponents have
+attendance less than 20000? A: She ffield
+Wednesday
+Count How many opponents were
+there?•Q: What are all the opponents? A: Walsall;
+Portsmouth; Liverpool; She ffield Wednes-
+day; Oxford United
+•Q: count(Walsall; Portsmouth; Liverpool;
+Sheffield Wednesday; Oxford United) A: 5
+Comparison What round had a higher at-
+tendance: SF 2nd Leg or
+QFR?•Q: What was the attendance when round was
+SF 2nd Leg? A: 34,669
+•Q: What was the attendance when round was
+QFR? A: 33,861
+•if_then(34,669 >33,861; SF 2nd Leg; QFR)
+A: SF 2nd Leg
+Difference What is the di fference be-
+tween attendances when
+the opponent was Oxford
+United and Portsmouth?•Q: What was the attendance when opponent
+was Oxford United? A: 34,669
+•Q: What was the attendance when opponent
+was Portsmouth? A: 10,037
+•diff(34669; 10037) A: 24632
+–Q: What is the di fference between
+34669 and 24632?
+Sum What were the total at-
+tendances when opponents
+were Walsall and Oxford
+United?•Q: What was the attendance when opponent
+was Walsall? A: 5,666; 33,861
+•Q: What was the attendance when opponent
+was Oxford United? A: 34,669
+•sum(5666; 33861; 34669) A: 74196
+Sort Which opponent had the
+second highest attendance?•Q: What are all the attendances? A: 5,666;
+10,037; 14,074; 34,669; 33,861
+•Q: top(2, 5,666;10,037;14,074;34,669;33,861
+A: 33,861
+•What was the opponent when attendance was
+33,861? A: Walsall1263Reasoning Complex Question Decomposition (Question, Answer)
+Higher-order combinations with SORT
+Sort-
+FilterWhich opponent had the
+third lowest attendance af-
+ter 1 January 1991?•Q: What are all the attendances after 1 January
+1991? A: 14,074; 34,669; 33,861
+•Q: bottom(3, 14,074;34,669;33,861 A: 14,074
+•What was the opponent when attendance was
+14,074 A: She ffield Wednesday
+Difference-
+SortWhat is the di fference be-
+tween the second highest at-
+tendance and lowest atten-
+dance?•Q: What are all the attendances? A:
+5,666;14,074;18,246;14,074;34,669;33,861
+•Q: top(2, 5,666; 14,074; 18,246; 14,074;
+34,669; 33,861 A: 33861
+•Q: bottom(1, 5,666; 14,074; 18,246; 14,074;
+34,669; 33,861) A:5666
+–Q: What is the smallest value in: 33861
+and 5666?
+•diff(33861;5666) A: 28195
+Sum-Sort What was the total of high-
+est attendance and third low-
+est attendance?•Q: What are all the attendances? A: 5,666;
+14,074;18,246;14,074;34,669;33,861
+•Q: top(1, 5,666; 14,074; 18,246; 14,074;
+34,669; 33,861 A: 34669
+•Q: bottom(3, 5,666; 14,074; 18,246; 14,074;
+34,669; 33,861 A:18246
+•sum(33861;5666) A: 52915
+–Q: What is the sum of 33861 and 5666?
+(Additional) Higher-order combinations with COUNT
+Count-
+FilterHow many rounds had
+venue as A and attendance
+greater than 30000?•Q: What rounds had venue as A? A: R2 1st Left;
+SF 2nd Leg; QFR
+•Q: Out of rounds R2 1st Left, SF 2nd Leg and
+QFR, which had attendance greater than 30000?
+A: SF 2nd Leg; QFR
+•Q: count(SF 2nd Leg; QFR) A: 2
+Gather-
+CountHow many opponents were
+there for each of venue: A
+and H?•Q: What are the opponents when venue was A?
+A: Walsall; Oxford United
+•Q: count(Walsall; Oxford United) A: 2
+•Q: What are the opponents when venue was H?
+A: Portsmouth; Liverpool; She ffield Wednesday
+United
+•Q: count(Portsmouth; Liverpool; She ffield
+Wednesday United) A: 3
+•Q: gather(2;3) A: 2 and 31264Reasoning Complex Question Decomposition (Question, Answer)
+Additional Higher-order combinations with COUNT
+Sum-
+CountWhat are the total number
+of opponents when venue
+were A and H?•Q: What are the opponents when venue was A?
+A: Walsall; Oxford United
+•Q: count(Walsall; Oxford United) A: 2
+•Q: What are the opponents when venue was H?
+A: Portsmouth; Liverpool; She ffield Wednesday
+United
+•Q: count(Portsmouth; Liverpool; She ffield
+Wednesday United) A: 3
+•Q: sum(2;3) A: 5
+Difference-
+CountWhat is the di fference be-
+tween number of rounds
+when venue was A and H?•Q: What are the venues when round was SF 1st
+Leg? Ans: H
+•Q: count(A) A: 1
+•What are the venues when round was QFR? A:
+H;A
+•Q: count(H;A) A: 2
+•diff(3; 2) Ans: 11265

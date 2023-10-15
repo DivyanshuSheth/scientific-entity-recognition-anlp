@@ -1,1 +1,716 @@
-7919 Proceedings of the 2022 Conference on Empirical Methods in Natural Language Processing , pages 7919 7933 December 7 - 11 , 2022 © 2022 Association for Computational Linguistics 7920 7921 7922 7923 7924 7925 7926 7927 7928 7929 7930 7931 7932 7933 
+
+Ahmet Üstün*
+University of Groningen
+a.ustun@rug.nlAsa Cooper Stickland*
+University of Edinburgh
+a.cooper.stickland@ed.ac.uk
+Abstract
+Parameter-efficient fine-tuning methods
+(PEFTs) offer the promise of adapting large
+pre-trained models while only tuning a small
+number of parameters. They have been shown
+to be competitive with full model fine-tuning
+for many downstream tasks. However, prior
+work indicates that PEFTs may not work
+as well for machine translation (MT), and
+there is no comprehensive study showing
+when PEFTs work for MT. We conduct a
+comprehensive empirical study of PEFTs
+for MT, considering (1) various parameter
+budgets, (2) a diverse set of language-pairs,
+and (3) different pre-trained models. We find
+that ‘adapters’, in which small feed-forward
+networks are added after every layer, are
+indeed on par with full model fine-tuning when
+the parameter budget corresponds to 10% of
+total model parameters. Nevertheless, as the
+number of tuned parameters decreases, the
+performance of PEFTs decreases. The magni-
+tude of this decrease depends on the language
+pair, with PEFTs particularly struggling for
+distantly related language-pairs. We find that
+using PEFTs with a larger pre-trained model
+outperforms full fine-tuning with a smaller
+model, and for smaller training data sizes,
+PEFTs outperform full fine-tuning for the same
+pre-trained model.
+1 Introduction
+There has been enormous progress on scaling up
+neural machine translation (NMT) in the recent
+years, resulting in ‘massively multilingual’ mod-
+els that are capable of translating across many
+languages (Bapna et al., 2022). Most success-
+ful applications rely on sequence-to-sequence pre-
+training that (1) leverages web-scale monolingualdata with a masking objective to build a multilin-
+gual backbone (parent) model (Liu et al., 2020;
+Song et al., 2019), or (2) directly targets a many-
+to-many NMT system by mining parallel corpora
+(Fan et al., 2020).
+Standard practice is to fine-tune every parameter
+of a particular a pre-trained model to specialize it
+to a language pair (or domain) of interest (Zoph
+et al., 2016; Neubig and Hu, 2018). However, if we
+require specialization to many language pairs or do-
+mains, the storage and time costs of full fine-tuning
+may become prohibitive. Moreover, as models
+grow ever larger, more efficient methods become
+attractive.
+As an alternative to full model fine-tuning,
+several parameter-efficient fine-tuning methods
+(PEFTs ) have been proposed. Such methods only
+fine-tune a small number of parameters, reducing
+storage cost, and avoid calculating the gradients for
+every model parameter, reducing training time and
+memory cost. Examples include adapters (Houlsby
+et al., 2019; Bapna and Firat, 2019) and prefix-
+tuning (Li and Liang, 2021), which introduce a
+few extra parameters to fine-tune, keeping the pre-
+trained model fixed. Others like BitFit (Zaken et al.,
+2021) tune only the bias vectors of the backbone
+model and similarly Gheini et al. (2021) update
+only cross-attention layers.
+PEFTs can produce results that are competitive
+with full fine-tuning. For instance, adapters can
+match full fine-tuning performance on the GLUE
+benchmark using only 2-4% additional parameters
+(Houlsby et al., 2019). However their potential
+for MT has not been fully explored. Prior stud-
+ies indicate that PEFTs designed for classification
+tasks can fail for MT (Stickland et al., 2021a), and
+it is not known how source and target language
+characteristics affect PEFTs’ performance.
+In this work, we provide a comprehensive analy-
+sis of PEFTs for MT. For our analysis, we consider:
+(1) different pre-trained models which vary in size7919from 484 million to 1.2 billion total parameters, (2)
+several PEFTs, and (3) typographically and geo-
+graphically diverse languages. Moreover, we vary
+the number of tuned parameters, resulting in dif-
+ferent parameter ‘budgets’, ranging from 0.03% to
+10% of total model parameters. Our main research
+questions are:
+RQ1: For a given parameter budget, which PEFT
+works best?
+RQ2: How does language similarity affect the per-
+formance of PEFTs for different parameter
+‘budgets’?
+RQ3: How does (i) the pre-training objective, and
+(ii) the size of the parent model affect the
+performance of PEFTs?
+RQ4: Do PEFTs work better than fine-tuning for
+small dataset sizes?
+Key Findings 1) We found methods which in-
+troduce new parameters to a pre-trained model,
+namely adapters and prefix tuning, give us the best
+performance (§ 5.1). As we increase the number of
+new parameters, adapters retain good performance,
+while prefix-tuning falls behind. 2)We found a
+large variation in PEFTs’ performance across lan-
+guage pairs. Specifically, the distance between the
+source and target languages is negatively correlated
+with performance, especially for methods tuning
+the smallest number of parameters and methods tun-
+ing a subset of existing parameters (like bias terms
+or cross attention) (§ 5.2). 3)We observe that in-
+creasing model size, but keeping the same number
+of fine-tuned parameters, substantially increases
+MT performance (§ 5.3). Finally, 4)we observe
+that adapters perform better than full fine-tuning
+for small datasets, with the advantage for adapters
+increasing as dataset size gets smaller (§ 5.4).
+2 Background
+This section briefly describes the two multilingual
+pre-trained models that we focus on in this work,
+namely mBART and M2M-100.
+Multilingual Denoising Pre-training Multilin-
+gual BART, mBART (Liu et al., 2020), is a
+sequence-to-sequence transformer model (Vaswani
+et al., 2017) that consists of an encoder and an
+autoregressive decoder. It is pre-trained with a de-
+noising objective, reconstructing a document from
+a noisy version. mBART uses span masking andsentence permutation to noise the original docu-
+ment. It consists of 12 encoder and 12 decoder
+layers, with hidden dimension of 1024 and 16 at-
+tention heads. mBART is trained entirely on mono-
+lingual data that includes multiple languages and it
+has a large multilingual vocabulary of 250k tokens.
+In our experiments, we use mBART-50 (Tang et al.,
+2020) which was pre-trained on 50 languages.
+Many-to-Many Multilingual MT The M2M-
+100 model (Fan et al., 2020) is a many-to-many
+multilingual translation system that is pre-trained
+on a large-scale parallel dataset for 100 languages
+and 100 ×99 translation directions. This dataset is
+automatically constructed with a novel data mining
+method based on language similarities and back-
+translation. The model is trained in a many-to-
+many fashion, balancing languages using sinkhorn
+temperature sampling. In our experiments, we use
+the base size M2M-100 with 484M parameters that
+consists of 12 encoder and 12 decoder layers, hid-
+den dimension of 1024 and feedforward dimension
+of 4096. To study the effect of model size, we also
+use the medium size M2M-100 with 1.2B parame-
+ters, which has 24 encoder and 24 decoder layers,
+and feedforward dimension of 8192. Both models
+have a multilingual vocabulary of 128K unique to-
+kens that are distributed across 100 languages with
+temperature sampling.
+3 Parameter Efficient Fine-tuning
+Methods
+All of our experiments fall under the umbrella
+of specialising a pre-trained sequence-to-sequence
+transformer model for MT of a particular language
+pair, with source language xand target language
+y. If the pre-training task was MT, and xandy
+were included, then a lower bound will be sim-
+ply applying the pre-trained model without any
+changes. Conversely an upper bound is fine-tuning
+100% of the pre-trained model parameters (‘full
+fine-tuning’). In between full fine-tuning and di-
+rectly using the pre-trained model, we consider the
+following parameter-efficient fine-tuning methods
+(PEFTs) in this work:
+Adapter-tuning (Houlsby et al., 2019) ‘Adapter
+layers’ are lightweight, learnable units inserted be-
+tween transformer layers. They typically take the
+form of a feedforward network inserted as the final
+operation in a transformer layer. Formally, we fol-
+low the architecture introduced by Bapna and Firat7920(2019) for MT:
+A(h) =W·f(WLN(h) +b) +b,(1)
+where an adapter module Aat layer ℓconsists of a
+layer-normalization LN of the input h∈ R, fol-
+lowed by a down-projection W∈ Rwith bot-
+tleneck dimension b, a non-linear function f(·)and
+an up projection W∈ R. Finally, a residual
+connection with input his added to the output of
+the adapter: h→A(h)+h. We write ‘adapter-
+b’ to mean adapters with bottleneck dimension b
+throughout this work.
+Prefix-tuning (Li and Liang, 2021) prepends a
+sequence of continuous task-specific vectors (‘pre-
+fixes’) to the model input, in analogy to natural
+language prompts (e.g. ‘translate this sentence:’)
+which the transformer can attend to, but the prefix
+consists entirely of free parameters. For each trans-
+former layer, the prefix is replaced with a new set
+of vectors, increasing expressiveness. Concretely,
+we replace token embeddings by
+E=Concat (V, E), (2)
+withE∈ Rthe original token embeddings
+packed into a matrix, V∈ Rthe prefix
+vectors, and Lthe original sequence length, p
+the prefix length and dmodel dimension. Be-
+fore transformer layer ℓwe additionally set the
+firstphidden states to a new prefix vector, i.e.
+H[:p,:] = VwithH∈ Rthe hidden
+states and V∈ R.
+BitFit (Zaken et al., 2021) Bias term fine-tuning
+was introduced in the context of fine-tuning BERT
+for classification tasks, and consists of training only
+the bias terms and the task-specific classification
+layer. For MT we additionally fine-tune all de-
+coder bias terms, and do not need the classification
+head. We introduce a simple improvement to BitFit,
+based on replacing redundant parameters with ones
+that increase expressiveness. Note that BitFit fine-
+tunes bias parameters in layer-norm (LN) modules
+(Ba et al., 2016), since the layer-norm contains the
+following affine transformation:
+LN(z) =γ⊙z+β (3)
+where zis the normalized input after a residual
+connection. γ, β∈ Rare learnable weights and
+the bias parameters of the LN module. For the stan-
+dard transformer model, the LN module is always
+followed by a matrix multiplication plus a bias term
+i.e.W·LN(z)+b=W·γ⊙z+W·β+b.
+Notice the same space of functions is available by
+only updating the bterm in W·β+b. We
+simply switch to updating γinstead of β, i.e. un-
+freezing the LN weight and freezing the bias, in
+order to increase expressiveness (confirmed em-
+pirically in § 5.1). We use this version of BitFit
+throughout this work unless stated otherwise.
+X-attention Tuning (Gheini et al., 2021) refers
+to fine-tuning only cross-attention (X-attention)
+and corresponding layer-norm parameters located
+in each decoder layer of a transformer model.
+This method is based on the importance of cross-
+attention for MT.
+4 Experiments
+Datasets We conduct experiments with a selec-
+tion of 12 typologically and geographically diverse
+languages, paired with English. In our experiments,
+we fine-tune the pre-trained model on only one
+language pair and translation direction at a time
+(e.g. Italian →English). The parallel data for
+all languages is from TED talks in order to fac-
+tor out the impact of the domain differences (ex-
+cept Finnish and Estonian which we only use for
+a separate control experiment). To pick these lan-
+guages, we consider variation in language families
+and scripts. More details of the datasets are given
+in Appendix A.7921
+Experimental Settings We used mBART-50
+(Liu et al., 2020; Tang et al., 2020) and M2M-100
+(Fan et al., 2020) as our multilingual pre-trained
+models, and all the languages we experiment with
+are included in their pre-training data. mBART
+needs to learn machine translation with parallel
+data, but M2M-100 can also be used without fine-
+tuning, since it is initially pre-trained for MT (see
+§ 2). We conduct experiments with both the base
+and the medium size M2M-100, to measure the
+impact of parent model size.
+For all fine-tuning methods, we fine-tuned mod-
+els with a maximum learning rate of 1e-4 with
+2500 warm-up steps for 100K training updates. We
+picked the best model based on dev set perplexity.
+We used a maximum batch size of 1024 tokens for
+mBART and 600 tokens for M2M-100, with a gra-
+dient accumulation step ( update-frequency ) of 2 for
+both models. All experiments are performed with
+the fairseq (Ott et al., 2019) library. Additional
+details including dataset splits are in Appendix A.
+We use BLEU scores to estimate MT quality, cal-
+culated from Sacrebleu(Post, 2018). To compare
+fine-tuning methods across different languages, we
+often report relative performance with respect to
+full fine-tuning (FT) for each language by calculat-
+ing the ratio of each method’s BLEU score w.r.t. the
+full FT BLEU score.On the recommendation of
+Marie et al. (2021) we report chrF (Popovi ´c, 2015)
+in Appendix C for each fine-tuning method.Parameter Budget Selection In order to
+fairly compare different methods, we selected a
+series of parameter ‘budgets’, and adjusted the
+settings of each method such that they update
+the same number of parameters. To determine
+the parameter budgets, we used the number of
+trainable parameters for the cross-attention update
+and BitFit since these numbers are constant
+(Unlike adapters and prefix-tuning, where we have
+an adjustable bottleneck dimension). Additionally,
+when comparing adapters and prefix-tuning, we
+start from the parameter size of the smallest
+adapter where the bottleneck dimension is 1.
+5 Results and Discussion
+In this section, we first compare the performance
+of various PEFTs on two language directions for
+different parameter budgets § 5.1. We then select a
+subset of these methods to test on ten language di-
+rections, in order to evaluate the effect of language
+similarity on the performance of PEFTs § 5.2. We
+use these results to explore the effect of parent
+model pre-training § 5.3 and parent model size
+§ 5.3. We noticed that on the language directions
+with the smallest dataset size, adapter methods out-
+performed full fine-tuning, and therefore conducted
+control experiments showing that as dataset size
+decreases, adapters outperform full fine-tuning by
+a larger margin.7922
+5.1 RQ1: Comparing fine-tuning methods
+Table 1 shows the performance of PEFTs in terms
+of BLEU score for it →en and tr →en. In the table,
+each block (separated with a dashed line) consists
+of PEFTs with approximately the same number of
+updated parameters. Adapters outperform other
+methods for almost all parameter budgets for both
+mBART and M2M-100, except the smallest budget
+of 120k updated parameters. In this block, prefix-
+tuning (prefix-5) performs better than adapters for
+mBART. However, when the fine-tuned parame-
+ter count increases, as shown in Figure 1, prefix-
+tuning quickly falls behind adapters, confirming
+previous findings (He et al., 2021a). Furthermore,
+in terms of training speed/memory cost , prefix-
+tuning slows down training relative to adapters, and
+imposes a significant memory cost due to a large
+effective sequence length; see also Appendix B.
+As for the methods that fine-tune existing param-
+eters, both BitFit and X-attention performs worsethan adapters in most cases. Averaging across 10
+language pairs, adapters still outperform BitFit for
+both parent models (Figure 5). However, we con-
+firm that our method of tuning layer norm weights
+rather than biases improves BitFit, see Table 1.
+5.2 RQ2: Impact of language relatedness
+In order to evaluate how language similarity be-
+tween translation pairs affects the performance of
+different PEFTs, we extend our experiments to 10
+languages paired with English (x →en, en→x), rep-
+resenting a diverse set of linguistic typology. Fig-
+ure 2 and 3 show performance w.r.t. full fine-tuning,
+for both mBART and M2M.
+We found that similarity between source and tar-
+get languages impacts the performance of PEFTs,
+with distantly related languages (e.g. English and
+Korean) leading to lower performance for the meth-
+ods with a small number of updated parameters
+such as BitFit and adapter-5. And so when translat-
+ing between distantly related languages, we need
+to tune more parameters to match full fine-tuning
+and get the most out of the parent model.7923
+More concretely, relative performance w.r.t. full
+FT is negatively correlated with language distance
+measured by lang2vec. These correlations are
+stronger for mBART than M2M. Methods which
+tune existing parameters (X-attention and BitFit)
+and M2M with no fine-tuning show higher correla-
+tion than adapters with similar parameter budgets;
+see Table 5. One explanation is that adding param-
+eters, and therefore increasing model capacity with
+adapters is beneficial for overcoming the difficulty
+of translating distant languages.
+We provide correlation results with more fine-
+grained measures of language distance, namely syn-
+tactical, phonological and geographical distances in
+Appendix D. For the first two distances, we observe
+a similar trend: as the distance between source and
+target language increases, BitFit and small adapters
+do not perform as well (the negative correlation
+is stronger). Generally the syntactic features pro-
+duced a larger negative correlation than the phono-
+logical features, with the exception of M2M plus
+PEFTs for en →x. However, in terms of geographic
+distance, we do not observe a particular trend.
+To investigate whether our findings extend be-
+yond English-centric settings, we designed another
+set of experiments. We picked 3 languages from
+MultiParaCrawl, Finnish, Estonian and English,
+where Finnish and Estonian are from the same lan-
+guage family and typologically similar. We mea-
+sure translation performance into Finish from Esto-
+nian and English, for different fine-tuning methods,
+and similarly for translation into Estonian. Figure 4
+shows results for both mBART and M2M-100.
+As shown in the first two plots, when translat-
+ing into Finnish, Estonian as the source language
+gives an advantage over English for BitFit and
+adapter-5 (This advantage is higher in M2M-100
+than mBART). Likewise, for translation into Es-
+tonian, as the number of trainable parameters de-
+creases, relative MT performance drops less when
+Finnish is the source language compared to English,
+for both parent models. Thus, when the source and
+target languages are typologically similar, PEFTs
+make better use of the parent model.
+5.3 RQ3: Impact of parent model
+Pre-training Objective Figure 5 shows the over-
+all performances for PETFs aggregated over all
+languages (x ↔en) when the model is initialized
+with mBART or M2M-100. In general, PEFTs for
+M2M-100 provides higher relative performance
+than mBART (Fig. 5). This difference is larger
+when the number of trainable parameters is small
+(BitFit and adapter-5). While M2M-100 is pre-
+trained for MT with parallel data, mBART is pre-
+trained with a (monolingual) denoising objective.
+Thus, more parameters are required at fine-tuning
+time to ‘learn’ the MT task for mBART. Finally, we7924
+note mBART results have a higher variance than
+M2M-100 (see Fig. 5), due to the higher negative
+correlation with language distance.
+Model Size We investigate how parent model
+size affects the performance of fine-tuning meth-
+ods, comparing M2M-100’s base model (484M)
+to its medium model (1.2B). Table 3 shows the
+average performance of full fine-tuning and small-
+size adapters corresponding to approximately 300K
+new parameters. No fine-tuning (no FT) results
+are also shown, representing lower bounds.
+Predictably, the medium model outperforms the
+base model across all fine-tuning methods. The
+magnitude of this improvement is larger when trans-
+lating into English ( x→en) vs. x→en, and the in-
+crease for small adapters is larger than for other
+methods. When translating into English, small
+adapters with the medium model outperform full
+fine-tuning of the base model for most languages
+despite tuning only 0.03% of its parent model pa-
+rameters. For en→x, small adapters are still com-
+petitive with full fine-tuning of the base model with
+almost the same average performance. But for dis-
+tantly related languages to English (Farsi, Korean
+and Turkish), adapters’ (1.2B) performance falls
+behind full fine-tuning of the base model.
+When it is used without anyparameter updates
+(‘no FT’), the medium model (while outperforming
+the base model for no FT) is not competitive with
+small size adapters for the base model, in either di-
+rection ( x↔en). Furthermore, relative performance
+w.r.t. full fine-tuning is still negatively correlated
+with language distance (see Appendix Table 6).
+Therefore, even at large scales, parameter efficient
+fine-tuning is useful, taking MT performance to the
+upper bound of a smaller model.
+5.4 RQ4: Impact of fine-tuning dataset size
+We noticed that for the datasets with the smallest
+amount of training data (Vietnamese and Czech),
+PEFTs outperformed full fine-tuning (see Ap-
+pendix C). We therefore designed a control experi-
+ment to test for the effect of the training data size
+on PEFT’ performance, taking a random subset of
+sizes 2000, 8000, 32000 and 128000 training exam-
+ples for Italian to English and Turkish to English.
+We then evaluated full fine-tuning, large adapters
+(≈50m parameters) and small adapters ( ≈300k pa-
+rameters) on each dataset; see Figure 6.
+For all models, at the smallest dataset size, large
+adapters outperformed full fine-tuning, and for
+M2M full fine-tuning only catches up at 128k ex-
+amples. For mBART, small adapters lag far be-
+hind, indicating they do not provide enough ca-
+pacity to ‘learn’ the MT task. For M2M however,
+small adapters are on a par with larger ones for
+small dataset sizes, but fall behind as dataset size7925
+increases. Again, we believe this is because more
+capacity is needed to get the most out of larger
+datasets.
+Chen et al. (2022) explore the effect of fine-
+tuning dataset size for RoBERTa fine-tuned on En-
+glish NLU tasks, finding PEFTs outperform full
+fine-tuning for dataset size <1000. Interestingly,
+for mBART, similarly small dataset sizes are re-
+quired for outperforming full fine-tuning. However,
+for M2M, we see adapters outperforming up until
+dataset sizes of ≈128k. Perhaps the ‘gap’ between
+RoBERTa’s masked language model pre-training
+objective and the fine-tuning objective is similar
+to the gap between mBART’s pre-training objec-
+tive and MT, whereas since M2M is pre-trained for
+MT, leaving the base model unchanged is viable
+up to larger fine-tuning dataset sizes. We leave
+further exploration of this to future work. Finally,
+we observe that full fine-tuning always converges
+in fewer iterations than the adapter methods, in a
+result similar to that of Chen et al. (2022).
+6 Related Work
+PEFTs have been widely used for fine-tuning Trans-
+former models to new tasks, domains or languages.
+Adapters (Houlsby et al., 2019) have been used in
+multi-task learning (Stickland and Murray, 2019;Pfeiffer et al., 2021; Karimi Mahabadi et al., 2021),
+cross-lingual transfer (Üstün et al., 2020; Pfeiffer
+et al., 2020) and multilingual NMT (Bapna and Fi-
+rat, 2019; Philip et al., 2020; Stickland et al., 2021b;
+Üstün et al., 2021). Prefix-tuning (Li and Liang,
+2021) and Prompt-tuning (Lester et al., 2021; Qin
+and Eisner, 2021) (i.e. only using soft prompt to-
+kens without prefix vectors in each layer), have
+a natural interpretation in terms of virtual tokens.
+They can be used as task embeddings for inter-task
+transferability (Vu et al., 2021). LoRA (Hu et al.,
+2021) injects trainable low-rank matrices into query
+and value projection matrices of each transformer
+layer. He et al. (2021a) present a unified framework
+that integrates the above methods.
+Some of these methods have been compared in
+a controlled setting for English classification tasks
+(Chen et al., 2022) or only a single language pair
+(English and Romanian) for MT (He et al., 2021a).
+Chen et al. (2022) test PEFTs for various English
+classification tasks and observe that on the tasks
+with the smallest dataset sizes, PEFTs outperform
+fine-tuning, but they do not conduct a control ex-
+periment varying dataset size and parent model for
+a single task as we do.
+Aspects of efficiency and scale in MT in terms of
+inference cost (Berard et al., 2021), vocabulary size7926(Gowda and May, 2020) data (Gordon et al., 2021),
+model size (Gordon et al., 2021; Arivazhagan et al.,
+2019) and number of languages (Arivazhagan et al.,
+2019) have been explored. Other work aims to
+improve full FT for domain adaptation by mixing
+in different data (Chu et al., 2017), regularisation
+(Miceli Barone et al., 2017) or many other methods
+(Chu and Wang, 2018; Saunders, 2021). However,
+none of these works study PEFTs for MT, and we
+aim to fill this gap.
+7 Conclusion
+Do PEFTs work for MT? We found that the answer
+depends on multiple factors: the particular method,
+the backbone model, the number of tuned param-
+eters and the fine-tuning language pair. Adapters
+usually have the highest performance out of all
+PEFTs (§ 5.1), although for the smallest parame-
+ter budgets we consider, prefix tuning outperforms
+adapters for mBART. For large parameter budgets
+(≈50m parameters) adapters almost recover full
+fine-tuning performance, and even for lower bud-
+gets, if the pre-training task was MT, i.e. M2M-
+100, adapters can recover >90% of full FT perfor-
+mance. However PEFTs only outperform full FT
+for smaller dataset sizes (§ 5.4), less than around
+≈2k examples for mBART and ≈128k for M2M.
+Future work could explore in detail how the differ-
+ence between pre-training objective and fine-tuning
+task affects this phenomenon.
+Using PEFT with a larger model (M2M-100
+medium size) can outperform full FT of a smaller
+model (M2M-100 base size). However when trans-
+lating in the en →x direction where xis distantly
+related to English e.g. Korean, full FT is superior
+(§ 5.3). More generally, distantly related language
+pairs require more parameters to be tuned to get
+close to full FT, for all methods (§ 5.2).
+8 Limitations
+Firstly, in this work we do not cover all parameter-
+efficient fine-tuning methods (or variations on those
+that we do analyse) such as LoRA (Hu et al., 2021),
+or mix-and-match adapters (He et al., 2021b). In
+order to make our analysis compact and clear we
+center our comparison around simple adapters and
+prefix-tuning, together with BitFit and updating
+cross-attention. Secondly, our experiments only
+cover models with up to around 1 billion param-
+eters due to compute limitations, which does not
+include the largest models available, such as the 11billion parameter M2M or mT5 (Xue et al., 2021)
+models similar to the encoder-decoder models we
+use in this paper, or much larger autoregressive
+(and trained largely on English data) language mod-
+els e.g. Chowdhery et al. (2022). Thirdly, although
+we attempted to cover a diverse set of languages,
+we did not explore truly low resource languages,
+and those not included in the pre-training data of
+our models (introducing another confounding fac-
+tor for our language distance analysis), where one
+would expect even larger performance gaps for
+PEFTs. However, we do imitate a very-low re-
+source setup by limiting training data size (Sec-
+tion § 5.4). Furthermore, although we attempt to
+look into PEFTs’ performances across languages
+w.r.t. different distance metrics such as syntax,
+phonology and geography (Appendix § D), more
+analysis in terms of fine-grained attributes such
+as word order or morphology are not provided in
+our analysis, which we leave for future work. Fi-
+nally, we use automatic/string-based quality met-
+rics, BLEU and chrF++ (Popovi ´c, 2017), rather
+than pre-trained/neural quality metrics, with the lat-
+ter often better correlated with human judgements
+(Kocmi et al., 2021).
+Acknowledgements
+We would like to thank Iain Murray, Arianna
+Bisazza, Gosse Bouma, and Gertjan van Noord
+for valuable comments on a draft of this paper. We
+also would like to thank the Center for Informa-
+tion Technology of the University of Groningen
+for providing access to the Peregrine HPC cluster.
+Asa Cooper Stickland was supported in part by the
+EPSRC Centre for Doctoral Training in Data Sci-
+ence, funded by the UK Engineering and Physical
+Sciences Research Council (grant EP/L016427/1)
+and the University of Edinburgh.
+References792779287929
+A Reproducibility Report
+Datasets All datasets that are used in our ex-
+perimetns are publicly available. We used TED
+talks (Qi et al., 2018) for (cs, fr, ko, ru, pt, tr,
+fa)↔en, IWSLT15 and IWSTL17 (Cettolo et al.,
+2012) for vi ↔en and (it, de) ↔en respectively, IITB
+(Kunchukuttan et al., 2018) for hi ↔en. Finally, for
+(en, et, fi) experiments, we randomly sampled 200k
+parallel sentences for each language-pair from Mul-
+tiParacrawl by using OPUS (Tiedemann, 2012).
+Sizes of train, dev and test splits are given in Ta-
+ble 4. All datasets have licenses allowing non-
+commercial use.7930
+Pre-trained models and Hyper-parameters We
+used mBART (Liu et al., 2020) that is extended to
+50 languages (Tang et al., 2020). For M2M-100
+(Fan et al., 2020), we used base- and medium-size
+models that consist of 484M and 1.2B parameters.
+For all experiments we used the hyper-
+parameters that are reported by Liu et al. (2020)
+except learning rate. For the learning rate, we fol-
+low Üstün et al. (2021) and used maximum of 1e-4
+with polynomial learning rate decay, based on their
+adapter-tuning experiments. We fine-tune models
+by using 0.3 dropout, 0.2 label smoothing, 2500
+warm-up steps for 100K training updates with an
+early-stopping patience of 10 epochs. We used a
+maximum batch size of 1024 tokens for mBART
+and 600 tokens for M2M-100, with a gradient ac-
+cumulation step ( update-frequency ) of 2 for both
+models. For full fine-tuning (and not other meth-
+ods) with the 1.2 billion size M2M model we use
+the Adafactor optimizer (Shazeer and Stern, 2018)
+in order to save memory (and use learning rate 5e-
+5), and otherwise use the Adam optimizer (Kingma
+and Ba, 2014). We report the result of a single ran-
+dom seed/training run throughout this work when-
+ever we list BLEU scores. All parameter-efficient
+fine-tuning methods are implemented on top of the
+Fairseq framework (Ott et al., 2019). We will share
+our code and scripts to reproduce all experiments.
+Computing Budget and Infrastructure All the
+experiments are conducted using Tesla V100 GPUs
+with mixed precision ( fp16 ). Parameters that are
+fine-tuned for each model are reported in the exper-
+iments section (§ 4). Each individual experiment
+took 3-10 hours on one GPU depending on thefine-tuning method and the language-pair.
+B Prefix-tuning Details
+There is relationship between memory cost and
+training time for prefix-tuning: including virtual to-
+kens in a sentence will increase the effective length
+of that sentence, and we can either impose addi-
+tional memory cost for the virtual tokens, or we
+can reduce the total number of ‘real’ i.e. natural
+language as opposed to virtual tokens in each batch.
+With the latter method we avoid a large memory
+cost, however the time taken to iterate through a
+given number of training examples will be longer,
+since the number of real tokens per batch will be
+decreased, increasing training time. We use the
+latter (decreased ‘real’ tokens) method.
+Finally we note that inference speed will de-
+crease as we increase the number of virtual tokens,
+since the decoder attention needs to attend to virtual
+tokens, i.e. when decoding token nit will attend to
+n−1 +pprevious tokens for prefix length p.
+C Additional Results and Metrics
+Table 7 shows chrF (Popovi ´c, 2017) scoresfor the
+experiments comparing different PEFTs on it →en
+and tr→en (Table 1). These results confirms that
+the trends discussed in Section 4 are the same re-
+gardless of metric used for MT quality.
+In Tables 8, 9 and 10, we show BLEU scores for
+other experiments presented in the paper only in
+terms of performance relative to full FT. Addition-
+ally we show adapter-1024 and X-attention scores7931
+for M2M-100; in general adapter-1024 outperforms
+X-attention, and both methods come close to full
+FT performance or slightly outperform it. Note
+that for M2M, for the two smallest dataset sizes (cs
+and vi) we see adapter-1024 (and adapter-2 for the
+medium size M2M) outperforming full fine-tuning,
+similarly to § 5.4.
+In Table 9 we show results of a smaller (40m pa-
+rameters) transformer model trained from scratch
+on each dataset separately, with an architecture
+consisting of 6 encoder and decoder layers, hid-
+den dimension of 512 and feed-forward hidden
+dimension 1024. We train a unique sentence-
+piece (Kudo and Richardson, 2018) vocabulary
+for each dataset, shared between source and tar-
+get language, of size approximately 16k. Train-
+ing hyper-parameters were the same as our other
+models. For the x→endirection almost all of our
+methods based on pre-trained models outperformed
+the ‘from scratch’ baseline, however in the en→x
+direction for mBART the most parameter efficient
+methods sometimes fall short (see e.g. Turkish oren→x x→en
+Adapter (b=2) -0.75 -0.39
+No fine-tuning -0.75 -0.55
+French). For translating into Farsi no pre-trained
+model outperformed the from scratch model, even
+with full fine-tuning, suggesting a weakness for
+particularly low resource resource languages like
+Farsi. Note per-dataset hyper-parameter search
+would likely improve performance, especially for
+‘from scratch’ results, but we did not attempt this
+due to computational constraints.
+D Additional Correlation Results for
+Language Distance
+Table 5 shows additional correlation coefficient
+between PEFTs’ performances and different lan-
+guage distances: syntax, phonology and geogra-
+phy. Moreover, Table 6 shows the correlation co-
+efficients between language distance and relative
+performance for the 1.2 billion size M2M model.79327933

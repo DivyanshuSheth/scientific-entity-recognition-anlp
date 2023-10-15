@@ -1,1 +1,704 @@
-4706 Proceedings of the 61st Annual Meeting of the Association for Computational Linguistics Volume 1 : Long Papers , pages 4706–4718 July 9 - 14 , 2023 © 2023 Association for Computational Linguistics 4707 4708 4709 4710 4711 4712 4713 4714 4715 4716 4717 4718 
+
+Siyuan Wang, Zhongyu Wei, Meng Han,
+Zhihao Fan, Haijun Shan, Qi Zhang, Xuanjing HuangSchool of Data Science, Fudan University, ChinaResearch Institute of Intelligent and Complex Systems, Fudan University, ChinaHuawei Poisson Lab, ChinaCEC GienTech Technology Co., Ltd, ChinaSchool of Computer Science, Fudan University, China
+{wangsy18,zywei,fanzh18,qz,xjhuang}@fudan.edu.cn
+hanmeng12@huawei.com; haijun.shan@gientech.com
+Abstract
+Logical reasoning over incomplete knowledge
+graphs to answer complex logical queries is
+a challenging task. With the emergence of
+new entities and relations in constantly evolv-
+ing KGs, inductive logical reasoning over KGs
+has become a crucial problem. However, pre-
+vious PLMs-based methods struggle to model
+the logical structures of complex queries, which
+limits their ability to generalize within the same
+structure. In this paper, we propose a structure-
+modeled textual encoding framework for induc-
+tive logical reasoning over KGs. It encodes
+linearized query structures and entities using
+pre-trained language models to find answers.
+For structure modeling of complex queries,
+we design stepwise instructions that implic-
+itly prompt PLMs on the execution order of
+geometric operations in each query. We fur-
+ther separately model different geometric oper-
+ations (i.e., projection, intersection, and union)
+on the representation space using a pre-trained
+encoder with additional attention and maxout
+layers to enhance structured modeling. We con-
+duct experiments on two inductive logical rea-
+soning datasets and three transductive datasets.
+The results demonstrate the effectiveness of our
+method on logical reasoning over KGs in both
+inductive and transductive settings.
+1 Introduction
+Logical reasoning over knowledge graphs (KGs)
+aims to answer complex logical queries given large-
+scale KGs (Guu et al., 2015; Hamilton et al., 2018).
+Recent years have witnessed increasing attention
+on logical reasoning over widely used KGs such as
+Freebase (Bollacker et al., 2008), Yago (SuchanekFigure 1: Examples of inductive logical reasoning over
+KGs: testing queries contain unseen entities and rela-
+tions (in red) during training. Each query is associated
+with an intrinsic logical structure and its natural lan-
+guage interpretation.
+et al., 2007), NELL (Carlson et al., 2010) and Wiki-
+data (Vrande ˇci´c and Krötzsch, 2014). With missing
+relations in the KG, it is challenging to deduce cor-
+rect answers to complex queries by traversing the
+graph. Previous work primarily focuses on trans-
+ductive logical reasoning where the training and
+testing are done on the same KG with the same
+group of entities. They typically rely on geomet-
+ric embedding-based methods to map both entities4706and queries into a joint low-dimensional vector
+space (Hamilton et al., 2018; Ren et al., 2020; Ren
+and Leskovec, 2020). The goal is to push the em-
+beddings of answer entities and queries to be close
+to each other, allowing answers to be predicted
+through embedding similarity even when the in-
+volved relation is absent. In contrast, the inductive
+setting of logical reasoning has been rarely studied
+which requires generalizing to unseen entities and
+relations or even new KGs. As real-world KGs are
+usually dynamic with emerging unseen entities and
+relations, it’s significant to explore the inductive
+setting for complex query answering.
+Existing research on inductive logical reasoning
+mainly follows two directions. The first inherits
+embedding-based methods and incorporates type
+as additional information to improve inductive ca-
+pability (Hu et al., 2022), which can not general-
+ize to unseen types of entities and relations. The
+second direction leverages pre-trained language
+models (PLMs) to encode textual information of
+entities/relations for generalization to unseen ele-
+ments (Wang et al., 2021b; Daza et al., 2021; Wang
+et al., 2021a). PLMs-based approaches provide
+more flexible solutions and generate better results.
+However, they only explore link prediction tasks of
+one-step reasoning, and simply linearize the triplet
+or subgraph into text sequence without modeling
+explicit reasoning structure (Yao et al., 2019; Zha
+et al., 2022). An example is shown in Figure 1.
+Two findings stand out. (1) The query qandq
+appear to be similar in format (both as a conjunc-
+tion of three terms) but actually have different log-
+ical structures. PLMs-based methods that encode
+flattened queries can not model this structure infor-
+mation for correct logical reasoning. (2) Although
+queries qandq(also qandq) contain differ-
+ent elements, they share the same logical structure.
+Motivated by these, we argue that structure model-
+ing of different complex queries can further boost
+the generalization ability of logical reasoners.
+In this paper, we propose to model query struc-
+ture for inductive logical reasoning over KGs.
+Specifically, we transform the query structure into
+a sequence using textual names of involved enti-
+ties, relations, and logical operators. For complex
+query structures composed of multiple geometric
+operations over entities and relations, we introduce
+two measures to enable logical structure modeling
+during text encoding. First, we design stepwise
+instructions for different query types to indicatewhich operation in the query structure should be
+conducted at each step and feed them as the struc-
+tural prompt to PLMs. Besides, we extend the
+pre-trained encoder with an additional attention
+layer and a maxout layer to respectively model dif-
+ferent geometric operations including projection,
+intersection, and union on the representation space,
+to implicitly inject structured modeling into PLMs.
+Our proposed method is a generic inductive frame-
+work, which can be plugged into different PLMs
+for better performance.
+We conduct experiments on two datasets for in-
+ductive logical reasoning over KGs, FB15k-237-
+V2 and NELL-V3 (Teru et al., 2020) as well as
+three transductive datasets, FB15k (Bordes et al.,
+2013), FB15k-237 (Toutanova and Chen, 2015),
+and NELL995 (Xiong et al., 2017). The results
+demonstrate that our method achieves strong induc-
+tive performance on unseen entities and relations,
+even across different KGs, without sacrificing logi-
+cal reasoning capability and generalizability to new
+query structures.
+2 Methodology
+In this work, we study the task of complex logi-
+cal reasoning over KGs. The input is a first-order
+logic query qwhich can include any set of ex-
+istential quantification ( ∃), conjunction ( ∧), and
+disjunction ( ∨) operators (such as the query in
+Figure 1). Our goal is to predict a set of entities
+A={a, a, a...}that answer the query qbased
+on an incomplete KG G= (E,R)which consists
+of a set of triplets (h, r, t )but lacks several involved
+relations. Here h, t∈ Eare the head and tail enti-
+ties and r∈ R is the relation between them. We
+mainly focus on the inductive setting of KG logi-
+cal reasoning, where the evaluated queries contain
+entities/relations that are completely unseen during
+the training period.
+Figure 2 shows the overall architecture of our
+model. We propose to encode the text sequences
+of query structures and predict the answer entities
+based on representation similarity for inductive log-
+ical reasoning over KGs. In this section, we first
+list different types of query structures studied in
+logical reasoning over KGs(§ 2.1). Then according
+to various query types, we introduce our structure
+linearization and structural prompts for textual en-
+coding(§ 2.2). The geometric operation modeling
+and query answer prediction modules are described
+in (§ 2.3) and (§ 2.4). Finally, we provide the de-4707
+tails about training and inference (§ 2.5).
+2.1 Query Structure Types
+Following (Ren et al., 2020), we consider 9 types
+of complex query structures which are composed
+of different sets of geometric operations (including
+projection, intersection and union) over entities and
+relations. These include six single-operation query
+structures and three mixed-operation ones. Specif-
+ically, three query types only focus on projection,
+including one-relation projection (1p), two-relation
+projection (2p), and three-relation projection (3p).
+Two query types focus on the intersection of two
+triplets (2i) and three triplets (3i), and another one
+focuses on the union of two triplets (2u). The three
+mixed-operation query structures are respectively
+the combinations of intersection&projection (ip),
+projection&intersection (pi), and union&projection
+(up). The different query structures are illustrated
+as the following formula:
+[1p]q=v:r(e, v)
+[2p]q=v.∃v:r(e, v)∧r(v, v)
+[3p]q=v.∃v, v:r(e, v)∧r(v, v)
+∧r(v, v)
+[2i]q=v:r(e, v)∧r(e, v)
+[3i]q=v:r(e, v)∧r(e, v)∧r(e, v)
+[pi]q=v.∃v:r(e, v)∧r(v, v)∧r(e, v)
+[ip]q=v.∃v:r(e, v)∧r(e, v)∧r(v, v)
+[2u]q=v:r(e, v)∨r(e, v)
+[up]q=v.∃v: (r(e, v)∨r(e, v))∧r(v, v)
+(1)where eandvare the anchor entities and exis-
+tentially quantified bound variables entities, and v
+are the target answer entities to the query. As these
+complex queries contain rich logical structural in-
+formation, we need to model the structure knowl-
+edge during textual encoding for better inductive
+generalization within the same logical structure.
+2.2 Query Structure Encoding
+In order to use PLMs for better generalization to un-
+seen entities/relations, we first need to linearize the
+query structures into text sequences. We also de-
+sign instructions for each query type as a structural
+prompt to implicitly indicate the order of geometric
+operations execution to PLMs. We concatenate the
+linearized query and structural prompt as the input,
+and encode them to obtain the query representation
+for matching with the answer entities.
+Query Structure Linearization Given a
+query structure q, we customize its linearization
+method according to the query type. For each
+triplet r(e, v)in the query, we formulate it
+as “[anchor] t(e)[relation] t(r)” and
+ignores the intermediate variable entities, where
+t(e)andt(r)are the textual names of anchor
+entity eand relation r. Then we add the
+names of logical operations before the involved
+subqueries. For example, the query structure
+of type [2p] can be linearized into sequence
+“[projection] [anchor] t(e)[relation]
+t(r)[projection] [relation] t(r)” and the
+query structure of type [2i] can be mapped into
+“[intersection] [projection] [anchor]4708t(e) [relation] t(r) [projection]
+[anchor] t(e)[relation] t(r)”.
+For query types [ip] and [up] that are composed
+of intersection/union and projection, the last re-
+lation projection is conducted over the intersec-
+tion/union of previous triplets. Directly flattening
+the query is unable to keep such structural infor-
+mation. Therefore, we propose to split the inter-
+section/union and repeatedly connect each triplet
+with the last relation projection which moves the
+intersection/union operation to the final step. This
+transformation is equivalent to the original query
+structure. For example, the following two query
+structures are equivalent and are both of type [up].
+(r(e, v)∨r(e, v))∧r(v, v)
+(r(e, v)∧r(v, v))∨(r(e, v)∧r(v, v))
+(2)
+Based on this transformation, we linearize
+the query structure of type [up] into the text
+sequence as “ [union] [projection] [anchor]
+t(e) [relation] t(r) [projection]
+[relation] t(r)[projection] [anchor]
+t(e) [relation] t(r) [projection]
+[relation] t(r)”. The details of structure
+linearization templates for each query type are
+listed in Appendix A.
+Structural Prompt Besides feeding the lin-
+earized query structure into PLMs, we also intro-
+duce stepwise instructions that indicate the order of
+geometric operations execution to prompt the pre-
+trained encoder with implicit structural information
+of the query. Specifically, each prompt consists of
+two parts: the number of total execution steps and
+the operation order in the query, which is formu-
+lated as “ total steps: operation order ”. For
+query types [ip] and [up], we define the total steps
+and operation order according to the transformed
+query structure in Eq 2. The detailed structural
+prompts of each query type are presented in Ta-
+ble 1.
+Then the input tcan be obtained by concate-
+nating the structural prompt sand the linearized
+query structure t(q), which is formulated as “ [CLS]
+[qtype] s [SEP] t(q) ”. We feed it to the pre-
+trained encoder and obtain the output hidden states
+H= (h, h, ..., h).
+2.3 Geometric Operation Modeling
+To further enhance the structure modeling dur-
+ing textual encoding, we propose to separately
+model different geometric operations in logical
+queries to explore their spatial characteristics. As
+Transformer-based encoders are widely used to im-
+plicitly learn the translation function for simple link
+prediction and question answering (Yao et al., 2019;
+Wang et al., 2021a), we directly utilize it for mod-
+eling multi-hop relation projection. For each path
+of relation projection r(e, v)∧...∧r(v, v),
+we extract the hidden states corresponding to se-
+quence “ [anchor] t(e)[relation] t(r)...
+[projection] [relation] t(r)” from H=
+(h, h, ..., h). We then take the average as the
+representation of target entity v, which also can be
+viewed as the representation hof the query that
+only involves relation projection operation.
+For the intersection and union of multiple sub-
+queries, we adopt an attention layer (Bahdanau
+et al., 2014) and a maxout layer (Goodfellow et al.,
+2013) on top of the pre-trained encoder to respec-
+tively model these two operations in the geometric
+representation space. Specifically, we feed the rep-
+resentations of target entities in all subqueries to
+these two additional layers to achieve the intersec-
+tion and union operations. The output can be taken
+as the query representation hthat contains inter-
+section or union.
+As presented in (Ren and Leskovec, 2020), the
+complete set of first-order logic operations encom-
+passes existential quantification ( ∃), conjunction
+(∧), disjunction ( ∨) and negation( ¬). Our approach
+covers the first three operations by modeling rela-
+tion projection, intersection, and union respectively.
+The negation operation is not individually modeled
+as pre-trained encoders are capable of capturing se-4709mantic exclusion for negation. We can add negative
+terms such as “not” before the corresponding rela-
+tions within the input and feed it into pre-trained
+encoders to naturally address this task.
+2.4 Query Answer Prediction
+To answer the complex query q, we adopt the
+Siamese dual encoder (Gillick et al., 2018) to re-
+spectively encode the query qand the candidate
+entity cto match the answer. We formulate the en-
+tity input as the sequence “ [CLS] [target] t(c)”
+and feed it into the pre-trained encoder to obtain
+the candidate entity representation hby taking
+the average of the hidden states. Then we compute
+the similarity dbetween the query representation
+hand entity representation h, and encourage the
+query representation to be similar to the positive
+answer entities while dissimilar to negative enti-
+ties. The entities whose representations are similar
+enough to the query will be predicted as the an-
+swers. We can pre-compute the representations of
+all candidate entities and utilize them to predict
+answers for different queries more efficiently.
+The above matching scheme can handle the
+inductive setting when the candidate entity set
+is not closed and new entities may arise. To
+improve the answer prediction accuracy in the
+transductive setting where the candidate entity set
+is closed, we also employ a classification layer
+on top of the query representation h. Given
+the fixed candidate entity set (c, c, ..., c), the
+classification layer with a softmax function will
+output an N-dimensional plausibility distribution
+(s, s, ..., s)for each candidate entity cto be
+the answer.
+2.5 Training & Inference
+We simultaneously optimize a matching objective
+and a classification objective to train our inductive
+model for answering complex logical queries. For
+the former, we adopt contrastive learning (Chen
+et al., 2020) which needs to separate the positive
+and negative answers for the query. We take the
+given ground-truth answer cas positive and imple-
+ment in-batch negative sampling to collect the nega-
+tives. We measure the similarity between the query
+and entities using dot product, and follow (He et al.,
+2020) to utilize InfoNCE as the contrastive loss.
+The loss function is formulated as Eq. 3 where τis
+L=−logexp(h·h/τ)
+/summationtext(exp( h·h/τ)(3)the temperature hyper-parameter and Nis the total
+number of candidate entities including positives
+and negatives. For the classification objective, we
+take all entities in each KG as candidate entities
+and calculate the cross-entropy loss as Eq. 4.
+L=−logs/summationtextexp(s)(4)
+These two losses are combined in a weighted man-
+ner as L=L+λLandλis the weighted
+hyper-parameter.
+During inference, we perform differently for in-
+ductive and transductive logical query answering.
+For the inductive reasoning, we utilize the match-
+ing scheme and rank the representation similarities
+between the query and all candidate entities for
+query answer prediction. For the transductive in-
+ference, we only adopt the classification scheme
+and find the most plausible answer according to
+classification scores.
+3 Experiments
+3.1 Experiment Setup
+We conduct experiments on complex logical rea-
+soning over KGs in both inductive and transductive
+setting. For the inductive setting, we adopt two
+datasets, FB15k-237-V2 and NELL-V3, that have
+disjoint sets of entities for training and evaluation,
+as introduced by (Teru et al., 2020). To further chal-
+lenge our model, we also illustrate the cross-KG in-
+ductive generalization performance by respectively
+taking FB15k and NELL995 for training/inference
+and inference/training that contain completely dif-
+ferent entities and relations. In the transductive
+setting, we evaluate our model on the generated
+queries from three datasets: FB15k (Bordes et al.,
+2013), FB15k-237 (Toutanova and Chen, 2015),
+and NELL995 (Xiong et al., 2017), as proposed
+by (Ren et al., 2020). All these datasets cover nine
+types of query structures. We follow the setting
+of (Ren et al., 2020) to illustrate the generalization
+within the same structure to unseen entities and
+relations, and also the generalization to more com-
+plicated unseen structures composed of different
+structures. Specifically, we train our model on the
+first five types of query structures (1p, 2p, 3p, 2i,
+3i) and evaluate it on all nine query types (1p, 2p,
+3p, 2i, 3i, pi, ip, 2u, up), including both seen and
+unseen query structures during training. The data
+split statistics of logical queries in these datasets
+are provided in Appendix B.4710
+3.2 Implementation Details
+We take bert-large-cased and bert-base-cased (De-
+vlin et al., 2018) as the pre-trained encoder
+for encoding the query structure in (FB15k-237-
+V2, NELL-V3) and (FB15k, FB15k-237, and
+NELL995), respectively. All models are imple-
+mented using Huggingface (Wolf et al., 2019), and
+trained for 30 epochs on 4 NVIDIA Tesla V100
+GPUs with 16 GB of memory. The Adam is taken
+as the optimizer and the learning rate is 1.5e-4.
+We use a linear learning rate scheduler with 10%
+warmup proportion. The weight hyper-parameter
+to balance losses is set to λ= 0.3orλ= 0.4. For
+automatic evaluation, we use Hits@ K(K= 3,10)
+as the metrics, which calculate the proportion of
+correct answer entities ranked among the top- K.
+3.3 Inductive Setting
+Unseen Entities Generalization To illustrate
+the inductive performance of complex logical
+reasoning over KGs, we first make a compar-ison on FB15k-237-V2 and NELL-V3 datasets
+for generalizing to unseen entities. We compare
+ourstructure-modeled inductive logical reasoning
+method ( SILR ), with the baseline embedding-based
+method Q2B (Ren et al., 2020) and the best ver-
+sion of the inductive model TEMP(GQE) (Hu et al.,
+2022). TEMP(GQE) enriches embedding method
+GQE (Hamilton et al., 2018) with type informa-
+tion which has achieved the state-of-the-art perfor-
+mance. BiQE (Kotnis et al., 2021) is also a tex-
+tual encoding method with positional embedding
+for logical query but only in the transductive set-
+ting. We reimplement it by replacing the original
+classification-based prediction with the matching
+scheme for an inductive comparison.
+The experimental results are shown in Table 2.
+We can see that our SILR outperforms all other mod-
+els on both FB15k-237-V2 and NELL-V3 datasets
+by a considerable margin. This highlights the ef-
+fectiveness of our method for inductive logical rea-
+soning over unseen entities. Additionally, the im-4711
+provement over the other positional textual encod-
+ing model, BiQE , demonstrates that our structure
+knowledge modeling during textual encoding is ca-
+pable of enhancing the inductive complex query
+answering capability.
+Cross-KG Generalization We further explore
+a more challenging cross-KG inductive setting,
+where the model is trained and tested on different
+datasets and requires generalizing to completely
+different KGs. Specifically, we take FB15k and
+NELL995 as the source/target and target/source
+datasets, respectively. In this scenario, we adopt the
+few-shot setting, where 500 random samples of the
+target domain are provided for continual learning
+to achieve better transferring. As embedding-based
+methods, even when aware of type information,
+are unable to embed most entities and relations in
+new KGs with unseen types, we only compare our
+SILR with the reimplemented BiQE . The results in
+Table 3 show that our SILR performs better than
+BiQE , and it can not only generalize to unseen en-
+tities but also perform logical reasoning over new
+KGs with only a few portions observed. This mani-
+fests the effectiveness of our method on inductive
+logical reasoning over KGs even in the real-world
+challenging cross-KG setting.3.4 Transductive Setting
+Although textual encoding methods have the in-
+ductive potential, their performance often lags be-
+hind embedding-based models due to learning in-
+efficiency and the inability to structure knowledge
+modeling (Wang et al., 2022). We also compare our
+SILR with transductive logical reasoning methods
+to illustrate the logical reasoning performance over
+KGs with structure modeling. The compared mod-
+els including GQE ,Q2B,TEMP(Q2B) andBiQE
+where the first three are embedding-based models
+while the last one is a positional textual encoding
+model. Since BiQE does not evaluate query types
+2u and up, and does not provide results for FB15k,
+we reimplement it for a fair comparison.
+The results are shown in Table 4. Our SILR
+outperforms BiQE , particularly in query types in-
+volving intersection and union, indicating that our
+structure knowledge modeling can effectively im-
+prove the logical reasoning performance of textual
+encoding and help generalize to unseen query struc-
+tures. Although textual encoding methods have the
+potential for inductive KG reasoning, they still lag
+behind embedding-based methods for the trans-
+ductive setting, due to explicit structure model-
+ing and better learning efficiency of embedding-4712based methods (Wang et al., 2022). In this work,
+we mainly focus on improving textual encoding
+methods for inductive complex reasoning, but our
+method still achieves comparable transductive per-
+formance. This demonstrates the effectiveness of
+our inductive method with query structure model-
+ing on transductive logical reasoning over KGs.
+3.5 Further Analysis
+Ablation Study To dive into the impact of dif-
+ferent components in our model on both inductive
+and transductive logical reasoning over KGs, we
+conduct an ablation study on the FB15k-237-V2
+and FB15k-237 datasets. We respectively take bert-
+large-cased and bert-base-cased as baseline models
+for FB15k-237-V2 and FB15k-237. They remove
+Structural Prompt ( SP) and Geometric Operation
+Modeling ( GOM ) from the final model SILR , which
+directly encodes linearized query structures for an-
+swer prediction.
+As shown in Table 5, incorporating structural
+prompting and geometric operation modeling can
+both improve the baseline model, but still perform
+worse than our final SILR . This indicates that these
+two measures for modeling structure knowledge
+during query text encoding can enhance the in-
+ductive and transductive performance of logical
+reasoning over KGs.
+Query Structure Generalization Embedding-
+based methods are known to generalize well to
+unseen query structures due to their explicit spatial
+structure learning. To analyze the generalizability
+of our implicit structure-modeled textual encoding
+method to different logical query structures, we
+further construct four types of complicated query
+structures with more relations and geometric op-
+erations, including 4p, 5p, 3ip and i2p, based on
+the query structures in test sets. The detailed il-
+lustrations and explanations of these query struc-tures are given in Appendix C. We directly evaluate
+our method on these more complicated queries in
+both inductive and transductive datasets FB15k-
+237-V2 and FB15k-237. The results are listed in
+Table 6. We can see that compared to seen and un-
+seen query structures in the original datasets in Ta-
+ble 2 and 4, our method can also generalize to these
+complicated structures with more logical opera-
+tions and achieves impressive performance. This
+demonstrates that the design of structural prompt
+and implicit geometric operation modeling can ef-
+fectively learn structure knowledge and improve
+query structure generalizability.
+4 Related Work
+Answering first-order logic queries over incomplete
+KGs is a challenging task (Guu et al., 2015). Pre-
+vious research (Lin et al., 2015; Hamilton et al.,
+2018) mainly studies transductive logical reason-
+ing, where the training and testing are performed
+on the same KG. Embedding-based methods are
+widely used to embed both logical queries and enti-
+ties into a joint low-dimensional vector space and
+push answer entities and queries to be close enough,
+enabling answer prediction through embedding
+similarity, even when the involved relation is ab-
+sent. Following this paradigm, some further pro-
+pose extending the embedding of the query/entity
+from a single point to a region (Ren et al., 2020;
+Zhang et al., 2021; Choudhary et al., 2021b) or
+probabilistic distribution (Ren and Leskovec, 2020;
+Choudhary et al., 2021a) over vector space to map
+arbitrary first-order logic queries into sets of an-
+swer entities. However, these methods are unable
+to tackle the inductive problem, which requires
+generalizing to unseen entities and relations. Al-
+though (Hu et al., 2022) proposes enriching the
+entity and relation embedding with type informa-
+tion for inductive logical reasoning, it can only
+generalize to elements of observed types.
+Another line of research focuses on inductive4713logical reasoning over KGs using textual encod-
+ing methods. With the advance of large-scale
+pre-trained language models (Devlin et al., 2018;
+Liu et al., 2019), these methods propose trans-
+forming the graph structures into linearized text
+and utilize PLMs for encoding (Yao et al., 2019;
+Zha et al., 2022). With the strong generaliz-
+ability of PLMs, they can easily generalize to
+unseen entities/relations, but struggle to model
+structure knowledge during text encoding. Some
+works (Wang et al., 2021b; Daza et al., 2021; Wang
+et al., 2021a) propose to follow TransE (Bordes
+et al., 2013) to apply the translation function be-
+tween entity and relation representations for geo-
+metric structure learning. Nevertheless, these meth-
+ods usually require descriptions of entities and re-
+lations for encoding and assume these descriptions
+are readily available. Besides, they only focus on
+simple link prediction tasks without exploring com-
+plex structure modeling in logical reasoning, which
+is essential for generalizing within the same query
+structure/type. We thus propose to simultaneously
+encode the linearized query and preserve the logi-
+cal structure knowledge by structural prompt and
+separate geometric operation modeling for induc-
+tive logical reasoning over KGs.
+5 Conclusion
+In this paper, we present the first flexible induc-
+tive method for answering complex logical queries
+over incomplete KGs which can generalize to any
+unseen entities and relations. To accomplish this
+goal, we propose a structure-model textual encod-
+ing model that utilizes PLMs to encode linearized
+query structures to find the answer entities. For
+structure modeling of complex queries, we design
+structural prompts to implicitly indicate PLMs the
+order of geometric operations execution in each
+query, and separately model three geometric oper-
+ations on representation space using a pre-trained
+encoder, an attention layer, and a maxout layer. Ex-
+perimental results demonstrate the effectiveness of
+our model on logical reasoning over KGs in both
+inductive and transductive settings.
+Limitations
+This study has potential limitations. First, it only
+focuses on answering existential positive first-order
+logic queries but does not support the negation op-
+eration. We will later address this limitation by
+modeling the negation operation. Second, we uti-lize BERT as the backbone model for inductive
+generalization due to computing resource limits.
+We plan to investigate the use of more powerful
+pre-trained language models with stronger gener-
+alizability in future research to improve inductive
+logical reasoning over KGs.
+Acknowledgments
+This work is supported by National Natural Sci-
+ence Foundation of China (No. 6217020551) and
+Science and Technology Commission of Shanghai
+Municipality Grant (No.21QA1400600).
+References4714
+A Structure Linearization Templates
+In this part, we list the detailed linearization tem-
+plates of different structural query types in Table 7.4715
+B Data Statistics
+In Table 8, we summarize the statistics of logical
+queries in our experimented datasets for both in-
+ductive and transductive settings.
+C Constructed Query Types
+We here introduce our generated more complicated
+query types involving more relations and logical
+operations, which are used to illustrate the compli-
+cated query structure generalizability.
+[4p]q=v.∃v, v, v:r(e, v)∧r(v, v)
+∧r(v, v)∧r(v, v)
+[5p]q=v.∃v, v, v, v:r(e, v)∧r(v, v)
+∧r(v, v)∧r(v, v)∧r(v, v)
+[3ip]q=v.∃v:r(e, v)∧r(e, v)∧r(e, v)
+∧r(v, v)
+[i2p]q=v.∃v, v:r(e, v)∧r(e, v)
+∧r(v, v)∧r(v, v)
+(5)4716ACL 2023 Responsible NLP Checklist
+A For every submission:
+/squareA1. Did you describe the limitations of your work?
+Section Limitations
+/squareA2. Did you discuss any potential risks of your work?
+Not applicable. Left blank.
+/squareA3. Do the abstract and introduction summarize the paper’s main claims?
+Section 1
+/squareA4. Have you used AI writing assistants when working on this paper?
+Use Grammarly and ChatGPT for spelling checking and polishing.
+B/squareDid you use or create scientiﬁc artifacts?
+Section 3.1 & 3.2
+/squareB1. Did you cite the creators of artifacts you used?
+Section 3.1 & 3.2
+/squareB2. Did you discuss the license or terms for use and / or distribution of any artifacts?
+Not applicable. Left blank.
+/squareB3. Did you discuss if your use of existing artifact(s) was consistent with their intended use, provided
+that it was speciﬁed? For the artifacts you create, do you specify intended use and whether that is
+compatible with the original access conditions (in particular, derivatives of data accessed for research
+purposes should not be used outside of research contexts)?
+Section 3.1 & 3.2
+/squareB4. Did you discuss the steps taken to check whether the data that was collected / used contains any
+information that names or uniquely identiﬁes individual people or offensive content, and the steps
+taken to protect / anonymize it?
+Not applicable. Left blank.
+/squareB5. Did you provide documentation of the artifacts, e.g., coverage of domains, languages, and
+linguistic phenomena, demographic groups represented, etc.?
+Section 3.1
+/squareB6. Did you report relevant statistics like the number of examples, details of train / test / dev splits,
+etc. for the data that you used / created? Even for commonly-used benchmark datasets, include the
+number of examples in train / validation / test splits, as these provide necessary context for a reader
+to understand experimental results. For example, small differences in accuracy on large test sets may
+be signiﬁcant, while on small test sets they may not be.
+Section B
+C/squareDid you run computational experiments?
+Section 3
+/squareC1. Did you report the number of parameters in the models used, the total computational budget
+(e.g., GPU hours), and computing infrastructure used?
+Section 3.24717/squareC2. Did you discuss the experimental setup, including hyperparameter search and best-found
+hyperparameter values?
+Section 3.2
+/squareC3. Did you report descriptive statistics about your results (e.g., error bars around results, summary
+statistics from sets of experiments), and is it transparent whether you are reporting the max, mean,
+etc. or just a single run?
+Section 3
+/squareC4. If you used existing packages (e.g., for preprocessing, for normalization, or for evaluation), did
+you report the implementation, model, and parameter settings used (e.g., NLTK, Spacy, ROUGE,
+etc.)?
+Section 3.2
+D/squareDid you use human annotators (e.g., crowdworkers) or research with human participants?
+Left blank.
+/squareD1. Did you report the full text of instructions given to participants, including e.g., screenshots,
+disclaimers of any risks to participants or annotators, etc.?
+No response.
+/squareD2. Did you report information about how you recruited (e.g., crowdsourcing platform, students)
+and paid participants, and discuss if such payment is adequate given the participants’ demographic
+(e.g., country of residence)?
+No response.
+/squareD3. Did you discuss whether and how consent was obtained from people whose data you’re
+using/curating? For example, if you collected data via crowdsourcing, did your instructions to
+crowdworkers explain how the data would be used?
+No response.
+/squareD4. Was the data collection protocol approved (or determined exempt) by an ethics review board?
+No response.
+/squareD5. Did you report the basic demographic and geographic characteristics of the annotator population
+that is the source of the data?
+No response.4718

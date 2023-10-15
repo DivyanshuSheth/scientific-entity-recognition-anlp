@@ -1,1 +1,977 @@
-6655 Proceedings of the 2022 Conference on Empirical Methods in Natural Language Processing , pages 6655 6672 December 7 - 11 , 2022 © 2022 Association for Computational Linguistics 6656 6657 6658 6659 6660 6661 6662 6663 6664 6665 6666 6667 6668 6669 6670 6671 6672 
+
+Akari AsaiMohammadreza SalehiMatthew E. PetersHannaneh HajishirziUniversity of WashingtonAllen Institute for AI
+{akari, mrsalehi, hannaneh}@cs.washington.edu
+matthewp@allenai.org
+Abstract
+This work introduces a new multi-task,
+parameter-efficient language model (LM) tun-
+ing method that learns to transfer knowledge
+across different tasks via a mixture of soft
+prompts —small prefix embedding vectors pre-
+trained for different tasks. Our method, called
+A (ATTEntional Mixtures of Prompt
+Tuning), obtains source prompts as encodings
+of large-scale source tasks into a small number
+of parameters and trains an attention module
+to interpolate the source prompts and a newly
+initialized target prompt for every instance in
+the target task. During training, only the target
+task prompt and the attention weights, which
+are shared between tasks in multi-task train-
+ing, are updated, while the original LM and
+source prompts are intact. A is highly
+parameter-efficient (e.g., updates 2,300 times
+fewer parameters than full fine-tuning), while
+achieving high task performance using knowl-
+edge from high-resource tasks. Moreover, it is
+modular using pre-trained soft prompts and can
+flexibly add or remove source prompts for effec-
+tive knowledge transfer. Our experimental re-
+sults across 21 diverse NLP datasets show that
+A significantly outperforms prompt
+tuning and outperforms or matches fully fine-
+tuned or other parameter-efficient tuning ap-
+proaches that use over ten times more parame-
+ters. Finally, A outperforms previous
+work in few-shot learning settings.
+1 Introduction
+Fine-tuning all the parameters of large language
+models (LMs) given target task training data is the
+most common practice for optimizing task perfor-
+mance (Devlin et al., 2019; Raffel et al., 2020).
+A recent line of research introduces parameter-
+efficient tuning methods (Houlsby et al., 2019; Li
+and Liang, 2021; Ben Zaken et al., 2022) that onlyFigure 1: A combines multiple soft prompts
+trained on large-scale datasets ( source prompts ) to gen-
+erate instance-wise prompts for a target task. At target
+task training, the LM and the source prompts are intact.
+update a small number of LM parameters; how-
+ever, increasing efficiency often decreases the task
+performance (He et al., 2022). Moreover, these
+models are trained only using the task training
+data and do not benefit from large collection of
+other NLP tasks (Liu et al., 2019a). We posit that
+parameter-efficient tuning methods can leverage
+rich knowledge of high-resource tasks to improve
+both training efficiency and task performance.
+This work introduces a new parameter-efficient,
+modular multi-task tuning method called A
+(ATTE ntional Mixtures of Prompt Tuning, pre-
+viewed in Figure 1). A efficiently inte-
+grates knowledge from multiple tasks via a mix-
+ture of trainable soft prompts preprended to the in-
+put, keeping the original LM completely frozen. It
+first pre-trains transferable soft embeddings (Lester
+et al., 2021), called source prompts , on large-scale
+source tasks, which are likely to contain knowledge
+beneficial to other tasks. Then, A initial-
+izes a new target prompt for a given target task and
+learns an attention-weighted combination of source
+prompts and the target prompt. The attention mod-
+ule is a light-weight network that can be shared and
+trained simultaneously across tasks.
+A offers three key advantages over pre-
+vious multi-task fine-tuning or parameter-efficient
+tuning methods: first, it is highly parameter-
+efficient and achieves competitive performance
+despite updating only 0.4% of the parameters6655in full fine-tuning. Second, it enables modular
+multi-task learning using pre-trained soft prompts,
+where knowledge from different tasks can be flexi-
+bly combined, reused, or removed, and new tasks
+can be added to the lists of source or target tasks.
+Unlike prior work that relies on precomputed pri-
+ors on which tasks are related, A learns
+to focus on useful tasks from many source tasks.
+Moreover, at inference, a single LM with multiple
+pre-loaded soft prompts can perform multiple tasks
+without parameter reloading. Lastly, it improves
+interpretability on underlying task similarities in
+multi-task learning by generating attention distri-
+butions.
+We conduct experiments on 21 datasets across
+diverse tasks, domains and output formats. A- significantly outperforms previous prompt
+tuning-based approaches and matches state-of-the-
+art parameter-efficient transfer approaches or fully
+fine-tuned models that train orders of magnitude
+more parameters, especially on smaller datasets.
+A is also effective on few-shot domain
+adaptations (i.e., 4-32 shots).
+Our analysis further shows that A is
+particularly parameter-efficient and competitive
+with larger backbone LMs, where other parameter-
+efficient transfer approaches shows rapid increases
+of the trainable parameters. Our ablation studies
+suggest that learned attentions, multi-task learning
+and modular transfer from multiple tasks largely
+contribute to the performance improvements. The
+attention distributions show the underlying similar-
+ities among seemingly different tasks (e.g., entail-
+ment and paraphrase detection), indicating signal
+for effective knowledge transfer across tasks.
+2 Background and Problem Setup
+We first enlist common paradigms in NLP for learn-
+ing a target task, which differ in terms of available
+data and resources. We then describe our problem
+setup with respect to these paradigms.
+Fine-tuning. The most common practice in
+learning a new target task T is to fine-tune all
+parameters of a pre-trained LM on the target task
+training data {(x,y)}(e.g., Devlin et al. 2019).
+Formally, given pre-trained LM parameters θ, fine-
+tuning results in a specialized model θ by op-
+timizing: maxp(y|x).
+Parameter-efficient tuning. To decrease train-
+ing costs, parameter-efficient tuning updates asmall number of parameters for the target task
+ϕ :maxp(y|x), where the
+number of ϕ is much smaller than θ .
+Adapter (Houlsby et al., 2019) and its variants (Ma-
+habadi et al., 2021a; Rücklé et al., 2021) insert
+trainable layers in the LMs for each task, and
+BitFit (Ben Zaken et al., 2022) directly updates
+LM biases only. Highly efficient prefix-tuning (Li
+and Liang, 2021) and prompt tuning (Lester et al.,
+2021) keep the original LM frozen and only update
+soft prompts prepended to the input. In-context
+learning (Brown et al., 2020) uses massive-scale
+LMs to learn new tasks from demonstrations ( hard
+prompts ) without any parameter update of θ, but
+often perform worse than the aforementioned meth-
+ods with parameter updates (Liu et al., 2022).
+Given the rapidly increasing size of pre-trained
+LMs (Chowdhery et al., 2022; Brown et al., 2020),
+efficiently tuning to a new target task is desirable,
+but it often incurs a performance cost compared
+to the fine-tuning methods or shows sensitivity to-
+ward initialization (Li and Liang, 2021; Lester et al.,
+2021). SPoT (Vu et al., 2022) demonstrates that
+transferring prompts to another task enhances the
+performance at the cost of massive search.
+Multi-task transfer learning. Transfer learning
+methods attempt to learn a new target task given
+a collection of source tasks by updating the pa-
+rameters of an LM, which has been proven effec-
+tive in NLP (Khashabi et al., 2020; Raffel et al.,
+2020). Common approaches train on many differ-
+ent tasks (Liu et al., 2019a; Aribandi et al., 2022)
+or transfer a model fine-tuned on source tasks to
+another target task (Vu et al., 2020; Talmor and
+Berant, 2019). Several recent work introduce zero-
+shot or few-shot transfer of massive multi-task pre-
+trained models (Sanh et al., 2022; Min et al., 2021;
+Wang et al., 2022a,b) via in-context learning, which
+does not require any parameter updates. However,
+those massive multi-task training approaches lack
+the flexibility of adding or removing source tasks
+even when some of the tasks cause negative in-
+terference between competing tasks (Zhang et al.,
+2020; Aghajanyan et al., 2021).
+Our problem setup. We combine parameter-
+efficient tuning and multi-task learning. Given a
+collection of source tasks T, . . . T, our goal is
+to learn a new task T by efficiently updat-
+ing parameters ϕ given the target task data
+{(x,y)}, transferring knowledge from the source6656
+tasks. Importantly, we do not know a priori which
+tasks provide useful inductive bias in the new target
+task (Ponti et al., 2022): seemingly different tasks
+can benefit from each other.
+3 Method
+A (depicted in Figure 2) leverages highly
+parameter-efficient prompt tuning (Lester et al.,
+2021) to obtain source prompts that encode knowl-
+edge from source tasks into a small number of
+parameters. It tunes instance-level prompts by in-
+tegrating the source prompts and a target prompt
+newly initialized for a target task through an atten-
+tion mechanism for every target task instance.
+A pre-trains a set of source prompts
+P, . . . ,Pfor source tasks (Section 3.1; left side
+of Figure 2) and initializes a target prompt P
+for the target task. It then computes attentions be-
+tween embedded input Xand the soft prompts for
+each instance (x,y)using an attention module G
+(Section 3.2.1). Subsequently, A produces
+instance-wise prompt P by interpolating the
+source prompts and the target-task prompt given
+the computed attentions (Section 3.2.2). P
+is then prepended to the input to form the final
+input to a frozen LM θ.
+During training, A only updates the
+weights of P andGby maximizing the proba-
+bility of generating ygivenP andx. Impor-
+tantly, it uses the unique characteristic of prompt
+or prefix tuning, where task-specific parameters
+ϕ for different tasks can be trained in the
+same minibatch (Lester et al., 2021; Li and Liang,
+2021). Hence, it can train a shared attention G
+and multiple target task prompts simultaneously
+for further parameter and inference efficiency (Sec-
+tion 3.3). Finally, we discuss parameter efficiency
+of A in Section 3.4.3.1 Source Prompt Pre-training
+We first obtain source prompts [P, . . . ,P]
+forthigh-resource datasets, such as Multi-
+NLI (Williams et al., 2018), SQuAD (Rajpurkar
+et al., 2016) through prompt tuning (Lester et al.,
+2021). Each source prompt is only trained once
+for a source task and can be transferred to different
+target tasks. Formally, for an input sequence X, a
+soft prompt is represented as P= [p, . . . ,p]∈
+R, where mis the prompt length, and dis the
+LM dimension. Input embeddings prepended by
+the prompt [P;X]are fed into the frozen LM θ.
+During training, only prompt embeddings are up-
+dated by maximizing the likelihood of generating
+the target sequence y, as follows:
+maxp(y|[P;X]). (1)
+3.2 Target Prompt Training
+After initializing a soft prompt for a new target
+taskP(=P), we learn instance-wise soft
+prompts P for each instance in the target
+task by interpolating the source prompts and the
+target task prompt given attention scores generated
+byG. Similar to Eq. 1, we concatenate the pro-
+duced instance-wise prompt to the input and train
+A by maximizing the likelihood:
+maxp(y|[P ;X]). (2)
+During training, the new task prompt P andG
+are updated via P , while source prompts and
+the original LM θare untouched to preserve the
+knowledge learned from prior tasks or pretraining.
+3.2.1 Input-prompt Attentions
+A controls the influence of the set of source
+prompts on the instance-wise prompt by calculat-
+ing input-prompt attentions. Specifically, an at-
+tention module Ggenerates the attention weights6657a, . . . , afrom input Xto the prompts includ-
+ing both source prompts and the new target prompt.
+Since the input X∈Rand a soft prompt
+P∈Rhave different sequence lengths, we
+first perform the max-pool operation for each di-
+mension on Xand each source prompt embedding
+and obtain ˆX∈Rand ˆP∈R.We then feed
+ˆXto a sub-network Gto project it into the prompt
+spaces. For efficiency, Gconsists of down and up
+projection layers, as follows:
+H =W(ˆX)
+H =W(NonLinear( H))
+H =LayerNorm( H),
+where W∈R(r < d )andW∈R
+are projection parameters to be updated during
+training. We use SiLU (Elfwing et al., 2017) for the
+non-linear layer and apply Layer Norm (Ba et al.,
+2016) on H, observing that without layer norm,
+Hoften grows quickly and gradients explode.
+Finally, we compute the attentions by calculat-
+ing the product between ˆPandH, and apply
+softmax over the prompts, as follows:
+a=e/T/summationtexte/T, (3)
+where Tis a softmax temperature (Radford et al.,
+2021) and scale the logits in Eq. 3 to avoid making
+the attention module over-confident.
+3.2.2 Prompt Interpolation
+The final soft prompt for the instance Xis calcu-
+lated as the weighted sum of the prompts given the
+attention generated by Eq. 3:
+P (X) =P +/summationdisplayaP. (4)
+The second term on the right differs for different
+instances of the same task, while the P term
+is task-specific. The attentions act as a gate to
+control the influences from different prompts and
+enable a flexible composition of knowledge from
+multiple tasks. As shown in Eq. 4, the selection of
+1+aweights for the target-task-specific prompt
+P(=P)enables A todown-play
+the role of source prompts if the knowledge from
+none of the sources tasks is useful for the instance
+X, while always keeping the influence of P
+so that it will be properly updated during training.3.3 Multi-task Training and Inference
+Training. A can jointly train the atten-
+tion module Gand multiple target task prompts.
+Here, we explain our approach on multi-task learn-
+ing over a group of target tasks by sharing G.
+It first concatenates the training datasets, while
+keeping each task ID information. During training,
+we retrieve the target-task prompt corresponding to
+the instance given the task ID, calculate attentions
+over the set of the prompts and produce instance-
+wise prompt as described in Section 3.2. The loss
+for each target task prompt only backpropagates
+when the prompt is used, while the weights of the
+attention module is updated at each iteration.
+This way, target tasks are loosely connected
+and together contribute to an improved and task-
+agnostic attention module, which is particularly
+effective when the target task training data is small.
+Moreover, this reduces the number of parameters
+to be updated per task and improves the efficiency
+of inference time.
+Inference. At inference time, we load source
+prompts, all of the target task prompts and the
+shared Gjust once. For each instance, A
+retrieves the target task prompt and produces
+P as in Eq. 4, and then concatenates
+P to the input embedding. The inference
+process after producing instance prompt is exactly
+the same as in prompt tuning.
+A enables loading multiple target task
+prompts and performing multiple target tasks simul-
+taneously, significantly reducing the inference time
+model loading overhead. Existing approaches such
+as full fine-tuning or Adapter requires model load-
+ing for different target tasks, making its multi-task
+inference pipeline complicated.
+3.4 Parameter Efficiency of A
+For each task, we will introduce a new trainable
+soft prompt m×d, where mis the length of the
+prompts and dis the LM’s dimension. An attention
+module consists of two projection matrices and a
+layer norm, resulting in d×r+r×d+ 2d=
+2rd+ 2dparameters, where ris the projection di-
+mension. As this can be shared across Ntarget
+tasks, the additional parameters per task will be:
+d×m+=d(m+ 2(r+ 1)/N). A unique
+characteristic of A or prompt tuning is their
+independence from the number of the LM layers;
+With Adapter or fine-tuning, the number of the pa-
+rameters quickly increases as the backbone LMs6658get larger. A , in contrast, updates only
+the soft prompts and do not modify the LM higher
+layers, resulting in moderate parameter increases
+compared to other approaches. When we use T5-
+XL as a backbone LM, Adapter and BitFit updates
+about 6 million and 2 million parameters respec-
+tively, while A only updates and stores
+172k parameters per task (Figure 7 in Appedix).
+4 Experiments
+4.1 Source and Target Tasks
+We use 6 large-scale datasets as source tasks , and
+evaluate on 21 diverse target tasks including en-
+tailment, paraphrase detection, sentiment analysis,
+question answering (QA), commonsense reasoning.
+Datasets details are in Appendix Section B.
+Source tasks. We use the following datasets with
+more than 100k annotations in total from GLUE,
+SuperGLUE and MRQA for source prompts:
+MNLI (Williams et al., 2018), QNLI (Demszky
+et al., 2018), QQP (Wang et al., 2019b), SST-
+2 (Socher et al., 2013), SQuAD (Rajpurkar et al.,
+2016), and ReCoRD (Zhang et al., 2018).
+GLUE and SuperGLUE. We use 8 GLUE
+tasks (Wang et al., 2019b) and 5 Super-
+GLUE (Wang et al., 2019a) tasks as target datasets
+to test the model’s natural language understanding
+abilities: BoolQ (Clark et al., 2019), CB (De Marn-
+effe et al., 2019), MultiRC (Khashabi et al., 2018),
+WiC (Pilehvar and Camacho-Collados, 2019),
+WSC (Levesque et al., 2012), RTE (Giampiccolo
+et al., 2007), CoLA (Warstadt et al., 2019), STS-
+B (Cer et al., 2017), MRPC (Dolan and Brockett,
+2005), MNLI, QQP, QNLI and SST-2. Four of the
+GLUE datasets used as source tasks (MNLI, QQP,
+SST-2 and QNLI) are also included as target tasks
+to provide comprehensive comparisons with prior
+parameter-efficient tuning methods, whose evalu-
+ations often focus on GLUE (Lester et al., 2021;
+Ben Zaken et al., 2022).
+Question answering. We use the MRQA 2019
+shared task (Fisch et al., 2019) data to test on four
+large-scale QA datasets: Natural Questions (NQ;
+Kwiatkowski et al. 2019), HotpotQA (HQ; Yang
+et al. 2018), NewsQA (News; Trischler et al. 2017)
+and SearchQA (SQA; Dunn et al. 2017).
+Others. We experiments on four different
+datasets, whose tasks are related to the source tasks
+but domains differ. SciTail (Khot et al., 2018)is a scientific entailment dataset. Yelp-2 (Zhang
+et al., 2015) is a sentiment analysis dataset on Yelp
+reviews. WinoGrande (Sakaguchi et al., 2020) is
+commonsense reasoning task in multiple choice
+format. PAWS-Wiki (Zhang et al., 2019) is a
+Wikipedia-based paraphrase detection dataset.
+4.2 Baselines and Implementation Details
+Baselines. We compare A with: fine-
+tuning (FT) ;prompt tuning (PT; Lester et al.
+2021), where target prompt embeddings are
+initialized by randomly sampled top vocabu-
+laries; SPoT (Vu et al., 2022), where target
+prompts are initialized by source prompt embed-
+dings trained on other tasks (details are in Ap-
+pendix); Adapter (Houlsby et al., 2019), Adap-
+terDrop (Rücklé et al., 2021) and BitFit (Ben Za-
+ken et al., 2022). On GLUE, we also compare
+A with several state-of-the-art multi-task
+methods, which train a single model on different
+tasks: FT-multi-task (FT-m) ,Adapter-m ,Hy-
+perFormer (Mahabadi et al., 2021b), HyperDe-
+coder (Ivison and Peters, 2022), and AdapterFu-
+sion (Pfeiffer et al., 2021).
+Implementation details. Although our meth-
+ods, A andA -m use the same six
+source task prompts, A -m trains a shared
+attention layer across multiple target tasks by con-
+ducting multi-task training, while A trains
+a task-specific attention layer separately. Unless
+specified, we use T5-base as our base LMs for
+A and all of the baselines.If a dataset
+does not have public test split with annotations,
+we use a development set as our test set or split
+the development set into our development and test
+sets, following Mahabadi et al. (2021a). We train
+for 20 epochs on small datasets with less than 10k
+examples, 10 epochs on medium-size data with
+more than 10k examples, and 5 epochs on MRQA
+datasets and limit the maximum training data num-
+ber of Yelp-2 to be 100k samples. To make Glearn
+a good prompt composition for efficient knowledge
+transfer, we introduce different learning rates for
+G(Ponti et al., 2022) and also pre-train and trans-6659
+fer the weights of Gfrom the source tasks. More
+experimental details are in Appendix.
+Prompt initialization. Each source prompt is ini-
+tialized by randomly sampling tokens from the top
+vocabularies as in Lester et al. (2021). For target
+task prompt initialization, we use the MNLI source
+prompt for non-QA tasks and the SQuAD source
+prompt for QA, instead of initializing it with ran-
+domly sampled vocabularies for training stability.
+5 Results
+We present main results in Section 5.1 and few-
+shot domain transfer experiments on sampled tasks
+in Section 5.2, demonstrating the effectiveness of
+ATTEMPT especially when the data is scarce. Sec-
+tion 5.3 further provides set of analyses.
+5.1 Main Results
+Tables 1 and 2 present the per-task performance of
+the GLUE and SuperGLUE datasets, and the other
+datasets, respectively.
+Performance vs. efficiency. Figures 3a and 3b
+compare the performance of different models ver-
+sus their number of updated parameters on GLUE6660and SuperGLUE. A -m significantly out-
+performs PT, SPoT and BitFit by a large margin,
+and matches Adapter or Fine-tuning despite up-
+dating much fewer parameter per each task and
+keeping the LM completely frozen. Table 1 shows
+A outperforms all of the multi-task base-
+lines including recent HyperFormer or HyperDe-
+coder. In addition to competitive performance on
+GLUE/SuperGLUE, Table 2 shows that A -
+m achieves 72.8 MRQA average F1, outperforming
+BitFit using twice as many parameters. Moreover,
+A -m yields 85.6% average accuracy on
+WinoGrande, Yelp, SciTail and PAWS, outperform-
+ing BitFiT (84.7%) and matching Adapter (86.2%)
+that updates ten times more parameters.
+ATTEMPT largely improves prompt tuning.
+As pointed out by prior work (Mahabadi et al.,
+2021a; Lester et al., 2021; Sung et al., 2022),
+prompt tuning is sensitive to hyperparameters or
+initialization, and it has significantly lower perfor-
+mance on several datasets such as CoLA (10.2%),
+BoolQ (61.7%) or WiC (48.9%). SPoT (Vu et al.,
+2022) improves the target task prompt initializa-
+tion with a prompt trained on other related tasks,
+but it still under-performs other approaches, and
+requires searching the source tasks beforehand. A- largely outperforms those approaches on
+smaller datasets (e.g., CB, RTE), as well as large-
+scale MRQA datasets as shown in Table 2.
+5.2 Few-shot Domain Adaptations
+As shown in Table 2 ATTEMPT is particularly
+competitive on smaller dataset (e.g., RTE, WSC).
+Following Mahabadi et al. (2021b), we conduct
+few-shot experiments on BoolQ, CB and SciTail, to
+further verify the effectiveness of A under
+resource-constrained setup. Here, all of the models
+(Fine-tuning, Adapter, HyperFormer, SPoT and
+ATTEMPT) are first trained on the GLUE tasks
+and then transferred to new tasks using only k(k=
+4,16,32) randomly sampled training data. More
+details of few-shot domain adaptation experiments
+are available at Appendix.
+Table 3 shows that A significantly out-
+performs other methods in most of the setting. This
+indicate the effectiveness of transferring knowledge
+from multiple source tasks in a non-destructive
+manner in few-shot domain adaptation.
+5.3 Analyses
+Power of scale. We empirically analyze how
+increasing the backbone LM size affects A- performance. Figure 4 summarizes the
+performance of Adapter, A , prompt tuning
+(PT), and fully fine-tuned (FT) models vs. LM sizes
+on three SuperGLUE datasets.A largely
+benefits from backbone LM size increase. This
+is aligned with the finding of Lester et al. (2021)
+that show prompt tuning is particularly effective
+when the backbone LM is larger. Moreover, A- matches fully fine-tuned models even with
+T5-base or T5-large. This is in contrast to prompt
+tuning methods that suffers when the backbone LM
+is smaller. Furthermore, A performs on par
+with or outperforming Adapter with T5-3B, while
+updating 37 times less parameters.
+Ablation studies. We compare different variants
+ofA to see the effect of each of the de-
+sign choices.We ablate A with (a) no
+target , which neither initializes nor adds target
+task prompts in Eq. 4, to assess the feasibility of
+adapting to a new task by only interpolating pre-6661
+trained source prompts; (b) no attention , which
+gives constant score a= 1/tto all source prompts
+in Eq. 3, discarding attentions; (c) single prompt ,
+which uses only a single source prompt to assess
+the effect of transferring knowledge from multiple
+tasks. Single prompt ablation is similar to SPoT
+except that instead of using source prompts for ini-
+tialization and updating its during training, we keep
+the source prompt frozen while updating the target
+task prompt and the attention layers.
+Table 4 indicates that all components contribute
+to performance improvements. Adding a trainable
+target-task-specific prompt (no target) is crucial to
+achieve good performance on all of the datasets,
+especially on BoolQ and WinoGrande. Constant
+attention causes large performance drop, especially
+on BoolQ and NewsQA, indicating that it is im-
+portant to have learned attentions rather than sim-
+ply averaging the multiple source prompts. Al-
+though the single prompt ablation baseline outper-
+forms SPoT, possibly due to the non-destructive
+soft prompt transfer of A , there is notable
+performance decline relative to A . This
+demonstrates the effectiveness of leveraging multi-
+ple soft prompts to transfer knowledge from multi-
+ple diverse tasks.
+Modularity: effects of variable source prompts.
+We study the modular nature of A that en-
+ables flexibly adding or removing source tasks. Fig-
+ure 5 shows how including source tasks affects the
+final performance of A on two benchmarks,
+BoolQ and RTE. On both of the datasets, adding
+more source task prompts gives performance im-
+provements, with an exception of adding SQuAD
+and ReCoRD on RTE (“full” in Figure 5a). This
+potentially happens because of the negative transfer
+due to the different natures of QA and RTE, while
+adding the two QA source prompts helps in BoolQ.
+Interpretability: analysis on attentions. Fig-
+ure 6 shows the attention weight matrix between
+source and target tasks by A . Note that for
+the target task prompt, we present the aweight
+before adding 1. Attention patterns differ for differ-
+ent tasks. Generally, Ggives higher attentions to
+related source tasks: Yelp →SST-2, or PAWS-Wiki
+→QQP, which are the same tasks but are different
+in domains. QQP is often highly attended by some
+tasks that are seemingly different from paraphras-
+ing (e.g., MultiRC, WNLI), which may indicate
+underlying task similarities between those tasks.
+Unlike the underlying task similarities, MNLI is
+not highly attended by some highly-related target
+tasks such as RTE. We hypoothesize that this is
+because the target task prompts for those tasks are
+initialized with the MNLI source prompt, and thus
+A may try to attend to other tasks. On
+WinoGrande or SciTail, Ggives large attentions to
+the target task embeddings (“target”); this maybe
+because those two tasks have significantly different
+task format or input domain, and Gignores source
+prompts more.
+6 Related Work
+Parameter-efficient tuning. Here, we enlist ad-
+ditional parameter-efficient tuning methods that are
+close to our work. AdapterFusion (Pfeiffer et al.,
+2021) compose multiple different adapters by learn-
+ing task-specific compositions on each task, and
+Friedman et al. (2021) take an average of multiple
+adapter layers after training adapters individually6662on different QA datasets. HyperFormer (Mahabadi
+et al., 2021b) and HyperDecoder (Ivison and Pe-
+ters, 2022) train a shared hyper network to gener-
+ate parameters of adapter layers. Qin and Eisner
+(2021) introduce mixture of soft prompts, where
+predictions given different prompts are ensembled
+for the same knowledge base relationship types.
+IDPG (Wu et al., 2022) and Instance-Dependent
+Prompt Tuning (Levine et al., 2022) learn to gener-
+ate instance-wise prompts given the input encoded
+by LMs. Compared to the previous work, our main
+focus is transferring knowledge from multiple tasks
+to produce soft prompts rather than learning to gen-
+erate them from scratch, and is much more efficient
+in terms of parameters and inference time.
+Concurrent to our work, Liu et al. (2022) in-
+troduce (IA)that multiplies intermediate acti-
+vation by learned vectors for few-shot learning.
+Wang et al. (2022b) shows that combining a set
+of prompts retrieved from the prompt pool by a
+key-value mechanism yields competitive perfor-
+mance in computer vision continual learning. For
+generation tasks, Li et al. (2022) transfer multiple
+source prompts using multi-key memory network
+for prompt clustering and multi-head attention tak-
+ing another LM output. In contrast, we present
+an efficient multi-task tuning that is effective in
+diverse NLP tasks. More importantly, prior work
+often relies on priors such as pre-computed clusters
+or another LM’s predictions of which tasks should
+be used as source tasks. A removes the
+necessity of such priors by training an attention
+layer that learn to focus on relevant source tasks.
+Several recent lines of research attempt to adapt a
+massive multi-task LM trained with instructions or
+demonstrations to a new task without any parameter
+updates (Sanh et al., 2022; Min et al., 2021; Wang
+et al., 2022a; Wei et al., 2022). The main focus of
+this paper is how to efficiently transfer rich multi-
+task knowledge from source tasks to target tasks
+with training data during target task training, while
+those work often emphasize on zero or few-shot
+transfer without any parameter updates.
+Modular multi-task training. There is a large
+literature on composing multiple separate networks
+to handle different sub-tasks (Jacobs et al., 1991b,a;
+Andreas et al., 2016; McCann et al., 2018). As
+the LM size expands, several recent work tries to
+sparsely activate or employ light-weight modules
+for efficient multi-task learning (Gupta et al., 2022;
+Ponti et al., 2022; Fedus et al., 2022). In particu-lar, we share the same intuition as the concurrent
+work (Ponti et al., 2022), which combines several
+skills encapsulated in parameter-efficient modules;
+however, our main focus is on how to transfer and
+share knowledge from resource-rich tasks in a su-
+per parameter-efficient way, while they focus on im-
+proving few-shot generalization ability. Moreover,
+A keeps LMs intact and updates fewer pa-
+rameters.
+7 Conclusion
+We present a new parameter-effluent tuning method
+A , which learns to produce instance-wise
+prompts by interpolating multiple reusable soft
+prompts trained on source tasks and a new task-
+specific prompt, while keeping the original LM
+frozen. Our large-scale experiments demonstrate
+thatA achieves a great trade-off between
+task performance and efficiency, introducing an
+interpretable and modular task transfer.
+Limitations
+Despite its parameter-efficiency and strong empiri-
+cal results, A has several limitations: First,
+as prompt tuning increases the input token length
+bymprompt tokens, it increases the memory foot-
+print and computational costs (Mahabadi et al.,
+2021a), although Lester et al. (2021) found that
+prompt length can be shortened when larger LMs
+are used as backbone models. We investigate this
+issue in Appendix Section C.10. Secondly, as the
+first step toward multi-task knowledge transfer via
+soft prompts, our evaluation focuses on classifi-
+cation and QA tasks, and our target tasks do not
+include the tasks that require long sequence gen-
+erations (e.g., summarization). Future work can
+explore applications of A to more diverse
+sets of tasks. In addition, we use representative
+six NLP tasks as source tasks, but do not explore
+a large-scale experiments on many source task
+combinations. We will release pretrained source
+prompts and easily extendable code to facilitate
+future work on multi-task transfer via soft prompt
+transfer. Lastly, we do not test A on
+non-English tasks, and we will investigate the ef-
+fectiveness of A in non-English languages
+or apply A for cross-lingual transfer.
+Ethics Statement
+A is trying to improve parameter-efficiency
+and transferrability of models so that groups with6663limited computational resources can still get benefit
+from state-of-the-art large-scale models. All of
+the experiments are based on widely-used general
+purpose datasets, which are unlikely to include
+harmful content. However, several datasets such
+as Yelp Review are created from existing review
+sites, and may have more risks of privacy issues or
+harmful content than some other datasets based on
+news or encyclopedic websites.
+Acknowledgement
+This research was supported by NNSF IIS-
+2044660, ONR N00014-18-1-2826, a Sloan fellow-
+ship and gifts from AI2, and the Nakajima Foun-
+dation Fellowship. We thank UW NLP and Allen
+NLP group members for their insightful discussion
+and Sandy Kaplan, Sewon Min, Ofir Press, and
+Yizhong Wang for their helpful feedback on this
+paper.
+References6664666566666667Appendix
+A More Method Details
+A.1 Improving Multi-task Training
+Learning effective interpolations of prompts is chal-
+lenging, as input embeddings themselves do not
+necessarily correspond to meaningful prompt to-
+kens, and we do not have any supervisions for the
+ground truth task mapping. We explore several
+approaches to improve the training with good in-
+ductive bias so that Glearns a good prompt compo-
+sition for efficient knowledge transfer.
+Learning attention prior. We pre-train the at-
+tention module on source tasks and then use the
+learned projection layers and the layer norm to ini-
+tialize the attention module on the target task(s).
+This learned prior can be also directly used for
+tasks that lack training data.
+Two-speed learning rate. Ponti et al. (2022)
+shows that setting different learning rates for the
+composition module and the task-specific model
+parameters helps to provide useful inductive bias to
+encourage the model to learn the best skill compo-
+sition. We also introduce this two-speed learning
+rate approach for A .
+A.2 Pre-training Gon Source Tasks
+To learn the attention prior for G, we run the same
+training process as in the target task training on
+the source tasks. In particular, we initialize an-
+other task-specific prompt for each source task,
+and trains both those task-specific prompts as well
+as the shared attention weights of Gon the combi-
+nations of the source tasks as in Section 3.2.
+A.3 Overview of Training
+Algorithm Table 5 presents the overview of the
+training algorithm.
+A.4 Parameter Efficiency of A
+Figure 7 shows the number of the parameters to
+be updated for Prompt tuning, A , Adapter,
+and BitFit when we increase the size of the back-
+bone LMs. As we can see, other parameter-efficient
+transfer approaches observe quick increases of the
+trainable parameters, while A shows small
+increases. In addition, A keeps the original
+LM frozen and does not modify the LM structures
+unlike those approaches.A.5 Alternative Attention Design
+A computes the same attention scores over
+mprompt tokens. Alternatively, we compute atten-
+tion scores for each prompt token further flexibility
+and expressiveness. Here, instead of computing
+similarities between the summary representation of
+Hand prompt ˆP, we compute similarities be-
+tween Hand each lth prompt token as follows:
+a=e
+/summationtexte. (5)
+For prompt token-level attention, in the second
+term on the right, each lth prompt token in the sum-
+mary representation is calculated as the weighted
+summary of the lth prompt tokens.
+Empirically the token-level attentions gives sim-
+ilar performance to the original attention in Eq. 3,
+while in some tasks it gives notable performance
+improvements. Due to the additional computational
+overhead, we use the max-pooling based unified at-
+tention (Eq. 3) as our default attention mechanism.
+Interestingly, we find that the attention distributions
+are significantly different among prompt tokens in
+different locations (e.g., giving significantly higher
+attentions to the target task prompt in the later to-
+kens), potentially because of the position biases of
+pretrained models (Wang and Chen, 2020). This is
+beyond the scope of this work, but is certainly of
+interest for future work.
+B Task and Dataset Details
+We show the list of the datasets, tasks and domains
+for source tasks in Table 6 and for target tasks in
+Table 7, respectively. In summary, both source
+and target datasets cover diverse tasks, domains
+and output formats (i.e., span extraction, multiple-
+choice, classification).
+C Experimental Details
+C.1 Implementation Details
+We use PyTorch(Paszke et al., 2019) and hug-
+gingface transformers(Wolf et al., 2020) to im-
+plement our models. For Adapter, BitFit, prompt
+tuning and BitFit baselines, we use the implemen-
+tations by Mahabadi et al. (2021a).We use hug-
+gingface datasetslibrary to use the data for the6668Source Prompt Training
+Forjth source tasks in tsource tasks, train a source prompt Pby maximizing p(y|[P,X]
+individually (Section 3.1) [Eq. 2]
+Target Prompt Training
+Initialization: initialize a new prompt P and attention module G
+For each instance (x,y), after passing xto the embedding layer to get input embeddings X,
+Step 1: Compute instance-wise prompt P forX(Section 3.2)
+1. calculate attentions between Xand a set of prompts [P, . . . ,P,P]usingG[Eq. 3]
+2. interpolate P, . . .PandP using attention scores [Eq. 4]
+Step 2: Prepend P toXand feed the final input to frozen LM θ
+Step 3: Maximize p(y|[P ,X])and backpropagate to P andGviaP [Eq. 2]
+experiments except for MRQA 2019 shared task.
+For MRQA 2019 shared task, we download the
+original training and development data from the
+official repository.
+C.2 Source Prompt Training Details
+We fine-tune the source prompts on six large-scale
+datasets for 5 epochs. We use the checkpoints with
+the best development score as our source prompts.
+Each source prompt is initialized by randomly sam-
+pled tokens as in Lester et al. (2021). We found that
+although this random vocabulary based initializa-
+tion is often unstable even in large-scale datasets,
+on the six source tasks, this approach gives reason-
+able performance, even with T5-small.
+C.3 Attention Module Pretraining Details
+As the six source tasks have significantly different
+length of input context (e.g., the input context of
+MNLI, SST-2, QQP or QNLI is on average less
+than 200 tokens while SQuAD or ReCoRD have
+the context longer than 512 tokens), we split the
+source tasks into the two groups: (1) MNLI, SST-2,
+QQP and QNLI; (2) SQuAD and ReCoRD. We use
+the resulting pretrained weights from group (2) for
+MRQA 2019, while for other experiments, we use
+the weights from (1).
+C.4 General hyperparameters
+We set the maximum token length to be 512 for
+MRQA datasets, 348 for MultiRC and 256 for allof other datasets. All of the experiments are con-
+ducted with a single GPU with 24 GB memory. On
+all of the datasets, training were completed within
+24 hours. Per GPU batch size is 32, and for MRQA,
+we set the per GPU batchsize to be 16 and set the
+gradient accumulation step to 2 due to the out of
+memory error.
+C.5 Hyperparameters for A
+We use T=d×exp(1) , where dis the LM di-
+mension size, to control the soft max temperature
+in Section 3.2. The prompt length mis 100 and
+the prompt tuning learning rate is 0.3 and optimize
+the objective function using Adam (Kingma and
+Ba, 2015). We set weight decay to be 1×10.
+For the projection layers, we use r= 100 . For the
+attention module G, we found that the best learn-
+ing rate varies across datasets and tune it on the
+development sets. In particular, we use the learning
+rate of 0.1 for SuperGLUE, and Yelp, WinoGrande,
+SciTail and PAWS multi-task experiments, and 0.3
+for the other experiments.
+C.6 Hyperparameters for Baselines
+For all of the baselines, we set the warmup steps
+to be 500, use Adam for optimization with a linear
+learning rate scheduler.
+Prompt Tuning. As in A , we use the
+prompt length of m= 100 and use the learning
+rate of 0.3 for prompt tuning and set weight decay
+to be 1×10.6669
+SPoT. We explore two approaches to initalize
+the target task prompt as in Vu et al. (2022):
+SPoT- generic (SPoT-g) andSPoT- targeted (SPoT-
+t). SPoT-g first pre-trains source prompts on eight
+GLUE tasks and then uses the source prompts to
+initialize target task prompts, while SPoT-t uses
+prompt similarities to find top- ksimilar tasks and
+then initializes target task prompts using the top
+kprompts. As we only use 6 source tasks in this
+work, we use top 1 similar prompt as the transfer
+source of SPoT-t. We use the same hyperparam-
+eters as in prompt tuning. To select the source
+task for SPoT-t, we run prompt tuning on all of the
+source and target tasks for 5 epochs for medium
+and large-scale datasets and 20 epochs for smaller
+scale datasets and then compute the cosine simi-
+larity between a target prompt and the set of the
+source prompts. Regarding the SPoT-g training, we
+train a single source prompt on the combination of
+the GLUE source tasks following Vu et al. (2022).
+We found that SPoT-g baseline is not strong on
+MRQA or Others (i.e., Yelp, Scitail, WinoGrande
+and PAWS-Wiki), while it gives small performanceimprovements on GLUE from SPoT-t in some tasks.
+Therefore, we use SPoT-t in our main experiments.
+Adapter. We use the default hyperparameters by
+Mahabadi et al. (2021a) for the Adapter baseline.
+We use GELU (Hendrycks and Gimpel, 2016) for
+non-linear layers, set the reduction factor to be 32
+and the learning rate to be 3×10.
+BitFit. We use the learning rate of 3×10.
+Fine-tuning. We use the learning rate of 3×
+10. Other hyperparameters are the same as the
+huggingface transformers T5 models.
+C.7 Multi-task Training Details
+The 17 datasets have significantly different length
+of input context, and training on the combinations
+of all of the datasets can make training inefficient.
+We conduct multi-tasking of 4 datasets (Super-
+GLUE, MRQA 2019, and others), while on GLUE,
+we train A -m on 8 GLUE tasks. We keep
+MultiRC training separated from other SuperGLUE
+tasks, as MultiRC has significantly longer context6670
+than other SuperGLUE datasets. We set the maxi-
+mum length of the input to be 256, 256, 512, 256
+for GLUE, SuperGLUE, MRQA 2019, and others
+task set, respectively. We set the maximum length
+of input to be 348 for MultiRC.
+C.8 Few-shot Adaptation Experiments Details
+Following (Mahabadi et al., 2021b), we run few-
+shot adaptation experiments for three times and
+takes the mean of the performance. We cite the
+performance of the fine-tuning, Adapter and Hyper-
+Former from Mahabadi et al. (2021b), and train a
+single prompt tuning model on 8 GLUE tasks and
+then transfer it to few-shot tasks. For A ,
+we load the attention weights trained on 8 GLUE
+tasks.
+C.9 Scaling Experiments Details
+During this experiment, we use only a single GPU
+with 24 GB GPU memory, as in our main experi-
+ments, to simulate a common resource environment.
+We found that under this computational constraint,
+we could not fine-tune the T5-3B model due to
+the out of memory error, even with a batch sizeof 1. Adapter, prompt tuning and A can
+be trained on a single GPU even with the T5-3B
+model. We provide the experimental details for the
+LM scaling experiments in Section 5.3. For A- and prompt tuning, we use the same single
+GPU with 24 GB GPU memory as the main experi-
+ments. For Adapter and fine-tuning, we use a single
+GPU with 48 GB GPU memory but restrict GPU
+memory usage at 24 GB for a fair comparison. For
+the scalability experiments, we set the maximum
+token length to 216 across all datasets.
+Per-device batch size for A and prompt
+tuning. For T5 small and base, we set per-GPU
+batch size to be 100 and 32, while for T5-large and
+T5-XL (3B), we use the batch size of 16 and 2,
+respectively.
+Per-device batch size for Adapter. For Adapter
+experiments, we flexibly adjust the per-device
+batch size for each dataset to avoid out of the mem-
+ory issues. The number of the per-device batch size
+is shown in Table 8.
+Per-device batch size for fine-tuning. Similarly
+in Adapter, we adjust the per-device batch size
+for the fine-tuned models. The number of the per-
+device batch size is shown in Table 8. For fine-
+tuned models, we found that we cannot avoid the
+out of memory issue even with the batch size of
+1, so we report the results with T5 small, base and
+large.
+Performance Instability of fine-tuning with T5-
+large. We found that fine-tuning with T5-large is
+occasionally unstable and fails to learn a target task,
+and is sensitive to the batch size or learning rate.
+For instance, using different batch size results in
+65% BoolQ accuracy. For those cases, we explored
+several learning rates and batch sizes and report
+the best performance. Several prior work report the
+instability of fine-tuning large-scale LMs (Mosbach
+et al., 2021; Dodge et al., 2020).
+C.10 Memory Footprints
+Despite its parameter-efficiency, prompt tuning
+based approaches increase the sequence length by
+prepending continuous emeddings in front of the
+original input sequence (Lester et al., 2021; Ma-
+habadi et al., 2021a). We evaluate the memory foot-
+print of full fine-tuning, Adapter, BitFit, prompt
+tuning and A . We use T5-base as a de-
+fault base LM and set the per-gpu batch size to6671
+32. We also compare the memory footprint using
+T5-3B with batch size of 2. We set the length of
+the prompt to 100.
+As shown in Table 9, A increase the
+memory footprint from other methods, due to the
+increase of the input length, multiple pre-loaded
+source prompts and attention calculations. On the
+other hand, A shows moderate memory
+footprint increase when the backbone LM size gets
+larger (13.7 GB to 16.1 GB) while Adapter and Bit-
+Fit show about three times more memory footprints
+than T5-base. This demonstrates that A is
+more parameter-efficient and can be more memory-
+efficient when the backbone LMs get even larger
+(e.g., 11 billions). Moreover, Lester et al. (2021)
+show that the input prompt length can be signifi-
+cantly reduced when the backbone LMs get larger,
+which further improve the memory efficiency of
+prompt tuning-based methods.6672

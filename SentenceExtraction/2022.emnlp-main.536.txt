@@ -1,1 +1,654 @@
-7862 Proceedings of the 2022 Conference on Empirical Methods in Natural Language Processing , pages 7862 7874 December 7 - 11 , 2022 © 2022 Association for Computational Linguistics 7863 7864 7865 7866 7867 7868 7869 7870 7871 7872 7873 7874 
+
+Huiyin Xue and Nikolaos Aletras
+Department of Computer Science, University of Sheffield
+United Kingdom
+{hxue12, n.aletras}@sheffield.ac.uk
+Abstract
+Transformer-based pre-trained language mod-
+els are vocabulary-dependent, mapping by de-
+fault each token to its corresponding embed-
+ding. This one-to-one mapping results into em-
+bedding matrices that occupy a lot of memory
+(i.e. millions of parameters) and grow linearly
+with the size of the vocabulary. Previous work
+on on-device transformers dynamically gener-
+ate token embeddings on-the-fly without em-
+bedding matrices using locality-sensitive hash-
+ing over morphological information. These
+embeddings are subsequently fed into trans-
+former layers for text classification. However,
+these methods are not pre-trained. Inspired by
+this line of work, we propose HF ,
+a new family of vocabulary-independent pre-
+trained transformers that support an unlimited
+vocabulary (i.e. all possible tokens in a cor-
+pus) given a substantially smaller fixed-sized
+embedding matrix. We achieve this by first in-
+troducing computationally cheap hashing func-
+tions that bucket together individual tokens to
+embeddings. We also propose three variants
+that do not require an embedding matrix at
+all, further reducing the memory requirements.
+We empirically demonstrate that HF - are more memory efficient compared to
+standard pre-trained transformers while achiev-
+ing comparable predictive performance when
+fine-tuned on multiple text classification tasks.
+For example, our most efficient HF
+variant has a negligible performance degrada-
+tion (0.4% on GLUE) using only 99.1K parame-
+ters for representing the embeddings compared
+to 12.3-38M parameters of state-of-the-art mod-
+els.
+1 Introduction
+The majority of transformer-based (Vaswani et al.,
+2017) pre-trained language models (PLMs; Devlinet al. 2019; Liu et al. 2019; Dai et al. 2019; Yang
+et al. 2019) are vocabulary-dependent, with each
+single token mapped to its corresponding vector in
+an embedding matrix. This one-to-one mapping
+makes it impractical to support out-of-vocabulary
+tokens such as misspellings or rare words (Pruthi
+et al., 2019; Sun et al., 2020). Moreover, it linearly
+increases the memory requirements with the vocab-
+ulary size for the token embedding matrix (Chung
+et al., 2021). For example, given a token embed-
+ding size of 768, BERT- with a vocabulary
+of 30.5K tokens needs 23.4M out of 110M total pa-
+rameters while RBERT- with 50K tokens
+needs 38M out of 125M total parameters. Hence,
+disentangling the design of PLMs from the vo-
+cabulary size and tokenization approaches would
+inherently improve memory efficiency and pre-
+training, especially for researchers with access to
+limited computing resources (Strubell et al., 2019;
+Schwartz et al., 2020).
+Previous efforts for making transformer-based
+models vocabulary-independent include dynam-
+ically generating token embeddings on-the-fly
+without embedding matrices using hash embed-
+dings (Svenstrup et al., 2017; Ravi, 2019) over
+morphological information (Sankar et al., 2021a).
+However, these embeddings are subsequently fed
+into transformer layers trained from scratch for on-
+device text classification without any pre-training.
+Clark et al. (2022) proposed CANINE, a model
+that operates on Unicode characters using a low-
+collision multi-hashing strategy to support ~1.1M
+Unicode codepoints as well as infinite character
+four-grams. This makes CANINE independent of
+tokenization while limiting the parameters of its
+embedding layer to 12.3M. Xue et al. (2022) pro-
+posed models that take as input byte sequences rep-
+resenting characters without explicit tokenization
+or a predefined vocabulary to pre-train transformers
+in multilingual settings.
+In this paper, we propose HF a new7862family of vocabulary-independent PLMs. Our mod-
+els support an unlimited vocabulary (i.e. all pos-
+sible tokens in a given pre-training corpus) with a
+considerably smaller fixed-sized embedding matrix.
+We achieve this by employing simple yet compu-
+tationally efficient hashing functions that bucket
+together individual tokens to embeddings inspired
+by the hash embedding methods of Svenstrup et al.
+(2017) and Sankar et al. (2021a). Our contributions
+are as follows:
+1.To the best of our knowledge, this is the first at-
+tempt towards reducing memory requirements
+of PLMs using various hash embeddings with
+different hash strategies aiming to substan-
+tially reduce the embedding matrix compared
+to the vocabulary size;
+2.Three HF variants further reduce
+the memory footprint by entirely removing
+the need of an embedding matrix;
+3.We empirically demonstrate that our H-
+F are consistently more memory
+efficient compared to vocabulary-dependent
+PLMs while achieving comparable predictive
+performance when fine-tuned on a battery of
+standard text classification tasks.
+2 Related Work
+2.1 Tokenization and Vocabulary-independent
+Transformers
+Typically, PLMs are pre-trained on text that has
+been tokenized using subword tokenization tech-
+niques such as WordPiece (Wu et al., 2016), Byte-
+Pair-Encoding (BPE; Sennrich et al. 2016) and Sen-
+tencePiece (Kudo and Richardson, 2018).
+Attempts to remove the dependency of PLMs on
+a separate tokenization component include mod-
+els that directly operate on sequences of charac-
+ters (Tay et al., 2022; El Boukkouri et al., 2020).
+However, these approaches do not remove the re-
+quirement of an embedding matrix. Recently, Xue
+et al. (2022) proposed PLMs that take as input byte
+sequences representing characters without explicit
+tokenization or a predefined vocabulary in multilin-
+gual settings. PLMs in Clark et al. (2022) operating
+on Unicode characters or ngrams also achieved the
+similar goal. These methods improve memory effi-
+ciency but still rely on a complex process to encode
+the relatively long ngram sequences of extremely
+long byte/Unicode sequences, affecting their com-
+putational efficiency.
+In a different direction, Sankar et al. (2021b)proposed PF , an on-device vocabulary-
+independent transformer-based model. It generates
+token hash embeddings (Svenstrup et al., 2017; Shi
+et al., 2009; Ganchev and Dredze, 2008) on-the-fly
+by applying locality-sensitive hashing over morpho-
+logical features. Subsequently, hash embeddings
+are fed to transformer layers for text classification.
+However, PF is trained from scratch us-
+ing task-specific data without any pre-training.
+2.2 Compressing PLM Embeddings
+A different line of work has focused on compress-
+ing the embedding matrix in transformer mod-
+els (Ganesh et al., 2021). Prakash et al. (2020) pro-
+posed to use compositional code embeddings (Shu
+and Nakayama, 2018) to reduce the size of the
+embeddings in PLMs for semantic parsing. Zhao
+et al. (2021) developed a distillation method to
+align teacher and student token embeddings us-
+ing a mixed-vocabulary training (i.e. the student
+and teacher models have different vocabularies) for
+learning smaller BERT models. However, these
+approaches still rely on a predefined vocabulary.
+Clark et al. (2022) adopted low-collision multi-
+hashing strategy to support ~1.1M Unicode code-
+points and a larger space of character four-grams
+with a relatively small embedding matrix contain-
+ing 12.3M parameters.
+3 HashFormers
+In this section, we present HF , a fam-
+ily of vocabulary-independent hashing-based pre-
+trained transformers.
+3.1 Many-to-One Mapping from Tokens to an
+Embedding
+Given a token t,HF use a hash func-
+tionHto map tinto a value v. Using hashing
+allows our model to map many tokens into a single
+embedding and support an infinite vocabulary. We
+obtain the embedding index by squashing its hash
+value vintoi= [1, ..., N ]where e=Eis the cor-
+responding embedding from a matrix E∈R
+where Nis the number of the embeddings and d
+is their dimensionality. We assume that |V| ≫N
+where |V|is the size of the vocabulary. Subse-
+quently, eis passed through a series of transformer
+layers for pre-training. This is our first variant,
+HF -Emb that relies on a look-up em-
+bedding matrix (see Figure 1). Our method is inde-
+pendent of tokenization choices.7863
+3.2 Message-Direct Hashing
+(HashFormers-MD)
+Our first approach to hash tokens is by using a
+Message-Digest (MD5) hash function (Rivest and
+Dusse, 1992) to map each token to its 128-bits out-
+put,v=H(t). The mapping can be reproduced
+given the same secret key. MD5 is a ‘random’ hash-
+ing approach, returning mostly different hashes for
+tokens with morphological or semantic similarities.
+For example:() =( ) =
+It is simple and does not require any pre-processing
+to obtain the bit encoding for each token. To map
+the hash output vinto its corresponding embedding,
+we transform its binary value into decimal and then
+compute the index itoEasi=v%N.
+3.3 Locality-Sensitive Hashing
+(HF -LSH)
+Locality-sensitive hashing (LSH) hashes sim-
+ilar tokens into the same indices with high
+probability (Rajaraman and Ullman, 2011).
+HF -LSH uses LSH hashing to as-
+sign tokens with similar morphology (e.g. ‘play’,
+‘plays’, ‘played’) to the same hash encoding. This
+requires an additional feature extraction step for
+token representation.
+Token to Morphological Feature Vector: We
+want to represent each token with a vector xasa bag of morphological (i.e. character n-grams)
+features. For each token, we first extract charac-
+ter n-grams ( n∈1,2,3,4) to get a feature vector
+whose dimension is equal to the vocabulary size.
+Each element in the feature vector is weighted by
+the frequency of the character n-grams of the token.
+Morphological Vector to Hash Index: Once we
+obtain the morphological feature vector of each to-
+ken, we first define Nrandom hyperplanes, each
+represented by a random unit vector r∈R,
+where dis the dimensionality of the morpholog-
+ical feature vector. Following a similar approach
+to Kitaev et al. (2020), we compute the hash value
+vas the index of the nearest random hyperplane
+vector to the token’s feature vector, xobtained
+by computing v=H(x) = arg max( xR),R=
+[r;...;r]where [α;β]denotes the concatenation
+of two vectors. This approach results into buck-
+eting together tokens with similar morphological
+vectors. Similar to HF -MD -Emb, we
+compute the embedding index as i=v%N.
+To prevent storing a large projection matrix
+(R) for accommodating each unit vector, we
+design an on-the-fly computational approach. We
+only store a vector η∈Rthat is randomly initial-
+ized from the standard normal distribution, guar-
+anteeing that each column rin the matrix Ris a
+permutation of ηwith a unique offset value (e.g.
+r= [η, ..., η, η]). Each offset value only relies
+on the index of the hyperplane. This setting ensures
+that each hyperplane has the same L2-norm.
+3.4 Compressing the Embedding Space
+We also propose three embedding compression ap-
+proaches that allow an even smaller number of
+parameters to represent token embeddings and sup-
+port unlimited tokens (i.e. very large |V|) without
+forcing a large number of tokens to share the same
+embedding. For this purpose, we first use a hash
+function Hto map each token tinto a T-bit value
+b,b∈[0,2). Then, we pass bthrough a trans-
+formation procedure to generate the corresponding
+embedding (to facilitate computation, we cast binto
+aT-bit vector τ). This way tokens with different
+values bwill be assigned to a different embedding
+by keeping the number of parameters relatively
+small. Figure 2 shows an overview of this method.
+Pooling Approach (Pool) Inspired by Svenstrup
+et al. (2017) and Prakash et al. (2020), we first7864
+create a universal learnable codebook, which is
+a matrix denoted as B∈R. Then, we split
+the hash bit vector τinksuccessive bits without
+overlap to obtain ⌈⌉binary values. We then cast
+these binary values into an integer value represent-
+ing a codeword. Hence, each token is represented
+by a vector c∈Rwith elements c∈[0,2).
+For example, given k= 4 and a 12-bits vector
+[1,0,1,0,0,1,0,0,0,0,0,1], 4-bit parts are treated as
+separate binary codewords [1010,0100,0001] then
+transformed into their decimal format codebook
+[10,4,1]. We construct the embedding e∈Rfor
+each token by looking up the decimal codebook
+and extracting ⌈⌉vectors corresponding to its
+⌈⌉codewords. We then apply a weighted average
+pooling on them using a softmax function:
+ˆW=expW
+/summationtextexpW, j= 1, ..,⌈⌉ (1a)
+e=/summationdisplay[B⊙ˆW] (1b)
+where W∈Ris a learnable weight matrix
+as well as the codebook B. The total number of pa-
+rameters required for this pooling transformation is
+(⌈⌉+ 2)×d. This can be much smaller than the
+N×dparameters required for standard PLMs that
+use a one-to-one mapping between tokens and em-
+beddings, where N=|V| ≫(⌈⌉+2). Figure 3
+shows the overview of the Pool process.
+Additive Approach (Add) Different to the Pool
+method that uses a universal codebook, we cre-
+ateTdifferent codebooks {B,B, ...,B}, each
+containing two learnable embedding vectors corre-
+sponding to codewords 0and1respectively. We
+get a T-bits vector τ∈ {0,1}for each token,
+where each element in the vector τis treated as
+a codeword. We look up each codeword in their
+corresponding codebook to obtain Tvectors and
+add up them to compute the token embedding e:
+e=/summationdisplayB/slashbigg
+γ (2)
+where B∈R, j= 1, .., T ,γis the scaling
+factor.Hence, the total number of parameters the
+additive transformation approach requires is 2×
+T×d. Similar to the Pool approach, the number of
+parameters required is smaller than the vocabulary
+size: 2×T×d≪N=|V|.
+Projection Approach (Proj) Finally, we propose
+a new simpler approach compared to Pool and Add.
+We create Tlearnable random initialized vectors
+asTpseudo-axes to trace the orientation of each T-
+bits vector τcorresponding to the token t. Given a
+token bit vector τ, thejelement in the embedding
+eis computed as the Pearson’s correlation coeffi-
+cient (PCC) between τand the learnable vector w7865
+corresponding to j.
+e=⟨τ−¯τ,w−¯w⟩
+∥τ−¯τ∥⪅Ⓢ⌝∔⌢®⋒Ⓢ≎⌢≏≏Ⓢ≫≏⋌⋓∥w−¯w∥, j = 1, ..., d
+e= (e, ..., e)(3)
+w∈R, j= 1, .., T , hence, the total number of
+parameters the projection transformation approach
+requires is only T×d≪N=|V|. Figure 5
+depicts an overview of our HF -Proj
+model.
+3.5 Hashing for Compressed Embeddings
+Similar to the embedding based HF -
+Emb, our embedding compression-based models
+also consider the same two hash approaches (MD
+and LSH) for generating the T-bit vector of each
+token.
+MD5: We directly map the tokens to its 128-bits
+output bwith a universal secret key.
+LSH: We repeat the same morphological feature
+extraction step to obtain a feature vector xcorre-
+sponding to each token t. However, rather than
+using 2random hyperplanes that require storing
+vectors of size R, we simply use Trandom hyper-
+planes similar to Ravi (2019); Sankar et al. (2021b).
+Each bit in brepresents which side of the corre-
+sponding hyperplane r∈Rthe feature vector x
+is located: b= sgn(sgn( x·r) + 1) , j= 1, ..., T .
+This allows an on-the-fly computation without stor-
+ing any vector (Ravi, 2019).
+3.6 Pre-training Objective
+Since our models support an arbitrary number of
+unique tokens, it is intractable to use a standard
+Masked Language Modeling (Devlin et al., 2019)
+pre-training objective. We opted using S +
+R (S+R), a computationally efficient three-
+way classification objective introduced by Yam-
+aguchi et al. (2021) for predicting whether tokens
+in the input have been shuffled, replaced with ran-
+dom tokens or remain intact.
+4 Experimental Setup
+4.1 Baseline Models
+We compare HF against the fol-
+lowing baselines: (i) a BERT -base model (De-
+vlin et al., 2019) with BPE tokenization and
+an MLM objective ( BERT -MLM); (ii) another
+BERT -base model with BPE tokenization and a
+Shuffle+Random objective ( BERT -S+R); (iii) C- -C(Clark et al., 2022) a vocabulary-free pre-
+trained PLM on Unicode character sequences; (iv)
+PF(Sankar et al., 2021b) a vocabulary-
+free LSH projection based transformer model with
+two encoder layers that is not pre-trained but only
+trained from scratch on the task at hand.
+4.2 Implementation Details
+Model Architecture Following the architecture
+ofBERT -base, we use 12 transformer layers,
+an embedding size of 768 and a maximum se-
+quence length of 512.For HF -
+LSH , we set T= 128 to make it comparable to
+HF -MD , as MD5 produces a 128-
+bit hash value. For HF -MD -Pool and
+HF -LSH -Pool, we choose k= 10 to
+keep the number of total parameters for the embed-
+dings relatively small. We also experiment with7866two sizes of the embedding matrix of HF --Emb for MD and LSH hashing. The first uses
+an embedding matrix of 50K, the same number of
+embedding parameters as BERT -base, while the
+second uses 1K which is closer to the size of the
+smaller Pool, Add and Proj models.
+Hyperparameters Hyperparameter selection de-
+tails are in Appendix A.
+Pre-training We pre-train all HF ,
+BERT -MLM and BERT -S+R on the English
+Wikipedia and BookCorpus (Zhu et al., 2015) from
+HuggingFace (Lhoest et al., 2021) for up to 500k
+steps with a batch size of 128. For our H-
+F models, we use white space tokenization
+resulting into a vocabulary of 11,890,081 unique
+tokens. For BERT -MLM and BERT -S+R, we use
+a 50,000 BPE vocabulary (Liu et al., 2019).
+Hardware For pre-training, we use eight
+NVIDIA Tesla V100 GPUs. For fine-tuning on
+downstream tasks, we use one NVIDIA Tesla V100
+GPU.
+4.3 Predictive Performance Evaluation
+We evaluate all models on G (Wang et al.,
+2018) benchmark. We report matched accuracy
+for MNLI, Matthews correlation for CoLA, Spear-
+man correlation for STS, F1 score for QQP and
+accuracy for all other tasks.
+4.4 Efficiency Evaluation
+Furthermore, we use the following metrics to mea-
+sure and compare the memory and computational
+efficiency of HF and the baselines.
+Memory Efficiency Metrics We define the three
+memory efficiency metrics together with a perfor-
+mance retention metric to use it as a point of refer-
+ence:
+•Performance Retention Ratio: We compute
+the ratio between the predictive performance
+of our target model compared to a baseline
+model performance. A higher PRR indicates
+better performance.
+PRR =score
+score(4)
+•Parameters Compression Ratio (All): We
+compute use the ratio between the total num-
+ber of parameters of our target model and that
+of the baseline to measure the memory effi-
+ciency of the target model compared to thebaseline. A higher PCRscore indicates bet-
+ter memory efficiency for the entire model.
+PCR= 1−#
+#(5)
+•Parameters Compression Ratio (Emb): We
+also use the ratio between the number of pa-
+rameters required by a target model for repre-
+senting embeddings and that of the baseline.
+A higher PCRscore indicates better mem-
+ory efficiency for the embedding representa-
+tion.
+PCR = 1−#
+#(6)
+•Proportion of Embedding Parameters: We
+also use the proportion of parameters of em-
+beddings out of the total parameters of each
+model to show the memory footprint of the
+embedding space on each model.
+PoEP =#
+#(7)
+Ideally, we expect a smaller PoEP, indicating
+that the embedding parameters occupy as little
+memory as possible out of the total number of
+parameters of a model.
+For number of parameters calculations, please
+see Appendix B.
+Computational Efficiency Metrics We also
+measure the computational efficiency for pre-
+training (PT) and inference (Infer). Each pre-
+training step is defined as a forward pass and a
+backward pass. The inference is defined by a sin-
+gle forward pass.
+•Time per Sample (Time) This measures the
+average time of a sample completing a PT
+or Infer step. It is measured in milliseconds
+(ms)/sample. Lower PT and Infer time indi-
+cates a more computational efficient model.
+•Speed-up Rate We finally measure the
+model’s computation speed-up rate against a
+baseline. It is defined as:
+Speed -upRate = 1/slashbiggTime
+Time(8)
+5 Results
+5.1 Predictive Performance Comparison
+Table 1 presents results on G for our H-
+F models and all baselines. We first ob-
+serve that both the performance of our H-
+F -Emb models (MD and LSH) are compa-
+rable to the two BERT variants (MLM and S+R)7867
+and CANINE-C on average G score (79.9 and
+76.0 vs. 79.5, 79.6 and 70.4 respectively). Surpris-
+ingly, the more sophisticated HF -LSH -
+Emb that takes morphological similarity of tokens
+into account does not outperform HF -
+MD-Emb that uses a random hashing. We be-
+lieve that HF -MD generally outper-
+forms HF -LSH mainly due to its abil-
+ity to map morphologically similar tokens to dif-
+ferent vectors. This way it can distinguish tenses
+etc.. On the other hand, HF -LSH con-
+fuses words with high morphological similarity
+(e.g. play, played) because it assigns them to the
+same embedding.
+However, LSH contributes to the performance
+improvement of smaller HF with
+compressed embedding spaces compared to their
+MD variants, i.e. Add (78.9 vs. 75.3), Add (78.9 vs.
+75.7) and Proj (79.1 vs. 75.7). The best perform-
+ing compressed HF -LSH -Proj model
+obtains 79.1 average G score, which is only
+0.4 lower than the BERT baselines. Reducing the
+number of embedding vectors in Emb (1K) models
+is detrimental to performance and leads to drastic
+drops between 11.8% and 13.1%. This indicates
+that the model size plays a more important role
+than the choice of tokenization approach (i.e. white
+space or BPE) or the vocabulary size (i.e. 12M vs.
+50K). At the same time, comparing to Emb, the
+Pool, Add and Proj approaches do not suffer frompredictive accuracy degradation, i.e. 0.4-4.2%.
+All our HF show clear advantages
+comparing to the LSH based PF which
+is not pre-trained across the majority of tasks (i.e.
+MNLI, QNLI, QQP, MRPC, CoLA and STS). Al-
+though PF shows that for a relatively
+simpler sentiment analysis task (SST), pre-training
+might not be necessary.
+5.2 Memory Efficiency Comparison
+Table 2 shows the results on memory efficiency and
+performance retention (%) on GLUE using BERT-
+MLM as a baseline. Notably, Pool, Add and Proj
+models provide large compression to the total num-
+ber of embeddings parameters compared to Emb
+as well as C -C and BERT variants. This is
+approximately a 30% PCRand 97-99% PCR
+compared to BERT . These models also achieve
+very high performance retention (from 94.7% to
+99.5%) which highlights their efficiency. In one
+case, HF -LSH -Add outperforms the
+BERT-MLM baseline on CoLA with a retention
+ratio of 105.9% using only 197.4K parameters for
+token embeddings.
+Proj variants, the smallest of HF
+achieve the highest performance retention (95.2%
+with MD, 99.5% with LSH) compared to Pool
+(94.7% with MD, 99.2% with LSH) and Add
+(95.2% with MD, 99.2% with LSH). Overall, they
+only have a negligible drop in performance reten-7868
+tion (0.5%) while they are extremely more memory
+efficient. Proj uses a substantially smaller num-
+ber of embedding parameters (99.1K) compared
+toC -C and BERT variants (i.e., 12.3M and
+38.6M respectively). In general, Pool, Add and
+Proj models lead to a 30% reduction in the total
+number of parameters (around 30.0M) compared
+to the baseline model and make their embedding
+footprint minimal, i.e. 0.1-1% PoEP. On the other
+hand, C -C has a larger embedding footprint
+(10.2% PoEP) but with similar or smaller perfor-
+mance retention compared to HF .
+HF -Emb have an embedding ma-
+trix of equal size (i.e. 50K embeddings) as BERT .
+However, BERT only supports a vocabulary of
+50K tokens, while HF -Emb supportsan unlimited vocabulary, e.g. 12M unique tokens
+in our pre-training corpora. Using a smaller em-
+bedding matrix (i.e. 1K), the performance reten-
+tion drops 20%~26%. Despite the fact that H-
+F -Emb (1K) has a similar number of em-
+bedding parameters as the embedding compression
+approaches (i.e. Pool, Add, Proj), it falls far behind
+those models, i.e. between 8.5% and 14.3% for
+both MD and LSH variants. This demonstrates the
+effectiveness of our proposed embedding compres-
+sion approaches.
+Although, the more lightweight ProFormer
+with only two transformer layers consists of
+15.1M parameters in total (approximately a 87.9%
+PCR), its performancefall far behind our worst
+HF -MD -Pool with a difference of
+29.5% PRR on G Avg. score. Nevertheless,
+ProFormer requires more bits for hashing the to-
+kens, resulting in more parameters for representing
+token embeddings (322.6K) comparing to H-
+F -Add and HF -Proj (197.4K
+and 99.1K). Such memory efficiency gains substan-
+tially sacrifice model’s predictive performance.
+5.3 Computational Efficiency Comparison
+Table 3 shows the pre-training (PT) and inference
+(Infer) time per sample for HF ,C- -C,BERT -S+R using BERT -MLM as a base-
+line for reference. We note that HF
+have comparable pre-training training time (PT) to7869the fastest BERT model (BERT-S+R). This high-
+lights that the complexity of the pre-training objec-
+tive is more important than the size of the embed-
+ding matrix for improving computational efficiency
+for pre-training.
+During inference, we observe that the speed-up
+obtained by HF is up to 2.6x com-
+pared to both BERT models. However, this is due
+to the tokenization approach. HF op-
+erate on the word level, so the sequence length
+of the input data is smaller, leading to inference
+speed-ups. Finally, we observe that C -C has
+a slower inference time compared to both BERT
+models and HF . This might be due to
+its relatively more complex approach for process-
+ing the long Unicode character input sequence.
+6 Conclusions
+We have proposed HF , a family of
+vocabulary-independent hashing-based pre-trained
+transformers. We have empirically demonstrated
+that our models are computationally cheaper and
+more memory efficient compared to standard pre-
+trained transformers, requiring only a fraction of
+their parameters to represent token embeddings.
+HF -LSH -Proj variant needs 99.1K pa-
+rameters for representing the embeddings com-
+pared to millions of parameters required by state-of-
+the-art models with only a negligible performance
+degradation. For future work, we plan to explore
+multilingual pre-training with HF and
+explore their ability in encoding linguistic proper-
+ties (Alajrami and Aletras, 2022).
+Limitations
+We experiment only using English data to make
+comparisons with previous work easier. For lan-
+guages without explicit white spaces (e.g. Chinese
+and Japanese), our methods can be applied with
+different tokenization techniques, e.g. using a fixed
+length window of characters.
+Acknowledgments
+This project made use of time on Tier 2 HPC facil-
+ity JADE2, funded by EPSRC (EP/T022205/1). We
+would like to thank Miles Williams and the anony-
+mous reviewers for their invaluable feedback.References787078717872A Hyperparameters
+The hyperparameters used in pre-training are listed
+in Table 4.
+The hyperparameters used in fine-tuning are
+listed in Table 5.
+B Model Parameter Counts
+We count the total number of parameters of each
+model on a binary classification task. This is com-
+puted by counting all learnable variables used for
+the task (including those in the classification head)
+without freezing any weights. For all BERT vari-
+ants and our HF , we adopt the same
+setting of BERT -Base by setting Dim =
+768,Dim = 3072 with 12 hidden
+layers and 12 attention heads. For CANINE -
+C, we use the default base-sized model whose
+Dim = 768 ,Dim = 3072 and
+has 12 hidden layers and attention heads.We only count the number of parameters which
+are used for retrieving or generating the embed-
+dings of any tokens (excluding those special tokens
+e.g. <PAD>) and we also exclude those for position
+embeddings. Specifically, # are
+computed as the follow:
+•BERT variants :
+# =|V| ×d (9)
+•CANINE-C :
+#= # ×d(10)
+CANINE-C employs 16,000 hash buckets
+(Clark et al., 2022).
+•PF :
+# = # ×d(11)
+PF hashes each token into a 420-bit
+vector (Sankar et al., 2021b).
+•HF -Emb :
+# −Emb =N×d (12)
+•HF -Pool :
+# −Pool = (⌈T
+k+ 2⌉)×d
+(13)
+•HF -Add :
+# −Add= 2×T×d(14)
+•HF -Proj :
+# −Proj =T×d (15)
+C HF with BPE
+Tokenization
+Table 6 presents results on G for our H-
+F with BPE tokenization. In general, we
+observe that using BPE tokinization, the perfor-
+mance of HF slightly drops.78737874

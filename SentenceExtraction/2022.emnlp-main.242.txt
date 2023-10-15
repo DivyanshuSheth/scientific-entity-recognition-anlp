@@ -1,1 +1,675 @@
-3688 Proceedings of the 2022 Conference on Empirical Methods in Natural Language Processing , pages 3688 3703 December 7 - 11 , 2022 © 2022 Association for Computational Linguistics 3689 3690 3691 3692 3693 3694 3695 3696 3697 3698 3699 3700 3701 3702 3703 
+
+Jia Peng Lim
+Singapore Management University
+jiapeng.lim.2021@smu.edu.sgHady W. Lauw
+Singapore Management University
+hadywlauw@smu.edu.sg
+Abstract
+Most Neural Topic Models (NTM) use a vari-
+ational auto-encoder framework producing K
+topics limited to the size of the encoder’s output.
+These topics are interpreted through the selec-
+tion of the top activated words via the weights
+or reconstructed vector of the decoder that are
+directly connected to each neuron. In this pa-
+per, we present a model-free two-stage process
+to reinterpret NTM and derive further insights
+on the state of the trained model. Firstly, build-
+ing on the original information from a trained
+NTM, we generate a pool of potential candi-
+date “composite topics” by exploiting possible
+co-occurrences within the original set of top-
+ics, which decouples the strict interpretation of
+topics from the original NTM. This is followed
+by a combinatorial formulation to select a final
+set of composite topics, which we evaluate for
+coherence and diversity on a large external cor-
+pus. Lastly, we employ a user study to derive
+further insights on the reinterpretation process.
+1 Introduction
+To help us understand the latent structures within a
+text corpus, topic models associate each document
+with “topics” (Blei et al., 2003). In turn, each topic
+is associated with a set of words that frequently
+co-occur together in various documents, forming
+a semantically coherent grouping that fosters inter-
+pretability. Aside from the common applications in
+text analysis and classifications, topic models are
+also used in advanced downstream tasks such as in
+summarization (Wang et al., 2020), text generation
+(Wang et al., 2019), and language modelling (Lau
+et al., 2017). While earlier topic models are based
+on graphical models, more recent topic models are
+neural, with several based on the variational auto-
+encoder framework (Kingma and Welling, 2014).
+Traditionally, what constitutes a topic is a neuron
+at the encoder’s output. Its association with words
+is typically derived from a selection of the top acti-
+vated words via the weights or reconstructed vectorof the decoder connected to that neuron, forming
+what we now interpret as a topic-word distribution.
+Motivation. While such autoencoder-based
+topic models are adept at learning lower-
+dimensional representations of documents, we
+question the notion of one-to-one correspondence
+between a topic and a neuron. We postulate that this
+traditional view belies the natural working order of
+a neural model, whereby it is the joint activation of
+several neurons, rather than the singular activation
+of an independent neuron, that may be responsible
+for the generation or reconstruction of document se-
+mantics. Moreover, the traditional interpretation of
+only the top activations in the resultant topic-word
+distribution ignores the potential information that
+might be gleaned from the rest of the distribution.
+We therefore hypothesize that individual neurons
+are but components of a “topic” that is inherently
+compositional in nature. And, to properly interpret
+an autoencoder-based topic model, we need to fully
+utilise the topic-word distribution space to uncover
+such compositions of neurons that frequently co-
+activate to collectively represent a semantic topic.
+Approach. Given a generic class of trained neu-
+ral topic model (NTM) (to be defined in Section 3)
+withKcomponent (original) topics, we seek to
+reinterpret the NTM by finding a new set of K
+compositional topics that are more attuned to well-
+accepted measures of topic interpretability (also
+to be specified in Section 3). Each compositional
+topic is a linear combination of the original com-
+ponent topics. Inherently, the number of potential
+compositional topics are combinatorially explosive.
+Thus, we propose a two-stage process of candi-
+date generation via mining the neural activations
+of various documents in the original corpus for
+frequently co-activated neurons, followed by can-
+didate selection via solving optimization problems
+that map to classical algorithmic formulations with
+well-established computational properties.
+Contributions. To our best knowledge, this is3688the first work to seek a reinterpretation of an NTM
+via compositional topics. We reiterate that our ob-
+jective is not to replace, but to derive further quan-
+titative insights on the state of the trained model.
+This reinterpretation process is model-free, as vali-
+dated on a number of base NTMs (see Section 7.1).
+Secondly, we propose an approach that aligns
+the mining of compositional topics to the objective
+of optimizing for well-accepted notions of topic
+interpretability. This approach is realized through
+principled formulations of frequent itemset mining
+for candidate generation (Section 5), as well as
+maximum independent sets and multi-dimensional
+knapsack for candidate selection (Section 6).
+Thirdly, through quantitative measurements of
+interpretability on external large corpora, we show
+that the compositional topics tend to perform better
+than the original output of NTM’s (Section 7).
+Finally, as our core thrust is topic interpretability,
+we employ a user study to derive additional insights
+from the reinterpretation process (Section 8).
+Implementation. Our gurobipyand an alter-
+native CVXPYimplementation can be found at
+github.com/PreferredAI/ReIntNTM .
+2 Related Work
+There are many neural topic models (NTMs), a
+comprehensive review can be found at Zhao et al.
+(2021). Primarily, the focus has been on creat-
+ing better models, with numerous NTMs bench-
+marked in Doan and Hoang (2021). More detailed
+descriptions of our baseline NTMs used in the ex-
+periments can be found in Section 7.1. There are
+also notable research efforts to derive better inter-
+pretability of NTMs, such as through works fo-
+cusing on topic sparsity (Lin et al., 2019; Gupta
+and Zhang, 2021), and through weakly supervised
+training (Meng et al., 2020).
+Another popular approach to topic modelling in-
+volves using graph-based NTMs such as in Shen
+et al. (2021), Yang et al. (2020), and Zhang and
+Lauw (2020) which utilizes Graph Neural Net-
+works, and/or, leveraging on graph representations
+of document/word/document-word relations and
+also through graph representations of higher-level
+entity metadata. The key distinction between our
+work and previous stand-alone graph-based NTMs
+is that our model-free approach is rooted in (non-
+neural network) classical selection problems withthe choices (component topics) represented in a
+graphical manner.
+Finally, there are other non-neural network-
+based topic modelling approaches such as online
+mean-field variational inference (Hoffman et al.,
+2010) and Non-negative matrix factorization (Zhao
+et al., 2017).
+3 Preliminaries
+Neural Topic Model (NTM). LetDdenote a text
+corpus, Kthe desired number of topics, and Nthe
+vocabulary. An autoencoder-based NTM τtrained
+onDwould produce a latent layer at the output
+of the encoder that we denote θ. The ineuron
+θis referred to as an original orcomponent topic.
+To associate θwith its topic words, we examine
+the topic-word decoder’s weights or outputs due
+to the sole activation of θ. Considering the gen-
+eral case where a topic-word decoder has one of
+more hidden layers, we set θ= 1 with the other
+θ= 0∀θ∈ {θ\θ}. Passing this input through
+the decoder, ∀θ∈θ, creates a K× |N|topic-
+word relation matrix β. Taking the ltop-activated
+words from each row in βproduces a topic set
+T={T} consisting of Knumber of l-
+sized word sets T, using the top activated words in
+each row of β.
+Normalised Point-wise Mutual Information
+(NPMI). Introduced in Bouma (2009) and evalu-
+ated for texts in Aletras and Stevenson (2013) and
+Lau et al. (2014), this is a popular metric used for
+evaluating T. In Röder et al. (2015), it is shown
+that NPMI has a good correlation with human rat-
+ings and the least sensitive to changes in the win-
+dows size parameter. This metric ranges from -1,
+suggesting incoherence, to 1, suggesting coherence
+within the topic. Let nrepresent a word in vocabu-
+laryN.
+npmi (n, n) =log
+−log(p(n, n))(1)=1
+K/summationdisplay/summationtext/summationtextnpmi (n, n)
+l(l−1)/2
+(2)
+Topic Uniqueness (TU). We seek to obtain K
+diverse topics (each of which is coherent), rather
+than a repetition of the same coherent topics mul-
+tiple times. An intuitive measure is to count how
+many unique words are collectively represented by3689
+theKtopics (more unique words means less rep-
+etition). TU is defined as a percentage of unique
+words in the topic set (Dieng et al., 2020; Bianchi
+et al., 2021a). This ranges fromto 1, with 1
+implying that each topic is unique and each word
+occurs once in T.
+TU(T) =| ∪{n∈t}|/(l·K) (3)
+4 Overview
+Classically, the interpretation of NTM, after
+training on D, is as-is via β. This assumes in-
+dependence within θand that the τ’s complexity
+is surface-deep. Since neurons work together in a
+composite manner to optimize a loss function, we
+believe that these composite interactions Cwithin
+θhas the potential to produce a better interpreta-
+tion of τ. As shown in Fig. 1, we seek to find aC∈Rthat interacts with βto form a
+better reinterpretation ˆβto produce new topic set
+ˆTwithKtopics. The sum of each row in Cis
+constrained to 1, reflecting the components’ weight
+in the composite topic, sufficiently representing all
+possible compositions.
+For simplicity and without loss of generality, we
+consider the case where components are evenly-
+weighted in each composition. Modelling the com-
+positions within βresults in a binary combinatorial
+search spaceC. The difficulty of selecting the
+bestCis further increased as it involves optimizing
+for two potentially-diverging objectives as there
+exist solutions that result in high coherence with
+low diversity and vice versa. Common strategies
+to solve for multiple objectives include min-max
+and weighted-sum. Cho et al. (2017) has a com-
+prehensive survey on solving Multi-Objective Sys-
+tems. We employ ϵ-programming, where we focus
+on NPMI objective while converting TU objective
+into a soft constraint.
+Problem 1 (Reinterpreting NTM) .Given βfrom
+a NTM τ. Find a K×Kcomposite matrix C
+that produces a new reinterpretation ˆβ∈R
+where C·β=ˆβ. Where ˆTwithKtopics, ˆT=
+{top-l(ˆb)|ˆb∈ˆβ,ˆb∈R}, is derived from ˆβ
+and maximizes the primary objective NPMI( ˆT) and
+secondary objective TU( ˆT) with soft constraints ϵ.
+Proposed Approach. In Stage I, Topic Candi-
+date Generation seeks to identify a pool of candi-
+date topics Vof feasible size mfrom the exponen-
+tial number of possible compositions. In Stage II,
+Topic Selection uses several proposed formulations
+relying on ϵto pick the final Kcomposite topics,
+fromV, to produce ˆTthat has high NPMI and TU.
+We elaborate on each of these stages in the coming
+sections.
+5 Stage I: Topic Candidate Generation
+Based on Neural Activation Profiles
+We make the critical observation that which neu-
+rons tend to co-activate with one another can be3690
+mined from the pattern of neural activations of the
+documents within a corpus. From Figure 3, the acti-
+vation distribution of τonDin layer θis similar to
+a pareto distribution, with a only a few neurons be-
+ing responsible for most of the activation strength.
+For practical purposes, we limit the size of com-
+positions of up to five different component topics.
+Leveraging on Dandτ, producing document-topic
+relations Θ∈R, we can find frequently oc-
+curring compositions in D.
+We can transform our current search problem
+to the Frequent Itemset Mining problem (FIM)
+(Agrawal and Srikant, 1994). The input to FIM
+is a set of transactions, where each transaction is
+a basket of items. The objective is to output all
+frequent itemsets, i.e., subsets of items that occur
+in at least s(minimum support) of the transactions.
+In our context, each transaction is a document,
+and each item is an activated neuron. We set the
+minimum activation threshold κto the fifth-largest
+mean activation value for Θ. For each document
+d, we set its θ= 1 ⇐⇒ θ> κ else 0,
+creating boolean “itemsets” (essentially baskets of
+co-activated neurons). Hyper-parameter minimum
+support scontrols the size of V(setting larger val-
+ues of sresulting in fewer candidates). While there
+are many solution approaches to FIM (Savasere
+et al., 1995; Toivonen, 1996), we leverage the Apri-
+ori algorithm(Agrawal and Srikant, 1994).
+The resulting frequent itemsets ˆC(each itemset
+specifying a few co-activated neurons) generate
+candidate pool V={top-l(b)|b∈ˆC·β}, i.e., each
+v∈Vis a set of top- lwords due to the correspond-ing composition of topics in an “itemset”.
+6 Stage II: Diversity-Constrained
+Coherence-Optimizing Topic Selection
+We now seek to reduce Vto find the final Kcom-
+posite topics that represent C, by optimizing for
+NPMI, as evaluated on D. However, due to the
+way that diversity-oriented constraint ϵcould be
+formulated, this gives rise to a couple of formula-
+tion variants as outlined below.
+6.1 Maximum-Weight Budget Independent
+Set (MWBIS)
+Suppose that candidates Vare vertices in a graph
+G(V, E). An edge (v, v)∈Eexists if the corre-
+sponding candidate topics have more than ϵnumber
+of similar words. To ensure diversity, we seek an
+independent set of unconnected vertices in G. Be-
+cause we could only accommodate Ktopics, the
+independent set must be budgeted or capped in size
+toK. Because there are many possible K-sized in-
+dependent sets, we seek the one with the maximum
+weight, which is the coherence score NPMI.
+Mixed Integer Program. Formulating it as a
+mixed integer problem (MIP), we have an objective
+(4) with budget constraints (5) to (7). Binary x
+represents whether a topic v∈Vis selected, and
+w, representing NPMI of v. Constraint (5) allows
+us to have negative weights. Constraint (7) restrict
+the number of times a word can appear in ˆT.
+max/summationdisplayxw (4)
+s.t/summationdisplayx=K (5)
+x+x≤1,∀i, j∈E (6)
+/summationdisplayx≤ϵ+ 1,∀n∈N (7)
+This formulation is essentially a maximum-
+weighted budget independent set problem (MW-
+BIS) Kalra et al. (2017), which is a variant of
+the well-established maximum-weighted indepen-
+dent set problem (MWIS), a known NP-hard prob-
+lem for general graphs (Garey and Johnson, 1979).
+Even so, this could still be solvable for smaller3691graphs, particularly with the help of numerical
+solvers capable of approximations.
+Greedy Algorithm. We introduce this simple
+approach, that mirrors the formulation of our MW-
+BIS formulation, as a fallback approach when it
+is infeasible to use solvers. It employs two heuris-
+ticsfandg.fensures that each T∈ˆTis no
+more than ϵ-similar of each other. gensures that
+each word occurs at most ϵ+ 1times in ˆT. The
+procedure iterates on V, sorted by NPMI, greed-
+ily choosing v, popped from V, if adding vtoˆT
+fulfils fandg. If we do not have Ktopics after
+a complete iteration, we increment ϵ, bounded by
+l, and repeat iteration, terminating procedure upon
+selecting Ktopics.
+From Austrin et al. (2009), assuming unique
+games conjecture (Khot, 2002) and P̸=NP,
+they prove that there is no Ω()-factor polyno-
+mial time approximation algorithm for MWIS in
+a degree- △bounded graph when △is sufficiently
+large. According to Kalra et al. (2017), the hard-
+ness result of MWIS applies to MWBIS as well.
+While we are unable to ensure optimal bounds for
+the greedy solution, it performs well empirically
+for a reasonable size of V(see Section 7).
+6.2 Multi-Dimensional Knapsack Problem
+(MDKP)
+In addressing diversity, the previous formulation
+seeks to reduce overlap between pairs of candidates.
+An alternative diversity constraint could be to seek
+some minimum number of unique words among
+the selected topic candidates.
+Again, we maximize the similar objective (4)
+with budget constraint (5) and treat the number of
+unique words as a budget to exceed in (8). For
+our experiments, we set ϵ to the number of
+unique words in the original T, i.e.,|{n∈v|v∈
+T }|.
+| ∪{v}| ≥ϵ (8)
+This formulation transforms our problem into a
+0/1 Multi-dimensional Knapsack Problem (MDKP)
+(Martello and Toth, 1990), a NP-hard problem (Chu
+and Beasley, 1998). It is also noted in Laabadi et al.
+(2018) that available heuristics and metaheuristics
+approaches for MDKP did not ensure optimality.
+7 Experiments
+The primary objective of the following experiments
+is to investigate the efficacy of the terpretation pro-Name #Docs #Words #Labels
+20NewsGroup 16,309 1,612 20
+BBC-News 2,225 2,949 5
+DBLP 54,595 1,513 4
+M10 8,355 1,696 10
+cess, i.e, whether the discovered composite topics
+via our methodology would outperform the compo-
+nent topics from the input NTMs (denoted Original
+in result tables) in terms of NPMI and TU.
+7.1 Base Neural Topic Models
+As previously asserted, our reinterpretation process
+is model-free, accommodating various NTMs. In
+this sub-section we describe the NTMs used in our
+experiments. There are 3 encoder parameters that
+we optimize for with respect to D: 1) Number and
+2) Size of hidden encoder layers and 3) Dropout.
+For more information, refer to Appendix B.
+CTM (Bianchi et al., 2021b). We chose
+this model as it utilises S-BERT (Reimers and
+Gurevych, 2019) embeddings as an additional
+source of information to construct a topic model.
+Additionally, there are other models such as (Dieng
+et al., 2020) that leverage on word embeddings.
+NeuralLDA (Srivastava and Sutton, 2017). In-
+troduced alongside ProdLDA, with its main dif-
+ference is how its βis interpreted. For its β, the
+decoder’s weights are further processed via batch-
+normalisation and softmax.
+NVDM (Miao et al., 2016). It is widely used as
+a baseline comparison in topic modelling, and is
+shown to produce a topic set that has has a weaker
+coherence compared to other NTMs.
+ProdLDA (Srivastava and Sutton, 2017). This
+NTM is a popular topic modelling baseline and is
+also used as a backbone model in CTM. Compared
+to NeuralLDA, ProdLDA’s βdoes not undergo ad-
+dition processing steps.
+WTM (Nan et al., 2019). This model differs
+greatly from the other selected models as it uses
+Wasserstein auto-encoders (Tolstikhin et al., 2018)
+for topic modelling. We use the recommended
+hyper-parameters Dirichlet parameter of 0.1 and
+noise coefficient αto 0.5.
+7.2 Training Corpora
+We use four English language corpora from OCTIS.
+For more details about the preparation of the cor-3692pora, refer to Terragni et al. (2021). Aside from the
+quantifiable differences (Table 2), we also note that
+20NewsGroupand BBC-news (Lim and Buntine,
+2014) have vocabularies that are considered more
+general and broad compared to the specialized and
+technical vocabularies found in M10 (Greene and
+Cunningham, 2006) and DBLP (Tang et al., 2008;
+Pan et al., 2016).
+Each corpus has a predefined train/val/test split
+comprising of 70%/15%/15%. During the training
+phase, the models optimizes its loss function on the
+train set in an unsupervised manner. The val set is
+used to determine early stopping. The full corpus
+is used for coherence evaluation during the Topic
+Selection stage.
+7.3 NPMI
+For our NPMI calculation, we use the recom-
+mended window size of 10 to consider word co-
+occurrences. To score V, with l= 10 , we evaluate
+for NPMI on D, using Gensim(ˇReh˚ u ˇrek and So-
+jka, 2010) wrapper in OCTIS. These NPMI scores
+are then utilised to select ˆTin Topic Selection.
+For a fairer evaluation against the original T, we
+conducted coherence evaluation on a external large
+corpora, using Palmetto(Röder et al., 2015), a co-
+herence evaluation tool with its word co-occurrence
+index built from Wikipedia articles. We do not mea-
+sure perplexity, because our reinterpretation pro-
+cess does not change the weights of τ, hence, τ’s
+perplexity remains unchanged. As NPMI of topics
+within ˆTandTmight not have a normal distribu-
+tion, a one-sided Mann–Whitney U test (Mann and
+Whitney, 1947) is suitable (Hart, 2001) to evaluate
+the significance of the difference in NPMI between
+ˆTandT.
+7.4 Results
+Better composite topics can be found. In most ex-
+periment instances with results for K= 20 , shown
+in Table 3, we are able to discover a set of com-
+posite topics ˆTthat score better in NPMI and TU
+on the external reference corpus, suggesting that ˆT
+is more coherent and has a higher generality com-
+pared to T. The observations for K= 20 extends
+to when K= 50 (see Appendix C.1).
+Information outside of top lwords. To get asense of how composite topics are different from
+the components, Table 4 shows several examples
+selected from ProdLDA (MDKP) on 20NewsGroup
+atK= 20 . From the first example, "medical" did
+not appear in the top-10 words of the component
+surface topics. Combining all three component
+topics (2, 6, 12) could surface the word in this
+"healthcare research"-related topic. Furthermore,
+some words that are highly activated in the compo-
+nent topics, are suppressed in the composite topics.
+We believe this is caused by negative values in β,
+that may be informative. Experiments conducted
+with positively-constrained βyields worse results
+compared to unconstrained β.
+Reducing redundancy. We showcase the third
+example in Table 4 where two unique but similar-
+themed component topics combine to form a better
+composite topic. The two component topics are
+excluded from the final ˆT. By folding together two
+similar component topics, we could make room to
+surface other topics of other themes, improving the
+diversity of ˆTqualitatively.
+On model collapse. When Tcontains similar
+topics, the composite combinations of these topics
+would also produce similar topics in ˆT. In Table
+3b, while Tof NVDM has similar topics, we still
+can improve NPMI and TU in ˆT, despite many
+candidate topics sharing similar words, However,
+if a topic model collapses to a single topic, it is
+unlikely that we can generate more topics.
+Better topic set not guaranteed. This occurs
+when ˆTdoes not improve on Tin both metrics,
+suggesting ˆβ≈β, such as in Table 3c, where
+MDKP for NeuralLDA unable to find a better ˆT.
+Consequently, this means that we are likely to be
+already evaluating the best topic set that can be
+interpreted from the topic model.
+Impact of ϵ.Adjusting ϵinfluences the solu-
+tion space of ˆT, resulting in trade-off between
+uniqueness and coherence. Table 5 shows that as
+ϵincreases, NPMI increases while TU decreases.
+Since different ϵproduces different ˆT, we might
+have multiple solutions where ˆTis better than T.
+Impact of s.We tried three different ways of
+generating candidate pools (see Table 6) and find
+that in cases where |V|discovered by FIM (re-
+ferred to as discovered ) is low, adding composite
+pairs to Vgenerated by Apriori algorithm is a non-
+expensive method to increase |V|. However, over-
+generating candidates might result in topics over-
+fitted to the training corpus. Comparing modes3693
+’pairs’ (candidate topics must be composite of two
+components only) and ’add-pairs’ (adding pairs to
+the discovered frequent itemsets), we can conclude
+that compositions of more than 2 topics can be
+meaningful. From our experiment results, a recom-
+mended target size |V|close to 1000 is reasonable
+forK= 20 andK= 50 , and can be revised up-
+wards for larger values of K.
+7.5 Computational Practicability
+In the hundreds of experiments (shown in Figure 4),
+a few could not be solved within time limit with
+MIP gap >0.05. These involve large Vexceeding
+10,000 candidate topics with ϵset to enforce tight
+uniqueness constraint, i.e. ϵ= 0. In Gouveia and
+Martins (2015), experiments on similar maximum-
+weight clique problems suggest that solver may be
+impractical when both density of graph and vertexcount is high. However, setting reasonable ϵands
+to avoid such conditions, we find many feasible ˆT.
+In any case, the Greedy approach is always capable
+of producing a solution.
+8 User Study
+We have 29 valid responses to our user study, con-
+sisting of 30 questions (14 normal and 1 verifica-
+tion each for two tasks below). We excluded re-
+sponses that failed verification questions, ensuring
+responses of higher quality. Before starting, partic-
+ipants were given a short primer on coherence and
+reminded that there are no right or wrong answers.
+Questions. Procedure of random question gen-
+eration, with topics sorted alphabetically, and ex-
+ample questions can be found in Appendix A.3694
+For Task I, participants are shown a pair of
+composite-component topics and asked to iden-
+tify which of the two is more coherent. We split
+the 14 questions into two groups where half of the
+questions contains a component topic with NPMI
+strictly larger than its paired composite topic, with
+the other half having equal or less.
+For Task II, participants are shown a group of
+topics consisting of one composite topic and its
+components and asked to check which topics they
+think are coherent. They may select multiple op-
+tions or none at all. Following which, they are
+asked if the composite topic is related to its compo-
+nents. Out of the 14 questions in Task II, 7 groups
+of topics will serve as control, with one of its com-
+ponent topic randomly swapped out with another.
+Insights. In Task I, we establish that NPMI
+indeed has a positive correlation (Pearson’s r=
+0.500)to participants’ selection of their pre-
+ferred topic, with greater participant’s agreement
+in instances where NPMI difference is large. Addi-
+tionally, despite the 50/50 split, in 60% of question
+instances, participants choose the composite topic
+over its component topic.
+In Task II, we plot each topic shown as a point3695
+in Figure 5. On average, composite topics have a
+higher consistent agreement (%), amongst partici-
+pants marking it as coherent, with a mean of 78%,
+compared to component topics, at 61%. Addition-
+ally, in terms of composite-component relevance,
+5 out of 7 treatment groups have more than 75%
+of participants agreeing that the composite topic is
+relevant to the component topics, compared to 0
+out of 7 control groups for the same criteria. This
+reveals that while majority of the composite topics
+are built out of related component topics, there are
+also instances when non-related component topics
+contribute to form composite topics.
+9 Conclusion
+Our proposed two-stage reinterpretation process
+strongly demonstrates the possibility of obtaining
+better topic sets. Its accompanying improvements,
+in both computational metrics and human evalua-
+tion, highlight the necessity to view the original
+topic model in a composite manner to reveal a
+deeper interpretation. Since auto-encoder frame-
+works are widely used on other tasks, future inves-
+tigation is required to explore and determine if this
+methodology can be applied to other tasks as well.
+Limitations
+Using composite topics for documents. We con-
+ducted a simple supervised classification task using
+supervised logistic regression to compare compos-
+ite and original topic vectors. Classification accu-
+racy for both vectors are very similar suggesting
+parity in information while being different in the
+interpretation of the information.
+Effect of τ’sKonˆBandˆT.Given the scope of
+this paper, we have not explored comparing similar
+NTMs with different K, i.e., comparing ˆTfroma model with K= 20 against Tfrom the same
+model type with K= 50 or higher values of K.
+Overcoming the current NTM’s fixed Kmight help
+to generate better models tailored to evaluation for
+a specific number of topics and more investigation
+into this area is required.
+|V|generated. For the purposes of parity, we
+try to keep |V|at similar levels for experiments
+shown. However, the relationship between NTMs
+and generated Vvaries, some models might require
+a larger |V|to showcase its full potential.
+Ethics Statement
+We understand that some corpus might produce top-
+ics with group of words that might cause offense
+due to possible sensitiveness regarding politically-
+charged affairs in the Middle-East. Hence, for our
+user study, we reviewed questions to remove or
+replace any topics that we think might be offensive.
+However, for the sake of transparency, these omit-
+ted topics are still included in the full set of topics
+that are listed in the Appendix D. The use of the
+reinterpretation process is largely dependent on the
+corpus that NTM τis trained on.
+Acknowledgments
+This research/project is supported by the National
+Research Foundation, Singapore under its AI Sin-
+gapore Programme (AISG Award No: AISG2-RP-
+2021-020). We also extend our gratitude to our
+user study participants, as well as, our reviewers
+for their feedback.
+References36963697
+A User Study Appendix
+Task I. To select pairs, we shuffled ˆTand select the
+first 7 pairs of random topics made up of one com-
+posite topic and one of its component topic where
+the NPMI of the composite topic is more than its
+random component topic. We repeat the procedure3698
+to obtain another 7 pairs with NPMI of composite
+topic is lower than its random component topic. ˆT
+is from CTM on 20NewsGroup at K= 50 . The
+options for each questions are randomized when
+displayed to the volunteer.
+Task II. We randomly select 14 groups of top-
+ics from ˆTmade up of a single component and its
+component topics. ˆTis from ProdLDA on 20News-
+Group at K= 50 . Of the 14 groups, we randomly
+choose 7 groups and replace one of its component
+with a random topic to create a control sample to
+test for composite-component similarity relations.
+The component topic is shown at the top of the list,
+followed by the component topics.
+Participant recruitment. We recruited study
+participants from two groups of people. For the
+first group, we have 17 valid responses from gradu-
+ates with a STEM background, physically located
+locally in our city. For the second group, we have
+12 valid responses from a small online text-based
+role-playing game community, physically located
+around the world. On average, the responses from
+both group are similar.
+B Model Parameters and Optimization
+For all NTMs, except WTM, we use OCTIS
+bayesian optimizer to search for encoder param-
+eters with 30 optimization iterations and 3 model
+runs each with selected parameters in Table 7. For
+all NTMs, their decoder has no hidden layers. We
+adapted NVDMfor OCTIS framework. For
+WTM, we use similar recommended parame-
+ters suggested in (Nan et al., 2019). We use default
+values for unmentioned parameters.3699C Additional Results Appendix
+C.1 Experiment results for NTMs with K= 50
+The tabled results for 20NewsGroup and BBC-news for NTMs with K= 50 .
+C.2 Full results for ablation on s
+The extended tabled results for three different modes of generations for different s.
+NPMI TU
+Modes s MWBIS MDKP Greedy MWBIS MDKP Greedy |V|
+add-pairs0.01 0.0842 ** 0.0897** 0.0712* 0.930 0.950 0.945 797
+0.03 0.0643 0.0569 0.0697* 0.905 0.935 0.945 277
+0.05 0.0752** 0.0644 0.0751** 0.920 0.965 0.930 211
+0.07 0.0738** 0.0522 0.0698* 0.920 0.955 0.935 198
+0.10 0.0785** 0.0526 0.0698* 0.920 0.955 0.935 193
+discovered0.01 0.0842** 0.0897** 0.0712* 0.930 0.950 0.945 797
+0.03 0.0817** 0.0468 0.0638 0.920 0.960 0.950 230
+0.05 0.0588 NA 0.0617 0.920 NA 0.920 103
+0.07 0.0440 NA 0.0436 0.890 NA 0.930 56
+0.10 0.0424 NA 0.0441 0.900 NA 0.920 22
+pairs - 0.0698* 0.0561 0.0698* 0.920 0.955 0.935 1903700D Full Topic Set Examples
+NPMI shown are evaluated on large external corpora in Palmetto. Each composite topic is shown in terms
+of a listing of the component topics, e.g., composite topic (1, 17) indicates that it has been derived from
+combining component topic 1 and topic 17. For each topic, we show the NPMI score, as well as a list of
+the top-10 words.370137023703

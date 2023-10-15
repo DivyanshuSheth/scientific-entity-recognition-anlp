@@ -1,1 +1,715 @@
-2687 Proceedings of the 2022 Conference of the North American Chapter of the Association for Computational Linguistics : Human Language Technologies , pages 2687 2700 July 10 - 15 , 2022 © 2022 Association for Computational Linguistics 2688 2689 2690 2691 2692 2693 2694 2695 2696 2697 2698 2699 2700 
+
+Ori Ram Gal Shachaf Omer Levy Jonathan Berant Amir Globerson
+Blavatnik School of Computer Science, Tel Aviv University
+ori.ram@cs.tau.ac.il
+Abstract
+Dense retrievers for open-domain question an-
+swering (ODQA) have been shown to achieve
+impressive performance by training on large
+datasets of question-passage pairs. In this
+work we ask whether this dependence on la-
+beled data can be reduced via unsupervised
+pretraining that is geared towards ODQA. We
+show this is in fact possible, via a novel pre-
+training scheme designed for retrieval. Our
+“recurring span retrieval” approach uses recur-
+ring spans across passages in a document to
+create pseudo examples for contrastive learn-
+ing. Our pretraining scheme directly controls
+for term overlap across pseudo queries and rel-
+evant passages, thus allowing to model both
+lexical and semantic relations between them.
+The resulting model, named Spider , performs
+surprisingly well without any labeled training
+examples on a wide range of ODQA datasets.
+Speciﬁcally, it signiﬁcantly outperforms all
+other pretrained baselines in a zero-shot set-
+ting, and is competitive with BM25, a strong
+sparse baseline. Moreover, a hybrid retriever
+over Spider and BM25 improves over both,
+and is often competitive with DPR models,
+which are trained on tens of thousands of ex-
+amples. Last, notable gains are observed when
+using Spider as an initialization for supervised
+training.
+1 Introduction
+State-of-the-art models for retrieval in open domain
+question answering are based on learning dense text
+representations (Lee et al., 2019; Karpukhin et al.,
+2020; Qu et al., 2021). However, such models rely
+on large datasets of question-passage pairs for train-
+ing. These datasets are expensive and sometimes
+even impractical to collect (e.g., for new languages
+or domains), and models trained on them often failFigure 1: Top- kretrieval accuracy of various unsuper-
+vised methods (solid lines) on the test set of Natural
+Questions (NQ). DPR (dotted) is supervised (trained
+on NQ) and given for reference.
+to generalize to new question distributions (Sci-
+avolino et al., 2021; Reddy et al., 2021).
+The above difﬁculty motivates the development
+of retrieval models that do not rely on large an-
+notated training sets, but are instead trained only
+on unlabeled text. Indeed, self-supervision for re-
+trieval has gained considerable attention recently
+(Lee et al., 2019; Guu et al., 2020; Sachan et al.,
+2021a; Fan et al., 2021). However, when applied in
+a “zero-shot” manner, such models are still outper-
+formed by sparse retrievers like BM25 (Robertson
+and Zaragoza, 2009) and by supervised models
+(see Sachan et al. 2021a). Moreover, models like
+REALM (Guu et al., 2020) and MSS (Sachan et al.,
+2021a,b) that train a retriever and a reader jointly
+(i.e. in an end-to-end fashion), treating retrieval
+as a latent variable, outperform contrastive mod-
+els like ICT (Lee et al., 2019), but are much more
+computationally-intensive.
+In this work we introduce Spider (Span-based
+unsuperv ised dense retriever), a dense model
+pretrained in a contrastive fashion from self-2687
+supervision only (Bhattacharjee et al., 2022), which
+achieves retrieval accuracy that signiﬁcantly im-
+proves over unsupervised methods (both con-
+trastive and end-to-end), and is much cheaper to
+train compared to end-to-end models.
+Spider is based on a novel self-supervised
+scheme: recurring span retrieval. We leverage re-
+curring spans in different passages of the same
+document (e.g. “Yoko Ono” in Figure 2) to create
+pseudo examples for self-supervised contrastive
+learning, where one of the passages containing the
+span is transformed into a short query that (dis-
+tantly) resembles a natural question, and the other
+is the target for retrieval. Additionally, we ran-
+domly choose whether to keep or remove the re-
+curring span from the query to explicitly model
+cases where there is substantial overlap between
+a question and its target passage, as well as cases
+where such overlap is small.
+We evaluate Spider on several ODQA bench-
+marks. Spider narrows the gap between unsuper-
+vised dense retrievers and DPR on all benchmarks
+(Figure 1, Table 1), outperforming all contrastive
+and end-to-end unsupervised models in top-5 &
+top-20 accuracy consistently across datasets. Fur-
+thermore, we demonstrate that Spider and BM25
+are complementary, and that applying their simple
+combination (Ma et al., 2021) improves retrieval
+accuracy over both, sometimes outperforming a
+supervised DPR model.We further demonstrate the utility of Spider as an
+off-the-shelf retriever via cross-dataset evaluation
+(i.e., when supervised models are tested against
+datasets which they were not trained on), a setting
+that often challenges dense retrievers (Sciavolino
+et al., 2021; Reddy et al., 2021). In this setting, Spi-
+der is competitive with supervised dense retrievers
+trained on an abundance of training examples.
+Last, Spider signiﬁcantly outperforms other pre-
+trained models when used as an initialization to-
+wards DPR training, and also shows strong cross-
+dataset generalization. For example, Spider ﬁne-
+tuned on TriviaQA is, to the best of our knowledge,
+the ﬁrst dense model to outperform BM25 on the
+challenging EntityQuestions dataset (Sciavolino
+et al., 2021).
+Taken together, our results demonstrate the po-
+tential of pretraining for reducing the reliance of
+ODQA models on training data.
+2 Background
+In open-domain question answering (ODQA), the
+goal is to ﬁnd the answer to a given question over
+a large corpus, e.g. Wikipedia (V oorhees and Tice,
+2000; Chen et al., 2017; Chen and Yih, 2020). This
+task has gained considerable attention following
+recent advancement in machine reading compre-
+hension, where models reached human parity in
+extracting an answer from a paragraph given a ques-
+tion (Devlin et al., 2019; Raffel et al., 2020).2688Due to the high cost of applying such reading
+comprehension models, or readers , over the entire
+corpus, state-of-the-art systems for ODQA ﬁrst ap-
+ply an efﬁcient retriever – either sparse (Robertson
+and Zaragoza, 2009; Chen et al., 2017) or dense
+(Lee et al., 2019; Karpukhin et al., 2020) – in order
+to reduce the search space of the reader.
+Recently, dense retrieval models have shown
+promising results on ODQA, even outperform-
+ing strong sparse methods that operate on the
+lexical-level, e.g. BM25. Speciﬁcally, the dom-
+inant approach employs a dual-encoder architec-
+ture, where documents and questions are mapped
+to a shared continuous space such that proxim-
+ity in that space represents the relevance between
+pairs of documents and questions. Formally, let
+C={p,...,p}be a corpus of passages. Each
+passagep∈C is fed to a passage encoder E,
+such thatE(p)∈R. Similarly, the question en-
+coderEis deﬁned such that the representation of
+a questionqis given byE(q)∈R. Then, the
+relevance of a passage pforqis given by:
+s(q,p) =E(q)E(p).
+Given a question q, the retriever ﬁnds the
+top-kcandidates with respect to s(q,·), i.e.
+top-ks(q,p). In order to perform this operation
+efﬁciently at test time, a maximum-inner product
+search (MIPS) index (Johnson et al., 2021) is built
+over the encoded passages {E(p),...,E(p)}.
+While considerable work has been devoted to
+create pretraining schemes for dense retrieval (Lee
+et al. 2019; Guu et al. 2020; inter alia ), it gener-
+ally assumed access to large training datasets after
+pretraining. In contrast, we seek to improve dense
+retrieval in the challenging unsupervised setting.
+Our contribution towards this goal is twofold.
+First, we construct a self-supervised pretraining
+method based on recurring spans across passages
+in a document to emulate the training process of
+dual-encoders for dense retrieval. Our pretrain-
+ing is simpler and cheaper in terms of compute
+than end-to-end models like REALM (Guu et al.,
+2020) and MSS (Sachan et al., 2021a). Second, we
+demonstrate that a simple combination of BM25
+with our models leads to a strong hybrid retriever
+that rivals the performance of models trained with
+tens of thousands of examples.3 Our Model: Spider
+We now describe our approach for pretraining
+dense retrievers, which is based on a new self-
+supervised task (Section 3.1). Our pretraining is
+based on the notion of recurring spans (Ram et al.,
+2021) within a document: given two paragraphs
+with the same recurring span, we construct a query
+from one of the paragraphs, while the other is taken
+as the target for retrieval (Figure 2). Other para-
+graphs in the document that do not contain the
+recurring span are used as negative examples. We
+train a model from this self-supervision in a con-
+trastive fashion.
+Since sparse lexical methods are known to com-
+plement dense retrieval (Luan et al., 2021; Ma et al.,
+2021), we also incorporate a simple hybrid retriever
+(combining BM25 and Spider) in our experiments
+(Section 3.2).
+3.1 Pretraining: Recurring Span Retrieval
+Given a document D⊂C with multiple passages
+(e.g. an article in Wikipedia), we deﬁne cross-
+passage recurring spans inDas arbitrary n-grams
+that appear more than once and in more than one
+passage inD. LetSbe a cross-passage recurring
+span inD, andD⊂D be the set of passages in the
+document that contain S, so|D|>1by deﬁnition.
+First, we randomly choose a query passageq∈D.
+In order to resemble a natural language question,
+we apply a heuristic query transformation T, which
+takes a short random window from qsurrounding
+Sto getq=T(q)(described in detail below).
+Similar to DPR, each query has one correspond-
+ing positive passage pand one corresponding
+negative passage p. Forp, we sample an-
+other random passage from Dthat contains S(i.e.
+p∈D\{q}). Forp, we choose a passage from
+Dthat does not contain S(i.e.p∈D\D). The
+article title is prepended to both passages (bot not
+to the query).
+Figure 2 illustrates this process. We focus on the
+ﬁrst example (in orange), which is comprised of
+three passages from the Wikipedia article “Aaron” .
+The span “the priesthood for himself and his male
+descendants” appears in two passages in the article.
+One of the passages was transformed into a query
+(denoted by q), while the other ( p) is taken as
+a positive passage. Another random passage from
+the article (p) is considered its negative.
+As the example demonstrates, existence of recur-
+ring spans in two different passages often implies2689semantic similarity between their contexts.
+Query Transformation As discussed above, af-
+ter we randomly choose a query passage q(with a
+recurring span S), we apply a query transformation
+onq. The main goal is to make the queries more
+“similar” to open-domain questions (e.g. in terms
+of lengths).
+First, we deﬁne the context to keep from q. Since
+passages are much longer than typical natural ques-
+tions,we take a random window containingS.
+The window length /lscriptis chosen uniformly between
+5 and 30 to resemble questions of different lengths.
+The actual window is then chosen at random from
+all possible windows of length /lscriptthat contain S.
+Second, we randomly choose whether to keepS
+inqorremove it. This choice reﬂects two comple-
+mentary skills for retrieval – the former requires
+lexical matching (as Sappears in both qandp),
+while the latter intuitively encourages semantic con-
+textual representations.
+The queries in Figure 2 (left) demonstrate this
+process. In the top query, the recurring span “the
+priesthood for himself and his male descendants”
+was kept as is. In the bottom query, the span “Yoko
+Ono” was removed.
+Span Filtering To focus on meaningful spans
+with semantically similar contexts, we apply sev-
+eral ﬁlters on recurring spans. First, we adopt the
+ﬁlters from Ram et al. (2021): (1) spans only in-
+clude whole words, (2) only maximal spans are
+considered, (3) spans that contain only stop words
+are ﬁltered out, (4) spans contain up to 10 tokens.
+In addition, we add another ﬁlter: (5) spans should
+contain at least 2 tokens. Note that in contrast to
+methods based on salient spans (Glass et al., 2020;
+Guu et al., 2020; Roberts et al., 2020; Sachan et al.,
+2021a,b), our ﬁlters do not require a trained model.
+Training At each time step of pretraining, we
+take a batch of mexamples{(q,p,p)}, and
+optimize the cross-entropy loss with respect to the
+positive passage pfor each query qin a con-
+trastive fashion (i.e., with in-batch negatives), simi-
+lar to Karpukhin et al. (2020):
+−logexp/parenleftbig
+s(q,p)/parenrightbig
+/summationtext/parenleftBig
+exp/parenleftbig
+s(q,p)/parenrightbig
++ exp/parenleftbig
+s(q,p)/parenrightbig/parenrightBig3.2 Hybrid Dense-Sparse Retrieval
+It is well established that the strong lexical match-
+ing skills of sparse models such as BM25 (Robert-
+son and Zaragoza, 2009) are complementary to
+dense representation models. Ma et al. (2021)
+demonstrated strong improvements by using hy-
+brid dense-sparse retrieval, based on BM25 and
+DPR. Speciﬁcally, they deﬁne the joint score of
+a hybrid retriever via a linear combination of the
+scores given by the two models, i.e. s(q,p) =
+s(q,p) +α·BM25 (q,p). They tuneαon a valida-
+tion set of each of the datasets. A similar approach
+was considered by Luan et al. (2021). Since tuning
+hyperparameters is unrealistic in our settings, we
+simply setα= 1.0for all hybrid models. Thus, we
+deﬁne:
+s(q,p) =s(q,p) +BM25 (q,p)
+We adopt the normalization technique from Ma
+et al. (2021). We begin by fetching the top- k
+(wherek> k) passages from each of the mod-
+els. If a passage pis found in the top- kof a dense
+retriever but not of BM25, then BM25 (q,p)is set
+to the minimum value from the top- kresults of
+BM25 (and vice versa).
+4 Experimental Setup
+To evaluate how different retrievers work on dif-
+ferent settings and given different amounts of su-
+pervision, we simulate various scenarios by using
+existing datasets, with an emphasis on the unsuper-
+vised setting.
+4.1 Datasets
+We evaluate our method on six datasets commonly
+used in prior work, all over Wikipedia: Natural
+Questions (NQ; Kwiatkowski et al. 2019), Trivi-
+aQA (Joshi et al., 2017), WebQuestions (WQ; Be-
+rant et al. 2013), CuratedTREC (TREC; Baudiš and
+Šedivý 2015), SQuAD (Rajpurkar et al., 2016) and
+EntityQuestions (EntityQs; Sciavolino et al. 2021).
+The datasets vary signiﬁcantly in the distribution
+of questions and the size of training data.
+Lewis et al. (2021a) showed that there exists
+a signiﬁcant overlap between train and test ques-
+tions in ODQA datasets, which poses an issue in
+our case: supervised models can memorize train-
+ing questions while unsupervised methods cannot.
+Thus, we also report the results on the “ no answer
+overlap ” portion of the test sets created by Lewis
+et al. (2021a) for NQ, TriviaQA and WQ.26904.2 Baselines
+We consider a variety of baselines, including su-
+pervised and self-supervised dense models, as well
+as sparse methods. All dense models share the
+architecture of BERT-base (namely a transformer
+encoder; Vaswani et al. 2017), including the num-
+ber of parameters (110M) and uncased vocabulary.
+In addition, all pretrained dense models use weight
+sharing between query and passage encoders (only
+during pretraining). E(q)andE(p)are deﬁned
+as the representation of the [CLS] token. Similar
+to Gao and Callan (2021a), we do not consider the
+models trained in Chang et al. (2020), as they rely
+on Wikipedia links, and were not made public.
+We now list our baselines (see App. A for fur-
+ther details). As a sparse baseline model, we fol-
+low prior work and take BM25 (Robertson and
+Zaragoza, 2009). We consider several unsuper-
+vised dense retrieval models: ICT(Lee et al., 2019;
+Sachan et al., 2021a), Condenser andCoCondenser
+(Gao and Callan, 2021a,b). We also compare our
+approach with an unsupervised model trained in
+an end-to-end fashion (i.e. jointly with a reader):
+Masked Salient Spans (MSS; Sachan et al. 2021a,b).
+In addition, we add the results of the unsuper-
+vised Contriever model (Izacard et al., 2021), a
+contemporary work. Last, we add results of DPR
+(Karpukhin et al., 2020), a supervised model, for
+reference.
+4.3 Evaluation Settings
+We evaluate our method and baselines in a broad
+range of scenarios. We report top- kretrieval accu-
+racy, i.e. the percentage of questions for which the
+answer span is found in the top- kpassages.
+Unsupervised Setting Models are trained only
+on unlabeled data, and evaluated on all datasets
+without using any labeled examples (i.e. in a zero-
+shot mode). As a reference point, we also compare
+to DPR, which is supervised.
+Cross-Dataset Generalization To test the ro-
+bustness of different models across datasets, we
+compare Spider to DPR models tested on datasets
+they were not trained on.The motivation behind
+these experiments is to determine the quality of
+all models as “off-the-shelf” retrievers, namely on
+data from unseen distributions of questions.Supervised Setting We compare Spider to other
+pretrained models for retrieval when ﬁne-tuned on
+different amounts of training examples, similar to
+Karpukhin et al. (2020). Speciﬁcally, we consider
+the settings where 128 examples, 1024 examples
+and full datasets are available. We restrict these
+experiments to NQ and TriviaQA due to the high
+cost of running them for all datasets and baselines.
+4.4 Implementation Details
+We base our implementation on the ofﬁcial code
+of DPR (Karpukhin et al., 2020), which is built on
+Hugging Face Transformers (Wolf et al., 2020).
+Passage Corpus We adopt the same corpus and
+preprocessing as Karpukhin et al. (2020), namely
+the English Wikipedia dump from Dec. 20, 2018
+(following Lee et al. 2019) with blocks of 100
+words as retrieval units. Preprocessing (Chen et al.,
+2017) removes semi-structured data (e.g., lists, in-
+foboxes, tables, and disambiguation pages), result-
+ing in roughly 21 million passages. This corpus
+is used for both pretraining and all downstream
+experiments.
+Pretraining We train Spider for 200,000 steps,
+using batches of size 1024. similar to ICT and Con-
+denser, the model is initialized from the uncased
+BERT-base model, and weight sharing between
+the passage and query encoders is applied. Each
+pseudo-query has one corresponding positive ex-
+ample and one negative example.Overall, the
+model is expected to predict the positive passage
+out of a total of 2048 passages.The learning rate
+is warmed up along the ﬁrst 1% of the training
+steps to a maximum value of 2·10, after which
+linear decay is applied. We use Adam (Kingma
+and Ba, 2015) with its default hyperparameters as
+our optimizer, and apply a dropout rate of 0.1 to
+all layers. We utilize eight 80GB A100 GPUs for
+pretraining, which takes roughly two days. In our
+ablation study (see Section 5.4), we lower the learn-
+ing rate to 10and the batch size to 512 in order
+to ﬁt in eight Quadro RTX 8000 GPUs.Each
+ablation takes two days.
+Fine-Tuning For ﬁne-tuning, we use the hyper-
+parameters from Karpukhin et al. (2020), and do2691
+not perform any hyperparameter tuning. Speciﬁ-
+cally, we train using Adam (Kingma and Ba, 2015)
+with bias-corrected moment estimates (Zhang et al.,
+2021), and a learning rate of 10with warmup
+and linear decay. We use batch size of 128 for
+40 epochs with two exceptions. First, when ﬁne-
+tuning DPR-WQ and DPR-TREC, we run for 100
+epochs for consistency with the original paper. Sec-
+ond, when ﬁne-tuning on 128 examples only, we
+lower the batch size to 32 and run for 80 epochs.
+We use BM25 negatives produced by Karpukhin
+et al. (2020), and do not create hard negatives by
+the model itself (Xiong et al., 2021).
+Retrieval When performing dense retrieval, we
+apply exact search using FAISS (Johnson et al.,
+2021). This is done due to the high memory de-
+mand of creating an HNSW index for each experi-
+ment (Karpukhin et al., 2020). For sparse retrieval
+(i.e. BM25), we utilize the Pyserini library (Lin
+et al., 2021), built on top of Anserini (Yang et al.,
+2017, 2018). For hybrid retrieval, we set k= 1000
+similar to Ma et al. (2021).
+5 Results
+Our experiments show that Spider signiﬁcantly im-
+proves performance in the challenging unsuper-
+vised retrieval setting, even outperforming strong
+supervised models in many cases. Thus, it enablesthe use of such retrievers when no examples are
+available. When used for supervised DPR train-
+ing, we observe signiﬁcant improvements over the
+baselines as well. We perform ablation studies that
+demonstrate the importance of our pretraining de-
+sign choices.
+5.1 Unsupervised Setting
+Table 1 shows the performance of Spider (measured
+by top-kretrieval accuracy) compared to other un-
+supervised baselines on three datasets, without ad-
+ditional ﬁne-tuning . Results for remaining datasets
+are given in Table 5 and Table 6. Supervised base-
+lines (i.e. DPR) are given for reference. Results
+demonstrate the effectiveness of Spider w.r.t. other
+dense pretrained models, across all datasets. For ex-
+ample, the average margin between Spider and ICT
+is more than 15 points. Moreover, Spider outper-
+forms DPR-Single on three of the datasets (TREC,
+SQuAD and EntityQs). When DPR is better than
+our model, the gap narrows for higher values of
+k. In addition, it is evident that Spider is able to
+outperform BM25 in some datasets (NQ, WQ and
+TREC), while the opposite is true for others (Trivi-
+aQA, SQuAD and EntityQuestions). However, our
+hybrid retriever is able to combine the merits of
+each of them into a stronger model, signiﬁcantly
+improving over both across all datasets. For exam-
+ple, on TriviaQA, Spider and BM25 achieve 75.8%
+and 76.4% top-20 retrieval accuracy, respectively.
+The hybrid model signiﬁcantly improves over both2692
+models and obtains 80.0%, better than DPR-Single
+and DPR-Multi (79.7% and 78.9%, respectively).
+Moreover, we observe that Spider consistently
+surpasses Contriever, with substantial gains for
+lower values of k.
+5.2 Cross-Dataset Generalization
+An important merit of Spider is the fact that a single
+model can obtain good results across many datasets,
+i.e. in a “zero-shot” setting. Table 2 demonstrates
+the results of supervised models in these scenar-
+ios, where DPR models are tested on datasets they
+were not trained on. Spider outperforms four of
+the six DPR models (DPR-WQ, DPR-TREC, DPR-
+SQuAD and DPR-Multi) across all datasets. In ad-
+dition, it signiﬁcantly outperforms DPR-NQ, which
+is a widely-used retriever,on three datasets out
+of ﬁve. Finally, DPR-TriviaQA outperforms Spi-
+der on three datasets.
+When ﬁne-tuning Spider on NQ and TriviaQA
+(see Sections 4.3;5.3), the resulting models show
+strong generalization to other datasets. For exam-
+ple, Spider-NQ outperforms DPR-NQ (initialized
+from BERT) by 4-12 points. Similar trends are ob-
+served for the models trained on TriviaQA. Speciﬁ-
+cally, Spider-TriviaQA is able to outperform BM25
+on EntityQuestions, that is known to challenge
+dense retrievers (Sciavolino et al., 2021).
+5.3 Supervised Setting
+Table 3 shows the performance when ﬁne-tuning
+pretrained models on 128 examples, 1024 exam-
+ples and full datasets from NQ and TriviaQA. Spi-
+der establishes notable gains compared to all otherdense baselines on both datasets and for all training
+data sizes. When only 128 examples are available,
+Spider signiﬁcantly outperforms all other models,
+with absolute gaps of 3-11% on both datasets. On
+TriviaQA, Spider ﬁne-tuned on 128 examples is
+able to outperform all other baselines when they
+are trained on 1024 examples. Similar trends are
+observed for the 1024-example setting (absolute
+gaps of 1.7-6.2%).
+Even though Spider was mainly designed for un-
+supervised settings, it outperforms other pretrained
+models in the full dataset as well. On both datasets,
+Spider obtains the best results, improving over DPR
+models (initialized from BERT) by 1.9-6.5%.
+5.4 Ablation Study
+We perform an ablation study on the query trans-
+formation applied on the query passage q. We then
+test the contribution of the negative passage pto
+the performance of our model. Last, we scale up
+both the batch size and the number of pretraining
+steps.
+Choice of Query Transformation During pre-
+training, we apply a query transformation on the
+queryq. We sample a random window containing
+the recurring span Sand either remove or keep
+S. We now test the effect of these choices on our
+model. We consider two more options for the con-
+texttaken fromq: (1) the whole passage, for which
+we replaceSwith a [MASK] token (as the context
+is very long, it makes sense to provide the retriever
+with a signal on what span is sought in the answer),
+and (2) a preﬁx of random length preceding S, for
+which we always remove Sfrom the context (as it
+is in any case, by deﬁnition, in the end of q). The2693
+top two rows in Table 4 correspond to these abla-
+tions. Indeed, both are inferior to taking a random
+window surrounding S(one before the last row).
+In addition, we test whether alternating between
+keeping and removing Sis indeed better than ap-
+plying only one of them consistently. The third,
+fourth and ﬁfth rows of Table 4 verify that our mo-
+tivation was indeed correct: Alternating between
+the two is superior to each of them on its own.
+Effect of Negative Passages During pretraining,
+each queryqhas one positive passage pand one
+negative passage p. We pretrain a model without
+negative passages at all, i.e. the target is to select
+the positive p, given the positive passages of all
+other examples{p}. This model corresponds
+to the row with # negatives = 0 (i.e. the sixth
+row in Table 4). As expected, the top- kretrieval
+accuracy of the model drops signiﬁcantly (2-6% for
+differentkvalues) with respect to the same model
+with # negatives = 1 as a result of this choice,
+which is consistent with Karpukhin et al. (2020).
+Scaling up Batch Size and Training Steps We
+scale up the batch size and observe improvements
+of 0.6-1.2%. We train our model for longer (200K
+steps instead of 100K), which leads to additional
+1.1-1.8% improvements (last two rows in Table 4).6 Related Work
+Pretraining for dense retrieval has recently gained
+considerable attention, following the success of
+self-supervised models in many tasks (Devlin et al.,
+2019; Liu et al., 2019; Brown et al., 2020). While
+most works focus on ﬁne-tuning such retrievers on
+large datasets after pretraining (Lee et al., 2019;
+Chang et al., 2020; Guu et al., 2020; Sachan et al.,
+2021a; Gao and Callan, 2021a), we attempt to
+bridge the gap between unsupervised dense mod-
+els and strong sparse (e.g. BM25; Robertson and
+Zaragoza 2009) or supervised dense baselines (e.g.
+DPR; Karpukhin et al. 2020). A concurrent work
+by O ˘guz et al. (2021) presented DPR-PAQ, which
+shows strong results on NQ after pretraining. How-
+ever, their approach utilizes PAQ (Lewis et al.,
+2021b), a dataset which was generated using mod-
+els trained on NQ, and is therefore not unsuper-
+vised.
+Leveraging recurring spans for self-supervised
+pretraining has previously been considered for nu-
+merous tasks, e.g. coreference resolution and coref-
+erential reasoning (Kocijan et al., 2019; Varkel and
+Globerson, 2020; Ye et al., 2020) and question an-
+swering (Ram et al., 2021; Bian et al., 2021; Castel
+et al., 2021). Glass et al. (2020) utilize recurring
+spans across documents to create pseudo-examples2694
+for QA.
+While we focus in this work on dual-encoder
+architectures, other architectures for dense retrieval
+have been introduced recently. Luan et al. (2021)
+showed that replacing a single representation with
+multiple vectors per document enjoys favorable
+theoretical and empirical properties. Khattab and
+Zaharia (2020) introduced late-interaction models,
+where contextualized representations of query and
+document tokens are ﬁrst computed, and a cheap
+interaction step that models their ﬁne-grained rele-
+vance is then applied. Phrase-based retrieval (Seo
+et al., 2018, 2019) eliminates the need for a reader
+during inference, as it directly retrieves the answer
+span given a query. Lee et al. (2021a) demon-
+strated strong end-to-end ODQA results with this
+approach, and Lee et al. (2021b) showed that it is
+also effective for passage retrieval. Our pretraining
+scheme can be seamlessly used for those architec-
+tures as well.
+7 Conclusion
+In this work, we explore learning dense retrievers
+from unlabeled data. Our results demonstrate that
+existing models struggle in this setup. We introduce
+a new pretraining scheme for dual-encoders that
+dramatically improves performance, reaching good
+results without any labeled examples. Our results
+suggest that careful design of a pretraining task is
+important for learning unsupervised models that
+are effective retrievers for ODQA.
+Acknowledgements
+We thank Yuval Kirstain and anonymous reviewers
+for valuable feedback and discussions, and Deven-dra Singh Sachan for his help with running the ICT
+and MSS baselines. This project was funded by
+the European Research Council (ERC) under the
+European Unions Horizon 2020 research and inno-
+vation programme (grant ERC HOLI 819080), the
+Blavatnik Fund, the Alon Scholarship, the Yandex
+Initiative for Machine Learning and Intel Corpora-
+tion.
+References269526962697
+A Baselines: Further Details
+BM25 (Robertson and Zaragoza, 2009) A sparse
+bag-of-words model that extends TF-IDF (i.e. re-
+ward rare terms that appear in both qandp) by ac-
+counting for document length and term frequency
+saturation.
+BERT (Devlin et al., 2019) was pretrained on
+two self-supervised tasks: Masked Language Mod-
+eling (MLM) and Next Sentence Prediction (NSP).
+We evaluate BERT only in the supervised setting,
+namely as a backbone for ﬁne-tuning, similar to
+DPR.
+ICT (Lee et al., 2019) A dual-encoder model
+which was pretrained on the Inverse Cloze Task.
+Given a batch of passages, ICT masks a sentence
+from each passage, and trains to predict what is the
+source passage for each sentence. ICT encourages
+lexical matching by keeping the sentence in the
+original passage with low probability. Note that
+unlike our approach, ICT is trained to produce rep-
+resentations to corrupted passages. In addition, we2698
+encourage lexical matching of individual terms in
+the query, rather than the entire query as ICT.
+Sachan et al. (2021a) trained their own ICT
+model, which shows stronger performance than
+Lee et al. (2019). The authors shared new results
+with us, in which TREC and EntityQs are missing.
+Since their model is not public, for ﬁne-tuning we
+use the model trained by Lee et al. (2019).
+Condenser & CoCondenser (Gao and Callan,
+2021a,b) Condenser is an architecture that aims
+to produce dense sequence-level (i.e. sentences
+and passages) representations via a variant of the
+MLM pretraining task. Speciﬁcally, to predict a
+masked token x, they condition the prediction on
+two representations: (1) a representation of xfrom
+an earlier layer in the encoder, and (2) a dense
+sequence-level representation of the [CLS] token
+at the last layer of the network. CoCondenser adds
+a “corpus-aware” loss alongside MLM to create
+better embeddings by sampling two sub-spans from
+each sequence and train in a contrastive fashion.
+MSS (Sachan et al., 2021a,b) An unsupervised
+model in which a dense retriever and a reader are
+trained jointly end-to-end. First, salient spans (e.g.
+entities) are identiﬁed using a NER model. Then,
+some of them are masked. The training objective is
+to predict these missing spans while using retrieved
+documents as evidence. Due to the latent nature
+of the retrieval process in this model, its training
+is substantially more expensive than contrastive
+learning. In addition, it requires frequent updatesof the encoded evidence corpus.
+Contriever (Izacard et al., 2021) A contempo-
+rary work. Contriever is an unsupervised dense
+model trained in a contrastive fashion, using ran-
+dom cropping to generate two views of a given
+input.
+DPR (Karpukhin et al., 2020) A supervised
+model for ODQA based on dual-encoders and
+trained in a contrastive fashion (see Section 2). All
+DPR models considered in the paper are initial-
+ized with a BERT-base encoder, and trained on
+full datasets : DPR-Single models are trained on a
+single dataset, and are also referred to as DPR- x,
+wherexis the name of the dataset. DPR-Multi
+was trained onNQ, TriviaQA, WQ and TREC. For
+DPR-NQ and DPR-Multi, we use the checkpoints
+released by the authors. We re-train the other DPR-
+Single models (which were not made public) us-
+ing the same hyper-parameters as Karpukhin et al.
+(2020). We do not train a DPR model on Enti-
+tyQs. The models we trained are consistent with
+the results of Karpukhin et al. (2020), except for
+DPR-SQuAD, where we did not manage to repro-
+duce the original results.
+B Further Results
+Table 5 and Table 6 show the top- kaccuracy for
+the unsupervised setting (complements Table 1)
+for additional datasets . Table 7 shows the top-100
+accuracy for the cross-dataset setting (complements
+Table 2).2699
+C Limitations & Risks
+We point to several limitations and potential risks of
+Spider. First, there is still a gap in performance be-
+tween supervised and unsupervised models, as can
+be observed in Table 1. Second, self-supervised
+pretraining is heavier in terms of compute than
+standard supervised training like DPR. Third, Spi-
+der was trained on data solely from Wikipedia,
+which might hurt its performance when applied
+to other domains. Last, our model may introduce
+biases as other pretrained language models, e.g.
+against under-represented groups.
+D Dataset Statistics
+Table 8 shows the number of examples in each of
+the datasets used in our evaluation suite.2700

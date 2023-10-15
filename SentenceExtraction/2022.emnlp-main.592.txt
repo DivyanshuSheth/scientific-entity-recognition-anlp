@@ -1,1 +1,879 @@
-8642 Proceedings of the 2022 Conference on Empirical Methods in Natural Language Processing , pages 8642 8658 December 7 - 11 , 2022 © 2022 Association for Computational Linguistics 8643 8644 8645 8646 8647 8648 8649 8650 8651 8652 8653 8654 8655 8656 8657 8658 
+
+Nan Xu, Fei Wang, Bangzheng Li, Mingtao Dong, Muhao Chen
+Department of Computer Science & Information Sciences Institute
+University of Southern California
+{nanx,fwang598,bangzhen,mingtaod,muhaoche}@usc.edu
+Abstract
+Entity typing aims at predicting one or more
+words that describe the type(s) of a specific
+mention in a sentence. Due to shortcuts from
+surface patterns to annotated entity labels and
+biased training, existing entity typing models
+are subject to the problem of spurious correla-
+tions . To comprehensively investigate the faith-
+fulness and reliability of entity typing methods,
+we first systematically define distinct kinds of
+model biases that are reflected mainly from
+spurious correlations. Particularly, we identify
+six types of existing model biases, including
+mention-context bias, lexical overlapping bias,
+named entity bias, pronoun bias, dependency
+bias, and overgeneralization bias. To mitigate
+model biases, we then introduce a counterfac-
+tual data augmentation method. By augment-
+ing the original training set with their debiased
+counterparts, models are forced to fully compre-
+hend sentences and discover the fundamental
+cues for entity typing, rather than relying on
+spurious correlations for shortcuts. Experimen-
+tal results on the UFET dataset show our coun-
+terfactual data augmentation approach helps im-
+prove generalization of different entity typing
+models with consistently better performance on
+both the original and debiased test sets.
+1 Introduction
+Given a sentence with an entity mention, the entity
+typing task aims at predicting one or more words
+or phrases that describe the type(s) of that spe-
+cific mention (Ling and Weld, 2012; Gillick et al.,
+2014; Choi et al., 2018). This task essentially sup-
+ports the structural perception of unstructured text
+(Distiawan et al., 2019), being an important step
+for natural language understanding (NLU). More
+specifically, entity typing has a broad impact on var-
+ious NLP tasks that depend on type understanding,
+including coreference resolution (Onoe and Dur-
+rett, 2020), entity linking (Hou et al., 2020; TianranFigure 1: Examples demonstrating spurious correlations
+exploited by one of the SOTA entity typing models ML-
+MET . Left context is in magenta, entity mention in italic
+blue, right context in green. Perturbations upon men-
+tions and new predictions start from →/→. implies
+good predictions by exploiting spurious correlations
+and indicates bad predictions when spurious correla-
+tions no longer exist. MLMET falsely relies on the entity
+name to give “island” predictions for a hotel mention,
+incorrectly infers types of the dependent “car” rather
+than the headword “spoiler”, and gives only the coarse
+label “animal” with more fine-grained missing.
+et al., 2021), entity disambiguation (Onoe and Dur-
+rett, 2020), event detection (Le and Nguyen, 2021)
+and relation extraction (Zhou and Chen, 2022).
+To tackle the task, literature has developed vari-8642ous predictive methods to capture the association
+between the contextualized entity mention repre-
+sentation and the type label. For instance, a number
+of prior studies approach the problem as multi-
+class classification based on distinct ways of repre-
+senting the entity mentioning sentences (Yogatama
+et al., 2015; Ren et al., 2016; Xu and Barbosa, 2018;
+Dai et al., 2021). Other studies formulate the prob-
+lem as structured prediction and leverage structural
+representations such as box embeddings (Onoe
+et al., 2021) and causal chains (Liu et al., 2021)
+to model the dependency of type labels. However,
+due to shortcuts from surface patterns to annotated
+entity labels and biased training, existing entity
+typing models are subject to the problem of spu-
+rious correlation (Wang and Culotta, 2020; Wang
+et al., 2021; Branco et al., 2021). For example,
+given a sentence “Last week I stayed in Treasure
+Island for two nights when visiting Las Vegas.”, a
+SOTA model like MLMET (Dai et al., 2021) may
+overly rely on the entity name and falsely type Trea-
+sure Island as an island , while ignoring the senten-
+tial context that indicates this entity as a resort or
+ahotel . For morphologically rich mentions with
+multiple noun words such as “most car spoilers”,
+entity models may fail to understand its syntactic
+structure and miss the target entity from the actual
+head-dependent relationship, leading to predictions
+describing the dependent car ( car,vehicle ) rather
+than the head spoilers ( part). Such spurious clues
+can cause the models to give unfaithful entity typ-
+ing and further harm the machine’s understanding
+of the entity mentioning text.
+To comprehensively investigate the faithfulness
+and reliability of entity typing methods, the first
+contribution of this paper is to systematically de-
+fine distinct kinds of model biases that are reflected
+mainly from spurious correlations. Particularly, we
+identify the following six types of existing model
+biases, for which examples are illustrated in Fig. 1.
+Those biases include mention-context biases, lex-
+ical overlapping biases, named entity biases, pro-
+noun biases, dependency structure biases and over-
+generalization biases. We provide a prompt-based
+method to identify instances posing those biases to
+the typing model. In the meantime, we illustrate
+that common existence of these types of biased in-
+stances causes it hard to evaluate whether a model
+is faithfully comprehending the entire context to
+infer the type, or trivially leveraging surface forms
+or distributional cues to guess the type.We introduce a counterfactual data augmenta-
+tion (Zmigrod et al., 2019) method for debiasing
+entity typing, as the second contribution of this pa-
+per. Given biased features, we reformulate entity
+typing as a type-querying cloze test and leverage
+a pre-trained language model (PLM) to fill in the
+blank. By augmenting the original training set with
+their debiased counterparts, models are forced to
+fully comprehend the sentence and discover the
+fundamental cues for entity typing, rather than rely
+on spurious correlations for shortcuts. Compared
+with existing debiasing approaches such as product
+of experts (He et al., 2019), focal loss (Karimi Ma-
+habadi et al., 2020), contrastive learning (Zhou
+et al., 2021) and counterfactual inference (Qian
+et al., 2021), our counterfactual data augmentation
+approach helps improve generalization of all stud-
+ied models with consistently better performance on
+both original UFET (Choi et al., 2018) and debi-
+ased test sets.
+2 Method
+In this section, we start with the problem definition
+(§2.1) and then categorize and diagnose the spuri-
+ous correlations causing shortcut predictions by the
+typing model (§2.2). Lastly, we propose a counter-
+factual data augmentation approach to mitigate the
+identified spurious correlations, as well as several
+alternative techniques that apply (§2.3).
+2.1 Problem Definition
+Given a sentence swith an entity mention e∈s,
+theentity typing task aims at predicting one or
+more words or phrases Tfrom the label space L
+that describe the type(s) of e.
+By nature, the inference of type Tshould be
+context-dependent. Take the first sample demon-
+strated in Fig. 1 as an instance: in “Last week I
+stayed in Treasure Island for two nights when vis-
+iting Las Vegas,” Treasure Island should be typed
+ashotel andresort , rather than island orland by
+trivially considering the surface of mention phrase.
+2.2 Spurious Correlations Diagnoses
+We systematically define six types of typical model
+biases caused by spurious correlations in entity typ-
+ing models. For each bias, we qualitatively inspect
+its existence and the corresponding spurious cor-
+relations used by a SOTA entity typing model on
+sampled instances with bias features. Following
+Poerner et al. (2020), we prompt a PLM, RoBERTa-8643
+large (Liu et al., 2019), to identify potential biasing
+samples with either detected surface patterns or
+facts captured during training. To do so, we refor-
+mulate entity typing as a type-querying cloze task
+and perform the analysis as follows.
+1) Mention-Context Bias : Semantically rich en-
+tity mentions may encourage the model to overly
+associate the mention surface with the type without
+considering the key information stated in contexts.
+An example is accordingly shown in T1 of Tab. 1,
+where MLMET predicts types that correspond to
+the case where “fire” is regarded as burning instead
+ofgun shooting . Evidently, this is due to not ef-
+fectively capturing the clues in the context such as
+“shooting” and “gunman”. This is further illustrated
+by the counterfactual example T2, where the model
+predicts almost the same labels when seeing “fire”
+without a context.
+To identify potential instances with the mention-
+context bias, we query the PLM to infer the entitytypes based only on the mention with the template
+shown in Prompt I (Tab. 1). Therefore, samples
+where the PLM can accurately predict without the
+context information are regarded as biased. Entity
+typing models can easily achieve good performance
+on those biased samples by leveraging spurious cor-
+relations between their mention surface and types,
+as shown in S2 from Tab. 1.
+2) Lexical Overlapping Bias : Type labels that
+have lexical overlaps with the entity mention can
+also become prediction shortcuts. As shown in T3
+from Tab. 1: labeling mention “next day” with the
+type dayand additional relevant types leads to the
+F1 up to 0.749. We observe a considerable amount
+of similar examples, e.g., typing the mention “eye
+shields” as shield , “the Doha negotiations” as nego-
+tiation , etc. The highly overlapped mention words
+and type labels make it difficult to evaluate whether
+the model makes predictions based on content com-
+prehension or simply lexical similarities.8644
+We substitute the overlapping mention words
+with semantically similar words and ask the PLM
+to infer the entity types on such perturbed instances
+(details introduced in §2.3) by prompting with the
+template Prompt II (Tab. 1). We consider instances
+have lexical overlapping biases when the PLM per-
+forms poorly after the overlapped mention words
+are substituted, as shown in S3 of Tab. 1.
+3) Named Entity Bias : On cases where mentions
+refer to high-reporting entities in corpora, models
+may be trained to ignore the context but directly
+predict labels that co-occur frequently with those
+entities. We show a concrete instance to type a
+person named entity in T5of Tab. 1. The men-
+tionBenjamin Netanyahu , known as Israeli former
+prime minister, is normally annotated with politi-
+cian, leader andauthority . After observing popu-
+lar named entities and their common annotations
+during training, models are able to predict their
+common types, making it hard to evaluate models’
+capabilities to infer context-sensitive labels.
+As illustrated in Prompt III (Tab. 1), we prompt
+the PLM to type the named entity when only the
+name and its general attribute is given, e.g., the
+geopolitical area India orthe organization Apple ,
+etc. We regard instances to have the named entity
+bias when the PLM accurately infers the mentiontypes relying on prior knowledge of named entities.
+In Tab. 1, we show one instance with the mention
+containing Benjamin Netanyahu in S4, and the Thai
+pop music singer – Jintara Poonlarp in S5. Based
+on types related to Benjamin ’s political role in S4
+and general types for Jintara in S5, we consider
+instances to type mentions including Benjamin as
+biased while those with Jintara as unbiased.
+4) Pronoun Bias : Compared with diverse person
+names, pronouns show up much more frequently to
+help make sentences smoother and clearer. There-
+fore, models are subject to biased training to type
+pronouns well, but lose the ability to type based
+on diverse real names. To type the pronoun herin
+T7of Tab. 1, the entity typing model can success-
+fully infer general types woman, female as well as
+the context-sensitive type actress . To obtain high
+generalization, we expect models to infer types cor-
+rectly for both pronouns and their referred names.
+We substitute the gender pronoun with a random
+person name of the same gender (details introduced
+in §2.3) and ask the PLM to infer the types with
+Prompt IV (Tab. 1). We consider samples to have
+the pronoun bias when the PLM fails to capture
+the majority of types after the name substitution, as8645shown in S6 of Tab. 1.
+5) Dependency Bias : It is observed that the men-
+tion’s headwords explicitly match the mention to
+its types (Choi et al., 2018). However, models
+may fail to capture the syntactic structure with pre-
+dictions focusing on dependents instead of head-
+words. We show an instance with inappropriate
+focus among mention words in T9of Tab. 2.With-
+out understanding the mention’s syntactic structure,
+entity typing models may make predictions that are
+irrelevant to the actual entity.
+Since knowledge about mention structures is
+beneficial for typing complex multi-word mentions,
+we mitigate the bias by data augmentation to im-
+prove model learning (details introduced in §2.3),
+rather than identify whether the bias exists or not.
+6) Overgeneralization Bias : When training with
+disproportional distributed labels, frequent labels
+are more likely to be predicted compared with rare
+ones. Entity typing datasets are naturally imbal-
+anced (Gillick et al., 2014; Choi et al., 2018). We
+show two instances annotated by coarse- and fine-
+grained labels in T11 andT12 of Tab. 2: the model
+can easily predict the coarse-grained label person
+to describe “anarchist”, but fails to infer less fre-
+quent but more concrete labels such as misconduct
+andwrongdoing to type behavior . Models ought to
+type entities by reasoning on mentions and contexts,
+rather than trivially fitting the label distribution.
+As shown in T13 of Tab. 2, we craft a special
+instance – an empty sentence, with which the uni-
+form distribution over all types is expected from
+models free of overgeneralization bias. We then
+compute its disparity with the model’s actual prob-
+ability distribution: the higher/lower probability
+predicted on popular/rare types, the more biased
+the model on the label distribution.
+Discussion The prior defined six biases are not
+mutually exclusive. We discuss some possible mix-
+tures of concurrent biases as follows:
+Mention-Context andLexical Overlapping Bias :
+the model falsely types the mention “Treasure Is-
+land” as island , without understanding the context
+talking about the holiday accommodation. Another
+possible reason that the mention far outweighs the
+context might be the high word similarity between
+mention word “Island” and type word “island”.
+Dependency andLexical Overlapping Bias :ML-
+MET incorrectly makes the prediction carfor the
+mention “most car spoilers” without distinguishing
+important headwords from less important depen-dent words. Another reasonable explanation for
+emphasizing on the dependent rather than the head-
+word is its perfect lexical match with the type set,
+where “car” is a relatively popular label but no type
+has high word similarity with “spoilers”. To di-
+agnose and mitigate all spurious correlations the
+entity typing model may take advantage of, we dis-
+entangle the multiple biases on a single instance by
+analyzing each bias individually without consider-
+ing their mutual interactions .
+2.3 Mitigating Spurious Correlations
+Models exploiting spurious correlations lack the
+required reasoning capability, leading to unfaithful
+typing and harmed out-of-distribution generaliza-
+tion when bias features observed during training
+do not hold. Therefore, we propose to mitigate
+spurious correlations from the counterfactual data
+augmentation perspective: for each instance recog-
+nized with specific bias features, we automatically
+craft its debiased counterpart and train entity typing
+models with both samples. Whenever the model
+prefers to exploit biasing features, it will fail on
+newly crafted debiased instances and actively look
+for more robust features: understanding and reason-
+ing on the sentence rather than exploiting spurious
+correlations. Considering the characteristic textual
+patterns from different biases, we propose the fol-
+lowing distinct strategies to craft debiased instances
+for four types of biases (with examples explained
+in Appx. §A.1). Note that although we can hardly
+craft a new instance free of mention-context bias or
+overgeneralization bias, we can choose to leverage
+the alternative debiasing techniques introduced in
+later parts of this section for these two biases.
+Counterfactual Augmentation On instances di-
+agnosed with lexical overlapping biases, we per-
+form word substitutions in two steps to substitute
+mention words lexically similar to type labels with
+original semantics preserved. To do so, we identify
+the sense of type words in mentions using an off-
+the-shelf word sense disambiguation model (Barba
+et al., 2021) and substitute them with their WordNet
+synonyms. We consider perturbed sentences with
+poor performance from the PLM as the counterfac-
+tual augmented instances free from lexical overlap-
+ping bias, to prohibit the entity typing model from
+exploiting spurious correlations (T4 of Tab. 1).
+For instances with the named entity bias, we
+augment by performing named entity substitution
+according to the following criteria. 1) validity : sub-8646stituted entities should have the same general type
+as the original ones, e.g., the geopolitical area “In-
+dia” can be replaced by “London”; 2) debiased :
+models training on large corpora should not pos-
+sess comprehensive knowledge of the new named
+entities. Basically, we leverage an off-the-shelf
+NER model (Ushio and Camacho-Collados, 2021)
+to identify and classify named entities into general
+NER types provided by this model, and then divide
+the entities into informative andnon-informative
+group based on the prompt-based typing perfor-
+mance by the PLM. We then substitute informa-
+tive named entities with non-informative ones shar-
+ing the same NER type as the counterfactual aug-
+mented instances (T6 of Tab. 1).
+For the pronoun bias, we craft new instances
+by concretizing pronoun mentions in two situa-
+tions. If co-reference resolution (Toshniwal et al.,
+2021) detects the referred entity of the pronoun
+mention in the context, that entity is selected as the
+new mention. Otherwise, the gender pronoun men-
+tion will be substituted with a randomly sampled
+masculine/feminine name from the NLTK corpus
+(Bird, 2006). New sentences with the actual person
+names are considered counterfactual augmented
+if the PLM fails to infer the person’s type with
+contextual information given (T7 of Tab. 1).
+We further augment from instances where men-
+tions have internal dependency structures to tackle
+the dependency bias. First, we use a dependency
+parsing tool (Honnibal et al., 2020) to recognize the
+dependency parse tree of the mention. On top of
+that, we truncate all other dependent words in the
+new mention to create the augmentation. From as-
+sociations between explicitly provided headwords
+and their matching labels, the models are encour-
+aged to learn dependency structures for targeted
+entity typing and predict precisely when head-
+words and dependents are mixed in mentions (T9
+of Tab. 2).
+Together with the new instances with headwords
+explicitly given, instances counterfactually aug-
+mented upon the entity typing training set is uti-
+lized to allow various entity typing models to learn
+to mitigate spurious correlations. Meanwhile, we
+leverage the counterfactual augmented instances
+derived from the test set for model evaluation.
+Alternative Debiasing Techniques In additionto data augmentation, other applicable debiasing
+techniques can be used to resample or reweight
+original instances in training, or directly mea-
+sure and deduct biases in inference. A typical
+resampling technique is AFLite (Le Bras et al.,
+2020) which drops samples predicted accurately
+by simple models such as fasttext (Joulin et al.,
+2017). Reweighting techniques typically train one
+or more models to proactively identify and up-
+weight underrepresented instances in the training
+process, which includes product of experts, de-
+biased focal loss, learned-mixin and its variant
+learned-mixin+H (Clark et al., 2019; He et al.,
+2019; Karimi Mahabadi et al., 2020). On the other
+hand, counterfactual inference (Qian et al., 2021)
+measures prediction biases based on counterfac-
+tual examples (e.g. masking out the context for
+measuring mention-context biases, or giving empty
+inputs to measure overgeneralization biases (Wang
+et al., 2022)), and directly deducts the biases in
+inference. In addition, contrastive learning (Chen
+and He, 2021; Caron et al., 2021; Chen and He,
+2021) can be used to adopt a contrastive training
+loss (Caron et al., 2021; Chen and He, 2021) to
+discourage the model from learning similar rep-
+resentations for full and bias features. Next, we
+compare our approach with those techniques.
+3 Experiments
+In this section, we start with describing the exper-
+imental setups (§3.1). Next, we diagnose entity
+models to measure their reliance on spurious corre-
+lations (§3.2). We then compare our counterfactual
+data augmentation with other debiasing techniques
+for spurious correlation mitigation (§3.3).
+3.1 Experimental Settings
+We leverage the ultra-fine entity typing ( UFET )
+dataset (Choi et al., 2018) to evaluate entity typ-
+ing models and apply different mitigation ap-
+proaches either during training or as inference
+post-processing. UFET comes with 6Ksamples
+from crowdsourcing and 25.2Mdistant supervi-
+sion samples. There are 10,331 types in total,
+among which nine are general (e.g., person), 121
+are fine-grained (e.g., engineer), and 10,201are8647
+ultra-fine (e.g., flight engineer). We follow prior
+studies (Choi et al., 2018) to evaluate entity typing
+models with macro-averaged precision, recall and
+F1. We also study spurious correlations and ef-
+fectiveness of the proposed debiasing approach on
+OntoNotes (Gillick et al., 2014). As results present
+similar observations, we leave detailed analysis
+in Appx. §A.3.
+Entity Typing Baselines We diagnose the predic-
+tion biases and the effectiveness of distinct debias-
+ing models based on following approaches: 1) BiL-
+STM (Choi et al., 2018) concatenates the context
+representation learned by a bidirectional LSTM
+and the mention representation learned by a CNN
+to predict entity labels. 2) LabelGCN (Xiong
+et al., 2019) introduces graph propagation to en-
+code global label co-occurrence statistics and their
+word-level similarities. 3) LRN (Liu et al., 2021)
+autoregressively generates entity labels from coarse
+to fine levels, modeling the coarse-to-fine label de-
+pendency as causal chains. 4) Box4Types (Onoe
+et al., 2021) proposes to embed concepts as d-
+dimensional hyper rectangles (boxes), so that hier-
+archies of types could be captured as topological
+relations of boxes. 5) MLMET (Dai et al., 2021)
+augments training data by constructing mention-
+based input for BERT to predict context-dependent
+mention hypernyms for type labels. Without loss
+of generality, we discuss results of two represen-
+tative models, the earliest BiLSTM training from
+scratch and the latest MLMET finetuning on the
+PLM, for the sake of clarity in this section. As the
+observations on the other models are similar, weleave those results in Appx. §A.
+3.2 Diagnosing Entity Typing Models
+In Tab. 3, we report performance of entity typing
+models trained on UFET. The models are tested
+on original biased samples and their perturbed new
+instances to reflect exploited spurious correlations.
+We conduct similar analyses on unbiased samples.
+1) Mention-Context Bias : When perturbing the
+biased samples by only feeding their mentions to
+typing models, the performance of MLMET keeps
+unchanged while the performance of BiLSTM even
+improves by 3.8%. This disobeys the task goal of
+entity typing where types of the mentions should
+also depend on contexts, and we suggest that sam-
+ples with mention-context biases are insufficient
+for a faithful evaluation of a reliable typing system.
+2) Lexical Overlapping Bias : After substituting
+label-overlapped mention words with semantically
+similar words, performance of both models drops
+drastically especially on biased samples identified
+by the PLM. Compared with MLMET ,BiLSTM
+has less parameter capacity and is more inclined to
+leverage lexical overlapping between mentions and
+type labels as the shortcut for typing.
+Compared with original biased instances, the
+perturbed instances with label-overlapped mention
+words replaced might look less natural or fluent. In
+Tab. 4, we therefore substitute words from different
+parts of instance, and prove that performance degra-
+dation is caused by removed lexical overlapping
+bias rather than unnatural or dysfluent input.
+3) Named Entity Bias : After replacing named
+entities to be less impacted from biased prior knowl-8648
+edge, performance of both studied models in Tab. 3
+decreases considerably when encountering named
+entities, with which models struggle to capture spu-
+rious correlations with mention types. Interestingly,
+perturbing unbiased samples by utilizing named en-
+tities with bias provides shortcuts for prediction,
+leading to improved performance of both models.
+4) Pronoun Bias : With pronouns replaced by
+their referred entities in contexts or random mascu-
+line/feminine names otherwise, we observe serious
+performance degradation from both models, which
+demonstrates their common weakness on typing
+more diverse and less frequent real names.
+5) Dependency Bias : With headwords directly
+exposed to entity typing models by dropping all
+other less important dependents, performance from
+BiLSTM on around 30% of all testing samples with
+dependency structures gets improved dramatically,
+while MLMET also predicts more precisely on 23%
+of samples. Hereby, we confirm that existing entity
+models still suffer from extracting core components
+of given mentions for entity typing and appeal for
+more research efforts to address this problem.
+6) Overgeneralization Bias : Models are sub-
+ject to making biased predictions towards popu-
+lar types observed during training, which leads to
+contrastive performance on instances purely an-
+notated by coarse and ultra-fine types, as shown
+in Tab. 3. This problem is exemplified in a case
+study in Tab. 5, where typing models are queried
+with an empty sentence. Compared with the uni-
+form probability distribution expected from models
+free from overgeneralization bias, existing models
+are inclined to give much higher probabilities to
+coarse types such as person andtitle.
+3.3 Mitigating Spurious Correlations
+In Tab. 6, we evaluate robustness of entity typing
+models after adopting the proposed counterfactual
+data augmentation or alternative debiasing tech-
+niques, and present results on the UFET test set
+with bias and our counterfactually debiased test set.
+Overall, our counterfactual data augmentation is
+the only approach that consistently improves the
+generalization of the studied models across both
+test sets. Particularly, we achieve the best perfor-
+mance on UFET and the debiased test set with ML-
+MET . Besides, models trained with our approach
+improve the performance of BiLSTM andMLMET
+relatively by 71.15% and11.81% on the debiased
+test set, respectively, implying the least reliance on
+spurious correlations to infer correct entity types.
+When evaluating other debiasing approaches, we
+find that 1) none of the resampling or reweighting
+techniques is capable to maintain the performance
+on UFET test set of both models, which could be
+attributed to the large-scale label space and the
+existence of diverse causes of model biases; 2) con-
+trastive learning with either cross entropy loss or
+cosine similarity loss helps improve performance
+on debiased samples, but leads to accuracy drop
+ofMLMET on UFET; 3) without updating model
+parameters given bias features, counterfactual in-
+ference fails to improve performance of MLMET
+on debiased samples.
+4 Related Work
+Entity Typing Earlier studies on entity typing (Yo-
+gatama et al., 2015; Ren et al., 2016; Xu and Bar-
+bosa, 2018) learned contextual embeddings for en-
+tity mentions and types to capture their association.
+To model label correlations without annotated la-
+bel hierarchies in UFET, LabelGCN (Xiong et al.,
+2019) introduced the graph propagation layer to
+encode global label co-occurrence statistics and
+their word-level similarities, whereas HMGCN (Jin
+et al., 2019) proposed to infer this information
+from a knowledge base. For the same purpose,8649
+Box4Types (Onoe et al., 2021) was proposed to
+embed concepts as hyper rectangles (boxes), such
+that their topological relations can represent type
+hierarchies. Considering the prevailing noisy labels
+in existing entity typing datasets, Onoe and Dur-
+rett (2019) performed supervised denoising to filter
+and fix noisy training labels. Dai et al. (2019) in-
+troduced distant supervision from entity linking re-
+sults. To tackle the sparsity of training, recent work
+conducted data augmentation with a masked lan-
+guage model and WordNet knowledge to enrich the
+training data (Dai et al. 2021; MLMET), and made
+use indirect supervision from natural language in-
+ference (Li et al. 2022; LITE). Despite much atten-
+tion in literature, to the best of our knowledge, our
+work represents the first investigation on faithful-
+ness and reducing shortcuts in this task.
+Spurious Correlations in NLP Models Much re-
+cent effort has been put into studying spurious
+correlation in Natural Language Inference (NLI)
+tasks. Recent studies show that crowd workers
+are prone to produce annotation artifacts (Guru-
+rangan et al., 2018) through the rapid annotation
+process and result in identifiable shortcut features
+(Karimi Mahabadi et al., 2020; Du et al., 2021a).
+Hence, simple models can easily achieve good per-
+formance even with partial inputs (Kaushik et al.,
+2019; Karimi Mahabadi et al., 2020), or leveraging
+superficial syntactic properties (McCoy et al., 2019;
+Utama et al., 2020; Pezeshkpour et al., 2021). On
+several other NLP tasks composed of multiple tex-
+tual components, it has been observed that models
+fed with partial inputs can already achieve compet-itive performance, e.g., predicting for claim veri-
+fication (Schuster et al., 2019; Utama et al., 2020;
+Du et al., 2021b) or argument reasoning compre-
+hension (Niven and Kao, 2019; Branco et al., 2021)
+with only the claim, choosing a plausible story
+ending without seeing the story (Cai et al., 2017),
+question answering using a positional bias (Jia and
+Liang, 2017; Kaushik and Lipton, 2018), etc.
+The spurious correlation problems in informa-
+tion extraction tasks are still an under-explored
+area. Despite most recent studies on NER (Zhang
+et al., 2021) and relation extraction (Wang et al.,
+2022), this work represents the first attempt to di-
+agnose spurious correlations in entity typing, for
+which we comprehensively analyzed various types
+of causes for biases and provided a dedicated debi-
+asing method. We also conducted a comprehensive
+comparison with various alternatives based on re-
+sampling (Le Bras et al., 2020), reweighting (Clark
+et al., 2019; Karimi Mahabadi et al., 2020) and
+counterfactual inference (Wang et al., 2022).
+5 Conclusions
+To comprehensively investigate the faithfulness and
+reliability of entity typing methods, we systemat-
+ically define six kinds of model biases that are
+reflected mainly from spurious correlations. In
+addition to diagnosing the biases on representa-
+tive models using benchmark data, we also present
+a counterfactual data augmentation approach that
+helps improve the generalization of different entity
+typing models with consistently better performance
+on both original and debiased test sets.8650Limitations
+There are two important caveats to this work. First,
+for instances identified with a particular bias by the
+PLM, we do not guarantee all typing models would
+exploit spurious correlations on it. To the best of
+our knowledge, entity typing models with spurious
+correlation ablated and mitigated do not yet ex-
+ist. Although we observe significant performance
+differences between the original biased instances
+and the crafted debiased counterparts from existing
+entity typing models, we hope future work would
+pay attention to spurious correlations, and develop
+models with improved robustness and generaliza-
+tion performance. Second, although biases defined
+in this work comprehensively cover six aspects, but
+still they may not exhaust all kinds of biased predic-
+tion in entity typing. In our study we only tried our
+best effort to study the most noteworthy and typical
+biases with which models may inflate performance
+by leveraging corresponding spurious correlations.
+At the same time, appeal for more research efforts
+to complete our understanding with more biases in-
+vestigated. In addition, the studied model biases are
+representative to the widely practiced classification-
+based typing paradigm. There are effects in the
+most recent NLI-based or bi-encoder-based meth-
+ods (Li et al., 2022; Huang et al., 2022), which
+require further analysis.
+Ethical Consideration
+We acknowledge the importance of ethical con-
+siderations in language technologies and would
+like to point the reader to the following concern.
+Gender is a spectrum and we respect all gender
+identities, e.g., nonbinary, genderfluid, polygender,
+omnigender, etc. To craft instances free from pro-
+noun bias, we substitute the gender pronouns with
+their referred names in contexts if they exist, or ran-
+dom masculine/feminine given names otherwise.
+This is due to the lack of entity typing datasets go-
+ing beyond binarism for pronoun mentions such
+as they/them/theirs, ze/hir/hir, etc. Nevertheless,
+we support the rise of alternative neutral pronoun
+expressions and look forward to the development
+of non-binary inclusive datasets and technologies.
+In the meantime, although our techniques do not
+introduce or exaggerate possible gender bias in the
+original experimental data, in cases where such
+biases pre-exist in those data, additional gender
+neuralization techniques would be needed in order
+for such biases to be mitigated.Acknowledgement
+We appreciate the anonymous reviewers for their in-
+sightful comments and suggestions. This material
+is partly supported by the National Science Founda-
+tion of United States Grant IIS 2105329 and a Cisco
+Research Award. Nan Xu and Fei Wang are sup-
+ported by the Annenberg Fellowships. Bangzheng
+Li is supported by the USC Provost’s Ph.D. Fel-
+lowship. Mingtao Dong is supported by the USC
+Provost’s Undergrad Research Fellowship.
+References8651865286538654A Appendix
+A.1 Additional Details about Mitigating
+Spurious Correlations
+Lexical Overlapping Bias We consider the fol-
+lowing sentence as an instance: “Deutsche Bank
+would neither confirm nor deny the discharge of
+the two executives, and it also would not specify
+who was the target of the alleged spying”, anno-
+tated with types dismissal, discharge, leave, ter-
+mination . Since “discharge” shows up both in the
+mention and the true labels, we perform word sub-
+stitutions with synonym candidates from 20 synsets
+found in WordNet. We show a few synsets with
+popular senses as follows:
+Synset I: (the termination of someone’s em-
+ployment ) dismissal, dismission, discharge, firing,
+liberation, release, sack, sacking
+SynsetII : (a substance that is emitted or
+released ) discharge, emission
+SynsetIII : (a formal written statement of
+relinquishment ) release, waiver, discharge
+Synonyms that share high word similarities with
+the true labels are removed to avoid creating new
+lexical overlapping bias features, e.g., dismissal,
+discharge from Synset I, discharge from Synset II
+and Synset III. To guarantee the semantic consis-
+tency of the new sentence and the fidelity of true
+labels to type the new mention, we leverage avail-
+able word sense disambiguation models to preserve
+synonyms from the synset that is most consistent
+with the sense used in the original sentence: dis-
+mission, firing, liberation, release, sack, sacking
+from Synset I are finally selected to substitute “dis-
+charge”. As shown in T4 of Tab. 1, without training
+on the debiased set, MLMET no longer predicts the
+overlapped type “day”, but some surface word “pe-
+riod” instead.
+Named Entity Bias Compared with the politi-
+cian Benjamin Netanyahu , the PLM can hardly
+infer the impression of the singer Jintara Poon-
+larp on the public. Particularly, only general types
+to describe person named entities are predicted in
+S5: person, human, woman . We then consider
+Benjamin Netanyahu as a biased named entity con-
+taining much prior knowledge, while Jintara Poon-
+larp as an unbiased named entity without much
+type-relevant information revealed. After substi-
+tuting Benjamin Netanyahu with Jintara Poonlarp
+in T6, MLMET can hardly infer the political roleof the new mention by analyzing its connection
+with the politician ( Amin al-Husseini , Palestinian
+Arab nationalist and Muslim leader in Manda-
+tory Palestine) and political description (“master-
+minds” and “Holocaust”) in the context. MLMET
+even crashes with some out-of-context predictions:
+scholar, writer .
+Pronoun Bias As shown in the original instance
+T7 of Tab. 1, the actual person’s name that the pro-
+noun mention “Her” refers to is not provided in
+the current sentence. As a result, a random femi-
+nine name, “Judith” is assumed to be the referred
+entity and substitutes the pronoun mention as a
+new sentence in S6. Considering the ridiculously
+wrong types predicted by RoBERTa such as bird
+andcat, we include this new instance in the debi-
+ased set and expect the entity modeling training on
+this kind of instances to infer person name types as
+accurate as pronoun types. Beforehand, we test on
+the newly crafted instance without counterfactual
+augmented training, and observe huge performance
+drop after pronoun concretization: types related
+to the name’s gender attribute such as woman and
+female are missing, let alone the types requiring
+fully context understanding such as actress .
+Dependency Bias For instance T9 in Tab. 2, we
+show their mention word dependency analysis in
+S6 and predictions on the perturbed instance in T10.
+Without distractions from other dependent words
+in the new mention, MLMET spares no effort to
+infer types of the target entity “whale” with the cor-
+rect prediction subject . Motivated by the improved
+performance when the mention headword is specifi-
+cally provided, we believe entity typing models can
+actively learn to capture target entity among men-
+tion words when both original sentences and their
+debiased counterparts are given during training. In
+such augmented training regime, the entity typing
+model is expected achieve robust performance on
+new sentences bearing distractions from dependent
+words in mentions.
+A.2 Implementation Details
+We adopt the released checkpoints of RoBERTa-
+large (Liu et al., 2019) as the PLM to identify bi-
+ased instances. To perform masked fill-in, we adopt
+the top 10 predictions and filter out non-type words
+as the predicted types. We recognize potentially8655biased samples based on PLM predictions based
+on the following criteria. 1) mention-context bias :
+instances are considered biased if the PLM can
+predict the type labels with the F1 score above
+0.5when only the mention is provided; 2) named
+entity bias : instances are considered biased if the
+PLM can predict types labels with the F1 score
+above 0.5when only the named entity is given; 3)
+lexical overlapping bias : instances are considered
+biased if the PLM makes predictions with the F1
+score below 0.5after substituting overlapped words
+with their semantically similar words; 4) pronoun
+bias: for pronouns without coreferenced entities
+detected, we substitute them with 5 random real
+person names as debiased instances. Instances are
+considered biased if the PLM makes predictions
+with the F1 score below 0.5after real name sub-
+stitution. We mainly use 0.5as the threshold to
+distinguish biased samples from unbiased, since
+the SOTA model achieves the F1 score approximat-
+ing0.5on average of the UFET test samples.
+To diagnose entity typing models, for those with
+released checkpoints ( BiLSTM ,Box4Types ,LRN ),
+we directly evaluate on the original (un)biased and
+crafted debiased instances. We train LabelGCN
+andMLMET by ourselves following hyperparame-
+ters and training strategies introduced in their pa-
+pers.
+To evaluate various debiasing approaches, we
+train entity typing models using checkpoints train-
+ing on the original dataset as the warm start with
+the same hyperparameter sets.
+We run experiments on a commodity server with
+a GeForce RTX 2080 GPU. It takes about 4 hours
+to train one entity typing model on average and 2
+minutes for inference on the UFET test set.
+A.3 OntoNotes Experiments
+We diagnose entity typing models and the effec-
+tiveness of the proposed counterfactual augmented
+approach on OntoNotes (Gillick et al., 2014). The
+original dataset contains 251,309instances auto-
+matically annotated by linking identified entity
+mentions to Freebase profiles for training, and
+11,165manually annotated instances: 2,202for
+validation and 8,963for testing, respectively. Its la-
+bel space is constituted of 89types organized into
+a hierarchy, e.g., /person (level 1), /person/artist
+(level 2), /person/artist/actor (level 3). We adopt
+the set augmented by (Choi et al., 2018) for model
+training: 793,487instances with distant supervi-sion from Wikipedia definition sentences and head
+word supervision.
+In Tab. 8, we report performance of two repre-
+sentative entity typing models on original biased
+samples where they are likely to exploit spurious
+correlations, the perturbed counterparts, as well as
+performance on unbiased samples. We have the
+following observations: 1) entity typing models
+can achieve satisfactory performance when only
+the mention is provided without context; 2) con-
+sidering lexical overlapping bias, performance on
+both biased and unbiased samples identified by the
+PLM drops a lot after substituting overlapped men-
+tion words with their sematically similar words;
+3) the performance variation after named entity
+substitution is evident; 4) models can obtain much
+better performance on some instances when the
+headwords are explicitly given without distractions
+from other words in mentions; 5) performance on
+instances purely annotated by coarse and fine labels
+is good in general with around 15% difference in
+F1 score. Similarly to UFET, models training on
+OntoNotes may achieve good performance without
+reasoning on the context, rely on lexical overlap-
+ping between mention words and types to make pre-
+cise predictions, and obtain below-average results
+on some instances for lack of syntactic structure
+understanding.
+To mitigate spurious correlations, we evaluate
+the proposed counterfactual augmented approach
+in Tab. 9. With additional debiased instances for
+model training, both BiLSTM andMLMET main-
+tain good performance on the original OntoNotes
+test set and much higher accuracy on the corre-
+sponding debiased test set, leading to improved
+generalization.865686578658

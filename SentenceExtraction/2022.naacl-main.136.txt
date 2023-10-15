@@ -1,1 +1,731 @@
-1861 Proceedings of the 2022 Conference of the North American Chapter of the Association for Computational Linguistics : Human Language Technologies , pages 1861 1874 July 10 - 15 , 2022 © 2022 Association for Computational Linguistics 1862 1863 1864 1865 1866 1867 1868 1869 1870 1871 1872 1873 1874 
+
+Tobias DomhanEva HaslerKe Tran Sony Trenous Bill Byrne Felix Hieber
+Amazon AI Translate
+Berlin, Germany
+{domhant,ehasler,trnke,trenous,willbyrn,fhieber}@amazon.com
+Abstract
+V ocabulary selection, or lexical shortlisting, is
+a well-known technique to improve latency of
+Neural Machine Translation models by con-
+straining the set of allowed output words dur-
+ing inference. The chosen set is typically
+determined by separately trained alignment
+model parameters, independent of the source-
+sentence context at inference time. While vo-
+cabulary selection appears competitive with
+respect to automatic quality metrics in prior
+work, we show that it can fail to select the
+right set of output words, particularly for se-
+mantically non-compositional linguistic phe-
+nomena such as idiomatic expressions, lead-
+ing to reduced translation quality as perceived
+by humans. Trading off latency for quality
+by increasing the size of the allowed set is
+often not an option in real-world scenarios.
+We propose a model of vocabulary selection,
+integrated into the neural translation model,
+that predicts the set of allowed output words
+from contextualized encoder representations.
+This restores translation quality of an uncon-
+strained system, as measured by human evalua-
+tions on WMT newstest2020 and idiomatic ex-
+pressions, at an inference latency competitive
+with alignment-based selection using aggres-
+sive thresholds, thereby removing the depen-
+dency on separately trained alignment models.
+1 Introduction
+Neural Machine Translation (NMT) has achieved
+great improvements in translation quality, largely
+thanks to the introduction of Transformer mod-
+els (Vaswani et al., 2017). However, increasingly
+larger models (Aharoni et al., 2019; Arivazha-
+gan et al., 2019) lead to prohibitively slow infer-
+ence when deployed in industrial settings. Espe-
+cially for real-time applications, low latency is
+key. A number of inference optimization speed-
+ups have been proposed and are used in practice:EN: to swal low the bitter pill
+DE: in den sau renap felbei ßen
+GL: to bite into the sour apple
+EN: by ho ok or cro ok
+DE: auf biegen undbrechen
+GL: by bending andbreaking
+EN: to buy a p ig in a po ke
+DE: die kat zeimsack kaufen
+GL: to buy the catin the bag
+EN: to swe at blood
+DE: blu t und wasser sch wit zen
+GL: to sweat blood and water
+EN: make yourself at home !
+DE: machen sie es sich bequem !
+GL: make yourself comfortable !
+Figure 1: Examples of subword-segmented idiomatic
+expressions (EN) and their German correspondences
+(DE) as well as an English gloss (GL) of the German ex-
+pression. Alignment-based vocabulary selection: out-
+put tokens missing from the allowed set of top-k output
+tokens are marked in orange/bold (red/italic) for k=200
+(k=1000).
+reduced precision (Aji and Heaﬁeld, 2020), replac-
+ing self-attention with Average Attention Networks
+(AANs) (Zhang et al., 2018), Simpler Simple Re-
+current Units (SSRUs) (Kim et al., 2019), or model
+pruning (Behnke and Heaﬁeld, 2020; Behnke et al.,
+2021).
+Another technique that is very common in prac-
+tice is vocabulary selection (Jean et al., 2015)
+which usually provides a good tradeoff between
+latency and automatic metric scores (BLEU) and
+reduced inference cost is often preferred over the
+loss of∼0.1BLEU. V ocabulary selection is effec-
+tive because latency is dominated by expensive,
+repeated decoder steps, where the ﬁnal projection
+to the output vocabulary size contributes to a large
+portion of time spent (Bérard et al., 2021). Despite1861high parallelization in GPUs, vocabulary selection
+is still relevant for GPU inference for state-of-the-
+art models.
+However, we show that standard methods of vo-
+cabulary selection based on alignment model dictio-
+naries lead to quality degradations not sufﬁciently
+captured by automatic metrics such as BLEU. We
+demonstrate that this is particularly true for se-
+mantically non-compositional linguistic phenom-
+ena such as idiomatic expressions, and aggressive
+thresholds for vocabulary selection. For example,
+see Figure 1 for alignment-model based vocabulary
+selection failing to include tokens crucial for trans-
+lating idiomatic expressions in the set of allowed
+output words. While less aggressive thresholds
+can reduce the observed quality issues, it also re-
+duces the desired latency beneﬁt. In this paper we
+propose a neural vocabulary selection model that
+is jointly trained with the translation model and
+achieves translation quality at the level of an un-
+constrained baseline with latency at the level of an
+aggressively thresholded alignment-based vocabu-
+lary selection model.
+Our contributions are as follows:
+•We demonstrate that alignment-based vocab-
+ulary selection is not limited by alignment
+model quality, but rather inherently by making
+target word predictions out of context (§2).
+•We propose a Neural V ocabulary Selection
+(NVS) model based on the contextualized
+deep encoder representation (§3).
+•We show that alignment-based vocabulary se-
+lection leads to human-perceived translation
+quality drops not sufﬁciently captured by au-
+tomatic metrics and that our proposed model
+can match an unconstrained model’s quality
+while keeping the latency beneﬁts of vocabu-
+lary selection (§4).
+2 Pitfalls of vocabulary selection
+We ﬁrst describe vocabulary selection and then an-
+alyze its shortcomings. Throughout the paper, we
+use the recall of unique target sentence tokens as
+a proxy for measuring vocabulary selection qual-
+ity, i.e. the reachability of the optimal translation.
+We use the average vocabulary size in inference
+decoder steps across sentences as a proxy for trans-
+lation latency since it directly impacts decoding
+speed (Kasai et al., 2020).
+2.1 Vocabulary selection
+V ocabulary selection (Jean et al., 2015), also known
+as lexical shortlisting or candidate selection, is a
+common technique for speeding up inference in
+sequence-to-sequence models, where the repeated
+computation of the softmax over the output vocab-
+ularyVof sizeVincurs high computational cost
+in the next word prediction at inference time:
+p(y|y,x;θ) =softmax (Wh +b),(1)
+where W∈R,b∈Randh∈R,dbe-
+ing the hidden size of the network. V ocabulary
+selection chooses a subset ¯V⊂V , with ¯V/lessmuchV, to
+reduce the size of matrix multiplication in Equation
+(1) such that
+¯p(y|y,x;θ) =softmax (¯Wh +¯b),(2)
+where ¯W∈Rand¯b∈R. The subset ¯Vis
+typically chosen to be the union of the top-k target
+word translations for each source token, according
+to the word translation probabilities of a separately
+trained word alignment model (Jean et al., 2015;
+Shi and Knight, 2017). Decoding with vocabulary
+selection usually yields similar scores according to
+automatic metrics, such as BLEU (Papineni et al.,
+2002), compared to unrestricted decoding but at
+reduced latency (L’Hostis et al., 2016; Mi et al.,
+2016; Sankaran et al., 2017; Junczys-Dowmunt
+et al., 2018). In the following, we show that de-
+spite its generally solid performance, vocabulary
+selection based on word alignment models nega-
+tively affects translation quality, not captured by
+standard automatic metrics. We use models trained
+on WMT20 (Barrault et al., 2020a) data for all eval-
+uations in this section, see Section 4.1 for details.
+2.2 Alignment model quality
+In practice, the chosen subset of allowed out-
+put words is often determined by an alignment1862model, such as fast_align (Dyer et al., 2013),
+which provides a trade-off between the speed of
+alignment model training and the quality of align-
+ments (Jean et al., 2015; Junczys-Dowmunt et al.,
+2018). fast_align ’s reparametrization of IBM
+model 2 (Brown et al., 1993) places a strong prior
+for alignments along the diagonal. We investigate
+whether more sophisticated alignment models can
+lead to better vocabulary selection, especially for
+language pairs with high amount of reordering. To
+evaluate this we compute the recall of translation
+model and reference tokens using GIZA++ (Och
+and Ney, 2003) and MaskAlign(Chen et al.,
+2021) as seen in Table 1. We extract top-k word
+translation tables (from fast_align , GIZA++,
+and MaskAlign) by force-aligning the training
+data. Overall, GIZA++ achieves the best recall,
+and it is just slightly better than fast_align .
+MaskAlign, a state-of-the-art neural alignment
+model, underperforms fast_align with respect
+to recall. While performance of MaskAlign may
+be improved with careful tuning of its hyperparam-
+eters via gold alignments (Chen et al., 2021), we
+choose fast_align as a strong, simple baseline
+for vocabulary selection in the following.
+2.3 Out-of-context word selection
+Alignment-based vocabulary selection does not
+take source sentence context into account. A top-k
+list of translation candidates for a source word will
+likely cover multiple senses for common words,
+but may be too limited when a translation is highly
+dependent on the source context. Here we consider
+idiomatic expressions as a linguistic phenomenon
+that is highly context-dependent due to its semanti-
+cally non-compositional nature.
+Table 2 compares the recall of tokens in the refer-
+ence translation when querying the translation lexi-
+con of the alignment model for two different top-k
+settings. Recall is computed as the percentage of
+unique tokens in the reference translation that ap-
+pear in the top-k lexicon, or more generally, in the
+set of predicted tokens according to a vocabulary se-
+lection model. We evaluate two scopes for test sets
+of idiomatic expressions: the full source and target
+sentence vs. the source and target idiomatic multi-
+word expressions according to metadata. The Id-
+ioms test set is an internal set of 100 English idioms
+in context and their human translations. ITDS is
+the IdiomTranslationDSdata released by Fadaee
+et al. (2018) with 1500 test sentences containing
+English and German idiomatic expressions for eval-
+uation into and out of German, respectively. The
+results show that recall increases when increasing
+kbut is consistently lower for the idiomatic expres-
+sions than for full sentences. Clearly, the idiom
+translations contain tokens that are on average less
+common than the translations of “regular” inputs.
+As a consequence, increasing the output vocabulary
+is less effective for idiom translations, with recall
+lagging behind by up to 9.3%. This can directly
+affect translation quality because the NMT model
+will not be able to produce idiomatic translations
+given an overly restrictive output vocabulary.
+Table 3 shows a similar comparison but here we
+evaluate full literal translations vs. full idiomatic
+translations on a data set of English proverbs from
+Wikiquote. For EN-DE, we extracted 94 triples
+of English sentence and two references, for EN-
+RU we extracted 262 triples. Although in both
+cases recall can be improved by increasing k, it
+helps considerably less for idiomatic than for literal
+translations.
+Figure 1 shows examples of idiomatic expres-
+sions from the ITDS set and the output tokens be-
+longing to an idiomatic translation that are missing
+from the respective lexicon used for vocabulary1863
+selection. While for some of the examples, increas-
+ing the lexicon size solves the problem, for others
+the idiomatic translation can still not be generated
+because of missing output tokens.
+These results demonstrate that there is room for
+improvement in vocabulary selection approaches
+when it comes to non-literal translations.
+2.4 Domain mismatch in adaptation settings
+Using a word alignment model to constrain the
+NMT output vocabulary means that this model
+should ideally also be adapted when adapting the
+NMT model to a new domain. Table 4 shows that
+adapting the word alignment model with relevant
+in-domain data (in this case, idiomatic expressions
+in context) yields strong recall improvements for
+vocabulary selection. Compared to increasing the
+per-source-word vocabulary as shown in Table 2,
+the improvement in recall for idiom tokens is larger
+which highlights the importance of having a vocab-
+ulary selection model which matches the domain
+of the NMT model. This also corroborates the ﬁnd-
+ing of Bogoychev and Chen (2021) that vocabulary
+selection can be harmful in domain-mismatched
+scenarios.
+We argue that integrating vocabulary prediction
+into the NMT model avoids the need for mitigating
+domain mismatch because domain adaptation will
+update both parts of the model. This simpliﬁes do-
+main adaptation since it only needs to be done once
+for a single model and does not require adaptation
+or re-training of a separate alignment model.
+2.5 Summary
+We use target recall as a measure for selection
+model quality. We see that alignment model qual-
+ity only has a limited impact on target token re-
+call with more recent models actually having lower
+recall overall. In domain adaptation scenarios vo-
+cabulary selection limits translation quality if the
+selection model is not adapted. The main challengefor alignment-based vocabulary selection comes
+from its out-of-context selection of target tokens on
+a token-by-token basis, shown to reduce recall for
+translation of idiomatic, non-literal expressions. In-
+creasing the size of the allowed set can compensate
+for this shortcoming at the cost of latency. However,
+this begs the question of whether context-sensitive
+selection of target tokens can achieve higher recall
+without increasing vocabulary size.
+3 Neural Vocabulary Selection (NVS)
+We incorporate vocabulary selection directly into
+the neural translation model, instead of relying on
+a separate statistical model based on token transla-
+tion probabilities. This enables predictions based
+on contextualized representations of the full source
+sentence. It further simpliﬁes the training proce-
+dure and domain adaptation, as we do not require a
+separate training procedure for an alignment model.
+The goal of our approach is three-fold. We
+aim to (1) keep the general Transformer (Vaswani
+et al., 2017) translation model architecture, (2) in-
+cur only a minimal latency overhead that amortizes
+by cheaper decoder steps due to smaller output
+vocabularies, and (3) scale well to sentences of
+different lengths.
+Figure 2 shows the Neural V ocabulary Selection
+(NVS) model. We base the prediction of output
+tokens on the contextualized hidden representation
+produced by the Transformer encoder H∈R
+fortsource tokens and a hidden size of d. Thet
+source tokens are comprised of t−1input tokens
+and a special <EOS> token. To obtain the set of
+target tokens, we ﬁrst project each source position
+to the target vocabulary size V, apply max-pooling
+across tokens (Shen et al., 2018), and ﬁnally use
+the sigmoid function, σ(·), to obtain
+z=σ(maxpool (WH +b)), (3)
+where W∈R,b∈Randz∈R. The
+max-pooling operation takes the per-dimension
+maximum across the source tokens, going from
+RtoR. Each dimension of zindicates the
+probability of a given target token being present in
+the output given the source. To obtain the target
+Bag-of-words (BOW), we select all tokens where
+z> λ as indicated in the right-hand side of Fig-
+ure 2, where λis a free parameter that controls the
+size¯Vof the reduced vocabulary ¯V. At inference
+time, the output projection and softmax at every1864
+decoder step are computed over the predicted BOW
+of size ¯Vonly.
+We achieve goal (1) by basing predictions on
+the encoder representation already used by the de-
+coder. Goal (2) is accomplished by restricting NVS
+to a single layer and basing the prediction on the
+encoder output, where we can parallelize compu-
+tation across source tokens. Inference latency is
+dominated by non-parallelizable decoder steps (Ka-
+sai et al., 2020). By projecting to the target vo-
+cabulary per source token, each source token can
+“vote” on a set of target tokens. The model auto-
+matically scales to longer sentences via the max-
+pooling operation, acting as a union of per-token
+choices, fulﬁlling goal (3). Max-pooling does not
+tie the predictions across timesteps as they would
+be with mean-pooling which would also depend
+on sentence length. Additionally, we factor in a
+sentence-level target token prediction based on the
+<EOS> token. The probability of a target word be-
+ing present is represented by the source position
+with the highest evidence, backing off to a base
+probability of a given word via the bias vector b.
+To learn the V×d+Vparameters for NVS,
+we use a binary cross-entropy loss with the binary
+ground truth vector y∈R, where each entry
+indicates the presence or absence of target token
+y. We deﬁne the loss as
+L=1
+Z/summationdisplayylog(z)λ+(1−y) log(1−z),
+whereλis a weight for the positive class andZ=V+ (λ−1)∗nis the normalizing factor,
+withn=/summationtextybeing the number of unique target
+words. Most dimensions of the V-dimensional vec-
+torywill be zero as only a small number of target
+words are present for a given sentence. To counter
+the class imbalance of the negative class over the
+positive class the λweight allows overweighting
+the positive class. This has the same effect as if
+each target word had occurred λtimes. The NVS
+objective (L) is optimized jointly with the stan-
+dard negative log-likelihood translation model loss
+(L):L=L+L.
+4 Experiments
+4.1 Setup
+Our training setup is guided by best practices
+for efﬁcient NMT to provide a strong low la-
+tency baseline: deep Transformer as encoder with
+a lightweight recurrent unit in the shallow de-
+coder (Bérard et al., 2021; Kim et al., 2019), int8
+quantization for CPU and half-precision GPU in-
+ference. We use the constrained data setting from
+WMT20 (Barrault et al., 2020b) with four language
+pairs English-German, German-English, English-
+Russian, Russian-English and apply corpus clean-
+ing heuristics based on sentence length and lan-
+guage identiﬁcation. We tokenize with sacre-
+mosesand byte-pair encode (Sennrich et al., 2016)
+the data with 32k merge operations.1865
+All models are Transformers (Vaswani et al.,
+2017) trained with the Sockeye 2 toolkit (Domhan
+et al., 2020). We release the NVS code as part of
+the Sockeye toolkit. We use a 20-layer encoder
+and a 2-layer decoder with self-attention replaced
+by SSRUs (Kim et al., 2019).
+NVS and NMT objectives are optimized jointly,
+but gradients of the NVS objective are blocked be-
+fore the encoder. This allows us to compare the
+different vocabulary selection techniques on the
+same translation model that is unaffected by the
+choice of vocabulary selection. All vocabulary se-
+lection methods operate at the BPE level. We use
+the translation dictionaries from fast_align for
+alignment-based vocabulary selection. We use a
+minimum of k= 200 for alignment-based vo-
+cabulary selection which is at the upper end of
+what is found in previous work. Junczys-Dowmunt
+et al. (2018) set k= 100 , Kim et al. (2019) set
+k= 75 , and Shi and Knight (2017) set k= 50 .Smallerkwould lead to stronger quality degra-
+dations at lower latency. GPU and CPU latency
+is evaluated at single-sentence translation level to
+match real-time translation use cases where latency
+is critical. We evaluate translation quality using
+SacreBLEU (Post, 2018)and COMET (Rei et al.,
+2020). Furthermore, we conduct human evalua-
+tions with two annotators on the subsets of new-
+stest2020 and IDTS test sentences where outputs
+differ between NVS λ= 0.9(0.99) and align
+k= 200 . Professional bilingual annotators rate
+outputs of four systems concurrently in absolute
+numbers with increments of 0.2 from 1 (worst) to
+6 (best). Ratings are normalized so that the (un-
+constrained) baseline is at 100%. Complementary
+details on the training setup, vocabulary selection
+model size, human and latency evaluation setup
+can be found in Appendix A.18664.2 Results
+Table 5 shows results of different vocabulary selec-
+tion models on newstest2020 and the ITDS idiom
+set, compared to an unconstrained baseline without
+vocabulary selection. Automatic evaluation metrics
+show only very small differences between models.
+For three out of four language pairs, the alignment
+model withk= 200 performs slightly worse than
+the unconstrained baseline (0.2-0.3 BLEU). This
+corroborates existing work that quality measured
+by automatic metrics is not signiﬁcantly affected by
+alignment-based vocabulary selection (Jean et al.,
+2015; Shi and Knight, 2017; Kim et al., 2019).
+However, human-perceived quality of alignment-
+based vocabulary selection with k= 200 is con-
+sistently lower than the baseline. COMET, found
+to correlate better with human judgements than
+BLEU (Kocmi et al., 2021), only reﬂects this drop
+in two out of the four language pairs, considering
+conﬁdence intervals across random seeds. Increas-
+ingkto 1000 closes the quality gap with respect
+to human ratings taking the conﬁdence intervals
+into account. The same is true for vocabulary se-
+lection using NVS at both λ= 0.9andλ= 0.99,
+where quality is also within the conﬁdence intervals
+of the unconstrained baseline. However, NVS is
+consistently faster than the alignment-based model.
+Forλ= 0.9we see CPU latency improvements of
+95 ms on average across language arcs. Increas-
+ing the threshold to λ= 0.99latency compared
+tok= 1000 is reduced by 157 ms on average.
+The same trend holds for GPU latency but with
+smaller differences. Figure 3 compares the NVS
+model against the alignment model according to
+the speed/quality tradeoff reﬂected by average vo-
+cabulary size vs. reference token recall on new-
+stest2020. NVS consistently outperforms the align-
+ment model, especially for small average vocabu-
+lary sizes where NVS achieves substantially higher
+recall. This demonstrates that the reduced vocab-
+ulary size and therefore faster decoder steps can
+amortize the cost of running the lightweight NVS
+model, which is fully parallelized across source
+tokens as part of the encoder.
+To evaluate a domain adaptation setting, we ﬁne-
+tune the NVS models on a set of 300 held-out sen-
+tences of idioms in sentence context for 10 epochs.
+For a fair comparison, we also include the same
+data for the alignment-based vocabulary selection.
+Figure 4 shows that NVS yields pareto optimality
+over the alignment model with and without domainadaptation to a small internal training set of id-
+iomatic expressions in context. This highlights the
+advantage of NVS which is automatically updated
+during domain ﬁne-tuning as it is part of a single
+model. See Appendix C for additional ﬁgures on
+the proverbs and ITDS test sets, where the same
+trend holds.
+4.3 Analysis
+Our proposed neural vocabulary selection model
+beneﬁts from contextual target word prediction. We
+demonstrate this by comparing the predicted BOW
+when using the source sentence context versus pre-
+dicting BOWs individually for each input word
+(which may consist of multiple subwords) and tak-
+ing the union of individual bags. We use the NVS
+models that are adapted to a set of idiomatic ex-
+pressions for this analysis to ensure that the un-
+constrained baseline models produce reasonable
+translations for the Idiom test set.
+Table 6 shows the percentage of segments for
+which all reference tokens are included in the
+contextual vs. the non-contextual BOW for an
+acceptance threshold of 0.9 and 0.99. Indepen-
+dent of the threshold, predicting the BOW using
+source context yields signiﬁcantly larger overlap
+with idiomatic reference tokens. We also mea-
+sure the extent to which idiomatic reference tokens
+are included exclusively in the contextual or non-
+contextual BOW. For 32% of EN-DE segments,
+only the contextual BOW contains all idiomatic
+reference tokens. For non-contextual BOWs, this
+happens in only 1% of the segments (with λ=0.9).
+For EN-RU, the values are 38% versus 6%, respec-
+tively. This shows that the model makes extensive
+use of contextualized source representations in pre-
+dicting the relevant output tokens for idiomatic
+expressions.1867
+Figure 5 shows a few illustrative examples where
+the idiomatic reference is only reachable with the
+contextual BOW prediction. Consider the last ex-
+ample containing the English idiom “to wrap one’s
+head around it”. Even though the phrase is rather
+common in English, the German translation “ver-
+stehen” ( to understand ) would not be expected to
+rank high for any of the idiom source tokens. Eval-
+uating the tokens in context however yields the
+correct prediction.
+5 Related work
+There are two dominant approaches to generate a
+restricted set of target word candidates (i) using
+an external model and (ii) using the NMT system
+itself.In the ﬁrst approach, a short-list of transla-
+tion candidates is generated from word-alignments
+(Jean et al., 2015; Kim et al., 2019), phrase ta-
+ble, and the most common target words (Mi et al.,
+2016). L’Hostis et al. (2016) propose an additional
+method using support vector machines to predict
+target candidates from a sparse representation of
+the source sentence.
+In the second approach, Sankaran et al. (2017)
+build alignment probability table from the soft-
+attention layer from decoder to encoder. How-
+ever, applying their method to multi-head attention
+in Transformer is non-trivial as attention may not
+capture word-alignments in multiple attention lay-
+ers (Li et al., 2019). Shi and Knight (2017) use
+local sensitive hashing to shrink the target vocabu-1868
+lary during decoding, though their approach only
+reduces latency on CPUs instead of GPUs.
+Chen et al. (2019) reduce the softmax computa-
+tion by ﬁrst predicting a cluster of target words and
+then perform exact search (i.e., softmax) on that
+cluster. The clustering process is trained jointly
+with the translation process in their approach.
+Closely related to our work is Weng et al. (2017),
+who predict all words in a target sentence from the
+initial hidden state of the decoder. Our NVS model
+differs from theirs in that we make a prediction
+for each source token and aggregate the results via
+max-pooling to scale with sentence length. Recent
+work of Bogoychev and Chen (2021) illustrates the
+risk associated with reducing latency via vocabu-
+lary selection in domain-mismatched settings. Our
+work takes this a step further by providing a de-
+tailed analysis on the shortcomings of vocabulary
+selection and proposing a model to mitigate them.
+Related to our ﬁndings on non-compositional
+expressions, Renduchintala et al. (2021) evaluate
+the effect of methods used to speed up decoding
+in Transformer models on gender bias and ﬁnd
+minimal BLEU degradations but reduced gendered
+noun translation performance on a targeted test set.
+6 Conclusions
+Alignment-based vocabulary selection is a com-
+mon method to heavily constrain the set of allowed
+output words in decoding for reduced latency with
+only minor BLEU degradations. We showed with
+human evaluations and a targeted qualitative anal-
+ysis that such translations are perceivably worse.
+Even recent automatic metrics based on pre-trained
+neural networks, such as COMET, are only able to
+capture the observed quality degradations in two
+out of four language pairs. Human-perceived qual-
+ity is negatively affected both for generic transla-
+tions, represented by newstest2020, as well as for
+idiomatic translations. Increasing the vocabularyselection threshold can alleviate the quality issues
+at an increased single sentence translation latency.
+To preserve both translation latency and quality
+we proposed a neural vocabulary selection model
+that is directly integrated into the translation model.
+Such a joint model further simpliﬁes the training
+pipeline, removing the dependency on a separate
+alignment model. Our model has higher reference
+token recall at similar vocabulary sizes, translating
+into higher quality at similar latency.
+References186918701871A Reproducibility Details
+Data We use the constrained data setting from
+WMT20 (Barrault et al., 2020b) with four language
+pairs English-German, German-English, English-
+Russian, Russian-English. Noisy sentence pairs
+are removed based on heuristics, namely sentences
+with a length ratio >1.5,>70% token overlap,
+>100BPE tokens and those where source or target
+language does not match according to LangID (Lui
+and Baldwin, 2012) are ﬁltered.
+Model We train pre-norm Transformer (Vaswani
+et al., 2017) models with an embedding dimension
+of 1024 and a hidden dimension of 4096.
+Model Size
+align k=200 6,590,600
+align k=1000 32,953,000
+NVS 33,776,825
+Table 7 compares the memory consumption of
+the different vocabulary selection models in terms
+of ﬂoat numbers. We see that the NVS model re-
+quires a similar number of ﬂoating point numbers
+as the alignment-based model at k= 1000 . Note,
+that this only represent the disk space requirements
+as other intermediate outputs would be required at
+runtime for either vocabulary selection model.
+Training The NMT objective uses label smooth-
+ing with constant 0.1, the NVS objective sets the
+positive class weight λto 100,000. Models train
+on 8 Nvidia Tesla V100 GPUs on AWS p3.16xlarge
+instances with an effective batch size of 50,000 tar-
+get tokens accumulated over 40 batches. We train
+for 70k updates with the Adam (Kingma and Ba,
+2015) optimizer, using an initial learning rate of
+0.06325 and linear warmup over 4000 steps. Check-
+points are saved every 500 updates and we average
+the weights of the 8 best checkpoints according to
+validation perplexity.
+Inference For GPU latency, we run in half-
+precision mode (FP16) on AWS g4dn.xlarge in-
+stances. CPU benchmarks are run with INT8 quan-
+tized models run on AWS c5.2xlarge instances. We
+decode using beam search with a beam of size5. Each test set is decoded 30 times on different
+hosts, and we report the mean p90 latency with its
+95% conﬁdence interval. Alignment-based vocab-
+ulary selection includes the top kmost frequently
+aligned BPE tokens for each source token based on
+afast_align model trained on the same data as
+the translation model. NVS includes all tokens that
+are scored above the threshold λ. All vocabulary
+selection methods operate at the BPE level.
+Evaluation Human Evaluations and COMET /
+BLEU use full precision (FP32) inference outputs.
+We decided to use FP32 for human evaluation as
+we wanted to evaluate the quality of the underly-
+ing model independent of whether it gets used on
+CPU or GPU and the output differences between
+FP16/FP32/INT8 being small. We report mean and
+standard deviation of SacreBLEU (Post, 2018)
+and COMET (Rei et al., 2020) scores on detok-
+enized outputs for three runs with different random
+seeds. For human evaluations, bilingual annotators
+see a source segment and the output of a set of 4
+systems at once when assigning an absolute score
+to each output. The size of the evaluation set was
+350 for EN-DE and EN-RU and 200 for DE-EN
+and RU-EN for newstest2020. We used the full sets
+of sentences differing between NVS λ= 0.9, align
+k= 200 for the ITDS test set (309 for EN-DE and
+273 for DE-EN).
+Adaptation For domain adaptation, we ﬁne-tune
+the NVS model for 10 epochs using a learning rate
+of0.0001 and a batch size of 2048 target tokens.
+To adapt the alignment-based vocabulary selection
+model, we include the adaptation data as part of
+the training data for the alignment model. We up-
+sample the adaptation data by a factor of 10 for a
+comparable setting with NVS ﬁne-tuning.
+B Positive class weight ablation
+Based on preliminary experiments we had used a
+weight for the positive class ( λ) of 100k in the
+experiments in §4. Here the positive class refers
+to tokens being present on the target side and the
+negative class to tokens being absent from the tar-
+get side. For a Machine Translation setting there
+are many more words that are not present than
+are present on the target side. The negative class
+therefore dominates the positive class. This can be1872pos. weight BLEU COMET
+EN-DE auto x= 10 34.4 0.459
+autox= 1 34.1 0.458
+100k 34.4 0.461
+10k 34.2 0.460
+1k 34.4 0.463
+100 34.2 0.456
+10 32.5 0.295
+1 15.9 -0.498
+DE-EN auto x= 10 40.9 0.644
+autox= 1 40.8 0.640
+100k 40.8 0.642
+10k 41.0 0.645
+1k 40.8 0.643
+100 40.8 0.638
+10 40.2 0.558
+1 25.3 -0.608
+EN-RU auto x= 10 23.6 0.524
+autox= 1 23.5 0.524
+100k 23.6 0.524
+10k 23.7 0.528
+1k 23.6 0.526
+100 23.3 0.497
+10 20.6 0.128
+1 5.6 -1.509
+RU-EN auto x= 10 35.6 0.564
+autox= 1 35.6 0.563
+100k 35.6 0.557
+10k 35.8 0.565
+1k 35.4 0.556
+100 35.5 0.551
+10 34.2 0.452
+1 20.1 -0.622
+counteracted by using a large value for the positive
+weightλ.
+Instead of setting λto a ﬁxed weight one can
+also deﬁne it as
+λ=xn
+n
+withnas the number of unique target words,
+n=V−nas the number of remaining words
+andxbeing a factor to increase the bias towards re-
+call. This way the positive class and negative classare weighted equally. Table 8 shows the result of
+different positive weights, including the automatic
+setting according to the ratio ( auto). We see that
+not increasing the weight of the positive class re-
+sults in large quality drops. For positive weights
+>1000 the quality differences are small. The auto
+setting provides an alternative that is easier to set
+than ﬁnding a ﬁxed positive weight.
+C Additional vocabulary size vs. recall
+plots
+Figures 6 and 7 provide results for the proverbs and
+ITDS test sets, respectively. We see the same trend
+across all test sets of NVS offering higher recall at
+the same vocabulary size compared to alignment-
+based vocabulary selection. For the proverbs test
+set this is true both for the literal and the idiomatic
+translations.18731874

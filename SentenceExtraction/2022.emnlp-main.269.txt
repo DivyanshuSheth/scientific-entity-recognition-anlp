@@ -1,1 +1,626 @@
-4040 Proceedings of the 2022 Conference on Empirical Methods in Natural Language Processing , pages 4040 4052 December 7 - 11 , 2022 © 2022 Association for Computational Linguistics 4041 4042 4043 4044 4045 4046 4047 4048 4049 4050 4051 4052 
+
+Shan Wu, Chunlei Xin, Bo Chen, Xianpei Han, Le SunChinese Information Processing LaboratoryUniversity of Chinese
+Academy of Sciences, Beijing, ChinaState Key Laboratory of Computer Science
+Institute of Software, Chinese Academy of Sciences, Beijing, China
+{wushan2018,chunlei2021,chenbo,xianpei,sunle}@iscas.ac.cn
+Abstract
+Since the meaning representations are detailed
+and accurate annotations which express ﬁne-
+grained sequence-level semtantics, it is usually
+hard to train discriminative semantic parsers
+via Maximum Likelihood Estimation (MLE)
+in an autoregressive fashion. In this pa-
+per, we propose a semantic-aware contrastive
+learning algorithm, which can learn to dis-
+tinguish ﬁne-grained meaning representations
+and take the overall sequence-level seman-
+tic into consideration. Speciﬁcally, a multi-
+level online sampling algorithm is proposed
+to sample confusing and diverse instances.
+Three semantic-aware similarity functions are
+designed to accurately measure the distance
+between meaning representations as a whole.
+And a ranked contrastive loss is proposed
+to pull the representations of the semantic-
+identical instances together and push negative
+instances away. Experiments on two stan-
+dard datasets show that our approach achieves
+signiﬁcant improvements over MLE baselines
+and gets state-of-the-art performances by sim-
+ply applying semantic-aware contrastive learn-
+ing on a vanilla S2Smodel.
+1 Introduction
+Semantic parsing aims to translate natural lan-
+guage utterances into formal meaning represen-
+tations(MRs), which has attracted much attention
+for many years (Wong and Mooney, 2007; Kate
+et al., 2005; Lu et al., 2008; Guo et al., 2019).
+Recent studies mostly treat semantic parsing as
+a neural sequence to sequence translation task
+via encoder-decoder frameworks (Dong and Lap-
+ata, 2016; Jia and Liang, 2016; Rabinovich et al.,
+2017; Chen et al., 2018; Zhao et al., 2020; Shao
+et al., 2020).
+To train neural semantic parsers, most studies
+employ Maximum Likelihood Estimation, whichFigure 1: Meaning representations are detailed
+and accurate annotations which express ﬁne-grained
+sequence-level semtantics. (a) the correct MR yand
+the predicted yhave similar token sequences but with
+very different semantics; (b) one token error (from ≥
+to<) will reverse the semantics of MR.
+optimizes the probabilities of the tokens in an au-
+toregressive fashion. By decomposing sequence
+tasks into tokens, MLE training is good at n-gram
+based generation tasks such as machine translation
+and paraphrasing, but overlooks the semantics in a
+whole level.
+Unfortunately, meaning representation is for-
+mal and detailed annotation, that is, it should be
+viewed as a sequence-level whole possessing ﬁne-
+grained semantics. Such features make it hard to
+train accurate semantic parsers via MLE, which
+only computes loss token-by-token and is insensi-
+tive to small perturbations. For example, in Figure
+1(b) even one token error (from ≥to<) can re-
+verse the semantics of a meaning representation:
+Property (λs (s num_turnovers ≥3), player) to
+Property (λs (s num_turnovers <3), player) .
+For a case of pp-attatchment problem, the MRs in
+Fig 1(a) have very similar token sequence but very
+different semantics. We analyze the error cases
+of a classical S2Sparser in O
+dataset, and found that the edit distances from
+42.7% of the error parses to the correct MRs are
+only 1, and that of 74.2% of the error parses are ≤
+3. That is, most errors are due to the lack of abil-
+ity to distinguish ﬁne-grained semantics. There-4040fore it is crucial to develop learning algorithms
+which can take the sequence semantics and the
+ﬁne-granularity of meaning representations into
+consideration.
+In this paper, we propose Semantic-aware
+Contrastive Learning (SemCL), which can learn
+semantic-aware, ﬁne-grained meaning representa-
+tions for accurate semantic parsing. To resolve the
+ﬁne-granularity challenge, we sample negative in-
+stances in different divergence levels. And a multi-
+level online sampling algorithm is proposed to col-
+lect confusing and diverse instances. To resolve
+the sequence-level semantics challenge, we com-
+pare meaning representations as a whole, rather
+in token-by-token. Three semantic-aware simi-
+larity functions are designed to accurately mea-
+sure the distance between utterances and mean-
+ing representations. Finally, we propose ranked
+contrastive loss , which is used to pull the repre-
+sentations of the semantic-identical instances to-
+gether and push negative instances away (even if
+they look very similar to the positive ones). In this
+way, the semantic parsers can learn to distinguish
+ﬁne-grained semantics and take the overall seman-
+tics into consideration.
+In summary, the main contributions of this pa-
+per are:
+• We propose a semantic-aware contrastive
+learning algorithm, which can effectively
+model the ﬁne-grained and sequence-level
+semantics in semantic parsing. To our best
+knowledge, this is the ﬁrst attempt to adopt
+contrastive learning for semantic parsing.
+• We design an effective contrastive learn-
+ing algorithm, which contains a multi-level
+online sampling algorithm, three semantic-
+aware similarity functions, and a ranked con-
+trastive loss. This framework can also beneﬁt
+other tasks which depend on the distinguish-
+ing ability of the ﬁne-grained or whole-level
+semantics.
+• Experiments on two standard datasets show
+that our approach achieves signiﬁcant im-
+provements over MLE baselines, and gets
+state-of-the-art performances.
+2 Base S2SParser
+This paper uses the classical S2Ssemantic
+parser as our base model due to its simplicity and
+effectiveness (Dong and Lapata, 2016).Encoder. Given a sentence x=w,w,...,w,
+a bidirectional LSTM (Hochreiter and Schmidhu-
+ber, 1997) or BERT (Devlin et al., 2019) can be
+used to map words into h=h,h,...,h.
+Attention-based Decoder. Given the sentence
+representation, the tokens of the logical forms are
+generated sequentially. Speciﬁcally, the decoder
+is ﬁrst initialized with the hidden states of the en-
+coder. Then at each step t, letφ(y)be the vec-
+tor of the previous predicted token, the current hid-
+den state sis obtained from φ(y)ands. We
+calculate the attentioned source context represen-
+tations for the current step t:
+α=exp (s·h)/summationtextexp (s·h)(1)
+c=/summationdisplayαh (2)
+and the next token is generated from the vocabu-
+lary distribution:
+P(y|y,x) =softmax (W[s;c] +b)(3)
+MLE Learning. The S2Smodel is trained
+by maximizing the likelihoods of the tokens in an
+autoregressive fashion:
+L=−/summationdisplay/summationdisplaylogp(y|y,x)(4)
+where Dis the corpus, xis the sentence, yis its
+logical form label.
+However, such a token-by-token autoregressive
+training paradigm is insensitive to the overall se-
+mantics of the structured MR, making it hard to
+train effective and discriminative semantic parsers.
+We propose semantic-aware contrastive learning
+to help the semantic parsers to perceive the di-
+vergence of ﬁne-grained semantics, which is over-
+looked in the existing autoregressive training ap-
+proaches.
+3 Semantic-aware Contrastive Learning
+for Semantic Parsing
+In this section, we describe how to address
+the sequence-level semtantics and ﬁne-granularity
+challenges via semantic-aware constrastive learn-
+ing. The contrastive learning aims to disperse
+apart semantic-distinct instances and pull closer
+semantic-identical instances on vector representa-
+tion space. Speciﬁcally, to learn to differentiate4041
+ﬁne-grained meaning representations, we design
+a multi-level online sampling algorithm, which
+collects confusing negative samples and diverse
+positive samples in multi-level way. To com-
+paring meaning representations as a whole at the
+sequence level, we design three semantics-aware
+compatibility functions. To learn accurate and dis-
+criminative semantic parsers, we propose ranked
+contrastive loss to support the multi-level samples.
+In following we describe them in detail.
+3.1 Multi-level Online Instance Sampling
+Contrastive learning algorithms learn good param-
+eters by trying to pull positive instances closer and
+push negative instances away. Positive and neg-
+ative instances play a fundamental role in con-
+strastive learning (Karpukhin et al., 2020; Gao
+et al., 2021), and many studies focus on how to
+construct good positive and negative instances.
+In semantic parsing, it is challenging to sam-
+ple good contrastive instances. Firstly, because
+the meaning representation is formal and diverse,
+it is hard to tell the the changes on semantics after
+a small perturbation. Secondly, to distinguish the
+ﬁne-grained semantic representations, contrastive
+learning needs accurate negative/positive samples.
+However, many instances are vague, which cannot
+be accurately categorized into positive-negative
+partitions. For example, paraphrasing, one com-
+mon way to build positive instances, may changes
+the original ﬁne-grained semantics. And two
+very different MRs may represent the same mean-
+ing, and cannot be treated as negative samples.
+To resolve the above challenges, we propose a
+multi-level partition algorithm to address vague
+instances, and sample instances via an online al-gorithm.
+3.1.1 Multi-Level Sample Partition
+In contrastive learning, each instance is a pair of
+utterance and MR/angbracketleftx,y/angbracketright. To address the vagueness
+of instances, we divide samples into different lev-
+els according its conﬁdence, and set each instance
+with a Rank value. Speciﬁcally, Rank = 0indi-
+cates true positive instances, Rank = 2indicates
+true negative instances, and Rank = 1 indicates
+vague instances which may be correct. In follow-
+ing we describe how to divide instances into these
+levels and leave the sampling algorithm to next
+section.
+Rank = 0:This level contains true positive
+samples. We use the golden annotations in train-
+ing corpus as positive instances. And two common
+types of aliases are also used as positive samples,
+which are show in Table 1. Given a MR, the utter-
+ance labeled as it and its aliases are used as posi-
+tive samples.
+Rank = 1:This level contains vague samples
+which we cannot clearly identify whether it is into
+positive or negative. There are two types of vague
+instances. One is the utterance paraphrased ver-4042sion of instances, i.e., we paraphrase the annotated
+pair/angbracketleftx,y/angbracketrightand obtain/angbracketleftx,y/angbracketright. Because paraphras-
+ing may change the original semantic, we set this
+instance as vague one. The other is the MR aliases
+version, i.e., for a positive instance /angbracketleftx,y/angbracketrightwe view
+/angbracketleftx,y/angbracketrightand/angbracketleftx,y/angbracketrightas vague instances if the anno-
+tated/angbracketleftx,y/angbracketrightinstance has the same execution re-
+sult asy. Because the same execution result means
+they are potential aliases and may entail the same
+semantic, we use them as vague instances.
+Because these samples are vague, directly
+adding them as positive will mislead the model,
+but ignoring them may reduce diversity of posi-
+tive instances and thus affect the model general-
+ization ability. Therefore we view them as vague
+instances.
+Rank = 2:This level contains true negative in-
+stances. For utterance, negative MRs are the MRs
+with the wrong execution results. For MR, nega-
+tive utterances are the ones labeled with the MRs
+producing wrong execution results .
+3.1.2 Instance Sampling
+There are two common sampling algorithms for
+contrastive learning:
+1) Batch sampling: The positive and negative
+sample pairs are collected from the same batch.
+As shown in SimCLR(Chen et al., 2020), this al-
+gorithm is efﬁcient and simple.
+2) Online sampling: Given an annotated /angbracketleftx,y/angbracketright
+pair, we sample its positive, vague, and negative
+instances during parsing. Given an input utter-
+ance, we use the top- Kparses as candidates, and
+then devide them into Rank 0,1,2according to
+the methods described in above.
+Because online sampling can collect hard nega-
+tive samples(i.e., the top Kranked instances), this
+paper use it for better distinguishing confusing,
+ﬁne-grained meaning representations.
+3.2 Ranked Contrastive Loss
+Traditional contrastive learning only considers
+positive and negative samples, and their instances
+are usually not ﬁne-grained. In our semantic-
+aware contrastive learning, we need to deal with
+multi-level instances, and use special semantic-
+aware similarities.
+To this end, we propose ranked contrastive loss ,
+which aims to learn accurate and robust repre-
+sentations from the multi-level sample instances.
+Concretely, given sample instances in several lev-els, ranked contrastive loss compare both utter-
+ances and meaning representations:
+L=/summationdisplay/summationdisplay−loge
+/summationtexte
+(5)
+L=/summationdisplay/summationdisplay−loge
+/summationtexte
+(6)
+, in whichτdenotes a temperature parameter.
+When there are only positive and negative sam-
+ples as two ranks, the ranked contrastive loss can
+be gracefully degraded into the ordinary InfoNCE
+loss (van den Oord et al., 2018; Carse et al., 2021):
+With the minibatch Bof sizek, consisting of one
+positive pair (x,y)andk−1negative pairs (x,y),
+the InfoNCE loss is deﬁned as
+L=E/bracketleftBigg
+−loge
+e+/summationtexte()/bracketrightBigg
+(7)
+, which is also proved to be a lower bound on the
+mutual information of xandy.
+The ﬁnal training objective is to minimize the
+decoding loss and contrastive loss as follows:
+L=L+αL+βL (8)
+whereαandβare hyper-parameters that repre-
+sent the weights of the contrastive learning. In this
+way, the model can reduce the inﬂuence of noise
+in sample instances and robustly improve the gen-
+eralization by the augmentation of the instances.
+3.3 Semantic-aware Compatibility Function
+In contrastive learning, it is critical to measure the
+similarities between utterances and meaning rep-
+resentations, so that the positive /angbracketleftx,y/angbracketrightinstances
+will have high similarity, and the negative in-
+stances will have low similarity. As described
+above, a semantic parsing system needs to mea-
+sure the similarity by taking semantic represen-
+tations as a whole. Speciﬁcally, we design three
+compatibility functions on sequence representa-
+tions, attention-based representations and MR-
+conditioned representations.
+Compatibility Function on Sequence Represen-
+tations This similarity measure takes both utter-
+ance and meaning representations as two token se-4043quences. We project the embedding representa-
+tions of utterances and MRs onto the latent em-
+bedding space, and obtain the similarity between
+them:
+φ(x,y) =mean (h)Wmean (g)(9)
+, in which his the encoded contextual embed-
+ding of utterance xin S2Sencoder, and
+g=g,g,...,gis the encoded representa-
+tions ofy. An additional LSTM encoder is em-
+ployed to represent MRs, which also shares the
+same token embeddings with the decoder.
+Compatibility Function with Attention Be-
+cause different tokens may have different impor-
+tances, we extend the above mean pooling with at-
+tention mechanism as a soft selection to compute
+token-speciﬁc sentence representations.
+a(h,g) =e
+/summationtexte(10)
+˜h=/summationdisplaya(h,g)h (11)
+Then the compatibility function is:
+φ(x,y) =/summationdisplay˜hWg (12)
+MR-Conditioned Compatibility Function Se-
+mantic parsing is a S2Sgeneration process,
+and the decoder decides which utterance tokens
+are used to decode a MR token y. Therefore we
+take these conditional association into considera-
+tion, and measure the similarity between xandy.
+In S2Sdecoding,cis the attentioned source
+context representation in the decoding step as in
+Equ. 2. Then the compatibility function is:
+φ(x,y) =/summationdisplaycWg (13)
+, whereccaptures the used parts of utterance rep-
+resentation in decoding.
+4 Experiments
+4.1 Experimental Settings
+Datasets We conduct experiments on
+O and GG , which in-
+volve various domains. Our implementations are
+public available.O This is a multi-domain dataset,
+which contains natural language queries paired
+with lambda DCS logical forms. The O
+benchmark consists of eight semantic parsing
+datasets covering a range of semantic phenomena,
+which requires precise semantics learning ability
+to map natural language queries to the structured
+logical forms. We use the same train/test splits as
+Wang et al. (2015) to choose the best model during
+training.
+GG This is an version of G
+(Zelle and Mooney, 1996; Herzig and Berant,
+2019), which is labeled with lambda DCS logical
+forms. The dataset is constructed by paraphrases
+detecting. Crowd workers are employed to select
+the correct canonical utterance from candidate list.
+The generalization ability of models are requisite
+to handle 278 test queries from small numbers of
+train examples with only 487 instances. We fol-
+low the same splits in original paper (Herzig and
+Berant, 2019).
+In all our experiments, the standard accuracy is
+used to evaluate systems. The accuracies on all
+datasets are calculated as the same as Jia and Liang
+(2016) and Herzig and Berant (2019).
+Data Preprocessing Following Dong and La-
+pata (2016), we handle entities with Replacing
+mechanism, which replaces identiﬁed entities with
+their types and IDs. The entity mapping lexicons
+in Cao et al. (2019) are also used. The paraphras-
+ing model is the trained paraphraser based on T5,
+and we paraphrase 20 different expressions for
+each utterances.
+System Settings The bidirectional LSTM en-
+coders are employed for utterances and MRs with
+200 hidden units and 300-dimensional word vec-
+tors. We also use 200 hidden units and 300-
+dimensional word vectors for LSTM decoders. We
+initialize all parameters by uniformly sampling
+within the interval [-0.1, 0.1]. The batch size is
+set as 128. For each MR/utterance we collect 5
+paraphrases and 100 random utterance/MR sam-
+ples. In online sampling, after each training epoch,
+we collect the additional samples from the beam
+search results with the beam size as 20. We take
+α= 1,β= 1, andτ= 0.3. The ﬁrst 5 epochs train
+the original model, and the following 25 epochs
+optimize the overall training loss. The beam size4044
+of the decoder is set to 10. We use optimizer
+Adam(Kingma and Ba, 2015) with learning rate
+0.001 for all experiments. In the main experiments
+and ablation experiments, our models use online
+sampling and multi-level partition by default.
+4.2 Experimental Results
+4.2.1 Overall Results
+The overall results of baselines and different set-
+tings of our method are shown in Table 2 and Ta-
+ble 3. SR, Att, and Cond indicate the above three
+compatibility functions. We can see that:
+1.Semantic-aware contrastive learning is
+effective, which achieves state-of-the-art per-
+formance using a simple base model. On
+O and GEOG dataset, we both
+achieve state-of-the-art performance on average
+(81.1% and 73.4%). The results demonstrate the
+superiority of our contrastive learning algorithms.
+2. By taking the ﬁne granularity and
+sequence-level semantics into consideration,
+the semantic-aware contrastive learning can
+signiﬁcantly outperform MLE algorithm. Com-
+pared with the MLE counterpart – S2S, the
+contrastive learning algorithm can lead to 5.4 and
+1.8 accuracy improvements on O and
+GG . This veriﬁes that compared with
+MLE, our semantic-aware constrastive learning
+can learn more accurate semantic parsers.
+3.Semantic-aware similarity is critical for
+accurate semantic parsing. We can see that,
+all compatibility functions show their advantages
+over MLE-baselines. And more accurate similar-
+ity measure can result better performance. Such
+as, MR-conditioned compatibility functions are
+more stable in various domains and datasets. In
+general, the improvement of using semantic-aware
+contrastive learning is signiﬁcant, regardless of
+which function in the three ones is used.
+4.2.2 Detailed Analysis
+Effect of multi-level sampling To analyze the
+effect of the multi-level samples partition, we con-
+duct experiments with the positive-negative sam-
+ples partition. The results are shown in Table 4.
+When there are only positive and negative sam-
+ples, we try three ways to deal with the part of
+Rank = 1: ignoring it or viewing it as positive
+or negative samples. We can see that treating it
+as negative is inadvisable, which brings signiﬁcant
+performance degradation. We think this is because
+there are many positive examples in Rank = 1
+part, which should be gathered in representation
+space. And viewing them as negatives will mis-
+lead the model learning. We can see that treat-
+ing it as positive also brings slight performance
+drop, which may be due to the noise samples.
+The results also show that our approach is better
+than neglecting it. We believe that ignoring them4045
+will lead to insufﬁcient generalization ability of
+the model. In general, it is problematic to employ
+vague instances in positive-negative partition, and
+our multi-level fashion can facilitate the learning
+of vague samples.
+Effect of contrastive losses To investigate the
+effect of contrastive losses, we compare the set-
+tings with only contrastive learning on utterance
+side or MR side. The results in Table 4 show
+the performances of using contrastive losses on
+both sides are the best in all domains. We believe
+that by jointly optimizing the constrastive losses
+in both sides, the model can learn better sentence-
+side and semantic-side representations, which are
+beneﬁcial to the model’s awareness of ﬁne-grained
+semantics.
+Effect of instances sampling We conduct an-
+other experiment by changing sampling methods
+and the results are shown in Table 4: Batch
+Sampling denotes the sample instances are col-
+lected in the same batch; Random Sampling de-
+notes for each utterance/MR we randomly select
+100 MRs/utterances to form contrastive samples.We can see the instance-level sampling is im-
+portant. The Random Sampling on the instance-
+level is slightly better than Batch Sampling. We
+can see that the performances of Online Sampling
+(FM ) is signiﬁcantly higher than other
+methods. This veriﬁes that differentiating the hard
+negative samples, which are confusing on the cur-
+rent model, makes the model learn the ﬁne-grained
+semantics more accurately.
+Visualization of the representations space of ut-
+terances We use t-SNE (van der Maaten and
+Hinton, 2008) to visualize the utterance repre-
+sentations on a 2D map. The utterance repre-
+sentations are calculated by averaging the hidden
+states on words. The encoders of S2Smod-
+els and our contrastive learning models(with se-
+quence representations compatibility function) are
+used to obtain utterance representations. In Fig 3,
+we draw the most frequent 20 MRs and their ut-
+terances. Compared with S2Sbaseline, our
+two models learn smoother representation space,
+which explains why SemCL can yield better pars-
+ing performance. In Fig 3(c), we plot the 204046
+paraphrases for each utterance with the transparent
+markers. Although there are some noise samples
+in the paraphrases, compared with no paraphrases,
+the generalization ability of the model is improved
+by our multi-level sampling mechanism.
+Case study In Table 5 we compare the parsed re-
+sults of our model with that of the S2Sbase-
+line. In domain P , the utterance is
+mistaken by baseline for similar semantic “articles
+published in 2004 or 2010”. Our model can well
+distinguish the ﬁne-grained difference and gener-
+ate the correct MR, even the expression about “re-
+cent” is rare in the training set. We think both
+generalization and discrimination of the models
+are improved. In domain B , the base-
+line over-translate the word “points”. But SemCL
+can perceive the whole semantics and produce the
+right MR, which shows the effectiveness of treat-
+ing both the utterance and the MR as a whole.
+5 Related Work
+Contrastive Learning. Contrastive learning is a
+method of representation learning (Hadsell et al.,
+2006), which pulls the relevant embeddings to-
+gether and pushes different ones apart to pro-
+vide more effective representations (van den Oord
+et al., 2018; Chen et al., 2020). In NLP, contrastive
+learning is widely used in sentence representations
+learning (Qu et al., 2021; Gao et al., 2021; Kim
+et al., 2021; Giorgi et al., 2021). Contrastive learn-
+ing also improves many natural language under-
+standing tasks (Chen et al., 2021; Wang et al.,
+2021a,b; Qin et al., 2021). To the best of our
+knowledge, our work is the ﬁrst attempt to adopt
+contrastive learning for semantic parsing.
+Sequence-level Semantics. In S2Stasks,
+many studies have been proposed to remedy the
+problem of MLE, such as, minimum risk training(Shen et al., 2016), contrastive approaches (Lee
+et al., 2021) and reinforcement learning (He et al.,
+2016; Li et al., 2018). In semantic parsing, max-
+imum marginal likelihood methodes are proposed
+to exploit consistent logical forms (Berant et al.,
+2013; Guu et al., 2017; Goldman et al., 2018).
+The structured learning methods are employed to
+maximize the margins or minimize the expected
+risks (Yih et al., 2015; Yin et al., 2018; Xiao et al.,
+2016b; Iyyer et al., 2017). Dual learning methods
+have been proposed, which also design and opti-
+mze rewards in sequence level (Cao et al., 2019,
+2020). Globally normalized models are proposed
+to relieve the label bias problem in MLE (Huang
+et al., 2021). Different from previous works, our
+approach aims to acquire more discriminative se-
+quence representations by contrastive learning.
+Semantic Generalization. Recently, general-
+ization problem has become a research hotspot in
+semantic parsing. To generalize on various natural
+language expressions, semantic-invariance knowl-
+edge are introduced by paraphrasing (Berant and
+Liang, 2014; Wang et al., 2015; Dong et al., 2017;
+Herzig and Berant, 2019). There are also many
+strudies for achieving generalization on meaning
+composition (Oren et al., 2020; Liu et al., 2020;
+Conklin et al., 2021; Bogin et al., 2021; Herzig
+et al., 2021). To generalize in low resources set-
+tings, data augmentation (Jia and Liang, 2016;
+Marzoev et al., 2020) and constrained decod-
+ing(Wu et al., 2021; Shin et al., 2021) methods are
+proposed. In this paper, the generalization of rep-
+resentations is improved by pulling the utterance
+and MRs with similar overall semantics closer in
+representation space.
+6 Conclusions
+This paper proposes Semantic-aware Contrastive
+Learning – an effective contrastive learning frame-
+work for semantic parsing, which takes the
+sequence-level semantics and the ﬁne-granularity
+into consideration. Speciﬁcally, we propose a
+multi-level online sampling algorithm for accu-
+rately collecting confusing and diverse samples,
+and design three semantic-aware similarity func-
+tions to measure the similarity between utter-
+ances and MRs. We also propose Ranked Con-
+trastive Loss to optimze the representations from
+the multi-level samples. Experimental results
+show that our approach can achieve state-of-the-
+art performance in several domains and datasets.40477 Limitations
+There are two main limitations of this work. 1)
+Since additional negative instances are used for
+contrasting in our SemCL method, our method
+requires more training time than vanilla seman-
+tic parsing methods. 2) Our proposed method
+still relies on an amount of annotated data. Many
+contrastive learning methods have been proposed
+to resolve the low-resource tasks. We will ex-
+ploit contrastive learning for low-resource seman-
+tic parsing in the future.
+Acknowledgments
+We sincerely thank the reviewers for their insight-
+ful comments and valuable suggestions. More-
+over, this work is supported by the National Natu-
+ral Science Foundation of China under Grants no.
+U1936207, 62122077, 61906182 and 62076233.
+References4048404940504051A Appendix
+A.1 Error Case Statistics
+We use several indicators to measure the gap be-
+tween the predicted meaning representation yand
+the correct mentioned representation y. The basic
+S2Ssemantic parser is trained with MLE.
+The statistical results of B domain in
+O are shown in Table 6. The three sta-
+tistical indicators are used to represent the similar-
+ity between yandy. The Jaccard index is calcu-
+lated by:
+J(y,y) =|y∩y|
+|y∪y|(14)
+We can see that the model can easily produce
+outputs very similar to the correct results. Speciﬁ-
+cally, from 42.7% of the error parses to the correct
+MRs the edit distances are only 1, and from 74.2%
+of the error parses the edit distances of are ≤3.
+This reveals that the predicted wrong MRs of the
+parsers are very close to the correct answers, but
+it is still hard for the parsers to differentiate the
+ﬁne-grained semantics precisely.4052

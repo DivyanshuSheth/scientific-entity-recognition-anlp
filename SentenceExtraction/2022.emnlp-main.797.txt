@@ -1,1 +1,650 @@
-11600 Proceedings of the 2022 Conference on Empirical Methods in Natural Language Processing , pages 11600 11613 December 7 - 11 , 2022 © 2022 Association for Computational Linguistics 11601 11602 11603 11604 11605 11606 11607 11608 11609 11610 11611 11612 11613 
+
+Shikhar MurtyChristopher D. ManningScott LundbergMarco Tulio RibeiroComputer Science Department, Stanford UniversityMicrosoft Research
+{smurty,manning}@cs.stanford.edu, {scott.lundberg, marcotcr}@microsoft.com
+Abstract
+Current approaches for fixing systematic prob-
+lems in NLP models (e.g., regex patches, fine-
+tuning on more data) are either brittle, or
+labor-intensive and liable to shortcuts. In con-
+trast, humans often provide corrections to each
+other through natural language. Taking inspi-
+ration from this, we explore natural language
+patches —declarative statements that allow de-
+velopers to provide corrective feedback at the
+right level of abstraction, either overriding the
+model (“if a review gives 2 stars, the sentiment
+is negative”) or providing additional informa-
+tion the model may lack (“if something is de-
+scribed as the bomb, then it is good”). We
+model the task of determining if a patch applies
+separately from the task of integrating patch in-
+formation, and show that with a small amount
+of synthetic data, we can teach models to ef-
+fectively use real patches on real data—1 to
+7 patches improve accuracy by ~1–4 accuracy
+points on different slices of a sentiment anal-
+ysis dataset, and F1 by 7 points on a relation
+extraction dataset. Finally, we show that fine-
+tuning on as many as 100 labeled examples
+may be needed to match the performance of a
+small set of language patches.
+1 Introduction
+Natural language enables humans to communicate
+a lot at once with shared abstractions. For example,
+in teaching someone about the colloquial use of
+the term “bomb”, we might say describing food as
+‘bomb’ means it is very good, while saying someone
+bombed means it was disappointing . This simple
+sentence uses various abstractions (e.g., “food”) to
+provide context-dependent information, making it
+easy for humans to generalize and understand sen-
+tences such as “The tacos were bomb” or “The chef
+bombed” without ever having seen such examples.There is a growing body of research focused
+on using language to give instructions, supervi-
+sion and even inductive biases to models instead
+of relying exclusively on labeled examples, e.g.,
+building neural representations from language de-
+scriptions (Andreas et al., 2018; Murty et al., 2020;
+Mu et al., 2020), or language / prompt-based zero-
+shot learning (Brown et al., 2020; Hanjie et al.,
+2022; Chen et al., 2021). However, language is yet
+to be successfully applied for corrective purposes,
+where the user interacts with an existing model to
+improve it. As shown in Fig. 1a, if a developer
+discovers that a model contains bugs (i.e., system-
+atic errors; Ribeiro et al., 2020), common fixes
+are either brittle regex-based patches (e.g., Fig. 1a
+left, where patches either override predictions or
+replace the word “bomb” with the word “good”),
+or collecting hundreds of additional datapoints for
+finetuning, a tedious and computationally demand-
+ing process that can still lead to shortcuts such
+as assuming the word “bomb” is always positive
+(e.g., if the additional finetuning data mostly has
+the word in its colloquial sense). Instead, we envi-
+sion a setting where developers provide corrective
+feedback through a Natural Language Patch —a
+concise statement such as “If food is described as
+bomb, then food is good” . Language makes it easy
+for developers to express feedback at the right level
+of abstraction without having to specify exactly
+how the condition is applied. The patching system
+is responsible for applying the patch and integrat-
+ing the information appropriately, e.g., applying
+it to “The tacos were the bomb” but not to “The
+authorities found a bomb in the restaurant”.
+In this work, we present an approach for patch-
+ing neural models with natural language. Any
+patching system has to determine when a patch
+is relevant, and how it should modify model behav-
+ior. We model these tasks separately (Fig. 1b): a
+gating head soft-predicts whether the patch should
+be applied (e.g., “food is described as bomb”), and11600
+aninterpreter head predicts a new output by com-
+bining the information in the patch (e.g., “food
+is good”) with the original input. Both heads are
+trained on synthetic data in apatch tuning stage
+between training and deployment, such that new
+patches can be combined into a library of patches
+(or maybe various user-specific libraries), and ap-
+plied at test-time without further training. In addi-
+tion to the expressivity provided by abstractions,
+language-based patching is lightweight ,iterative
+and easily reversible . Much like software, devel-
+opers can write / edit / remove patches iteratively
+until errors on unit tests or validation data are fixed,
+without constantly retraining the model.
+Our experiments are organized as follows. First,
+in Section 5, we present controlled experiments
+that indicate these patches work even for abstract
+conditions, where regex patches would be infea-sible or very difficult—that is, they are applied
+correctly when the patch condition is met, and do
+nothing otherwise. Perhaps surprisingly, this is true
+even for test-time patches that are very different
+than the ones used in the patch finetuning stage.
+Next, in Section 6, we show that despite the syn-
+thetic nature of the patch tuning phase, a small set
+of very simple patches can fix bugs (and thus im-
+prove performance) on real benchmarks for two
+different tasks—1 to 6 simple language patches
+improve performance by ~1–4 accuracy points on
+two slices from the Yelp reviews dataset, while 7
+patches improve performance by ~7 F1 points on
+a relation extraction task derived from NYT. Fi-
+nally, in Section 7.2, we compare language patch-
+ing, a computationally lightweight procedure, with
+finetuning, a computationally and human-labor in-
+tensive procedure, and find that as many as 100
+labeled examples are needed to match performance
+gains from a small set of 1 to 7 patches. Further,
+finetuning sometimes fixes bugs at the expense of
+introducing new bugs, while patches maintain prior
+performance on inputs where they do not apply.
+2 Natural Language Patching
+Setup. We are given a model f, mapping an
+input text xto a probability distribution over its
+output space, f(x) = Pr( y|x). The model
+contains bugs —defined as behaviors inconsistent
+with users’ preferences or the “ground truth”—
+which we want to fix with a library of patches
+P={lp, lp, . . . , lp}. Users explicitly indicate
+the condition under which each patch applies and
+the consequence of applying it, such that each patch
+is in the form “If (condition) c, then (consequence)
+q”. We use this format to make modeling easier,
+noting that it still allows for very flexible patching
+through high level abstractions (e.g., “if the cus-
+tomer complains about the ambience”, “if food is
+not mentioned”, etc), and that most patches have
+an implicit applicability function, and thus can be
+converted to this format.
+Applying Patches. As indicated in Fig. 1b, our
+model consists of two separate heads. The gating
+headgcomputes the probability that the condition
+specified by lp= (c, q)is true for a given input x
+asg(x, c). The interpreter head Icomputes a new
+distribution over the label space, that conditions on
+xandthe consequence q. This is then combined
+with the original model output f(x)using the above
+gating probability. A single patch lp= (c, q), can11601
+be applied to any input xas
+Fix(f,x,lp)=g(x, c)· I(x, q) (1)
++ [1−g(x, c)]·f(x).
+Given a library of patches P={lp, . . . , lp},
+we find the most relevant patch lpfor the given
+input, and use that to update the model,
+lp= arg maxg(x, c), (2)
+Fix(f,x,P)=Fix(f,x,lp). (3)
+Patch Types. We consider two categories of
+patches (examples in Table 1). Override patches
+are of the form “Ifcond, then label is l”i.e., they
+override the model’s prediction on an input if the
+patch condition is true. For these patches, we do not
+use the interpreter head since I(x,“label is l”) =l.
+Feature-based patches are of the form “Ifcond ,
+then feature ”, i.e., they provide the model with a
+contextual feature “hint” in natural language, e.g.,
+in Fig. 3 the feature is “food is good”. For these
+patches, the model needs to integrate the hints with
+the original data, and thus both the gating and in-
+terpreter heads are used.3 Training Patchable Models
+Assuming fhas a text encoder and a classifica-
+tion head, we have two finetuning stages. In the
+Task Finetuning stage, we train fon a labeled
+dataset {x, y}(standard supervised learning). In
+thePatch Finetuning stage, we use the learnt en-
+coder and learn g(initialized randomly) and I(ini-
+tialized with the classification head). For the patch
+finetuning stage, we write a small set of patch tem-
+plates covering the kinds of patches users may
+write for their own application (see Table 1 for
+the patch templates used for our sentiment analy-
+sis results). Based on these templates, we instan-
+tiate a small number of patches along with syn-
+thetic labeled examples. This gives us a dataset
+{x, y, lp}, where lpconsists of a condition cas
+well as a consequence q. The interpreter head I
+is trained to model Pr(y|x, q)through standard
+log-likelihood maximization. The gating head g
+is trained via noise contrastive estimation to maxi-
+mize
+logg(x, c)−/summationdisplaylogg(x, c),(4)11602
+where(x)is a randomly sampled set of nega-
+tive conditions for x.
+Entropy Increasing Transformations. Patch
+Finetuning will fail if the synthetic data can be
+fit by a model that ignores the input or the patch
+(Fig. 2a). Thus, to ensure our model cannot fit the
+synthetic data without combining patch features
+with inputs, we perturb the inputs with Entropy
+Increasing Transformations (EITs). We identify
+words from the input template for which the patch
+supplies additional information e.g., aspect adjec-
+tives, relationship between entities, and transform
+these into a small set of nonce words. Crucially, the
+meanings of these nonce words vary from example
+to example, and can only be inferred from the patch
+(Fig. 2a bottom; more examples in Appendix A.2).
+Intuitively, the transformations inject an additional
+source of randomness which can only be recovered
+via the patch features. Such transformations are
+also used in Rajendran et al. (2020) in the context
+of meta-learning. EITs alone do not fix the failure
+mode where the model can fit the data without us-
+ing input features at all. For example, in Fig. 2a
+bottom, the model might learn a shortcut so that it
+always predicts 1/0 for “food is good” / “food is
+bad”, regardless of the input. Thus, in addition to
+EITs, to ensure that the model uses input features,
+we ensure that a given patch consequence qand the
+target label are independent (Fig. 2b).4 Experimental Setup
+Applications. We apply our method to binary
+sentiment analysis and relation extraction. For sen-
+timent analysis, our task finetuning data comes
+from SST2 (Socher et al., 2013). For relation ex-
+traction, we use the Spouse dataset (Hancock et al.,
+2018) for task finetuning, where the objective is to
+determine whether two entities are married or not
+given a textual context about them.
+Model. We use T5-large (Raffel et al., 2019)
+as implemented in the transformers library (Wolf
+et al., 2020) for all experiments. Both the gating
+and interpreter heads are separate decoders learnt
+on top of a shared encoder and each of these com-
+ponents are initialized with the corresponding T5
+pre-trained weights. To prevent catastrophic forget-
+ting on the original task during patch finetuning,
+we also multi-task learn the patch finetuning loss
+along with the original task loss. Templates for gen-
+erating patches for patch finetuning are in Table 1
+for sentiment analysis and in Table 9 ( Section A.2)
+for relation extraction. We train separate models
+for override and feature-based patches (the former
+does not need an interpreter head). When using a
+patch, its content (either cfor the gating head or q
+for the interpreter head) is inserted in the beginning
+of the input with a separator as in Fig. 1b.
+Baselines. We report performance of the original
+model with only task finetuning ( O) and the
+model obtained after patch finetuning ( O+PF)
+without using any patches, to isolate the gains
+of language patches from those induced by train-
+ing on additional synthetic data. We also report
+results obtained from prompting Owith our
+patches ( P ), i.e., inserting the patch text be-
+fore the input text to see how well finetuned T5
+follows instructions. To use multiple patches for
+this baseline, we prompt the model with each in-
+dividual patch and ensemble results with majority
+voting. Finally, we experiment with regex-based
+patches ( R ) where patch conditions are con-
+verted to regex rules and consequents are converted
+into functions Rule(x). For override patches, this
+function simply outputs the specified label. For sen-
+timent analysis, where feature based patches sup-
+ply contextual meanings, Rule(x)replaces words
+with specified meanings e.g., replacing “bomb”
+with “good” in “the food was bomb”. For fea-
+ture based patches on relation extraction, Rule(x)
+appends the patch consequent to the input text.11603
+5 Controlled Experiments
+We test the behavior of language patches (and base-
+lines) under different controlled conditions with
+CheckList (Ribeiro et al., 2020). Patches and ex-
+ample inputs are presented in Fig. 3. We test cases
+where patches apply and are relevant for predic-
+tions, and corresponding cases where they either do
+not apply or are not relevant. Thus, models that rely
+on shortcuts such as copying the label word from
+the patch or merely performing token matching
+perform poorly on the CheckList.
+For sentiment analysis, we test Override patches
+with abstract conditions (e.g., “If food is described
+as weird, then label is negative” ) on various con-
+crete instantiations such as “The pizza at the restau-
+rant was weird”. We also construct invariance
+tests ( O-Inv ), where adding such patches should
+not change predictions on inputs where the condi-
+tion is false (e.g., “The waiter was weird”, “The
+tacos were not weird”). We also construct tests
+for feature-based patches ( Feat) where patches
+provide meaning for nonce adjectives, with analo-
+gous invariance tests ( Feat-Inv ). Finally, we con-
+struct analogous tests for relation extraction, where
+patches fill in reasoning gaps in the model such
+as“If Entity1 gave Entity2 a ring, then Entity1 and
+Entity2 are engaged” .
+We present the results in Table 2, where we first
+note that O+PF does not perform well overall,
+and thus patching improvements are not merely
+a result of the additional synthetic data. R
+cannot handle abstract conditions, and thus (as ex-
+pected) does not change predictions on sentiment
+analysis, and does not do well on relation extrac-
+tion. While merely inserting the patch into the
+input ( P ) results in some gains when the
+patch applies, it does so at the cost of changing pre-
+dictions when the patch does not apply ( O-Inv and
+Feat-Inv ). In contrast to baselines, our method is
+able to apply abstract patches correctly on concrete
+instantiations, disregarding them when they do not
+apply, without relying on shortcuts such as copying
+the label from the consequent or merely checking
+for matching words between patch and input (all of
+which are tested by the invariance tests).
+6 Patching models on real benchmarks
+6.1 Sentiment Analysis
+Unless noted otherwise, all datasets in this subsec-
+tion are derived from Yelp Review (Zhang et al.,
+2015). To fix errors on low-accuracy slices, we
+write patches by inspecting a random subset of
+10-20 errors made by O+PF.
+Controlling the model. In order to check if
+patches can control model behavior with abstract
+conditions “in the wild”, we manually annotate a
+random subset of 500 reviews with food and service
+specific sentiment (“The food was good, service
+not so much” is labeled as service: 0, food: 1 ).
+We then construct override patches of the form “if
+food / service is good / bad, then label is positive11604
+/ negative” , and evaluate models as to how often
+(on average) the prediction is as expected when
+the patch applies and how often it is unchanged
+when the patch does not apply. We present results
+in Table 3. The sentiment of both aspects typically
+agrees, and thus even models without patching of-
+ten behave according to the patch. We note that
+natural language patches improve patched behav-
+ior the most (when compared to baselines), while
+almost never changing predictions when the patch
+does not apply. We additionally present results
+only on the subset of our aspect annotated exam-
+ples where both aspects disagree in Table 4. Over-
+all, we see a more pronounced difference i.e., our
+model gets a ~27 point boost in accuracy when the
+patch condition applies, while maintaining invari-
+ance when the condition does not apply.
+Patching low-accuracy slices. We identify slices
+where our base model has (comparatively) low ac-
+curacy, and check whether patches can improve
+performance. Yelp-stars consists of all examples in
+Yelp Review with the word ‘star’ present. For this
+subset, we use two overrides patch: “If review gives
+1 or 2 stars, then label is negative” ,“If review gives
+0 stars, then label is negative” .Yelp-Colloquial
+is a label-balanced slice consisting of examples
+having the colloquial terms {dope, wtf, omg, the
+shit, bomb, suck}. Because the colloquial use of
+these terms depends on context, we further con-
+struct Yelp-Colloquial-Control , a CheckList where
+the same terms are used in their traditional sense
+(e.g., “The manager was a dope”, “The bomb was
+found by the police at the restaurant”). A model
+can do well on both of these datasets simultane-
+ously only if it understands the contextual nuance
+associated with colloquial terms, rather than rely-
+ing on simple shortcuts such as equating “bomb”
+with “good”. For these datasets, we write simple
+feature-based patches such as “If food is described
+as bomb, then food is good” for each term. Fi-
+nally, we use the “Women’s E-commerce Clothing
+Reviews” dataset ( WCR ) from Zhong et al. (2021)
+and add two override patches: “If review mentions
+phrases like needs to be returned, then label is neg-
+ative” , and “If fit is boxy, then label is negative” .
+In Table 5, we observe that a very small number
+of language patches improve performance by 0.5-
+4.1 accuracy points, always outperforming both the
+original model and baselines. These gains are not
+a result of the added synthetic data, as O+PF
+often lowers performance. Qualitatively, P
+tends to rely on shortcuts such as copying over
+the label in the patch rather than gating and inte-
+grating the information, while R cannot deal
+with simple semantic understanding, e.g., the rule
+onYelp-stars fires for “Will deduct 1 star for the
+service but otherwise everything was excellent” ,
+leading to an incorrect patch application. Natural
+language patches avoid both of these pitfalls by ex-
+plicitly modeling gating and feature interpretation
+with learnt models.
+6.2 Spouse Relation Extraction
+We construct Spouse-FewRel , an out-of-
+distribution test benchmark derived from
+FewRel (Gao et al., 2019) by sampling from all11605
+relation types where at least one of the entities is
+a person ( n= 8400 ), and labeling examples as
+positive if they have the Spouse relation, negative
+otherwise. We inspect 20 randomly sampled
+errors made by O+PF onSpouse-FewRel , and
+observe that the model often confuses “Entity1 has
+a child with Entity2” with ”Entity1 is the child
+of Entity2”, and also misclassifies widowhood as
+negative. Thus, we write override patches for both
+of these error categories, resulting in 7 patches,
+presented in Table 6. Using all patches, we observe
+a ~7.4 point F1 improvement over O, while
+baselines either decrease F1 or barely improve it.
+We highlight in Table 6 a phenomenon where
+each natural language patch in isolation decreases
+performance, while all patches together increase
+performance. Further analysis reveals that this is
+because the gating head is not well calibrated in this
+case, and thus individual patches are applied incor-
+rectly. However, the comparative values of g(x, c)
+are often ordered correctly, and thus a better patch
+is the one applied ( lpin Eq 2) when all patches
+are available. We do further analysis in Table 7,
+where we report the gating accuracy (i.e., whether
+the patch actually applies or not, labeled manually)
+oflpon the subset of inputs where the P
+model changes the prediction ( Diff ), and where it
+changes the prediction to the correct label ( Diff
+∩Correct ). With the caveat that patches are ap-
+plied softly (and thus perfect gating accuracy is not
+strictly necessary), we observe that a few patches
+seem to hurt performance even in combination with
+others (e.g., the first one). We also note that the
+patched model is right “for the right reasons” in
+over 72% of inputs where it changes the prediction
+to the correct one.
+7 Analysis
+7.1 How Important are EITs?
+The goal of Entropy Increasing Transformations
+(EITs; Section 3) is to prevent the interpreter head
+from learning shortcuts that either ignore patch fea-
+tures or rely exclusively on them. We perform an
+ablation, comparing our model to a model trained
+without EITs on the CheckLists in Table 2 (Sec-
+tion 5), where the feature-based patch consequent
+supplies important information for making a cor-
+rect prediction. From Table 8, we note that the
+interpreter head trained without EITs has much
+lower performance on these datasets (as expected).
+7.2 Comparison to fine-tuning
+While patching is computationally lightweight, it
+requires domain knowledge or error analysis of in-
+correctly labeled examples. However, once such
+analysis is performed, one can label these addi-
+tional examples and finetune the model on them.
+Ignoring the computational and infrastructure costs
+of repeated finetuning, for patching to be a com-
+petitive alternative to finetuning from an annota-
+tion budget perspective, we require the gains from11606
+patching to only be matched by multiple labeled ex-
+amples. To compare language patches with finetun-
+ing, we consider Yelp-stars ,Yelp-Colloquial , and
+Spouse-FewRel and split each dataset into a train-
+ing set with 128 examples, and a test set with re-
+maining examples. Next, we finetune O, on
+k={2,4,8,16,32,64,128}examples from the
+training set, stopping early if finetuning perfor-
+mance exceeds patched performance. We finetune
+for 64 steps and optimize using AdamW with a
+fixed learning rate of 1e-4. We report means and
+standard deviations obtained from finetuning with
+5 random seeds.
+Results are presented in Fig. 4, where we note
+that over 100labeled examples are needed to match
+the performance of a single patch on Yelp-Stars or
+7 patches on Spouse-FewRel . On Yelp-Colloquial ,
+the patched performance is matched with a mere
+16examples. However, as noted earlier, Yelp-
+Colloquial is susceptible to simple shortcuts, and
+we observe that the performance on the control set
+Yelp-Colloquial-Control suffers significantly as we
+finetune on more data (with very high variance).
+Thus, we conclude that language patches on these
+datasets are not only very efficient in terms of an-
+notation effort (when compared to labeling data
+for finetuning), but also less susceptible to simple
+shortcuts that do not address the problem at the
+right level of abstraction.
+8 Related Work
+Learning with Language. Natural language in-
+structions or explanations have been used for train-
+ing fewshot image classifiers (Mu et al., 2020; An-
+dreas et al., 2018), text classifiers (Zaidan and Eis-
+ner, 2008; Srivastava et al., 2018; Camburu et al.,
+2018; Hancock et al., 2018; Murty et al., 2020), and
+in the context of RL (Branavan et al., 2012; Goyal
+et al., 2019; Co-Reyes et al., 2019; Mu et al., 2022).
+All of these works are concerned with reducing
+labeled data requirements with language supervi-
+sion, while our setting involves using language asacorrective tool to fix bugs at test time .
+Prompt Engineering. An emerging technique
+for re-purposing language models for arbitrary
+downstream tasks involves engineering “prompts”.
+Prompts are high level natural language descrip-
+tions of tasks that allow developers to express any
+task as language modeling (Brown et al., 2020;
+Gao et al., 2021; Zhong et al., 2021). While we
+could try and directly use prompting to incorporate
+language patches, our experiments show that the
+models we consider fail to correctly utilize patches
+in the prompt (Section 4). With increasing scale
+models may gain the ability to interpret patches
+zero-shot, but qualitative exploration of the largest
+available models at the time of writing (e.g. GPT-3;
+Brown et al., 2020) indicates they still suffer from
+the same problem. Using patches for corrective
+purposes requires an accurate interpretation model,
+as well as ignoring the patch when it is not applica-
+ble. We solve these challenges by learning a gating
+head and an interpretation head through carefully
+constructed synthetic data.
+Editing Factual Knowledge. Test time editing
+of factual knowledge in models is considered by
+Talmor et al. (2020); Cao et al. (2021); Mitchell
+et al. (2021); Meng et al. (2022). Instead of mod-
+ifying factual knowledge, we show that free-form
+language patches can be used to fix bugs on real
+data, such as correctly interpreting the meaning of
+the word “bomb” in the context of food or predict-
+ing that divorced people are no longer married.
+9 Conclusion
+When faced with the task of fixing bugs in trained
+models, developers often resort to brittle regex
+rules or finetuning, which requires curation and
+labeling of data, is computationally intensive, and
+susceptible to shortcuts. This work proposes nat-
+ural language patches which are declarative state-
+ments of the form “if c, then q” that enable de-
+velopers to control the model or supply additional11607information with conditions at the right level of
+abstraction. We proposed an approach to patching
+that models the task of determining if a patch ap-
+plies (gating) separately from the task of integrating
+the information (interpreting), and showed that this
+approach results in significant improvements on
+two tasks, even with very few patches. Moreover,
+we show that patches are efficient (1-7 patches are
+equivalent or better than as many as 100finetuning
+examples), and more robust to potential shortcuts.
+Our system is a first step in letting users correct
+models through a single step “dialogue”. Avenues
+for future work include extending our approach to
+a back-and-forth dialogue between developers and
+models, modeling pragmatics, interpreting several
+patches at once, and automating patch finetuning.
+10 Acknowledgements
+SM was partly funded by a gift from Apple Inc. We
+are grateful to Jesse Mu, Mirac Suzgun, Pratyusha
+Sharma, Eric Mitchell, Ashwin Paranjape, Tong-
+shuang Wu, Yilun Zhou and the anonymous review-
+ers for helpful comments. The authors would also
+like to thank members of the Stanford NLP group
+and the Adaptive Systems and Interaction group at
+MSR for feedback on early versions of this work.
+11 Reproducibility
+Code and model checkpoints are available at .
+12 Limitations
+Scaling to large patch libraries. For our ap-
+proach, inference time scales linearly with the size
+of the patch library. This is primarily because the
+gating head makes predictions on each patch in our
+patch library (Eq 2). Instead of running the gating
+head on each patch, one can trade off exactness for
+efficiency, by running the gating head on a much
+smaller candidate set identified using fast approx-
+imate nearest neighbors (Johnson et al., 2019) on
+sentence embeddings.
+Scaling to more patch types. The current ap-
+proach requires writing patch templates beforehand
+based on prior knowledge of the kinds of corrective
+feedback that developers might want to write in
+the future. Writing patch templates manually is
+fundamentally bottlenecked by human creativity
+and foresight. Morever, since humans are required
+to write templates, it makes scaling up to differentpatch types harder, since we expect generalization
+to completely new patch types to be poor e.g., gen-
+eralizing to a patch that requires counting. Future
+work can explore automatic generation of synthetic
+patch templates e.g., using pre-trained language
+models.
+Interpreting multiple patches. Finally, the ap-
+proach we develop can only incorporate a single
+patch at a time, by selecting the most relevant patch
+from our patch library. This precludes the model
+from being able to combine features from multiple
+patches—e.g., “caviar is a kind of food” and“If
+caviar is described as overpowering, then caviar
+is spoiled” .
+References1160811609
+A More details on Patch Finetuning
+A.1 Sentiment Analysis Data
+The templates used for constructing inputs are in
+Table 12. We programmatically find all patches for
+an input, to generate labels.
+A.2 Relation Extraction Data
+Override Patches. Patches and Input templates
+for constructing patch finetuning data can be found
+in Table 13.
+Feature Based Patches For training the gating
+head, we use the same data as generated by Ta-
+ble 13. For training the interpreter head, we use
+patches and input templates in Table 11 to generate
+finetuning data.
+A.3 Additional Finetuning Details
+After the model is finetuned in the Task finetun-
+ing stage, we finetune it additionally with a learn-
+ing rate of learning rate of 1e-4 and with a linear
+warmup scheduler which ramps up the learning
+rate from 0to 1e-4 over 100steps. The training
+batch size is 32, and we clip gradients to have a
+max norm of 5. We early stop based on valida-
+tion performance on a held out subset of the patch
+finetuning data.
+B Patches used for Yelp-Colloquial.
+We used the following patches for fixing bugs on
+Yelp-Colloquial:
+•“If clothes are described as dope, then clothes
+are good. ”
+•“If food is described as the shit, then food is
+good. ”
+•“If service is described as bomb, then service
+is good. ”
+•“If restaurant is described as bomb, then
+restaurant is good. ”
+•“If food is described as bomb, then food is
+good. ”
+•“If something is described as wtf, then some-
+thing is bad. ”
+•“If something is described as omg, then some-
+thing is good. ”
+•“If food is described as shitty, then food is
+bad. ”
+C More examples of Entropy Increasing
+Transformations
+To perform Entropy Increasing Transformations
+(EITs) for relation extraction, we convert rel(see
+Table 11 into nonce words e.g., “Alice has a kid
+with John” gets transformed into “Alice has a wug
+with John”, for which we use a patch “If Entity1
+has a wug with Entity2, then Entity1 and Entity2
+have kids
+D Regex Based Patches.
+The exact functions we use for patching with
+regexes can be found in Listing 1 and Listing 2.
+E Data Statistics for all evaluation slices
+Statistics for all slices used for evaluation can be
+found in Table 10.11610116111161211613

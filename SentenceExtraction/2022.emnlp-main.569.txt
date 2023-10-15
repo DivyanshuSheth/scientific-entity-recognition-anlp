@@ -1,1 +1,628 @@
-8318 Proceedings of the 2022 Conference on Empirical Methods in Natural Language Processing , pages 8318 8331 December 7 - 11 , 2022 © 2022 Association for Computational Linguistics 8319 8320 8321 8322 8323 8324 8325 8326 8327 8328 8329 8330 8331 
+
+Zhiheng Xi, Rui Zheng, Tao Gui, Qi Zhang, Xuanjing HuangSchool of Computer Science, Fudan University, Shanghai, ChinaInstitute of Modern Languages and Linguistics, Fudan University, Shanghai, ChinaInternational Human Phenome Institutes (Shanghai), Shanghai, China
+zhxi22@m.fudan.edu.cn ,{rzheng20,tgui,qz,xjhuang}@fudan.edu.cn
+Abstract
+Adversarial training is one of the most powerful
+methods to improve the robustness of pre-
+trained language models (PLMs). However,
+this approach is typically more expensive
+than traditional fine-tuning because of the
+necessity to generate adversarial examples via
+gradient descent. Delving into the optimization
+process of adversarial training, we find that
+robust connectivity patterns emerge in the early
+training phase (typically 0.15∼0.3epochs),
+far before parameters converge. Inspired by
+this finding, we dig out robust early-bird tickets
+(i.e., subnetworks) to develop an efficient
+adversarial training method: (1) searching for
+robust tickets with structured sparsity in the
+early stage; (2) fine-tuning robust tickets in
+the remaining time. To extract the robust
+tickets as early as possible, we design a ticket
+convergence metric to automatically terminate
+the searching process. Experiments show
+that the proposed efficient adversarial training
+method can achieve up to 7× ∼ 13×training
+speedups while maintaining comparable or
+even better robustness compared to the most
+competitive state-of-the-art adversarial training
+methods.
+1 Introduction
+Pre-trained language models (PLMs) have achieved
+great success in NLP (Devlin et al., 2019a),
+but they are vulnerable to adversarial examples
+crafted by performing subtle perturbations on
+normal examples (Ren et al., 2019; Garg and
+Ramakrishnan, 2020). Recent studies have shown
+the prevalence of adversarial vulnerability in NLP
+tasks (Wallace et al., 2019; Zhang et al., 2021; Lin
+et al., 2021). Various defense strategies have been
+proposed to improve the robustness of the model
+and maintain high accuracy on both normal and
+adversarial examples (Zhu et al., 2020; Wang et al.,Figure 1: A high-level overview of adversarial training
+methods and the proposed EarlyRobust. MHA means
+multi-head attention and FFN means feed-forward
+network. Structured pruning removes attention heads
+and intermediate neurons of each transformer layer in
+BERT. Our method achieves up to 7× ∼ 13×training
+speedups compared to adversarial training methods.
+2021). Adversarial training is one of the most
+widely used and strongest defense methods (Madry
+et al., 2018).
+One of the main challenges of adversarial
+training in real-world applications is its high com-
+putational cost, as they require multi-step gradient
+descents to generate adversarial examples (Wong
+et al., 2020; Andriushchenko and Flammarion,
+2020). Some work on this topic found that
+replacing strong adversarial examples with weaker
+and cheaper ones does not significantly change the
+resulting robustness (Wong et al., 2020). Zhang
+et al. (2019) remove redundant calculations during
+backpropagation for additional speedup. FreeAT
+(Shafahi et al., 2019) and FreeLB (Zhu et al.,
+2020) utilize a “free” strategy to generate diverse
+adversarial examples at a negligible additional cost.8318However, these methods are only alleviating the
+huge expense of generating adversarial samples,
+and still require optimizing the adversarial loss
+objective throughout the training period.
+The recently proposed robust lottery ticket
+hypothesis (Fu et al., 2021; Zheng et al., 2022b)
+suggests that a deep network contains robust tickets
+(i.e., subnetworks) that maintain matching accuracy
+but better robustness than the original network
+when trained individually. However, robust tickets
+have to be searched through a tedious process
+under the guidance of the adversarial loss objective
+(Zheng et al., 2022b). Moreover, these robust
+tickets consider unstructured sparsity, which only
+reduces storage but does not reduce computational
+overhead (Prasanna et al., 2020).
+In this work, we propose a novel robust early-
+bird ticket with structured sparsity for efficient
+adversarial training. We delve into the optimization
+process of adversarial training, and find that the
+robust connectivity patterns converge with few
+training iterations. As shown in Figure 1, we
+can extract robust tickets at the early stage of
+adversarial training by pruning the self-attention
+heads and intermediate neurons that contribute
+least to accuracy and robustness. A highly
+robust model can be easily obtained by fine-
+tuning the proposed robust tickets in the remaining
+time. In addition, we use a generic ticket
+convergence metric to automatically terminate
+the search process without going through each
+search moment. Experimental results show that
+the proposed method achieves up to 7× ∼ 13×
+training speedups while maintaining comparable
+or even better adversarial robustness compared
+with traditional adversarial training. Our codes are
+publicly available at Github. The contributions of
+this work can be summarized as:
+•We analyze the optimization process of ad-
+versarial training and reveal that the robust
+connectivity patterns emerge in the early
+training phase.
+•We propose a novel robust early-bird ticket for
+efficient adversarial training, which consists
+of two stages: (1) searching for robust tickets
+using adversarial training in the early stage;
+and (2) fine-tuning the robust tickets during
+the remaining time.
+•Compared with previous efficient adversarialtraining methods, the proposed approach
+provides a new pathway based on model
+pruning and robust architecture searching.
+2 Related Work
+2.1 Textual Adversarial Attack and Defense
+Textual adversarial attacks try to fool NLP models
+with adversarial examples which are constructed
+by substituting some parts of sentences with their
+counterparts. Typically, the adversarial examples
+hold a high similarity with clean ones in semantics
+or embedding space (Li et al., 2019; Ren et al.,
+2019; Jin et al., 2020; Li et al., 2020). To
+improve the robustness of NLP models against
+textual adversarial attacks, many defense methods
+have been proposed (Li et al., 2021; Zheng et al.,
+2022a; Liu et al., 2022). As the most popular one,
+adversarial training (AT) solves a robust min-max
+optimization problem by adding norm-bounded
+perturbations to word embeddings (Madry et al.,
+2018; Zhu et al., 2020; Li and Qiu, 2021). Likewise,
+some regularization methods have been proved
+beneficial to model robustness (Jiang et al., 2020;
+Wang et al., 2021).
+2.2 Efficient Adversarial Training Methods
+Adversarial training, represented by PGD (Pro-
+jected Gradient Descent, Madry et al. (2018)),
+costs much more computational resources than
+traditional training due to the need to construct
+adversarial examples. Therefore, some recent
+works attempt to improve its efficiency. FreeAT
+(Shafahi et al., 2019) and YOPO (Zhang et al.,
+2019) simplify the calculation of gradients to
+get speedups. Zhu et al. (2020) introduce the
+above accelerating methods to NLP and propose
+FreeLB, which adds adversarial perturbations to
+word embeddings. Our method shapes structured
+robust tickets in the early adversarial training stage,
+so it is orthogonal to the above methods.
+2.3 Lottery Ticket Hypothesis
+Lottery Ticket Hypothesis (LTH) suggests that
+there exist certain sparse subnetworks (i.e., winning
+tickets) at initialization that can be trained to
+achieve competitive performance compared to
+the full model (Frankle and Carbin, 2019). In
+NLP, previous work has found that matching
+subnetworks exist in Transformers, LSTMs, and
+PLMs (Yu et al., 2020; Renda et al., 2020; Chen
+et al., 2020). Prasanna et al. (2020) find structured8319tickets for BERT, which are efficient in training
+and inference, by pruning attention heads and MLP
+layers. Recently, You et al. (2020) and Chen et al.
+(2021) pioneer to identify Early-Bird tickets at
+the early stage of training. Fu et al. (2021) and
+Zheng et al. (2022b) find unstructured robust tickets
+in neural networks and thus the robust LTH is
+proposed. However, the search process for winning
+robust tickets is tedious. A concurrent work in
+CV jointly identifies and trains unstructured Flying
+Bird tickets with PGD-AT(Chen et al., 2022), while
+we explore the convergence of robust connectivity
+patterns in NLP. Particularly, we identify robust
+early-bird tickets with structured sparsity and apply
+them to fine-tuning.
+3 Methodology
+In this section, we first revisit the robust lottery
+ticket hypothesis (Sec.3.1). Next, we describe
+the early emergence of structured robust tickets
+(Sec.3.2). Based on this key finding, we propose
+the EarlyRobust method for efficient adversarial
+training (Sec.3.3). Finally, we make a brief review
+and discuss how our method accelerates adversarial
+training (Sec.3.4).
+3.1 Revisiting Robust Lottery Ticket
+Hypothesis
+For a network f(θ)initialized with parameters
+θ, we can identify a binary mask mwhich has
+the same dimension as θ, such that a subnetwork
+f(m⊙θ)can be shaped. Robust lottery ticket
+hypothesis articulates that, there exists certain
+subnetwork that can be trained to have matching
+performance and better robustness compared to
+the full model following the same training protocol
+(Zheng et al., 2022b). Such a subnetwork f(m⊙θ)
+is a so-called robust winning ticket , including both
+the mask mand the initialization θ.
+3.2 Early Emergence of Robust Tickets with
+Structured Sparsity
+In previous work, robust tickets with unstructured
+sparsity in PLMs are extracted after a tedious
+training process. However, when applying a
+structured pruning strategy, we observe that robust
+tickets with structured sparsity emerge in the
+early training stage. The structured pruning
+strategy aims at pruning self-attention heads and
+intermediate neurons of each transformer layer inBERT. Through visualizing the normalized mask
+distance between different training steps (You et al.,
+2020) in Figure 2, we learn that the structure of
+a robust ticket can be identified at a very early
+adversarial training stage. Inspired by this finding,
+we propose an efficient adversarial training method
+that draws robust early-bird tickets at the early
+adversarial training stage and then fine-tunes these
+tickets to achieve better robustness.
+3.3 Robust Early-bird Tickets
+Our method consists of two steps: 1) Searching
+Stage; 2) Drawing and Fine-tuning Stage.
+3.3.1 Searching Stage
+BERT is constructed by a stack of transformer
+encoder layers (Vaswani et al., 2017), and the
+structure of each layer is identical: a multi-head
+self-attention (MHA) block followed by a feed-
+forward network (FFN), with residual connections
+around each. In each layer, the MHA with N
+heads takes an input xand outputs:
+MHA( x) =/summationdisplayAtt(x),(1)
+where W,W,W∈R,W∈R,
+and they denote the query, key, value and output
+matrices in the l-th attention head. Here ddenotes
+the hidden size (e.g., 768) and d=d/Ndenotes
+the output dimension of each head (e.g., 64).
+Next comes an FFN parameterized by W∈
+RandW∈R:
+FFN( x) = gelu( XW)·W, (2)
+where d= 4d.
+Learnable Importance Coefficients Recent re-
+search reveals that MHAs and FFNs in transform-
+ers are redundant (Michel et al., 2019; V oita et al.,
+2019). Therefore, we adopt the modified network
+slimming (Liu et al., 2017; Chen et al., 2021),
+which assigns learnable importance coefficients
+to self-attention heads and intermediate neurons,
+to determine which components are essential for
+robustness:
+MHA( x) =/summationdisplayc·Att(x),(3)
+FFN( x) =c·gelu(XW)·W, (4)
+where cdenotes the coefficients for heads, iis the
+index of head, and cdenotes the coefficients for8320
+the FFN. Then, we can jointly train BERT with the
+importance coefficients but with a regularizer:
+R(c) =λ∥c∥+λ∥c∥, (5)
+where c={c, c},λandλdenote regular-
+ization strength for the two kinds of coefficients
+respectively.
+Adversarial Loss Objective To identify substruc-
+tures that are responsible for adversarial robustness,
+we introduce the adversarial loss objective:
+minEmaxL(f(x+δ;θ, c), y)
+/bracehtipupleft /bracehtipdownright/bracehtipdownleft /bracehtipupright,
+(6)
+where (x, y)is a data point from dataset D,δis the
+perturbation that is constrained within the ϵball.
+The inner max problem tries to generate worst-
+case perturbation towards inputs and maximize the
+model’s classification loss, while the outer min
+problem is to optimize the model on the perturbed
+data.
+Then, by integrating the adversarial training
+objective and the sparsity regularizer R(c), we can
+describe our loss objective as follow:
+minL(θ, c) +R(c). (7)After the joint training, we draw robust tickets,
+reset the parameters and then train the tickets with
+traditional fine-tuning.
+3.3.2 Drawing and Fine-tuning Stage
+Early-stopping Strategy As mentioned before,
+robust tickets with structured sparsity can be
+identified in the early adversarial training stage.
+However, it is difficult to determine the exact search
+termination time. The difficulty lies mainly in
+the following two aspects: (1) the termination
+time varies among datasets; (2) the termination
+moments of MHA and FFN in the same model
+are different. Therefore, we design a termination
+metric that measures the normalized mask distance
+between consecutive miniepochs (each miniepoch
+consists of 0.05epochs). When the termination
+metric is smaller than the threshold γboth for
+MHA and FFN, we extract robust early-bird tickets.
+Similar termination metrics are widely used for
+the extraction of subnetworks (You et al., 2020).
+To ensure the consistency of convergence, we end
+the subnetwork search stage when the termination
+metric is satisfied five times in a row.
+Pruning Strategy At the end of the search process,
+we prune the unimportant parts according to the
+magnitudes of the learned importance coefficients.
+The attention heads and intermediate neurons with
+the smallest importance coefficients are considered8321Algorithm 1: EarlyRobust Method
+Input: model parameters θ, learnable
+importance coefficients c, learning
+rateηand the fine-tuning epoch N.Procedure R T S
+Initialize θ,c;repeat θ=θ−η∇(L(θ, c) +R(c)); c=c−η∇(L(θ, c) +R(c));until the convergence condition in Sec.3.3.2
+is satisfied ;Procedure D -
+Extract robust winning tickets
+parameterized by θ ;forepoch ←1...N do θ←θ−η∇L;end
+to contribute the least to robustness and should be
+removed. For attention heads, we not only remove
+them from the computation graph, but also remove
+the corresponding W(see Eqn. (3)). We adopt
+a modified global approach to prune the heads
+and ensure that at least one head survives in each
+layer.As for intermediate neurons, pruning them
+is equivalent to reducing the size of WandWin
+Eqn. (4). We prune intermediate neurons globally
+as there is a large number of neurons in each FFN
+layer and empirical analysis suggests that global
+approach brings better performance.
+Efficient Robust Fine-tuning After pruning atten-
+tion heads and intermediate neurons, we then reset
+the weights to the pre-trained weights and utilize
+traditional fine-tuning to train the robust tickets.
+3.4 A Brief Review
+The proposed method searches for the key connec-
+tivity patterns for robustness , draws the winning
+tickets and trains them with traditional fine-tuning.
+We summarize it in Algorithm 1.
+How does EarlyRobust accelerate adversarial
+training? Firstly, the method draws robust tickets
+with structured sparsity , which reduces the size
+of models and speeds up training and inference.
+Secondly, the early-stopping strategy prevents thetedious searching process for robust tickets. Finally,
+the method trains the robust early-bird tickets
+with traditional fine-tuning instead of adversarial
+training methods, getting rid of the time-consuming
+process to construct adversarial examples.
+4 Experimental Settings
+4.1 Backbone Model and Datasets
+We take BERT (12 transformer layers, 12
+attention heads, 3,072 intermediate neurons per
+layer, hidden size 768 and 110M parameters in
+total) as the backbone model. We follow the BERT
+implementation in (Devlin et al., 2019b; Wolf et al.,
+2019). Mainly, we evaluate the proposed method
+on three text classification datasets, including
+IMDB (Maas et al., 2011), SST-2 (Socher et al.,
+2013), and AG NEWs (Zhang et al., 2015). We
+also include other datasets of more tasks in GLUE
+(Wang et al., 2019) as a supplement, such as QNLI
+and QQP.
+4.2 Baselines
+We compare our method with fine-tuned BERT,
+EarlyBERT, and several strong robust baselines.
+Fine-tune (Devlin et al., 2019b): Training full
+BERT on downstream tasks. EarlyBERT (Chen
+et al., 2021): A framework that draws early-bird
+tickets from BERT for efficient fine-tuning. PGD
+(Madry et al., 2018): An adversarial training
+algorithm that minimizes the empirical loss on
+worst-case adversarial examples. FreeLB (Zhu
+et al., 2020): An enhanced PGD-based adversarial
+training method for natural language understanding.
+InfoBERT (Wang et al., 2021): A framework that
+improves model’s robustness from an information-
+theoretic perspective. RobusT (Zheng et al.,
+2022b): An approach that identifies robust tickets
+from the original PLMs through learning binary
+masks.
+4.3 Evaluation Settings
+Robust Evaluation We apply three popular textual
+attack methods (Li et al., 2021) to evaluate
+the model’s defensive capability. TextBugger
+(Li et al., 2019) generates misspelled words by
+using character-level and word-level perturbations.
+TextFooler (Jin et al., 2020) constructs adversarial
+examples by substituting the most important words
+in a sentence with synonyms. BERT-Attack (Li
+et al., 2020) employs BERT to generate adversarial8322
+texts, and thus the semantic consistency and the
+language fluency are preserved.
+We adopt three evaluating metrics as follows:
+Clean accuracy (Clean%) is the model’s accuracy
+on the clean test set. Accuracy under attack
+(Aua%) denotes the model’s prediction accuracy
+under certain adversarial attack methods. Number
+of Queries (#Query) refers to the average attempts
+an attacker queries the model, and the larger the
+number of queries is, the more difficult the model
+is to be fooled.
+Training Time Measurement Protocol We mea-
+sure the training time of each method on GPU and
+exclude the time for data I/O. To get rid of random-
+ness, we run each method five times and report the
+average time. Notably, the training time of LTH-
+based methods (e.g., EarlyRobust, EarlyBERT, and
+RobusT) includes both the searching stage and the
+fine-tuning stage.
+4.4 Implementation Details
+We re-implement baseline methods based on their
+open-source codes and the results are competitive.
+We employ FreeLB to implement the adversarialloss objective in the searching stage of EarlyRobust
+because compared to standard K-step PGD, it
+accumulates gradients of parameters in multiple
+forward passes and passes gradients backward once.
+Clean% is tested on the whole test set. Aua% and
+#Query are evaluated on the whole test dataset for
+SST-2, and 500 randomly chosen samples for other
+datasets. We set the early-stopping threshold γto
+0.1and fine-tune EarlyRobust tickets 10 epochs.
+For fine-tuning, EarlyBERT, and other adversarial
+training methods, we also set the training epoch
+to 10, which is a trade-off between training cost
+and performance. The sparsity for EarlyBERT
+is the same as that of EarlyRobust. We prune
+40%,30%,20%,30% and30% intermediate
+neurons on IMDB, SST-2, AG NEWS, QNLI and
+QQP, respectively; the pruning ratio for attention
+heads is 1/6. More implementation details and
+hyperparameters can be found in Appendix A.2.
+5 Experimental Results and Discussion
+In this section, we illustrate the effectiveness and
+efficiency of our method with experimental results.8323
+5.1 Main Results
+The main results of EarlyRobust and other base-
+lines are summarized in Table 1. We can observe
+that: 1) Our method achieves high robustness with
+a little sacrifice in accuracy. It performs slightly
+worse than FreeLB on SST-2, but achieves the
+best robustness on both IMDB and AG NEWS,
+suggesting that the subnetworks shaped by our
+method own inborn robustness which can be
+exerted through traditional fine-tuning. 2) Our
+method achieves sizable training accelerations
+compared to robust baselines. This proves our
+method can deliver highly robust models under
+different kinds of adversarial attacks with limited
+computational resources. Though EarlyBERT
+and fine-tuning are also fast, they do not take
+robustness into account and thus have weak
+defensive capabilities. 3) Our method also brings
+storage savings, and thus robust early-bird tickets
+are suitable to be deployed on mobile devices and
+edge devices.
+We evaluate our method on paraphrase and
+inference tasks to verify its generality. Results in
+Table 2 show that our method consistently performs
+well on more difficult tasks.
+5.2 Ablation Study
+To investigate the contribution of different com-
+ponents to our method, we perform ablation
+experiments by removing adversarial loss objective
+(Adv) and sparsity-inducing regularizer. We also
+evaluate the performance of randomly pruned
+tickets. Results in Table 3 show that: 1) Adversarial
+loss objective is important for robustness, but not
+for clean accuracy. 2) There exists degradation
+in both accuracy and robustness if we remove
+the regularizer, indicating that the sparsity it
+induces is indispensable for high-quality tickets.
+3) Randomly pruned tickets have a competitive
+accuracy performance, which is also observed by
+(Prasanna et al., 2020). However, random tickets
+consistently suffer a large drop in robustness, which
+proves that robust tickets are non-trivial.
+5.3 Different Early-stopping Thresholds
+Here we study how different early-stopping thresh-
+olds affect the model’s robustness. Results
+in Figure 3 show that the model’s robustness
+converges when γis reduced to around 0.1.
+Considering training efficiency, we think 0.1is a
+reasonable threshold.8324
+5.4 Importance of EarlyRobust Tickets
+Initialization and Structure
+According to LTH, the winning tickets can not be
+trained effectively without original initialization
+and the ticket structure also plays a role (Frankle
+and Carbin, 2019). Therefore, we follow a
+similar way in (Zheng et al., 2022b) to study the
+importance of the initialization and the structure of
+EarlyRobust tickets. Specifically, we re-initialize
+the weights of EarlyRobust tickets to exclude the
+effect of the initialization. We employ the full
+BERT and re-initialize the weights which are not
+contained in the robust tickets to exclude the effect
+of the structure while preserving the effect of the
+initialization. Table 4 demonstrates that the pre-
+trained initialization and the structure are both
+fundamental for model performance. Another
+observation is that without the initialization, robust
+tickets suffer a greater performance drop than
+without the structure.
+5.5 Impact of Sparsity
+In our method, structured sparsity can not only
+bring speedups but also save the storage. Figure 4
+illustrates that as the sparsity (both for heads and
+neurons) increases, the accuracy shows a gradually
+decreasing trend, but the robustness is different.
+The robustness first increases and then degrades
+sharply as sparsity grows, which is similar to the
+observations in (Fu et al., 2021). To extract high-
+quality tickets, 1/6∼1/4and20%∼40% are
+suitable pruning ratio ranges for heads and neurons,
+respectively. We also visualize the sparsity patterns
+in Appendix A.3.
+5.6 Global Pruning vs. Layer-wise Pruning
+As mentioned in Sec.3.3.2, we prune self-attention
+heads and intermediate neurons separately with
+global approach. Here we study how global
+pruning and layer-wise pruning influence model
+performance. Table 5 demonstrates the results
+on IMDB.We can observe that: 1) Layer-
+wise pruning performs as well as global pruning
+in accuracy, but it induces a degradation in
+robustness, revealing that different layers have
+different degrees of contribution to robustness.
+So different layers should not be pruned with
+the same ratio. 2) The model’s robustness
+drops more dramatically when we use layer-wise
+pruning for neurons than for heads, suggesting that
+intermediate neurons are more sensitive to pruning
+approaches.83256 Conclusion
+In this paper, we delve into the optimization
+process of adversarial training on BERT, and
+observe the early convergence of robust con-
+nectivity patterns. Based on this, we propose
+EarlyRobust, a method that shapes structured
+robust early-bird tickets under the guidance of the
+adversarial loss objective and then utilizes efficient
+fine-tuning to train them. Experiments on various
+datasets demonstrate that our method achieves
+competitive or even better robustness compared
+to other strong baselines while maintaining a very
+low computational and storage consumption.
+Limitation
+In this work, we propose a method to draw
+structured robust early-bird tickets, which can
+be used as an efficient alternative to adversarial
+training. However, there are still limitations to
+be explored in future work: 1) Model robustness
+drops sharply when the pruning ratio is too large,
+so our robust tickets do not have high sparsity. We
+expect to compress the robust early-bird tickets
+to a smaller size while maintaining a high quality
+in the future. 2) We draw the robust early-bird
+tickets from pre-trained models, and future work
+includes searching for robust early-bird tickets
+from randomly initialized networks.
+Ethics Statement
+Our method is proposed for efficient adversarial
+training, so it is environmental-friendly. It
+achieves up to 7× ∼ 13×speedups compared to
+standard adversarial training, saving computational
+resources by a significant margin. Moreover, the
+proposed robust early-bird tickets with structured
+sparsity bring savings in storage, so it is easy to
+deploy them on mobile devices and edge devices.
+Acknowledgements
+The authors wish to thank the anonymous reviewers
+for their helpful comments. This work was partially
+funded by National Natural Science Foundation
+of China (No. 62206057, 61906176, 62076069,
+61976056), Program of Shanghai Academic Re-
+search Leader (No. 22XD1401100), Beijing
+Academy of Artificial Intelligence (BAAI) and
+CCF-Tencent Open Fund.References8326832783288329A Appendix
+A.1 Solving the Inner Max Problem of
+Adversarial Loss Objective
+We solve the inner max problem(generate the worst-
+case perturbation, i.e., L(θ, c)) with K-step
+projected gradient descent strategy (Madry et al.,
+2018), and the ( k+ 1)-th perturbation is defined as
+:
+δ=/productdisplay/parenleftbigg
+δ+ηg(δ)
+∥g(δ)∥/parenrightbigg
+, (8)
+where g(δ) =∇L(f(x+δ;θ, c), y)is the
+gradient of the loss with respect to δ, and/producttext(·)
+performs a projection onto the ϵ-ball, which is a
+Frobenius normalization ball.
+A.2 Implementation Details
+A.2.1 Details for Adversarial Attack
+We adopt textattack (Morris et al., 2020) to
+implement adversarial attack methods. Aua% and
+#Query are evaluated on all 872 test examples
+for SST-2, 500 randomly selected test samples for
+IMDB, AG NEWS, QNLI and QQP. For BERT-
+Attack, we set the neighbor vocabulary size to 50,
+and set the sentence similarity to 0.2; for the other
+two attack methods, we use the default parameters
+of third-party libraries.
+A.2.2 Hardware Details
+Experiments on SST-2, QNLI and QQP are run
+on seven 1080Ti GPUs and the sequence length
+is set to 128, while experiments on AG NEWS
+and IMDB are run on eight 2080Ti GPUs and the
+sequence length is set to 256.
+A.2.3 Hyperparameters
+There are four hyperparameters introduced by the
+adversarial loss objective: the initial magnitude of
+perturbations ϵ, the number of gradient descent
+steps for adversary s, the perturbation step size τ,
+and we do not constrain the bound of perturbations.
+We report the learning rate ηand the learning rate
+is the same at both the searching and fine-tuning
+stages. Moreover, we report the regularization
+penalties λandλ. We list the hyperparameters
+used for each task in Table 6.
+A.3 Sparsity Pattern
+Figure 5 illustrates the sparsity pattern of robust
+tickets on three datasets. We can observe that
+for different datasets, the sparsity pattern varies
+greatly. So we speculate that it is dataset-
+dependent. Another interesting finding is that on a
+given dataset, the pruning for attention heads and
+intermediate neurons is concentrated in different
+layers, i.e., if attention heads are pruned centrally in
+some layers, the pruning on intermediate neurons
+is concentrated in other layers. For example, on
+SST-2, our method prunes heads mainly in bottom
+layers, while pruning intermediate neurons mainly
+in top layers.
+A.4 More Results of Global Pruning vs.
+Layer-wise Pruning
+Table 7 and Table 8 show the results on SST-2 and
+AG NEWS, respectively. We can consistently find
+thatglobal pruning performs better than layer-wise
+pruning in terms of robustness.83308331

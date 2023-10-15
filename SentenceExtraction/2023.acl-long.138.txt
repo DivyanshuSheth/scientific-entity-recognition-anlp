@@ -1,1 +1,994 @@
-2450 Proceedings of the 61st Annual Meeting of the Association for Computational Linguistics Volume 1 : Long Papers , pages 2450–2467 July 9 - 14 , 2023 © 2023 Association for Computational Linguistics 2451 2452 2453 2454 2455 2456 2457 2458 2459 2460 2461 2462 2463 2464 2465 2466 2467 
+
+Jiashu Xu Mingyu Derek Ma Muhao Chen
+
+jxu1@harvard.edu ma@cs.ucla.edu muhaoche@usc.edu
+Abstract
+Two key obstacles in biomedical relation ex-
+traction (RE) are the scarcity of annotations
+and the prevalence of instances without ex-
+plicitly pre-deﬁned labels due to low anno-
+tation coverage. Existing approaches, which
+treat biomedical RE as a multi-class classiﬁca-
+tion task, often result in poor generalization in
+low-resource settings and do not have the abil-
+ity to make selective predictions on unknown
+cases but give a guess from seen relations, hin-
+dering the applicability of those approaches.
+We present NBR, which converts biomedical
+RE as a natural language inference formula-
+tion to provide indirect supervision. By con-
+verting relations to natural language hypothe-
+ses, NBR is capable of exploiting semantic
+cues to alleviate annotation scarcity. By in-
+corporating a ranking-based loss that implic-
+itly calibrates abstinent instances, NBR learns
+a clearer decision boundary and is instructed
+to abstain on uncertain instances. Extensive
+experiments on three widely-used biomedical
+RE benchmarks, namely ChemProt, DDI, and
+GAD, verify the effectiveness of NBR in both
+full-shot and low-resource regimes. Our analy-
+sis demonstrates that indirect supervision ben-
+eﬁts biomedical RE even when a domain gap
+exists, and combining NLI knowledge with
+biomedical knowledge leads to the best perfor-
+mance gains.
+1 Introduction
+In silico studies of biology and medicine have pri-
+marily relied on machines’ understanding of rela-
+tions between various molecules and biomolecules.
+For instance, disease-target prediction requires ac-
+curate identiﬁcation of the association between the
+drug target and the disease (Bravo et al., 2015),
+and drug-drug interaction recognition is essential
+for polypharmacy side effect studies (Herrero-Zazo
+et al., 2013). Due to the complexity and high costof human curation of such biomedical knowledge
+(Krallinger et al., 2017; Bravo et al., 2015), there
+has been a growing interest in the ﬁeld of biomedi-
+cal relation extraction (RE), a task of automatically
+inferring the relations between biomedical entities
+described in domain-speciﬁc corpora.
+However, two obstacles remain in training a reli-
+able biomedical RE model. First, biomedical RE
+often suffers from insufﬁcient and imperfect anno-
+tations, due to that the annotation process is very
+challenging and requires expert annotators to iden-
+tify complex structures from lengthy and sophisti-
+cated biomedical literature. The existing biomed-
+ical learning resources either require very costly
+expert annotations (Krallinger et al., 2017) or resort
+to weak supervision (Bravo et al., 2015). The insuf-
+ﬁciency and imperfection of annotations inevitably
+cause existing state-of-the-art (SOTA) biomedical
+RE systems (Yasunaga et al., 2022; Peng et al.,
+2019; Tinn et al., 2021, inter alia), though showing
+satisfactory results in a fully supervised setting, to
+result in poor generalization regarding the more
+common low-resource regime in this domain. For
+example, Han et al. (2018) showed that model per-
+formance deteriorated quickly as the number of
+instances for each relation drops, hindering the ap-
+plicability of those approaches in real-world scenar-
+ios. Second, given that biomedical RE annotations
+tend to be incomplete or have low coverage, it is
+difﬁcult for models to learn a clear decision bound-
+ary (Gardner et al., 2020). Speciﬁcally, in many
+scenarios where the described biomedical entities
+are not related in the context, the model may fail to
+abstain but give a guess from seen relations (Xin
+et al., 2021; Kamath et al., 2020). An overconﬁdent
+model can be particularly harmful in high-stakes
+ﬁelds such as medicine, where incorrect predictions
+can have severe direct consequences for patients.
+Recently, indirect supervision (Roth, 2017; He
+et al., 2021; Levy et al., 2017; Lu et al., 2022; Li
+et al., 2019) is proposed that leverages supervision2450
+signals from resource-rich source tasks to enhance
+resource-limited target tasks. In this approach, the
+training and inference pipeline of the target task is
+transformed into the formulation of the source task,
+thus introducing additional supervision signals not
+accessible in the target task. Recent works (Li et al.,
+2022; Yin et al., 2020; Sainz et al., 2021) transfer
+cross-task learning signals from the Natural Lan-
+guage Inference (NLI) task. The NLI task aims
+at determining whether the hypothesis can be en-
+tailed given the premise, and inductive bias of NLI
+models learns adaptive generalized logical reason-
+ing which aligns well with the goal of biomedical
+RE. On the other hand, traditional direct supervi-
+sion on the biomedical RE fails to capture seman-
+tic information of relations since they are merely
+transformed to logits of a classiﬁer. By converting
+relations to meaningful hypotheses in NLI, the in-
+directly supervised method bypasses this shortage
+and can adapt the the preexisting inductive bias
+of NLI-ﬁnetuned models to make meaningful pre-
+dictions based on relation semantics (Huang et al.,
+2022; Chen et al., 2020). This critically beneﬁts
+the generalizability of the model in low-resource
+regimes where limited direct supervision signals
+are provided (Sainz et al., 2021) to remedy insufﬁ-
+cient annotations. However, previous studies focus
+on general domain tasks and explore little in spe-
+ciﬁc domains such as biomedical. Moreover, to
+maximize the utility of indirect supervision, it is
+found that incorporating task knowledge into the
+model, i.e. NLI model that is trained on NLI data,yields the best performance (Li et al., 2022; Sainz
+et al., 2021). Yet, biomedical NLI is rarely avail-
+able and whether general domain NLI can provide
+strong indirect supervising signals to speciﬁc target
+domains remains unexplored.
+This study presents a general learning frame-
+work, dubbed NLI improved Biomedical Relation
+Extraction ( NBR ), to enhance biomedical RE with
+indirect supervision from general domain NLI task.
+Fig. 1 illustrates the structure of NBR . Speciﬁcally,
+given an input sentence, NBR reformulates RE
+to NLI by treating the input as the premise while
+verbalizing each relation label into template-based
+natural language hypotheses. NBR learns to rank
+the relations based on the entailment scores such
+that the hypothesis of a correct relation should be
+scored higher than those of any incorrect ones. Fur-
+thermore, to learn a ﬁne-grained, instance-aware
+decision boundary, NBR deploys ranking-based
+loss for implicit abstention calibration that handles
+abstinent relations in the dataset. During inference,
+the relation whose verbalized hypothesis achieved
+the highest score becomes the prediction. NBR
+fully exploits indirect supervision from NLI and
+performs exceptionally well even in low-resource
+scenarios.
+Our contributions are three-fold: First, to the
+best of our knowledge, this is the ﬁrst work to
+leverage indirect supervision from NLI on biomed-
+ical RE. Instead of solely relying on provided RE
+annotations, NBR leverages additional supervi-
+sion signals from NLI indirect supervision and2451can generalize well in low resource regimes. Sec-
+ond, we show that NBR provides a proper indi-
+rect supervision signal even if there is a domain
+gap between general NLI knowledge NBR trained
+on and biomedical downstream task. Third, we
+propose a new ranking-based loss that implicitly
+handles abstinent relations ubiquitous in biomed-
+ical RE by contrastively calibrating the score of
+abstinent instances. By extensive experiments
+on three commonly-used biomedical RE bench-
+marks, namely, ChemProt (Krallinger et al., 2017),
+DDI (Herrero-Zazo et al., 2013) and GAD (Bravo
+et al., 2015), we verify our contributions and show
+that general domain NLI can provide a proper su-
+pervision signal, especially in low resource set-
+tings where annotations are scarce. NBR provides
+consistent improvements on three datasets (1.10,
+1.79, and 0.96 points of F1 improvement respec-
+tively), and up to 34.25 points of F1 improvement
+in low-resource settings. Further analysis demon-
+strates that combing NLI knowledge with biomedi-
+cal knowledge leads to the best performance gains.
+2 Related Works
+Biomedical relation extraction. Despite the
+growing availability of biomedical corpora on Web
+repositories, the main challenge remains in trans-
+forming those unstructured textual data into a
+rigidly-structured representation that includes in-
+terested entities and relations between them (Peng
+et al., 2019; Lee et al., 2020; Tinn et al., 2021).
+However, knowledge curation for this purpose
+is often costly and requires expert involvement
+(Krallinger et al., 2017; Herrero-Zazo et al., 2013;
+Bravo et al., 2015). To address this issue, biomedi-
+cal RE techniques are developed to automate this
+process. Most existing works mainly conduct super-
+vised ﬁne-tuning language models pretrained on rel-
+evant corpus e.g. PubMed abstracts and MIMIC-III
+clinical notes, on annotated biomedical RE corpora
+(Tinn et al., 2021; Peng et al., 2019; Beltagy et al.,
+2019; Lee et al., 2020; Shin et al., 2020; Yasunaga
+et al., 2022). Two drawbacks of the aforementioned
+approach are: (1) it fails to capture the semantic
+interaction between relations and entities as rela-
+tions are represented as integer indices (Chen et al.,
+2020; Huang et al., 2022), and (2) performance de-
+teriorates as the number of training instances drops
+(Han et al., 2018).
+Indirect supervision. Indirect supervision (Roth,
+2017; He et al., 2021) transfers supervision sig-nals from a more resource-rich task to enhance
+a speciﬁc more resource-limited task. Often this
+line of work reformulates the training and infer-
+ence pipeline of the target task into the form of the
+source task to facilitate the cross-task signal trans-
+fer. Levy et al. (2017) demonstrate that relation
+extraction can be solved using machine reading
+comprehension formulation. Similarly, Li et al.
+(2019) and Lu et al. (2022) further show that re-
+lation extraction performance can be improved by
+multi-turn question answering and summarization,
+respectively. Recently Sainz et al. (2021) and Li
+et al. (2022) propose to leverage indirect supervi-
+sion from the NLI task. LITE (Li et al. (2022))
+enhances entity typing by incorporating NLI and
+a learning-to-rank training objective while Sainz
+et al. (2021) observes the beneﬁts of indirect su-
+pervision in low-resource relation extraction. As
+discussed, NLI aligns well with relation extraction,
+but to the best of our knowledge, there is no prior
+work that investigates the effectiveness of indirect
+supervision when there is a domain gap between
+the target task and the source task, e.g. biomedical
+domain and general domain in this study.
+3 Method
+We hereby present NBR . We discuss how to frame
+relation extraction as a NLI task in §3.2, illustrate
+how to leverage cross-domain NLI knowledge in
+§3.3, and lastly provide an optional explicit absten-
+tion detector to handle abstinent instances in §3.4.
+3.1 Problem Formulation
+The RE model takes a sentence xwith two men-
+tioned entities e,eas input, and predicts the re-
+lationybetweene,efrom the label space Y
+that includes all considered relations. The dataset
+Dconsists of both non-abstinent instances where
+y∈Y, and abstinent instanceswherey=⊥. A
+successful RE model should abstain for abstinent
+instances and accurately predict yfor non-abstinent
+instances.
+3.2 Relation Extraction with NLI
+Following Sainz et al. (2021), we reformulate the
+RE task as a NLI task, allowing cross-task transfer
+of indirect supervision signals from NLI resources.
+An overview of our pipeline is visualized in Fig. 1.2452Decompose RE to NLI queries. The NLI model
+takes in a premise and a hypothesis, both in natu-
+ral language, and outputs a logit indicating if the
+premise either “entails,” “contradicts” the hypoth-
+esis or the inference relation is “neutral.” We de-
+compose an instance (x,e,e)into|Y|+ 1NLI
+queries, each about a candidate relation. We formu-
+late the RE input sentence xas the premise and a
+verbalized sentence describing the candidate rela-
+tion as the hypothesis.
+Verbalizing relations to hypotheses. For each re-
+lationy∈Y∪{⊥} , we verbalize yas a natural
+language hypothesis ν(y). Contextual textual repre-
+sentations of labels provide more semantic signals
+and are thus more understandable by a language
+model (LM) compared to the relation name itself
+or discrete relation label index used in standard
+classiﬁcation methods (Chen et al., 2020; Huang
+et al., 2022).
+Entity mentions in biomedical RE are mostly
+domain-speciﬁc terms that rarely appear in the
+LM’s pre-training corpus. The relations are al-
+ways deﬁned between entities of certain types, e.g.
+between a gene complex and another chemical in
+ChemProt (Krallinger et al., 2017) or between two
+drugs in DDI (Herrero-Zazo et al., 2013). Thus,
+each entity mention is replaced by typed entity
+masks such as @GENE$ following Gu et al. (2021)
+and Peng et al. (2019).The replacement enables
+the LM to capture semantic information of the
+types and avoid using poorly trained representa-
+tions for rare biomedical terms.
+As demonstrated by recent studies (Yeh et al.,
+2022; Li et al., 2022; Sainz et al., 2021), picking
+a good verbalizer for each relation may affect per-
+formance. Speciﬁcally, we design several types of
+templates (details and performances are provided
+in Appx. §D) listed below, each containing the two
+typed entity masks:
+1.Simple Template verbalizes relation between
+two entities with “ is-a” phrase.
+2.Descriptive Template provides a contextual
+description of the relation.
+3.Demonstration Template includes a randomly
+sampled trainset exemplar with the same relation.
+4.Descriptive+Demonstration Template com-
+bines both the Descriptive description and the sam-
+pled exemplar.5.Learned Prompt Template (Yeh et al., 2022)
+learns optimal discrete tokens for description.
+We observe that Descriptive Template performs the
+best empirically (Tab. 7).
+Conﬁdence scoring. For each relation label
+y∈ Y ∪{⊥} , we calculate the conﬁdence
+score of whether relation yholds bys(y) =
+f(x[SEP]ν(y))where [SEP] is a special token
+separating x(premise) and ν(y)(hypothesis). f
+is a transformer-based NLI model that encodes the
+input and produces logits that correspond plausibil-
+ity of premise entailing hypothesis.
+Abstention as a separate label. We treat⊥as a
+separate relation label and verbalize it explicitly,
+which is analogous to how supervised biomedi-
+cal RE treats⊥as an additional label (Yasunaga
+et al., 2022; Peng et al., 2019). An explicit template
+relieves the burden of incorporating both stop con-
+dition and label discriminative power into scores
+ofYlabels.
+Training objective. Recent works in contrastive
+learning show that InfoNCE loss beneﬁts efﬁcient
+learning from negative examples (Robinson et al.,
+2021; Wang et al., 2022; Zhang and Stratos, 2021;
+Zhou et al., 2021; Ma et al., 2023, 2021). Moti-
+vated by the intuition that positive instances should
+be ranked higher than negative instances with re-
+gard to the anchor instance, in each step we sam-
+plennegative relations {y,...,y}⊆Y∪{⊥
+}\{y}and compute s(y),...,s (y), and opti-
+mize ground truth relation’s entailment score to
+be ranked higher. Speciﬁcally, we optimize the
+following InfoNCE loss
+L=/summationdisplay/lscript(x,y) (1),
+in which temperature τcontrols focus on harder
+negatives. In practice, learning from all possible
+negatives performs the best.
+In pilot experiments, we observed that the model
+was prone to be misled by the vast number of absti-
+nent instances in the dataset, leading to deteriorated
+performance. To alleviate such abstinent v.s.non-
+abstinent imbalance, we introduce a margin-based
+Abstention Calibration regularization to penalize
+over-conﬁdent abstinent instances while encourag-
+ing non-abstinent instances. Concretely, if relation2453is not⊥, we calibrate the score of ⊥such thats(⊥)
+is suppressed; otherwise, we control ⊥to be ranked
+higher than other relations.
+L=/summationdisplay/lscript(x,y) (2)
+/lscript(x,y)/defines
+where the ranking loss /lscript(x,x;γ)learns to
+projectxhigher thanxby a margin γ. Training
+with this objective, NBR can be viewed as com-
+bining an implicit abstention calibrator and s(⊥)
+as a learnable instance-aware threshold. The ﬁnal
+training loss isL+λLwhere non-negative
+hyperparameter λcontrols the strength of absten-
+tion calibration.
+Inference. NBR gathers hypotheses verbalized
+from every relation and performs ranking among
+the entailment scores of each hypothesis. Then the
+relation whose verbalized hypothesis achieves the
+highest score is selected as the ﬁnal prediction.
+3.3 Cross-Domain NLI Fine-tuning
+In order to maximize the beneﬁt of NLI formula-
+tion, it is advised to use models trained on target-
+domain NLI dataset (Li et al., 2022; Sainz et al.,
+2021). However, available biomedical NLI training
+resource is limited. As a remedy, we experiment
+with ﬁne-tuning NLI models on two commonly
+used general domain NLI datasets, namely MNLI
+(Williams et al., 2018) and SNLI (Bowman et al.,
+2015), instead. Empirically we found strong evi-
+dence (§4.2, §4.4) that general-domain NLI knowl-
+edge can still be beneﬁcial in the biomedical do-
+main even if a domain gap exists.
+3.4 Explicit Abstention Detector
+Training with aforementioned L(Eq. 2) makes
+NBR an implicit abstention calibrator. As an op-
+tional post-process step, we can further improve
+NBR by introducing an Explicit Abstention Dector
+(EAD ). This is analogous to the “no-answer reader”
+component used in previous works that detect ab-
+stinent instances explicitly (Back et al., 2020; Hu
+et al., 2019; Kundu and Ng, 2018).
+EAD is essentially another instance of NBR
+trained separately on the same train set, but chang-
+ing relation labels into binary “has relation” versus
+“no relation” (⊥). A new verbalization template is
+created for “has relation”. For inference, we collectall differences s(⊥)−s(“has relation” )on
+the dev set. Then we iterate each difference as a
+threshold, and for one instance in the test set, EAD
+predicts⊥only if the difference of such instance
+exceeds the threshold. Once EAD is trained, NBR
+andEAD are combined using a simple heuristic:
+resort to NBR only when EAD prediction is not
+⊥(Appx. §C). In this manner, even if EAD makes
+a false positive prediction, since NBR still retains
+the ability to ﬂag⊥, such error can be recovered.
+Otherwise, we trust EAD prediction since it spe-
+cializes in abstention prediction.
+4 Experiments
+In this section, we discuss our experiment setup
+(§4.1) and evaluation results (§4.2), followed by
+detailed ablation studies (§4.3) and analyses (§4.4).
+4.1 Experimental Setup
+Dataset and evaluation metric. We conduct
+experiments on three sentence-level biomedi-
+cal RE datasets contained in the widely-used
+BLURB benchmark (Gu et al., 2021). ChemProt
+(Krallinger et al., 2017) consists of PubMed
+abstracts corpora with ﬁve high-level chemical-
+protein interaction annotations. DDI (Herrero-
+Zazo et al., 2013) studies drug-drug interaction
+and specializes in pharmacovigilance built from
+PubMed abstracts. GAD (Bravo et al., 2015) is a
+semi-labeled dataset created using Genetic Associ-
+ation Archive and consists of gene-disease associa-
+tions.
+There are multiple variants of the datasets used
+by existing literature that differ by data statistics
+or evaluation protocol (Dong et al., 2021; Phan
+et al., 2021; Beltagy et al., 2019; Yeh et al., 2022;
+Peng et al., 2020; Xu et al., 2022) as described
+in Appx. §B, we adopt the most popular setting
+used by Gu et al. (2021) and give dataset statistics
+in Tab. 5. Most of entity pairs are labeled as ⊥
+without an explicit relation label.This setting is
+realistic since the model must identify a relation’s
+existence ﬁrst. Following Gu et al. (2021), we
+use the micro F1 score calculated across all non-
+abstinent instances as the evaluation metric.
+Baselines. We compare against the various base-
+lines (Appx. §A), mostly classiﬁcation-based ap-
+proaches that use|Y|+ 1-way classiﬁcation head
+on top of a biomedical-pretrained LM. Sci-Five2454Model ChemProt DDI GAD
+BioRE-Prompt(Yeh et al., 2022) 67.46 - -
+BLUE-BERT(Peng et al., 2019) 74.40 79.90 -
+Sci-BERT(Beltagy et al., 2019) 74.93 81.32
+Bio-BERT(Lee et al., 2020) 76.46 80.3379.83
+BioMegatron (Shin et al., 2020) 77.00 - -
+PubMed-BERT(Tinn et al., 2021) 77.24 82.36 82.34
+Sci-Five(Phan et al., 2021) 77.48 82.23 79.21
+KeBioLM (Yuan et al., 2021) 77.50 81.90 84.30
+BioLink-BERT(Yasunaga et al., 2022) 77.57 82.72 84.39
+BioM-ELECTRA(Alrowili and Vijay-Shanker, 2021) 78.60 - -
+BioRoBERTa(Alrowili and Vijay-Shanker, 2021) 78.80 - -
+BioM-ALBERT (Alrowili and Vijay-Shanker, 2021) 79.30 82.04-
+BioLink-BERT(Yasunaga et al., 2022) 79.98 83.35 84.90
+BioM-BERT(Alrowili and Vijay-Shanker, 2021) 80.00 81.92-
+NBR(§3.2) 79.30 83.87 83.75
+NBR (§3.3) 80.54 84.66 85.86
+NBR +EAD (§3.4) 81.10 85.14 -I SS M
+(Phan et al., 2021) generates the relation label as a
+seq-to-seq conditional generation formulation.
+Our method. We term three variants of NBR:
+•NBRusing NLI formulation (§3.2) with
+BioLinkBERT(Yasunaga et al., 2022) back-
+bone that pretrained on biomedical corpus.
+•NBR further cross-domain ﬁne-tunes
+(§3.3) BioLinkBERT on two general domain NLI
+datasets. The model retains biomedical domain
+knowledge and learns relevant NLI knowledge.
+•NBR +EAD assembles NBR
+with a separately trained EAD component (§3.4).
+We choose BioLinkBERT as the pretrained LM
+due to its supremacy in performance on various
+biomedical domain tasks, but we emphasize that
+our approach is agnostic to backbone models.
+4.2 Experimental Results
+NLI provides helpful indirect supervision. We
+report the comparison between NBR and baselines
+in Tab. 1. Overall, NBR +EAD achieves
+SOTA performance on all three datasets, with
+1.10, 1.79, and 0.96 points F1 improvement on
+ChemProt, DDI, and GAD respectively. Strongperformance gains verify the effectiveness of refor-
+mulating biomedical RE as NLI. NLI supervision
+signals from the general domain are transferred to
+enhance the biomedical RE learning signals. By
+verbalizing relations into natural language hypoth-
+esis, NBR leverages the preexisting inductive bias
+of NLI-ﬁnetuned models to make informed predic-
+tions based on relation semantics.
+We further compare the performance of our
+model’s variants. First, due to the prevalence of
+abstinent instances on the datasets, we notice that
+by explicitly detecting the abstinent instances, as-
+sembling EAD (§3.4) with NBR improves
+performance on ChemProt and DDI. This is likely
+because explicitly detecting ⊥by a separate EAD
+model reduces the burden on NBR to pre-
+dict relations and identify abstinent instances at the
+same time. Second, we show that cross-domain
+ﬁne-tuning (§3.3) is vital. Compared to NBR,
+which is not trained on NLI datasets, NBR
+resulted in signiﬁcant improvements in F1 across
+three datasets. This demonstrates that having prior
+NLI knowledge allows better utilization of the NLI
+formulation. Lastly, we note that NBRis out-
+performed by its direct supervision counterpart,2455Model on ChemProt 0 shot 8 shot 1% 50 shot 10% 100%
+BioRE-Prompt(Yeh et al., 2022) 1.32 6.07 27.89 36.80 55.66 67.46
+BLUE-BERT(Peng et al., 2019) - 10.22 20.13 27.91 51.02 74.40
+Sci-BERT(Beltagy et al., 2019) - 15.60 22.08 33.36 60.60 74.93
+Bio-BERT(Lee et al., 2020) - 10.28 20.96 38.15 68.01 76.46
+PubMed-BERT(Tinn et al., 2021) - 15.97 23.49 35.37 68.49 77.24
+Sci-Five(Phan et al., 2021) 0.00 17.19 35.66 47.41 68.62 77.48
+BioM-ALBERT (Alrowili and Vijay-Shanker, 2021) - 8.49 14.95 21.92 51.69 79.30
+BioLinkBERT(Yasunaga et al., 2022) - 9.31 21.19 38.70 71.37 79.98
+BioM-BERT(Alrowili and Vijay-Shanker, 2021) - 16.02 26.23 40.63 68.93 80.00
+NBR(§3.2) 5.70 36.42 49.63 51.95 72.03 79.30
+NBR (§3.3) 24.50 46.53 60.17 56.43 75.12 80.54
+NBR +EAD (§3.4) - 51.44 60.34 61.31 75.24 81.10
+Model on DDI 0 shot 8 shot 50 shot 1% 10% 100%
+BLUE-BERT(Peng et al., 2019) - 8.76 25.79 27.48 65.62 79.90
+Bio-BERT(Lee et al., 2020) - 13.61 31.93 30.01 64.56 80.33
+Sci-BERT(Beltagy et al., 2019) - 10.55 33.34 23.62 69.44 81.32
+Sci-Five(Phan et al., 2021) 0.00 25.44 39.36 29.80 77.11 82.23
+PubMed-BERT(Tinn et al., 2021) - 17.02 34.39 27.53 71.98 82.36
+BioM-ALBERT (Alrowili and Vijay-Shanker, 2021) - 11.52 22.50 18.64 76.70 82.04
+BioLinkBERT(Yasunaga et al., 2022) - 9.70 37.80 34.11 74.08 83.35
+BioM-BERT(Alrowili and Vijay-Shanker, 2021) - 16.42 37.25 27.85 79.07 81.92
+NBR(§3.2) 3.60 32.01 47.86 53.53 79.49 83.87
+NBR (§3.3) 11.94 37.80 52.49 60.20 80.85 84.66
+NBR +EAD (§3.4) - 42.48 58.50 61.06 81.71 85.14
+namely BioLinkBERT on ChemProt and GAD. The
+possible reason could be that the model needs to
+learn to perform NLI tasks on top of the RE task
+without NLI training, which leads to shallower
+supervision signals. However we observe that
+generally, and especially in low-resource regimes,
+NBRimproves over direct supervision (§4.4).
+Indirect supervision from NLI shines particu-
+larly under low-resource. We evaluate the NBR
+under zero- and few-shot settings in Tab. 2. Fol-
+lowing existing works (Peng et al., 2020; Xu et al.,
+2022), we train the model with 0, 8 and 50 shots
+and 1% and 10% of training instances. We note
+that classiﬁcation-based methods could not adapt
+to the zero-shot setting.
+Our experimental results show that all three vari-
+ants of NBR consistently achieve strong perfor-
+mance across all few-shot settings on all datasets,
+e.g. 34.25 points F1 improvement on 8-shot
+ChemProt. The performance of direct supervi-
+sion models deteriorates dramatically as the num-ber of training instances decreases, due to the lim-
+ited learning signals. On the contrary, NBR effec-
+tively leverages indirect supervision to transform
+richer NLI signals to improve the RE performance.
+Additionally verbalized hypotheses provide valu-
+able semantic cues for prediction. We also ob-
+serve similar patterns as the full-set experiments:
+using NLI knowledge learned from NLI training
+data improves the performance of NBR, and
+combing EAD with NBR leads to further
+performance gains.
+Lastly, we note that as the number of training
+instances increases, the beneﬁts of indirect super-
+vision tend to decrease. This suggests that given
+sufﬁcient training signals, direct supervision can
+learn effectively, and the marginal returns of intro-
+ducing additional NLI signals become smaller. In
+practical settings where biomedical annotations are
+scarce, learning with indirect supervision can lead
+to better performance.24564.3 Ablation Study
+1% 100% 1% 100%
+NBR 60.17 80.54 60.20 84.66
+-L(Eq. 1) 59.63 79.32 52.50 83.29
+-L(Eq. 2) 57.57 78.68 50.18 82.94
+-L-L 53.87 78.12 20.71 82.74
+MedNLI 53.58 79.60 51.04 82.42DDI ChemProtModel
+We perform ablation studies on model compo-
+nents on ChemProt and DDI using 1% and 100%
+training data in Tab. 3. (1) InfoNCE L(Eq. 1)
+is essential. Replacing Lwith ranking loss sum
+i.e./summationtext/lscript(s(y),s(y);γ)deteriorate perfor-
+mance. These results conﬁrm the effectiveness
+of InfoNCE in learning from negative samples
+(Robinson et al., 2021; Wang et al., 2022). (2)
+L(Eq. 2) is vital. Given the prevalence of ab-
+stinent relations in the two datasets, it is easy for
+models to be misled by abstinent instances since
+they impose stronger learning signals. We speciﬁ-
+cally notice 1% settings have a larger performance
+drop, which might be caused by the fact that de-
+tecting abstention is harder when the quantity of
+other labels and their associated learning signals is
+reduced. (3) We further consider a variant that re-
+placesLwith ranking loss sum, removes L
+and uses only one negative sample, which corre-
+sponds to LITE (Li et al., 2022) that uses NLI
+indirect supervision for the general domain entity
+typing task. We observe further performance degra-
+dation, which again veriﬁes the effectiveness of the
+two losses. Lastly (4) we ﬁne-tune BioLinkBERT
+on the biomedical MedNLI (Romanov and Shivade,
+2018). Despite being domain-relevant, we observe
+performance drops compared to ﬁne-tuning on gen-
+eral domain NLI datasets. We hypothesize that
+perform drops might be caused by (a) MedNLI
+being relatively small as MNLI is 35x larger and
+(b) low coverage on relevant knowledge e.g. only
+11.77% of ChemProt entities are mentioned in
+MedNLI. Therefore even if MedNLI provides both
+NLI knowledge and biomedical knowledge, the
+gain is insigniﬁcant.
+4.4 Analysis
+In this section, we ﬁrst show the beneﬁts of indirect
+supervision, then illustrate two key ingredients foreffective indirect supervision gains: biomedical
+domain knowledge and NLI knowledge.
+DS IS DS IS
+1% 0.00 51.11 21.19 49.63
+100% 45.72 76.02 79.98 79.30
+1% 15.13 26.11 34.11 53.53
+100% 81.23 81.73 83.35 83.87BioLinkBERT RoBERTaDataset
+NLI formulation beneﬁts, even without addi-
+tional NLI resources. In Tab. 4, we demonstrate
+the effectiveness of NLI formulation using two
+backbones without NLI knowledge : RoBERTa (Liu
+et al., 2019) and BioLinkBERT.
+We observe that even if models lack NLI for-
+mulation adaption, NLI formulation outperforms
+original RE formulation in most settings, particu-
+larly in low-resource settings. When data is limited,
+it is challenging for direct supervision methods to
+access sufﬁcient supervision signals. In contrast,
+the model can leverage the semantic information in
+the natural language hypothesis with the NLI for-
+mulation. Additionally, BioLinkBERT consistently
+outperformed RoBERTa in the same settings, de-
+spite RoBERTahaving larger parameters, sug-
+gesting the importance of domain knowledge.
+Two key ingredients of indirect supervision for
+biomedical RE. We identify two potential fac-
+tors that contribute to the effective usage of indi-
+rect supervision for biomedical RE: 1) biomedical
+domain-speciﬁc knowledge; and 2) NLI knowl-
+edge to adapt to the NLI formulation. To test the
+importance of these two kinds of knowledge, in
+Fig. 2 we evaluate on 1% and 100% of ChemProt
+and DDI the four combinations: RoBERTa and
+RoBERTa ﬁne-tuned on NLI, and BioLinkBERT
+and BioLinkBERT ﬁne-tuned on NLI.
+We ﬁrst observe that BioLinkBERT ﬁne-tuned
+on NLI datasets behaves the best across all four
+settings, indicating the importance of both pieces
+of knowledge. When the learning signal is lim-
+ited, the model can dynamically load-balance both
+forms of knowledge to make educated predictions.
+Secondly, we note that RoBERTa, which lacks both
+biomedical and NLI knowledge, consistently per-
+forms the worst, except for 1% ChemProt. Finally,2457
+it is difﬁcult to determine whether the domain or
+NLI knowledge is more important in biomedical
+RE, as the relative importance may depend on the
+speciﬁc dataset or the knowledge requirements of
+each input.
+5 Conclusion
+We present a novel method NBR that leverages
+indirect supervision by cross-task transfer learning
+from NLI tasks to improve the biomedical RE task.
+NBR verbalizes relations to natural language hy-
+potheses so that model is able to exploit semantic
+information to make informed predictions. Fur-
+thermore, NBR adopts a ranking-based abstinent
+calibration loss that penalizes overconﬁdent absti-
+nent instances while encouraging non-abstinent in-
+stances, thus being capable of abstaining on un-
+certain instances. Extensive experiments on three
+widely-used biomedical RE benchmarks demon-
+strate that NBR is effective in both full-set and
+low-resource settings. We further investigate two
+key ingredients for effective NLI indirect supervi-
+sion on biomedical RE. Future work could involve
+further investigation of other indirect supervision
+approaches and automatic relation template gener-
+ation based on prompt learning.
+Acknowledgement
+We appreciate the reviewers for their insightful
+comments and suggestions. Jiashu Xu was sup-
+ported by the Center for Undergraduate Research
+in Viterbi Engineering (CURVE) Fellowship.
+Mingyu Derek Ma was supported by the AFOSR
+MURI grant #FA9550-22-1-0380, the Defense Ad-
+vanced Research Project Agency (DARPA) grant
+#HR00112290103/HR0011260656, and a CiscoResearch Award. Muhao Chen was supported by
+the NSF Grant IIS 2105329, by the Air Force
+Research Laboratory under agreement number
+FA8750-20-2-10002, by a subaward of the INFER
+Program through UMD ARLIS, an Amazon Re-
+search Award and a Cisco Research Award. Com-
+puting of this work was partly supported by a sub-
+award of NSF Cloudbank 1925001 through UCSD.
+Limitations
+This work investigates using NLI as indirect su-
+pervision for biomedical RE. Experiments suggest
+two key ingredients in high-performing indirect
+supervision biomedical RE are biomedical knowl-
+edge and NLI knowledge. To this goal, we need
+to access a language model that is pretrained on
+biomedical domain corpus, which requires compu-
+tational resources. Compared to general domain
+ones, models pretrained on a speciﬁc domain are
+often limited in variety. Further to learn NLI knowl-
+edge additional cross-domain ﬁne-tuning needs to
+be conducted, which results in additional computa-
+tional overhead.
+During inference NBR requires #label times
+of forward passes to yield prediction since NBR
+needs to evaluate entailment scores for each verbal-
+ized relation. Compared to standard supervision
+which only requires one pass for every instance,
+inference cost and training cost are higher in a
+factor of # label. Higher inference cost hinders ap-
+plicability in a number of scenarios e.g. real-time
+applications. Additionally, the high inference cost
+makes it difﬁcult to deploy machine learning mod-
+els in resource-constrained environments, such as
+edge devices with limited processing power.
+Lastly, since NBR is sensitive to templates, de-
+signing an effective template is crucial for perfor-2458mance. However, currently human involvement is
+required to design templates for each relation. As
+the number of relations increases, human involve-
+ment might become costly and time-consuming.
+Moreover, it is not easy to test the effectiveness of
+templates as no objective metric exists, and the only
+way to assess the quality is to test the templates.
+References24592460
+A Models
+Baselines We categorize compared baselines by
+the pretrain corpus.
+•PubMed abstracts :BioM-ELECTRA (Alrowili
+and Vijay-Shanker, 2021).
+•PubMed abstracts and PMC full-text articles :
+Bio-BERT (Lee et al., 2020); BioM-BERT
+(Alrowili and Vijay-Shanker, 2021); BioMega-
+tron (Shin et al., 2020) pretrain on commercial-
+collection subset of PMC; PubMed-BERT
+(Tinn et al., 2021) ﬁne-tune model released by Gu
+et al. (2021), which is pretrain on those corpus;2461
+Sci-Five (Phan et al., 2021) is T5 based model
+that learns to conditionally generate relation la-
+bels in textual form directly; BioLinkBERT (Ya-
+sunaga et al., 2022) further proposes a pretraining
+task of link prediction, which enables the model
+to learn multi-hop knowledge.
+•PubMed abstracts and MIMIC-III clinical notes :
+BLUE-BERT (Peng et al., 2019).
+•Semantic Scholar :Sci-BERT (Beltagy et al.,
+2019) pretrain BERT on scientiﬁc corpus con-
+sists of 1.14M full-text papers from Semantic
+Scholar; BioRE-Prompt (Yeh et al., 2022) ini-
+tializes from RoBERTa trained on the Semantic
+Scholar and learns a three-token prompt for each
+relation and infers by ﬁnding the best matching
+prompt.
+We use model checkpoints released by hug-
+gingface (Wolf et al., 2020). Speciﬁcally, we use
+bionlp/bluebert_pubmed_mimic_uncased_L-
+24_H1024_A-16 for BLUE-BERT (Peng et al.,
+2019), allenai/scibert_scivocab_uncased
+for Sci-BERT (Beltagy et al., 2019),
+dmis-lab/biobert-basecased-v1.2 for Bio-
+BERT (Lee et al., 2020), microsoft/BiomedNLP-
+PubMedBERT-base-uncased-abstract-fulltext
+for PubMed-BERT (Tinn et al., 2021),
+razent/SciFive-large-Pubmed_PMC
+for Sci-Five (Phan et al., 2021),
+sultan/BioM-ALBERT-xxlarge-PMC for BioM-
+ALBERT (Alrowili and Vijay-Shanker, 2021),
+sultan/BioM-BERT-PubMed-PMC-Large for
+BioM-BERT (Alrowili and Vijay-Shanker,
+2021), michiyasunaga/BioLinkBERT-large
+for BioLink-BERT (Yasunaga et al., 2022), and
+cnut1648/biolinkbert-large-mnli-snli
+for BioLink-BERT that is ﬁne-tuned on SNLI
+(Bowman et al., 2015) and MNLI (Williams et al.,
+2018).
+NBR We run experiments on Quadro RTX 8000
+GPU. AdamW optimizer (Loshchilov and Hutter,
+2019) with learning rate 1e-5 is used, and we set
+marginγ= 0.7, temperature τ= 0.01and cali-
+bration (Eq. 2) strength λin sweep from 0.001 to
+10. We train models for 300 epochs. Models areevaluated every ten epochs on the dev set, and the
+best checkpoint is selected to infer on the test set.
+B Evaluation Difference
+As mentioned in §4, several previous works use
+a different evaluation metric and variants of the
+datasets, rendering it hard to compare with previ-
+ous work. In this section, we describe the main
+differences in the dataset. We ﬁrst report the statis-
+tics of the dataset we use in this work in Tab. 5. For
+other works that use variants of the datasets:
+•BLUE-BERT (Peng et al., 2019)’s variant
+of ChemProt and DDI. Their ChemProt con-
+tains 4,154/2,416/3458 train/val/test instances
+and ﬁve relations, while their DDI contains
+2,937/1,004/979 train/val/test instances and four
+relations.
+•Sci-BERT (Beltagy et al., 2019) uses a variant of
+ChemProt with 4,169/2,427/3,449 train/val/test
+instances and contains 13 relations.
+•Dong et al. (2021) and (Peng et al., 2020) use
+a variant of ChemProt with 4,168/2,427/3,469
+train/val/test instances and 13 relations.
+•Xu et al. (2022) use a variant of ChemProt with
+14 relations
+•BioRE-Prompt (Yeh et al., 2022) also use
+ChemProt provided by Gu et al. (2021), but does
+not exclude abstinent instances.
+C EAD Details and Variants
+Since only relations for EAD is “has relation”
+versus “no relation”, instead of Eq. 1 and Eq. 2
+used in NBR ,EAD learns only via ranking loss
+/lscript(s(y),s(y);γ)whereyis the ground-truth
+whileyis the opposite relation.2462We discuss several heuristics in assembling
+NBR andEAD . The best performing heuristic is
+simple: only resort to NBR when EAD prediction
+is not⊥. In other words, the ﬁnal prediction is
+⊥only if EAD prediction is⊥; otherwise, return
+the prediction of NBR . We evaluate other more
+sophisticated heuristics:
+•V oting: Predict⊥only when both NBR and
+EAD predict⊥; otherwise, return NBR ’s predic-
+tion.
+•Conﬁdent: Predict⊥only when EAD predicts⊥
+and conﬁdence score s(⊥)is higher than con-
+ﬁdence score s(⊥); otherwise, return NBR ’s
+prediction. Note that if EAD makes a false pos-
+itive, NBR is still able to recover if s(⊥)is
+the highest.
+•Super-conﬁdent: Predict ⊥when EAD predicts
+⊥; ifs(⊥)>s(⊥)return highest-scored
+non-abstinent relation arg maxs(y); oth-
+erwise prediction of NBR.
+•Classiﬁcation: Use a classiﬁcation-based model
+(with the same backbone as NBR ), and
+use logits for conﬁdence score under the simple
+heuristic.
+In Tab. 6, we observe that a more complicated
+heuristic does not entail better performance gains.
+Note that designing a contextual description for
+“has relation” is challenging and our template is
+a simple phrase such as “relation exists between.”
+Surprisingly, we still found assembling NBR with
+EAD empirically outperforms classiﬁcation-based
+abstention detector. We credit enhanced perfor-
+mance to additional semantic information captured
+by the verbalized template.
+D Template for datasets
+We provide details for each of the templates inves-
+tigated in this work.1.Simple Template: This template verbalizes
+the relation between two entities as a “ is-a”
+phrase, e.g. “@CHEMICAL$ is a downregu-
+lator to @GENE$.”
+2.Descriptive Template: We manually curate
+a description for each relation that con-
+tains more context, e.g. “Downregulator
+@CHEMICAL$ is designed as an inhibitor
+of @GENE$.”
+3.Demonstration Template: Motivated by few-
+shot exemplars used for in-context learn-
+ing, the demonstration template includes a
+randomly sampled context sentence whose
+entities hold the same relation, e.g. “Rela-
+tion described between @CHEMICAL$ to
+@GENE$ is similar to < example sentence >.”
+4.Descriptive + Demonstration: We include
+both a contextual description and an in-
+context exemplar by simple concatenating.
+5.Learned Prompt Template: Borrowed from
+Yeh et al. (2022), which leverage prompt tun-
+ing with rules (Han et al., 2022) to learn
+optimal discrete tokens to ﬁll in [MASK]
+within the template such as “@CHEMICAL$
+[MASK] [MASK] [MASK] @GENE$.”
+We further provide templates for NBR on three
+datasets: ChemProt (Tab. 10), DDI (Tab. 9) and
+GAD (Tab. 8).
+Lastly, Tab. 7 shows the effect of template de-
+sign. The descriptive template, which involves
+manual efforts, leads to the best performance. The
+simple template preserves the relation name se-
+mantics and yields strong performance. On the
+other hand, while popular in in-context learning
+works, we ﬁnd that the demonstration template or
+descriptive + demonstration template consistently
+underperforms the descriptive template, indicating
+that incorporating examples in NLI hypothesis is
+not helpful potentially due to limited diversity. The
+learned prompt template used by Yeh et al. (2022)
+does not outperform the manually constructed de-
+scriptive template. Finally, we note that changing
+templates can lead to signiﬁcant performance per-
+turbations, our experiments suggest that evaluating
+the quality of templates in low-resource settings
+such as 1% can be effective and efﬁcient. We note
+that the contextual template might not be optimal
+and we leave how to automatically pick the optimal
+template as future work.24632464Verbalized Hypothesis
+0 (no relation) @CHEMICAL$ and @GENE$ have no relation.
+CPR:3 @CHEMICAL$ is a upregulator to @GENE$.
+CPR:4 @CHEMICAL$ is a downregulator to @GENE$.
+CPR:5 @CHEMICAL$ is a agonist to @GENE$.
+CPR:6 @CHEMICAL$ is a antagonist to @GENE$.
+CPR:9 @CHEMICAL$ is a substrate to @GENE$.
+CPR:3 Upregulator @CHEMICAL$ is activated by @GENE$.
+CPR:4 Downregulator @CHEMICAL$ is designed as an inhibitor of @GENE$.
+CPR:5 Activity of agonist @CHEMICAL$ is mediated by @GENE$.
+CPR:6 @CHEMICAL$ is identiﬁed as an antagonist of @GENE$.
+CPR:9 @CHEMICAL$ is a substrate for @GENE$.
+CPR:3 Relation of @CHEMICAL$ to @GENE$ is similar to relation described in
+“@CHEMICAL$ selectively induced @GENE$ in four studied HCC cell lines. ”
+CPR:4 Relation of @CHEMICAL$ to @GENE$ is similar to relation described in
+“@CHEMICAL$, a new @GENE$ inhibitor for the management of obesity. ”
+CPR:5 Relation of @CHEMICAL$ to @GENE$ is similar to relation described in
+“Pharmacology of @CHEMICAL$, a selective @GENE$/MT2 receptor agonist: a
+novel therapeutic drug for sleep disorders. ”
+CPR:6 Relation of @CHEMICAL$ to @GENE$ is similar to relation described in
+“@CHEMICAL$ is an @GENE$ antagonist that is metabolized primarily by
+glucuronidation but also undergoes oxidative metabolism by CYP3A4. ”
+CPR:9 Relation of @CHEMICAL$ to @GENE$ is similar to relation described in “For
+determination of [@GENE$+Pli]-activity, @CHEMICAL$ was added after this
+incubation. ”
+CPR:3 Upregulator @CHEMICAL$ is activated by @GENE$, similar to relation described
+in“@CHEMICAL$ selectively induced @GENE$ in four studied HCC cell lines. ”
+CPR:4 Downregulator @CHEMICAL$ is designed as an inhibitor of @GENE$, similar to
+relation described in “@CHEMICAL$, a new @GENE$ inhibitor for the
+management of obesity. ”
+CPR:5 Activity of agonist @CHEMICAL$ is mediated by @GENE$, similar to relation
+described in “Pharmacology of @CHEMICAL$, a selective @GENE$/MT2 receptor
+agonist: a novel therapeutic drug for sleep disorders. ”
+CPR:6 @CHEMICAL$ is identiﬁed as an antagonist of @GENE$, similar to relation
+described in “@CHEMICAL$ is an @GENE$ antagonist that is metabolized
+primarily by glucuronidation but also undergoes oxidative metabolism by CYP3A4. ”
+CPR:9 CHEMICAL$ is a substrate for @GENE$, similar to relation described in “For
+determination of [@GENE$+Pli]-activity, @CHEMICAL$ was added after this
+incubation. ”
+CPR:3 @CHEMICAL$ is activated by @GENE$.
+CPR:4 @CHEMICAL$ activity inhibited by @GENE$.
+CPR:5 @CHEMICAL$ agonist actions of @GENE$.
+CPR:6 @CHEMICAL$ identiﬁed are antagonists @GENE$.
+CPR:9 @CHEMICAL$ is substrate for @GENE$.Relation2465ACL 2023 Responsible NLP Checklist
+A For every submission:
+/squareA1. Did you describe the limitations of your work?
+No section number, after Section 5 Conclusion
+/squareA2. Did you discuss any potential risks of your work?
+We do not see signiﬁcant risks in our work
+/squareA3. Do the abstract and introduction summarize the paper’s main claims?
+Abstract before Section 1 Introduction
+/squareA4. Have you used AI writing assistants when working on this paper?
+Left blank.
+B/squareDid you use or create scientiﬁc artifacts?
+Section 4 Experiments
+/squareB1. Did you cite the creators of artifacts you used?
+Section 4 Experiments
+/squareB2. Did you discuss the license or terms for use and / or distribution of any artifacts?
+Section 4 Experiments
+/squareB3. Did you discuss if your use of existing artifact(s) was consistent with their intended use, provided
+that it was speciﬁed? For the artifacts you create, do you specify intended use and whether that is
+compatible with the original access conditions (in particular, derivatives of data accessed for research
+purposes should not be used outside of research contexts)?
+Section 4 Experiments and Appendix B Evaluation Difference
+/squareB4. Did you discuss the steps taken to check whether the data that was collected / used contains any
+information that names or uniquely identiﬁes individual people or offensive content, and the steps
+taken to protect / anonymize it?
+We refer readers who interested in those information to the original paper
+/squareB5. Did you provide documentation of the artifacts, e.g., coverage of domains, languages, and
+linguistic phenomena, demographic groups represented, etc.?
+We refer readers who interested in those information to the original paper
+/squareB6. Did you report relevant statistics like the number of examples, details of train / test / dev splits,
+etc. for the data that you used / created? Even for commonly-used benchmark datasets, include the
+number of examples in train / validation / test splits, as these provide necessary context for a reader
+to understand experimental results. For example, small differences in accuracy on large test sets may
+be signiﬁcant, while on small test sets they may not be.
+Table 5
+C/squareDid you run computational experiments?
+Section 4 Experiments
+/squareC1. Did you report the number of parameters in the models used, the total computational budget
+(e.g., GPU hours), and computing infrastructure used?
+Appendix A Models2466/squareC2. Did you discuss the experimental setup, including hyperparameter search and best-found
+hyperparameter values?
+Section 4 Experiments and Appendix A Models
+/squareC3. Did you report descriptive statistics about your results (e.g., error bars around results, summary
+statistics from sets of experiments), and is it transparent whether you are reporting the max, mean,
+etc. or just a single run?
+Section 4 Experiments
+/squareC4. If you used existing packages (e.g., for preprocessing, for normalization, or for evaluation), did
+you report the implementation, model, and parameter settings used (e.g., NLTK, Spacy, ROUGE,
+etc.)?
+Section 4 Experiments
+D/squareDid you use human annotators (e.g., crowdworkers) or research with human participants?
+Left blank.
+/squareD1. Did you report the full text of instructions given to participants, including e.g., screenshots,
+disclaimers of any risks to participants or annotators, etc.?
+No response.
+/squareD2. Did you report information about how you recruited (e.g., crowdsourcing platform, students)
+and paid participants, and discuss if such payment is adequate given the participants’ demographic
+(e.g., country of residence)?
+No response.
+/squareD3. Did you discuss whether and how consent was obtained from people whose data you’re
+using/curating? For example, if you collected data via crowdsourcing, did your instructions to
+crowdworkers explain how the data would be used?
+No response.
+/squareD4. Was the data collection protocol approved (or determined exempt) by an ethics review board?
+No response.
+/squareD5. Did you report the basic demographic and geographic characteristics of the annotator population
+that is the source of the data?
+No response.2467

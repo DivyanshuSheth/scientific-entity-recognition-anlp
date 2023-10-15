@@ -1,1 +1,395 @@
-10775 Proceedings of the 2022 Conference on Empirical Methods in Natural Language Processing , pages 10775 10785 December 7 - 11 , 2022 © 2022 Association for Computational Linguistics 10776 10777 10778 10779 10780 10781 10782 10783 10784 10785 
+
+Fabian David Schmidt, Ivan Vuli ´c, Goran GlavašCenter For Artificial Intelligence and Data Science, University of Würzburg, GermanyLanguage Technology Lab, University of Cambridge, UK
+{fabian.schmidt, goran.glavas}@uni-wuerzburg.de
+iv250@cam.ac.uk
+Abstract
+Large multilingual language models generally
+demonstrate impressive results in zero-shot
+cross-lingual transfer, yet often fail to success-
+fully transfer to low-resource languages, even
+for token-level prediction tasks like named en-
+tity recognition (NER). In this work, we intro-
+duce a simple yet highly effective approach for
+improving zero-shot transfer for NER to low-
+resource languages. We observe that NER fine-
+tuning in the source language decontextualizes
+token representations, i.e., tokens increasingly
+attend to themselves. This increased reliance
+on token information itself, we hypothesize,
+triggers a type of overfitting to properties that
+NE tokens within the source languages share,
+but are generally not present in NE mentions
+of target languages. As a remedy, we propose a
+simple yet very effective sliced fine-tuning for
+NER ( S ) that forces stronger token con-
+textualization in the Transformer: we divide the
+transformed token representations and classifier
+into disjoint slices that are then independently
+classified during training. We evaluate S
+on two standard benchmarks for NER that in-
+volve low-resource languages, WikiANN and
+MasakhaNER, and show that it (i) indeed re-
+duces decontextualization (i.e., extent to which
+NE tokens attend to themselves), consequently
+(ii) yielding consistent transfer gains, especially
+prominent for low-resource target languages
+distant from the source language.
+1 Introduction
+In recent years, massively multilingual transform-
+ers (MMTs) have become the backbone of multi-
+lingual NLP. MMTs like mBERT (Devlin et al.,
+2019), XLM-R (Conneau et al., 2020), and mT5
+(Xue et al., 2021), pretrained on corpora spanning
+100+ languages, have become the main vehicle of
+cross-lingual transfer in NLP: fine-tuned using task
+annotations in the source language, an MMT can,
+conceptually, directly make predictions for all tar-
+get languages seen in pretraining, for which littleor no annotated task data exists (Pires et al., 2019;
+Wu and Dredze, 2019; Dufter and Schütze, 2020).
+Successful zero-shot transfer, however, has been
+shown to critically hinge on linguistic proximity
+between source and target languages as well the
+quality of target language representations, deter-
+mined by the size of target language corpora used in
+the MMT pretraining (Lauscher et al., 2020; Zhao
+et al., 2021). Unfortunately, the transfer fails where
+it is needed the most – for low-resource languages
+linguistically distant from high-resource languages
+with annotated task data (Ebrahimi et al., 2021;
+Adelani et al., 2021; Ruder et al., 2021b). Zero-
+shot transfer of named entity recognition (NER)
+models to low-resource languages suffers from a
+particularly profound performance drop (Adelani
+et al., 2021; Lauscher et al., 2020). In this work, we
+identify the cause and propose an effective remedy.
+Contributions. (1) We analyze the representation
+space of an MMT, before and after source-language
+NER fine-tuning, and discover that it decreases to-
+ken contextualization in higher Transformer lay-
+ers: after fine-tuning, tokens generally learn to put
+much more attention to themselves. Put differently,
+monolingual NER benefits from limiting higher-
+layer contextualization, which, we believe results
+with encoding more information from the token
+itself and less from the context. While this may be
+beneficial for monolingual NER, where NE tokens
+share features (e.g., capitalization, morphemes),
+we believe it has a negative effect in cross-lingual
+transfer, given that NE mentions in target languages
+generally do not exhibit the same features. (2)
+We devise a novel sliced fine-tuning Transformer-
+based NER ( S ): we split the transformed
+token vectors into disjoint segments and classify
+each independently with a different subset of classi-
+fication parameters. We show that S leads to
+increased contextualization in higher Transformer
+layers. This, as our empirical evaluation on two
+established multilingual NER benchmarks shows10775
+(Pan et al., 2017; Adelani et al., 2021), leads to sub-
+stantially better transfer performance, especially
+for low-resource languages distant from the source.
+Our work shows that, despite the task-agnostic
+nature of the current MMT-based paradigm for
+cross-lingual transfer, task-specific traits can be
+exploited to yield substantial performance gains.
+We hope it catalyzes more work on task-specific
+approaches to cross-lingual transfer with MMTs.
+2 Token Contextualization in NER
+Decontextualization in Monolingual NER. We
+first fine-tune one of the most widely used MMT
+models, XLM-R (Conneau et al., 2020),on the
+English training portion of WikiANN (Pan et al.,
+2017), a widely used multilingual NER dataset.
+Figure 1 shows the average proportion of the atten-
+tion that tokens in each Transformer layer place on
+themselves, before (i.e., for vanilla XLM-R) and
+after standard NER fine-tuning.The proportion of
+attention that tokens put on themselves in vanilla
+XLM-R varies between 10 and 20% across the lay-
+ers, with largest proportions in the first and last
+layer. The behavior of the corresponding XLM-
+R fine-tuned on English NER closely mirrors this
+behavior in the lower Transformer layers. In the
+higher layers – parameters of which change the
+most through NER fine-tuning – tokens start plac-
+ing much more attention to themselves than inthe vanilla XLM-R. The gap is particularly pro-
+nounced from the 9th layer onwards and amounts
+to roughly 10% more attending-to-self in the last
+layer, compared to the pretrained XLM-R. This
+suggests that monolingual NER favors (or, more
+precisely, requires) reduced contextualization in
+higher Transformer layers. This effectively means
+that the Transformer places more focus on token
+information itself, which, we hypothesize, leads to
+more similar representations for tokens with simi-
+lar properties, regardless of their context. In mono-
+lingual NER, this is arguably beneficial because,
+within the same language, NE tokens generally
+share many token-level properties (e.g., morpho-
+syntax and capitalization). Because of this, the
+same decontextualization effect, we argue, should
+have a detrimental effect in cross-lingual transfer
+to target languages in which NE tokens generally
+do not share token-level properties with NE tokens
+of the source language.
+Sliced Fine-Tuning for Cross-Lingual NER. We
+next devise a novel fine-tuning approach that forces
+the Transformer to retain more contextualization,
+especially in its higher layers. Given a sequence of
+input tokens t, letv∈Rbe the contextu-
+alized representation of the i-th token, output of the
+last Transformer layer. In standard fine-tuning for
+token-level tasks, contextualized token representa-
+tions are forwarded into a classifier parameterized
+by a linear layer W∈Rand a bias b∈R,
+which project vinto a vector of log-probabilities,
+one for each class c∈C.
+Due to the observed decontextualization (see
+again Figure 1), we believe that NER fine-tuning
+on source language data leads to representations
+that are mutually more correlated (across tokens
+of same NE classes) for combinations of features
+that predominantly encode token-level informa-
+tion, and not contextual information. This, as
+discussed, is beneficial for monolingual NER per-
+formance, but we suspect is detrimental to cross-
+lingual NER transfer. Aiming to decorrelate to-
+ken representations, we propose sliced fine-tuning
+for NER ( S ), in which we slice transformed
+token vectors vintod/h disjoint subsequences
+(i.e., smaller vectors) of size hduring training ,
+where hcan be any integer divisor of d:{v}
+(cf. Figure 2).We then accordingly slice the
+classifier’s matrix Walong the primary dimen-
+sion, resulting in the classification tensor W∈10776R={W∈R}. Each token
+vector slice is then independently classified by
+the corresponding slice of the classification tensor:
+y=softmax (v·W+b). We then compute
+the standard cross-entropy loss per slice and update
+both the classifier’s and Transformer’s parameters
+by minimizing the average of slice losses.
+Consider d= 768 withh= 2 as illustrated in
+Figure 2: SLICER learns to pool 768-dimensional
+token embeddings, output of the last attention layer,
+to384(i.e.,)slices∈Rin the last feed-forward
+layer. SLICER then computes the loss indepen-
+dently by slice (i.e., on subsequent pairs of features)
+and averages those slice losses {L}into the fi-
+nal loss. Such training forces the Transformer to
+self-sufficiently compress the information to clas-
+sify NE into 2features (for h= 1 into 1feature,
+forh= 8into 8features, etc.) as correlations be-
+tween features across slices cannot be exploited
+by design. The low capacity of slices further dis-
+ables the model to retain simplest token-level cues
+(e.g., casing, suffixes) that discern between differ-
+ent NE classes within a language. We hypothesize
+that the model is thereby coerced to embed more
+contextual information in token vectors v: since
+SLICER erodes token-idiosyncratic features, the
+class-independent dissimilarity between token rep-
+resentations decreases. This effect then propagates
+further backwards through the Transformer and ma-
+terializes in increased contextualization via higher
+attention over surrounding tokens. Such improved
+contextualization then results in token representa-
+tions that are more robust to distributional shift
+arising from language and domain transfer.
+3 Evaluation
+Experimental Setup. Unless stated differently,
+we train on the English training portion of
+WikiANN (Pan et al., 2017). We then evaluate
+S against standard fine-tuning (Standard FT)
+in zero-shot transfer to (i) 23 target languages
+from WikiANN and (ii) 10 African languages from
+MasakhaNER (Adelani et al., 2021).We fine-
+tune XLM-R (Base) with mixed precision, using
+AdamW with 0.05weight decay (Loshchilov and
+Hutter, 2019) for optimization. We train with three
+different learning rates {5e,1e,2e}with
+10% linear warmup and subsequent decay, for each
+setup of which we execute 10fine-tuning runs with
+different random seeds. We apply 10% dropout
+and train in batches of size 32for10epochs.
+We compare S against Standard FT un-
+der two common evaluation procedures for cross-
+lingual transfer: (1) zero-shot transfer strictly
+assumes that there are no labeled instances in the
+target language; (2) transfer assumes that
+a small validation set in the target language is avail-
+able for model selection: in this setting, we select
+the model checkpoint that yields the best target
+language validation performance. For S , we
+report the results for three different values of slice
+size,h∈ {1,2,8}.
+Results. Table 1 displays the performance of
+S against standard fine-tuning, for three
+different learning rates, on MasakhaNER and
+WikiANN (mean and std. deviation aggregates
+across all 10 and 23 target languages, respectively;
+we present detailed per-language results in the Ap-
+pendix §A.3). Our sliced fine-tuning outperforms
+standard source language training across the board
+(for both benchmarks, both evaluation protocols,10777
+and all three learning rates): the gains are substan-
+tially more modest for WikiANN (between 0.5%
+for the smaller learning rate and 2% for the largest).
+On MasakhaNER, S consistently yields im-
+pressive gains of around 8 Fpoints.
+Delving deeper into per-language WikiANN re-
+sults in Figure 3 reveals that S performs
+on a par with Standard FT for English (source)
+and high-resource Indo-European target languages
+(e.g., German, French), but in most cases substan-
+tially outperforms Standard FT for low-resource
+languages from other language families. Figure 3 il-
+lustrates this, showing results on five high-resource
+Indo-European languages (English itself, German,
+French, Spanish, and Russian) and five non-Indo-
+European target languages (mostly low-resource:
+Arabic, Igbo, Quechua, Yoruba, and Swahili).
+Given that we train the models on the English
+training portion of WikiANN (i.e., Wikipedia texts)
+and that MasakhaNER consists of sentences from
+newswire texts, transferring to MasakhaNER test
+sets represents not only language but also domaintransfer. We believe such a setup exacerbates even
+more the differences between train and test dis-
+tributions of token-level information of NE to-
+kens (i.e., test sentences are even more out-of-
+distribution for the model) then in the case of lan-
+guage shift alone. The positive effect of SLICER
+w.r.t. to this additional domain shift becomes ob-
+vious when comparing the gap in performance
+(S vs. Standard FT) for languages present
+in both MasakhaNER and WikiANN:e.g., for
+Igbo (,; see the Appendix A.3), the moder-
+ate edge of 6-8% Fpoints that S has over
+Standard FT on WikiANN widens to enormous 16-
+19% advantage on MasakhaNER.The fact that
+S achieves the largest gains exactly in chal-10778
+lenging transfer to hand-labeled MasakhaNER test
+sets corroborates our hypothesis that S re-
+duces reliance on context-independent token-level
+information and forces the Transformer to encode
+more information from the context.
+Further Analyses. We next test the hypothesis
+thatS prevents token decontextualization in
+Transformer layers, which is present with Stan-
+dard FT (cf., Figure 1). Figure 4 displays the
+average proportion of attention mass that tokens
+place on themselves after sliced fine-tuning. We
+observe that S indeed reduces the amount of
+attending-to-self in higher Transformer layers: this
+means that more attention is placed on other tokens,
+corresponding to stronger contextualization.
+Finally, to verify that our findings are not lim-
+ited to English as the source language, we re-
+run all our experiments with another source lan-
+guage: Russian. Table 2 summarizes the aggregate
+cross-lingual transfer results with RU as the source
+(detailed results in the Appendix). We note the
+same trends as before (EN as source, cf. Table 1):
+S outperforms Standard FT on both datasets,
+with substantially larger gains on MasakhaNER.4 Conclusion
+In this focused research effort, we show that (mono-
+lingual) fine-tuning for NER introduces token
+decontextualization in higher Transformer layers
+which, we hypothesize, has a negative effect on
+(zero-shot) cross-lingual NER transfer with MMTs.
+We devise a novel sliced fine-tuning approach,
+dubbed S , that reduces this decontextualiza-
+tion effect by splitting transformed token vectors
+into disjoint slices which are then independently
+classified. We demonstrate on WikiANN and
+MasakhaNER that this yields substantial transfer
+gains, especially when transferring to low-resource
+languages. We additionally show that gains do not
+stem from a particular choice of source language.
+Our work shows that, despite the task-agnostic na-
+ture of the predominant MMT-based cross-lingual
+transfer paradigm, task specificities can still be
+leveraged to improve the cross-lingual transfer.
+Limitations and Ethical Considerations
+The main limitation of our work stems from the
+fact that the benefits of its methodological proposal
+are limited to a single task: Named Entity Recog-
+nition. This is in contrast with the vast majority
+of existing work that aims to improve the multilin-
+gual representation spaces and consequently boost
+downstream transfer performance across a wide
+range of tasks (Ruder et al., 2021a). We have pre-
+liminarily investigated the effects of sliced fine-
+tuning in cross-lingual transfer for other sequence
+labeling tasks, namely part of speech tagging and
+event trigger extraction. For those tasks, however,
+we observed (i) much less decontextualization (i.e.,
+smaller increase in average attention-to-self propor-
+tions) after source language fine-tuning. and (ii) its
+presence in fewer Transformer layers (last or last
+two layers). Our sliced fine-tuning thus does not
+bring any substantial gains compared to Standard
+FT on those tasks.
+Acknowledgements
+We thank the state of Baden-Württemberg for its
+support through access to the bwHPC. Fabian
+David Schmidt and Goran Glavaš were supported
+by the EUINACTION grant from NORFACE Gov-
+ernance (462-19-010, GL950/2-1). Ivan Vuli ´c is
+supported by a personal Royal Society University
+Research Fellowship (no 221137; 2022-2027) as
+well as a Huawei research donation to the Language
+Technology Lab.10779References10780
+A Appendix
+A.1 Further Reproducibility Details
+Hardware & Infrastructure . We train our mod-
+els on a cluster that provides virtual machines on
+which each model was trained on a single NVIDIA
+Tesla V100 32GB GPU. Each model (incl. evalua-
+tion) requires a runtime of c. 1.5hrs, on average.
+Additional Hyperparameters . We train on 10 ran-
+dom seeds ( {42, ...,51}) as set by Pytorch Light-
+ning’s seed_everything . For other hyperparame-
+ters, please refer to §3.
+Code . Our implementation is publicly available at
+https://github.com/fdschmidt93/SLICER .Language ISO code Validation Test
+Afrikaans af 1000 1000
+Amharic am 100 100
+Aymara ay 100 100
+Bulgarian bg 10000 10000
+German de 10000 10000
+Greek el 10000 10000
+English en 10000 10000
+French fr 10000 10000
+Hebrew he 10000 10000
+Hindi hi 1000 1000
+Japanese ia 100 100
+Igbo ig 100 100
+Japanese ja 10000 10000
+Quechua qu 100 100
+Russian ru 10000 10000
+Rwanda rw 100 100
+Swahili sw 1000 1000
+Tamil ta 1000 1000
+Telegu te 1000 1000
+Turkish tr 10000 10000
+Urdu ur 1000 1000
+Vietnamese vi 10000 10000
+Yoruba yo 100 100
+Chinese zh 10000 10000
+A.2 List of Target Languages
+We access both WikiANN and MasakhaNER via
+the Huggingface datasets library (Lhoest et al.,
+2021). Table 3 and 4 list the number of sentences
+for validation and testing by language.10781Language ISO code Validation Test
+Amharic am 250 500
+Hausa hau 272 545
+Igbo ibo 319 638
+Kinyarwanda kin 301 604
+Luganda lug 200 401
+Luo luo 92 185
+Nigerian-Pidgin pcm 300 600
+Swahili kin 300 602
+Wolof wol 267 536
+Yoruba yo 303 608
+A.3 Full Results By Target Language10782A.3.1 MasakhaNER
+A.3.2 WikiANN1078310784A.4 Russian as Source Language10785

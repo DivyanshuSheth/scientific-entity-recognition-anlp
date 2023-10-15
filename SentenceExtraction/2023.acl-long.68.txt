@@ -1,1 +1,1098 @@
-1216 Proceedings of the 61st Annual Meeting of the Association for Computational Linguistics Volume 1 : Long Papers , pages 1216–1239 July 9 - 14 , 2023 © 2023 Association for Computational Linguistics 1217 1218 1219 1220 1221 1222 1223 1224 1225 1226 1227 1228 1229 1230 1231 1232 1233 1234 1235 1236 1237 1238 1239 
+
+Batu Ozturkler
+Stanford University
+Stanford, California, USA
+ozt@stanford.eduNikolay Malkin
+Mila, Université de Montréal
+Montréal, Québec, Canada
+nikolay.malkin@mila.quebec
+Zhen Wang
+Ohio State University
+Columbus, Ohio, USA
+wang.9215@osu.eduNebojsa Jojic
+Microsoft Research
+Redmond, Washington, USA
+jojic@microsoft.com
+Abstract
+Large language models (LLMs) have a substan-
+tial capacity for high-level analogical reason-
+ing: reproducing patterns in linear text that oc-
+cur in their training data (zero-shot evaluation)
+or in the provided context (few-shot in-context
+learning). However, recent studies show that
+even the more advanced LLMs fail in scenar-
+ios that require reasoning over multiple objects
+or facts and making sequences of logical de-
+ductions. We propose a two-stage probabilis-
+tic inference paradigm, ThinkSum , which rea-
+sons over sets of objects or facts in a struc-
+tured manner. In the first stage ( Think – re-
+trieval of associations), a LLM is queried in
+parallel over a set of phrases extracted from
+the prompt or an auxiliary model call. In the
+second stage ( Sum – probabilistic inference
+or reasoning), the results of these queries are
+aggregated to make the final prediction. We
+demonstrate the possibilities and advantages
+ofThinkSum on the BIG-bench suite of LLM
+evaluation tasks, achieving improvements over
+the state of the art using GPT-family models on
+thirteen difficult tasks, often with far smaller
+model variants. We also compare and contrast
+ThinkSum with other proposed modifications
+to direct prompting of LLMs, such as variants
+of chain-of-thought prompting. Our results sug-
+gest that because the probabilistic inference in
+ThinkSum is performed outside of calls to the
+LLM, ThinkSum is less sensitive to prompt
+design, yields more interpretable predictions,
+and can be flexibly combined with latent vari-
+able models to extract structured knowledge
+from LLMs. Overall, our proposed paradigm
+represents a promising approach for enhancing
+the reasoning capabilities of LLMs.
+1 Introduction
+Large language models (LLMs; Brown et al., 2020;
+Rae et al., 2021; Chowdhery et al., 2022) can recall
+a broad range of basic facts, recognize and mimicvarious forms in language, and efficiently extrapo-
+late analogies in structure and meaning. These abil-
+ities allow LLMs to excel in zero-shot and few-shot
+tasks formulated as the generation or selection of a
+likely completion to a prompt. This formulation re-
+quires LLMs to perform fast associative thinking ,
+in which each token of text in the sequence making
+up the answer is generated or scored in one pass
+through the model and, other than that, no interme-
+diate information is created or retained. This fast
+thinking is made possible by the compression of
+information that is repeated in a variety of ways in
+large training datasets, within the LLM’s weights.
+However, it is increasingly evident that when
+reasoning , or slow thinking, is required, fail-
+ure modes of LLMs are revealed. In our usage,
+reasoning refers to the sequential manipulation
+of concepts that can be expressed in language.
+Tasks that require iterative retrieval of rarely stated
+knowledge, uncertainties over multiple objects or
+facts, or multiple steps of deduction are difficult
+even for the most advanced LLMs (Suzgun et al.,
+2022). In a recently designed suite of evalua-
+tions, BIG-bench (Srivastava et al., 2022), some
+of the tasks where the gap between machine and
+human performance is large involve inference se-
+quences with nested counterfactuals ( L ), concepts introduced through defi-
+nitions ( C ), etc. (see
+Fig. B.1). These are tasks where a human solver’s
+intuitive feeling of ‘(in)coherence’ is insufficient
+to produce the right answer, and a sequence of
+thoughts, along with the use of intermediate re-
+sults, may be necessary to arrive at the solution,
+particularly when working memory is insufficient.
+We show several tasks in BIG-bench that can be
+addressed by a two-component mechanism, which
+we name ThinkSum:1216A binne is any furry four-legged creature, and a bam is a simpl e dwelling.D P
+C T / A K
+TSA binne bam is a place for people (55%) animals (44%) birds (0.87%) researchers (0.022%)
+A binne is any furry four-legged creature, and a bam is a simpl e dwelling.
+Examples of binnes: cat,mink ,ferret ,guinea pig ,rabbit .
+Examples of bams: hut,cabin ,cottage ,shelter ,shack .
+A binne bam is a place for people (51%) animals (48%) birds (0.76%) researchers (0.011%)
+A binne is any furry four-legged creature, and a bam is a simpl e dwelling.
+binne ={cat,mink ,ferret ,guinea pig ,rabbit }
+bam ={hut,cabin ,cottage ,shelter ,shack }
+Abinne bam is a place for animals (65%) people (34%) birds (1.5%) researchers (0.056%)T (auxiliary LM calls to deﬁne sets)S(aggregate LM likelihoods)
+•Think (fast thinking / association / knowledge re-
+trieval step): creating an association of text spans
+with sets of strings. This process may involve
+generation from a language model, as is the case
+in Fig. 1, where the novel word ‘binne’ is asso-
+ciated with the set of strings {‘cat’,‘mink’,...}
+by prompting GPT-3 with the definition and ask-
+ing for examples. Alternatively, it may consist
+solely of a scoring mechanism, resulting in the
+formation of a matrix of probabilities on which
+probabilistic inference is performed.
+•Sum (slow thinking / Sum marization / reasoning
+step): probabilistic inference that aggregates gen-
+erated strings or probabilities to produce the final
+answer. Summarization typically involves, and
+often entirely consists of, summing of probabili-
+ties of strings (computed in the Think step), as
+in Fig. 1, where the final word is assumed to be
+sampled from a mixture of possible substitutions
+of ‘binne’ and ‘bam’ words into the input.
+We discuss different ways to Think and to Sum
+in section §2, but we start with one example, illus-trated in Fig. 1 (bottom), motivated by the C- (I )
+task in BIG-bench. In this task, the LLM is pro-
+vided with the definitions of two invented words
+and asked to infer the most plausible sentence that
+uses a combination of the invented words. As the
+words are not common or consistently used in the
+training set, the LLM needs to understand and com-
+bine the definitions of the invented words to reason
+about the meaning of the combination. The LLM
+is queried to produce example instances of the in-
+vented words with the help of the definitions. These
+example instances can be substituted into the query
+in place of the invented words. By mapping indi-
+vidual spans of the text of interest to sets, we arrive
+at a mixture model (in this example, a mixture with
+25 components for 5 possible replacements of each
+word), which can be used in the same manner the
+original LLM is used, either to score text or to
+generate it token by token. When we score all can-
+didate completions using this mixture model and
+normalize over the four choices, the correct answer
+– that ‘binne bams’ are for animals and not people –
+becomes the most likely.1217An important difference between our ThinkSum
+and existing chain-of-thought-like prompt engineer-
+ing methods (Wei et al., 2022; Kojima et al., 2022),
+is that our reasoning step is not reduced to a gener-
+ation problem for the LLM, but is performed as a
+probabilistic inference external to the LLM. This re-
+duces vulnerability to features of the prompt, such
+as accidental distraction of the LLM by spurious
+patterns (see Fig. 1, middle). Instead, we engineer
+the slow thinking process to make parallel calls
+to the LLM to query for intermediate information,
+then possibly perform programmatic recombina-
+tion of strings ( Think ). The final reasoning step
+– in which likelihoods obtained from the LLM for
+the recombinations derived from earlier steps of
+the reasoning process are combined to make the
+final prediction – is left to classical probabilistic
+reasoning ( Sum ). In a sense, Sum replaces the
+self-attention mechanism over linear text, which is
+used as the sole ‘reasoning’ mechanism in chain-of-
+thought-like approaches that expect the intermedi-
+ate ‘thoughts’ to take the form of generated tokens
+intervening between the input and output.
+Imposing an alternative reasoning system over
+an associative “knee-jerk reaction" system has an
+analogy with models of human cognitive processes
+(Tversky and Kahneman, 1974; Kahneman, 2011)
+that separate System 1 (fast thinking) and System
+2 (slow thinking). System 2 acts as a ‘controller’
+that can prime System 1 to appropriately bias its
+fast thinking. In the context of reasoning with deep
+learning models, System 2 has been interpreted
+as operating with sparse concepts that can be de-
+scribed in language (Bengio, 2017; Goyal and Ben-
+gio, 2020). Through repeated usage, the functions
+of System 2 become compressed into System 1
+intuitions, in the same manner that iterative ‘rea-
+soning’ functions of which smaller LLMs are not
+capable become zero-shot generation capacities for
+large LLMs. As is the case with humans, there
+is always the next frontier of problems where a
+trained model with remarkable ‘intuition’ needs to
+be slowed down. The main claim of this paper is
+that more is possible with LLMs of existing scale
+when they are used in concert with a wise controller
+that allows for probabilistic inference.
+2 ThinkSum
+2.1 How to Think
+Here we list examples of the “fast thinking" that
+precedes the summarization stage.Elementary string manipulations. Standard
+ways to turn a question into a prompt that can be
+given to a LLM for generation or scoring involve
+choices (e.g., of the prompt format) that can be
+seen as being made by a controlling agent. The
+default approach to multiple-choice questions is
+to write them as Cloze tasks. However, there are
+nontrivial operations used in inference procedures
+that sometimes work better, such as:
+•Order inversion : Exchanging the order of the
+question and answers, as in Min et al. (2022).
+•Premise erasure : Deleting a part of the question.
+Removing a premise with which the answer is
+expected to have high mutual information is a
+step in inference procedures that aim to correct
+for bias towards answers with high unconditional
+likelihood (Zhao et al., 2021; Holtzman et al.,
+2021; Malkin et al., 2022).
+Substitution and normalization. An example
+is shown in Fig. 1. Elements from a set may be
+substituted in place of ‘slot’ words in a prompt,
+such as ‘cat’ substituted for ‘binne’ in the prompt
+“A binne bam is a place for ”. This operation
+can be combined with syntax-normalization steps
+that are reliably achieved by standard NLP tools,
+such as ensuring subject-verb agreement.
+Example and list generation. A LLM can be
+prompted to generate or score lists of words or
+phrases. We suggest and experiment with three
+instances of this:
+•Example generation : In Fig. 1, the LLM is
+prompted to turn a definition or characterizing
+property, such as ‘simple dwelling’, into a list of
+examples. This can be achieved with a prompt
+such as “ A bam is a simple dwelling.
+Examples: 1. ”. The generated completion can
+be parsed into a set to be used later in the infer-
+ence procedure.
+•List extension : A similar approach can also be
+used to hallucinate additional possible answers
+to questions, as we will show in some of the
+experiments.
+•List of words : Similar prompts provide an even
+simpler Think method that we use for scoring –
+but not generation – in several tasks. Just prompt-
+ing a LLM with “ List of words: 𝐴,𝐵”,
+where𝐴and𝐵are words or phrases, and com-
+puting the likelihood of 𝐵conditioned on “ List
+of words: 𝐴,” is a good measure of semantic
+relatedness of 𝐴and𝐵.1218Fact generation. This way of Think ing asso-
+ciates an input word with a set of phrases in a
+similar manner to generating examples from a def-
+inition. It can be achieved with prompts such as
+“List facts about cats. 1. ” The generated
+facts are good targets for substitutions of other con-
+cepts (‘dogs’, ‘galaxies’) in place of the concept
+(‘cats’) about which facts are generated. A varia-
+tion on this asks the LLM to generate differences
+between two concepts, as shown in Fig. 2 (right).
+Translation. The LLM can be prompted to con-
+vert between different forms of representing the
+same concept as a sequence of tokens. We use two
+basic examples of this in experiments:
+•Translation between languages by prompting the
+LLM in formats such as “ French: J’adore
+les chats noirs. English: ”. A very similar
+approach can be used to convert non-alphabetic
+symbols, such as emoji, into words with similar
+meanings.
+•Converting text to formal (symbolic) structures,
+like turning a word problem into a collection of
+mathematical equations.
+2.2 How to Sum
+Elementary inference. As above, we begin by
+listing existing standard ways of turning LLM out-
+puts into answers, which we see as trivial cases of
+aggregation ( Sum ).
+•Majority/minority vote (argmin/argmax) : a
+component of most answer selection procedures.
+•Ratio of likelihoods : Likelihoods from different
+variants of the same prompt can be combined
+by considering their ratio or more general log-
+linear or other mixture. For example, this can
+be done to correct the likelihood of an answer
+conditioned on a question by its unconditional
+likelihood, in combination with the Premise era-
+sure operation described above.
+Mixture (average) aggregation. A collection of
+prompts can be treated as the components of a
+mixture model over completions. An example is
+shown in Fig. 1, where substitutions of a set of
+words yield 25 different prompts. Likelihoods of
+the completion over these 25 prompts are averaged.
+Product aggregation. We use products of likeli-
+hoods in two different ways:
+•In a similar way as mixtures, but when the more
+natural probabilistic model has allelements of a
+set (of prompts) generating the answer, such as
+when a description or definition must be satisfiedby all concepts in a set.
+•In a task where we are to determine whether a
+statement𝑆or its negation 𝑆is true, we can
+compute the likelihood of both 𝑆and𝑆being
+true (as posterior over the tokens ‘True’ and
+‘False’ in an appropriate prompt), then compare
+𝑝(True|𝑆)𝑝(False|𝑆)(𝑆is true and𝑆is false)
+with𝑝(False|𝑆)𝑝(True|𝑆)(𝑆is false and𝑆is
+true).
+3 Experiments
+In this section, we perform case studies on three
+tasks from the BIG-bench suite to demonstrate the
+possibilities of the inference approaches discussed
+in §2. We also experiment with ten other tasks
+from BIG-bench; the best results are summarized
+in Table 1 and the methods, grouped by the style
+ofThink ing and Sum ming, are described in Ap-
+pendix (§A).
+All details of the tasks can be found in the Ap-
+pendix (§C). Comparisons to direct prompting and
+algorithms that append retrieved or generated to-
+kens to the prompt are given in §3.4.
+3.1 Conceptual combinations: Invented words
+InI , two nonce words 𝑥,𝑥are
+defined and the correct statement must be chosen
+out of a set of statements 𝑆={𝑠}that begin with
+(possibly inflected forms of) “ 𝑥𝑥” (Fig. 1).
+We use an Example generation prompt to ob-
+tain a set of example words fitting the definitions of
+𝑥and𝑥. We thus obtain sets 𝑆and𝑆of words
+that can be substituted for 𝑥and𝑥, respectively.
+We treat each statement 𝑠as a template into
+which words 𝑤∈𝑆and𝑤∈𝑆can be substi-
+tuted by replacing 𝑥with𝑤and normalizing the
+syntax to ensure subject-verb agreement. Denoting
+by𝑠⟨𝑤,𝑤⟩such a substitution, we form a vector
+of probabilities 𝑝by scoring the Substitution of
+each possible pair of words into each statement and
+performing Mixture aggregation and considering
+theRatio of likelihoods with the template without
+substitution:
+𝑝=/√︄ummationtext.𝑝(𝑠⟨𝑤,𝑤⟩)
+𝑝(𝑠).
+The statement 𝑠with highest likelihood under this
+normalized mixture, arg max𝑝, is selected.
+3.2 Odd one out
+We examine possible Think andSum approaches
+in depth on the O task, in which the1219
+word in a set 𝑊={𝑤}that is least semantically
+related to the others must be chosen (e.g., Pick the
+odd word out: glass, head, arm, leg, hand, foot ).
+List of words. We form a semantic relatedness
+matrix𝑃by querying the LLM with a List of
+words Think prompt for each pair of indices 𝑖,𝑗:
+𝑃=𝑝(𝑤|“List of words: 𝑤,”).
+This matrix is aggregated by averaging over 𝑗(in
+log domain) and selecting the 𝑖with lowest average,
+i.e., least likelihood of being generated by a product
+mixture of all words in the set: 𝑖=arg min/√︁√︂oducttext.𝑃.
+This is a case of Product aggregation .
+Because this approach is the most successful
+with all model sizes we experimented with, its
+performance is reported in Table 1. Remarkably,
+near-average-human accuracy is maintained for allmodel sizes from GPT-2 Small to the largest GPT-3
+model (Fig. 2 (left)).
+Fact generation. As an alternative approach, we
+use a Fact generation prompt. An effective way
+to mine facts for semantic relatedness tasks is to
+consider two items in the same context in order to
+get relevant facts regarding how items are related
+to each other (prompt in Fig. 2 (right)). The demon-
+stration used in the prompt ensures that the LLM
+generates statements in an expected format, which
+can be parsed and used for probability computa-
+tion later. Using this prompt, we obtain a collec-
+tion of statements 𝑆={𝑠}about items 𝑤. We
+treat each generated 𝑠as a template into which
+different words 𝑤can be substituted and denote
+by𝑠⟨𝑤⟩theSubstitution of word𝑤into template
+𝑠. We then form a|𝑆|×|𝑊|matrix𝑃, defined1220by𝑃=𝑝(𝑠⟨𝑤⟩). Then, we can perform
+Minority voting : we take argmin over 𝑗and pick
+as the answer the most frequently occurring value,
+i.e., the item that is most often the least likely to fit
+a generated statement.
+Comparison with auxiliary knowledge ap-
+proaches. We compare our method with a
+knowledge-based prompting method, herein re-
+ferred to as auxiliary knowledge. In auxiliary
+knowledge, we prepend generated facts in the
+prompt before the question. Details of the prompt
+for auxiliary knowledge are provided in §D.3. In
+Figure 2 (middle), we show that the accuracy of
+Fact generation -based ThinkSum rises as the
+number of generated facts is increased, while the
+auxiliary knowledge technique peaks and then de-
+grades as the prompt lengthens.
+Fig. 2 (left) shows how performance varies with
+the size of the LLM used for GPT-3, auxiliary
+knowledge and ThinkSum onO .
+Even with GPT-2 Small, ThinkSum dramatically
+improves over much larger largest zero- or few-shot
+models with or without auxiliary knowledge. A
+finetuned iteration of the largest GPT-3 model, text-
+davinci-002, is the only model variant that, with the
+help of auxiliary knowledge, achieves competitive
+performance with ThinkSum . This result provides
+experimental evidence for our claim that while new
+models may create qualitative jumps, ThinkSum
+can push the performance limits of smaller models.
+Latent variable models. As we have shown, the
+detection of the odd item can be performed with
+simple inference operations on items, facts, and
+their joint likelihoods. However, it is also possible
+to assume a latent structure in the items and facts,
+consisting of two or more clusters such that the
+facts and items belonging to a cluster can be freely
+interchanged. We describe a problem-specific la-
+tent variable model that enables selecting the facts
+that characterize the majority class, thus explaining
+why the minority item is ruled as the odd one out
+and helping interpret the decisions of the system.
+We model items 𝑖∈𝐼and facts𝑓∈𝐹as be-
+ing generated from a latent class 𝑐∈{0,1}. The
+distribution is modeled as:
+𝑃(𝑖, 𝑓)=∑︁𝑃(𝑐)𝑃(𝑖|𝑐)𝑃(𝑓|𝑐)
+where𝑃(𝑖, 𝑓)is a matrix of likelihoods from the
+LLM and the semantic components, groupings
+𝑃(𝑖|𝑐)and𝑃(𝑓|𝑐), are derived from the matrix us-
+ing a standard iterative expectation-maximizationModel LoW LVM MV
+text-davinci-002 0.84 0.67 0.70
+text-davinci-001 0.74 0.77 0.70
+(EM; Dempster et al., 1977) inference procedure
+(see §E). Then, the score for an item 𝑖belonging
+to a cluster and all other items 𝑚∈𝑆,{𝑚≠𝑖}
+belonging to another cluster can be found as 𝑆=/√︄ummationtext.𝑃(𝑖|𝑐)𝑃(𝑐)/√︁√︂oducttext.𝑃(𝑚|𝑐)𝑃(𝑐).
+We show the effectiveness of the latent vari-
+able models in Table 2, where we analyze dif-
+ferent methods for solving O using
+the InstructGPT variants text-davinci-001 and text-
+davinci-002. For the ‘latent variable model’ and
+‘minority voting’ methods, we use number of differ-
+ences𝑁=5. The latent variable model is trained
+for200EM iterations. All probabilistic reason-
+ing methods perform well, outperforming previous
+baselines reported in Table 1. Inference using EM,
+as well as the other approaches, can be seen as a
+Sum (inference) operation and can be applicable
+in other tasks of similar structure.
+3.3 Logical deduction
+In the L task, different types
+of items and clues regarding their order are pro-
+vided (Fig. 3(a)). The goal is to select the correct
+statement from a set of statements about their place-
+ments. The ordering problems involve different
+types of objects (cars, birds, etc.) and orderings
+(by size, price, contest ranking, etc.). The task
+creators emphasize that this task requires parsing
+information about multiple objects and their rela-
+tionships, understanding rules regarding ordered
+objects in various scenarios, and iteratively apply-
+ing these rules. The LLM calls in the Think stage
+ofThinkSum can perform mappings required to
+parse information and understand rules, and the
+Sum stage can integrate mappings of objects to
+the placements under these rules. Here, we use a
+Translation prompt to map the given problem into
+a set of mathematical (in)equalities (Fig. 3(c)).
+TheTranslation prompt in Fig. 3(b), containing
+generic ordering statements and object names that
+are not used in the task as an in-context demonstra-
+tion, is sufficient to perform the translation from
+natural language to equations. By prepending this1221
+demonstration prompt to a problem statement, we
+induce the LLM to map the objects in the problem
+to the set of strings corresponding to numbers from
+1to𝑁, where𝑁is the number of objects, and to
+produce a set of inequalities (Fig. 3(c)).
+Once a translation of the problem into a set of
+inequalities is obtained, the Sum stage considers all
+possible mappings of items to indices to determine
+the mapping compatible with the discovered set
+of (in)equalities. This can be done by an external
+algorithm or by the LLM itself, as an LLM may be
+capable of understanding that, for example, “ 2>3”
+is a less likely string than “ 2>1” (see §D.2).
+Finally, the probability of each of the candidate
+statements, like “ yellow book=2 ”, can thus be
+obtained by:
+𝑝(“yellow book=2|𝑇)
+∝∑︁𝑝({𝑇⟨b⟩:𝑇∈𝑇} (1)
+∪{“yellow book=2⟨b⟩})
+where bdenotes the vector of positions for the 𝑁
+items (e.g.,(5,2,3,4,1)),𝑇={𝑇}is the set of
+inequalities obtained from the Translation prompt
+as a set of strings (e.g., “ black book<purple
+book ”), and𝑠⟨b⟩denotes the substitution of the cor-
+responding entry in bin place of the object name
+in the string 𝑠(e.g., “ 4<5”). The term inside the
+sum is a case of Product aggregation : the LLM
+likelihoods of all strings in the set are multiplied.
+In summary, our solution to this task involvescomposition of two Think operations – a Transla-
+tion into a set of equations and then Substitution
+of numbers in place of item names – and two Sum
+operations – a Product aggregation followed by
+aMixture aggregation . (Other options are dis-
+cussed below.)
+Results and discussion. For the 500 L- problems with 𝑁=5objects,
+ThinkSum yields an accuracy of 77% (see Table 1),
+besting the average human performance. When the
+necessary summations become large, it becomes
+very unlikely that pure prompt engineering can be
+competitive, as even humans need paper and pencil
+to create and attend to many alternative solutions,
+and would likely translate the premises into a sim-
+pler notation using a single letter (representing a
+variable to which a numeric value can be assigned)
+to represent each object, rather than directly attend-
+ing to the words in the problem statement.
+We also test an auxiliary knowledge method akin
+to chain-of-thought reasoning, where the informa-
+tion obtained with the prompt in Fig. 3 is appended
+to the LLM input. In particular, the problem, to-
+gether with its translation into inequalities, is used
+as a prompt to each of the answer options, and then
+the option with the highest likelihood is chosen
+for the answer. This approach does improve over
+straightforward zero-shot GPT-3 scoring, but only
+raises the accuracy to 50% (see §3.4 and Table 3).
+Optimizations, failure modes, and extensions.
+We have seen that InstructGPT is able both to trans-
+late logical deduction problems into (in)equalities1222(Fig. 3) and to evaluate each of them after replace-
+ment of items with position numbers (§D.2). We
+conclude that the Sum stage is there simply to
+search over all possible mappings, the way a human
+might. But, just as a human might use shortcuts
+in the search, the Sum stage of ThinkSum could
+be implemented in more or less efficient ways. For
+example, instead of summing over all possible as-
+signments of the five items, we can avoid the ones
+that are not permutations of {1,2,3,4,5}. Further-
+more, instead of using 𝑝from Fig. D.1 in (1),
+we can simply evaluate each inequality externally,
+giving a high constant probability for each inequal-
+ity𝑇⟨b⟩that is true and a low probability when it
+is false, or the summing can be aborted whenever
+an incorrect statement is detected in a particular
+assignment bof positions to items.
+The prompt in Fig. 3(b) instructs the LLM to
+assign positive integers depending on the language
+used (e.g., the smallest object gets 1), but a com-
+mon behaviour of the LLM is to generalize to as-
+signing negative numbers, such as using −2to rep-
+resent ‘second from the end’ (or second-largest,
+etc.). To remain robust to such a behavior of the
+Think stage, we can convert negative position num-
+bers𝑟into𝑁+𝑟+1before evaluating statements.
+However, a persistent failure mode of this kind of
+ThinkSum is that the LLM may translate inequal-
+ity statements inconsistently with equality state-
+ments (e.g., by coding the leftmost item as 1 and
+being consistent with this choice for other equality
+constraints, but translating inequality constraints
+consistently with the reverse order, with ‘left of’
+meaning>). Such failures can be addressed by
+careful engineering in the Sum stage, such as by
+summing out a binary latent variable indicating
+whether inequalities should be reversed. This in-
+creases the number of model evaluations, but also
+allows for robust auto-correction by the Sum stage
+of inconsistencies in the Think stage.
+3.4 Comparisons with chain-of-thought and
+auxiliary knowledge approaches
+ThinkSum vs. auxiliary knowledge. Table 3
+shows the comparison of ThinkSum with algo-
+rithms that append auxiliary knowledge as an or-
+acle ‘reasoning chain’. For P - , auxiliary knowledge was generated using
+the “list differences” prompt shown in Fig. 2 (right).
+For both auxiliary knowledge and ThinkSum , 6
+generated differences were used, as that was the
+best for auxiliary knowledge (see Fig. 2 (middle)).
+ThinkSum O andP - are solved with the “list of words” prompt.
+ForL , the Think prompt
+shown in Fig. 3 was included before the question in
+the prompt. In all cases, ThinkSum outperforms
+auxiliary knowledge.
+ThinkSum vs. chain of thought. Following Wei
+et al. (2022), we use “chain-of-thought (CoT) meth-
+ods" to mean LLM scoring approaches that use in-
+sertion of generated tokens between the prompt and
+the target answer. The model is taught, using few-
+shot demonstrations, how to generate these interme-
+diate tokens. Above we have compared ThinkSum
+with approaches that add extracted (from an auxil-
+iary LM call), not generated (within the LM’s lin-
+ear workspace) token sequences after the prompt,
+for the O ,P ,
+and L tasks (see Table 3).
+With suitable examples, it may be possible for
+a CoT approach to replace the Think phase, by
+learning from demonstrations to generate the ap-
+propriate knowledge, and parts of the Sum phase,
+although inference over parallel evaluations of the
+LLM is no longer possible. Our auxiliary knowl-
+edge baselines make precisely that generous as-
+sumption and focus the comparisons on the need
+for parallel calls and reasoning over possibilities
+using probabilistic inference (instead of leaving it
+to the LLM to make the right conclusions from the
+list of extracted alternatives).
+Although we expect that appending facts in
+a standard format to the prompt would help the
+model more than teaching the model to generate
+these facts, we experimented with CoT approaches
+on several tasks. Table A.1 shows example demon-
+strations and prompt formats used for each task,
+and Table 4 shows the results using two variants of
+the largest GPT-3 model.
+As expected, ThinkSum outperforms CoT
+prompting on all tasks with all variants except
+K with the davinci variant,
+where direct prompting already performs well. (We
+did not evaluate ThinkSum with davinci on L- because prompts like the one1223
+in Figure 3 did not reliably produce outputs in the
+correct format; notice that CoT is barely better than
+random guessing (20%).)
+When interpreting these results, it is important
+to note that only one prompt format was evalu-
+ated for both CoT and ThinkSum , and the format
+of prompts and demonstrations can have a strong
+and often unpredictable effect on the LLM. We ob-
+served that CoT approaches are highly sensitive
+to minor changes in the prompt format or the con-
+struction of in-context examples, consistent with
+the known biases of in-context learning (Lu et al.,
+2022; Zhao et al., 2021). On the other hand, using
+structured, shorter components is more reliable, as
+demonstrated by the efficacy of the Think prompts
+used in ThinkSum .
+4 Related work
+Improvements to LLM inference. After the dis-
+covery of the in-context learning abilities of LLMs,
+there has been an explosion of interest in improving
+inference with LLMs in the zero-shot and few-shot
+setting (Brown et al., 2020; Chowdhery et al., 2022;
+Rae et al., 2021). One approach to improving the
+reasoning abilities of LLMs involves appending, or
+learning to generate, auxiliary knowledge within
+the prompt (Shwartz et al., 2020; Zelikman et al.,
+2022; Nye et al., 2021a). Recently, more general
+auxiliary knowledge or chain-of-thought prompt-
+ing methods have been proposed (Wei et al., 2022;
+Wang et al., 2022b; Zhou et al., 2022a; Creswell
+et al., 2022; Wang et al., 2022a; Liu et al., 2022b),
+including those that allow a control flow external
+to the main LLM (Khot et al., 2022). Later, Kojima
+et al. (2022) showed zero-shot chain-of-thought
+prompting can improve performance on a variety of
+reasoning tasks. This method does not require any
+hand-crafted few-shot examples, which is a shared
+property with ThinkSum . (Nye et al., 2021b) ob-
+served that a dual-system approach where an asso-
+ciative “System 1” and a logical “System 2” can
+increase coherence of LLMs in tasks such as robuststory generation and grounded instruction follow-
+ing. The two-step paradigm in ThinkSum is simi-
+lar, where “System 1” is the (querying of the LLM
+for) fast thinking, and “System 2” is the probabilis-
+tic inference step.
+Brittleness of chain-of-thought prompting. De-
+spite the recent success of chain-of-thought ap-
+proaches, recent studies have raised concerns re-
+garding the limitations of chain-of-thought ap-
+proaches. Webson and Pavlick (2022) observed
+that instructive prompts perform similarly with mis-
+leading or intentionally irrelevant prompts. Addi-
+tionally, Ye and Durrett (2022) showed improve-
+ments due to few-shot chain-of-thought are not ob-
+served in question answering, or natural language
+inference. More critically, few-shot prompts are
+highly sensitive to the order in which the samples
+are provided, the prompt format, and the selection
+of in-context examples, (Lu et al., 2022; Zhao et al.,
+2021). Thus, it is crucial to design techniques that
+are robust to such changes in the prompt.
+Inference as reasoning. Iterative inference over
+LLM outputs has been proposed for tackling
+true/false question answering and commonsense
+question answering (Jung et al., 2022; Liu et al.,
+2022a). Xie et al. (2021) presents a Bayesian infer-
+ence perspective on in-context learning, and Dohan
+et al. (2022) formalizes and unifies existing prompt-
+ing techniques in a probabilistic framework. Our
+work generalizes such approaches to perform arbi-
+trary probabilistic inference outside of the LLM.
+5 Conclusion
+In this paper we presented ThinkSum , a two-step
+probabilistic inference paradigm that reasons over
+sets in a structured manner. The fast thinking stage
+ofThinkSum allows elementary string manipula-
+tions as well as natural language prompting, which
+may enable numerous approaches to solve a natural
+language task. Even with far smaller model vari-
+ants, ThinkSum achieves state-of-the-art results on
+ten difficult tasks in BIG-bench using GPT-family
+models. The two-step paradigm allows operating
+over sets instead of manipulating the prompt it-
+self, preventing sensitivity to prompt format during
+the probabilistic inference in ThinkSum , which
+is performed outside of calls to the LLM. As a re-
+sult, ThinkSum is more robust to prompt design,
+yields more interpretable predictions, and can be
+combined with many probabilistic inference ap-
+proaches to tackle a diverse set of tasks.1224Acknowledgments
+The authors thank Alexandros Graikos, Sudha Rao,
+and Alessandro Sordoni for valuable discussions.
+Limitations
+Our proposed ThinkSum has demonstrated strong
+performance on thirteen challenging BIG-bench
+tasks. However, it is important to acknowledge
+certain limitations of the system.
+Firstly, as the number of objects or facts that
+are reasoned over increases, the computation cost
+will also rise. However, increasing the number of
+objects will also make the task harder, and direct
+prompting may cease to work at all (as we indeed
+observe in BIG-bench results, such as L with more than five objects), while
+ThinkSum offers a generalizable methodology, as
+the atomic Think operations do not increase in
+complexity as the number of objects grows.
+Secondly, when solving a new task, it is nec-
+essary to expend human effort to select specific
+operations in each step, as outlined in §2. This
+limitation is shared with prompt engineering of all
+kinds, including direct or chain-of-thought prompt-
+ing: finding a prompt for a new task requires an
+often-cumbersome prompt engineering procedure.
+We have described ThinkSum as a general two-
+stage paradigm, with an external inference step.
+This generality aims to facilitate the adaptation of
+ThinkSum to new tasks, with minimal modifica-
+tions to the Think andSum steps. Work on au-
+tomating the prompt engineering procedure (Zhou
+et al., 2022b) is a promising path towards over-
+coming this limitation. An alternative to prompt
+engineering that does not require such human effort
+is tuning (i.e., differentiable end-to-end learning)
+of prompts or model parameters; however, this re-
+mains impractical for GPT-3-scale models, and at-
+tempts to tune models directly on symbolic reason-
+ing chains have met with limited success (Kassner
+et al., 2020).
+Last but not least, ThinkSum has mainly been
+evaluated with GPT-3 (davinci) and InstructGPT
+(text-davinci-002) models. To further improve per-
+formance, it may be beneficial to apply ThinkSum
+to more recent instruction-tuned models such as
+Flan-PaLM (Chowdhery et al., 2022; Chung et al.,
+2022), text-davinci-003, ChatGPT, and GPT-4,
+which seem more capable of robustly performing
+Think steps.Ethics and impact statement
+We foresee no direct or immediate societal impacts
+arising from this work. However, we would like
+to emphasize that relying solely on LLMs’ asso-
+ciative reactions to prompts can lead to undesired
+bias in the behaviour of systems. Control of LLMs’
+reasoning in the way we have proposed can poten-
+tially mitigate such bias, due both to the decomposi-
+tion of the argumentation process into interpretable
+fact-retrieval steps and to the averaging effect of
+smoothing out spurious triggers when aggregating
+many hypotheses and reasoning chains.
+References122512261227A Additional tasks
+Descriptions of all the tasks studied here can be found in §C.
+A.1 Uncertainty and hallucination detection
+LLMs are prone to generating hallucinations that contain incorrect statements. The likelihoods of these
+statements are often dominated by short plausible patterns, which also makes it difficult for LLMs to
+evaluate their own uncertainty about a fact. Thus, detection (Liu et al., 2021; Zhou et al., 2021) and
+reduction of such hallucinations is crucial for widespread use of LLMs in real applications (Dziri et al.,
+2021; Shuster et al., 2021).
+A.1.1 Sports understanding
+Questions in S ask to determine whether it is ‘plausible’ or ‘implausible’
+that a professional sports player 𝑥(e.g., ‘Draymond Green’, a basketball player) performed an action 𝑎
+associated with a sport (e.g., ‘threw a touchdown’, an action in American football). It is implied that
+the combination of 𝑥and𝑎is plausible if the sport with which player 𝑥is associated coincides with the
+sport in which action 𝑎is performed. We consider an approach that does not rely on identifying the latent
+variable (sport) as an intermediate step and is thus more generalizable to other domains.
+We use an Example generation Think prompt to produce a set 𝑆of players who perform action 𝑎,
+then do Posterior computation by normalizing the likelihood assigned by the LLM to each player in 𝑆,
+as well as𝑥, performing action 𝑎:
+∀𝑦∈𝑆∪{𝑥}𝑝(𝑦|𝑎)=𝑝(“𝑦𝑎”)/√︄ummationtext.𝑝(“𝑦𝑎”)
+The statement is considered to be implausible if the posterior on 𝑥is sufficiently low ( Thresholding ) –
+see Fig. A.1.
+A.1.2 Known unknowns
+Questions in the K task ask to determine whether the answer to a question is a certain
+precise concept or ‘unknown’.
+Given a question 𝑞(e.g., “What was the temperature in Cuzco on the day of the Emperor Vespasian’s
+birth”) and the candidate precise answer 𝑎(e.g., 25C), we use a List extension prompt to generate a set
+𝑆of other possible answers to 𝑞. We then do a Posterior computation over𝑆and the original answer 𝑎,
+similar to that used for S :
+∀𝑦∈𝑆∪{𝑎}𝑝(𝑦|𝑞)=𝑝(“𝑞?𝑦”)/√︄ummationtext.𝑝(“𝑞?𝑦”).1228The answer𝑎is chosen if the posterior on 𝑎is sufficiently high ( Thresholding ), and otherwise ‘unknown’
+is chosen.
+A.2 Translation between languages and writing systems
+This extends the results on L in §3.3.
+A.2.1 Russian misconceptions.
+In the M R task, the true statement must be chosen out of a pair of Russian
+sentences: a statement 𝑠and its negation 𝑡.
+We first describe an approach that does not use translation and already performs better than random
+guessing – and better than baseline methods that simply select the more likely of the two statements –
+using the largest GPT-3 model, which has sufficient knowledge of Russian. We compute the posterior
+over the two hypotheses “ 𝑠is true,𝑡is false” and “ 𝑠is false,𝑡is true”:
+𝑝(|)𝑝(|),
+𝑝(|)𝑝(|).
+where Tdenotes True andF False in the actual prompt. This is a kind of Product aggregation . If the
+posterior on the first option is higher, 𝑠is chosen as the true statement; otherwise, 𝑡is chosen.
+This approach can be combined with a Translation prompt that produces translations of 𝑠and𝑡into
+English, then uses these translations in place of 𝑠and𝑡in the above computations. The approach can
+be further extended by sampling a setof translations and performing Mixture aggregation over the
+translations. Our reported result uses 10 generated translation for each statement, but it is only 2%higher
+than the result using one generated translation.
+A.2.2 Emoji movie
+The multiple-choice E task requires selecting the name of a movie from a list {𝑚}that is
+best described by a sequence of emoji symbols 𝑠=(𝑠...𝑠). An Order inversion prompt performs best
+on this task using the Davinci variant of GPT-3: choosing the answer
+arg max𝑝(𝑠|“Emoji describing the movie 𝑚”).
+We also attempt to use a Translation prompt to obtain a single-word English description 𝑤of each emoji
+𝑠in𝑠, then score using
+arg max𝑝(𝑤...𝑤|“Words describing the movie 𝑚”).
+This approach performs slightly better than Order inversion alone using InstructGPT. However, it does
+not work with the base GPT-3 models, which do not as reliably translate emoji to English.
+A.2.3 Persian QA
+We solve this standard extractive question answering task by simply translating the passage and question
+from Persian to English using a Translation prompt, generating English text, up to the first period or line
+break, following the concatenation of the translated prompt and question, and translating the result back
+to Persian using another Translation prompt.
+No few-shot algorithms have above zero accuracy on this task, indicating models’ knowledge is
+sufficient to translate between languages (probably due to the presence of paired data in the training
+corpus), but insufficient to reason in the source language without passing through an intermediate latent
+variable, the translation.
+Finally, note that the accuracy is evaluated by exact string match, which contributes to the very low
+scores. We observed that the answers generated by ThinkSum are often paraphrases or terms related to
+the correct answers, which suggests that the result could be improved by using the knowledge that the
+target string always appears verbatim as a substring of the prompt.1229A.3 Semantic relatedness
+This extends the results on O in §3.2.
+A.3.1 Phrase relatedness
+Each question in the multiple-choice P task requires to determine which of a given
+set of words or phrases {𝑤}is related to a query phrase 𝑞. We query the LLM for the likelihood of 𝑞
+following a List of words prompt to form a vector of likelihoods:
+𝑝=𝑝(𝑞|“List of words: 𝑤,”).
+The answer selected is the one with highest likelihood, arg max𝑝(a trivial Sum operation). We note
+that this is also an instance of Order inversion : the query is scored following a prompt in which each of
+the candidate answers is substituted.
+A.3.2 Codenames
+Each question in C requires selecting the 𝑘words from a set{𝑤}that are most closely related
+to a query word 𝑞. We form a vector 𝑝in the same way as for P , then select the
+top𝑘entries in𝑝to produce the output.
+A.4 Substitution and aggregation
+We give two other example of substitution and aggregation operations complementing the experiments on
+I (§3.1) and O (§3.2).
+A.4.1 Novel concepts
+In the multiple-choice N task, a set of words or phrases 𝑊={𝑤}and a set of statements
+𝑆={𝑠}with third-person plural pronoun subjects (‘They all...’) are given, and the statement which is
+true for all items in 𝑊must be determined.
+We treat each statement 𝑠as atemplate , into which words 𝑤can be substituted by replacing ‘They
+all’ with𝑤. Denoting by 𝑠⟨𝑤⟩the substitution of 𝑤into𝑠, we form a|𝑊|×|𝑆|matrix𝑃by scoring
+theSubstitution of each word into each statement and considering the Ratio of likelihoods with the
+template without substitution: 𝑃=.We then perform Product aggregation to select the
+statement which is most likely to be generated by all words in the set. To be precise, the selected statement
+isarg max/√︁√︂oducttext.𝑃.
+A.4.2 Code line description
+We solve the C task, in which a correct comment for a code snippet is to be
+chosen, using Order inversion andSubstitution techniques.
+The greatest gain – amounting for all but 1% of the improvement relative to direct prompting – arises
+from Order inversion . Instead of ranking the candidate comments 𝑐by their likelihood following the
+given code𝑠(i.e.,𝑝(𝑐|𝑠)), we score each candidate comment 𝑐by the likelihood of the code to follow 𝑐
+formatted as a Python comment ( 𝑝(𝑠|“#𝑐”)).
+We also experimented with Substitution andProduct aggregation , which yielded an additional small
+accuracy gain. The code snippets are written in Python, which requires code to be formatted using an
+arbitrary but consistent number of spaces for line indentation. Using the knowledge that the correct
+comment should be most likely to generate the program in anyof its equivalent representations, we scored
+comments in the manner described in the preceding paragraph, but with 𝑠reformatted with different
+number of indentation spaces 𝑛. The resulting scores were then multiplied over 𝑛=1,2,..., 6and the
+highest-scoring comment selected.1230
+A.5 Other tasks
+A.5.1 Language identification
+The multiple choice L task is similar in form and solution to C and we include it for completeness to show the large difference that can be made by Order
+inversion .
+Rather than scoring all candidate language names ℓfollowing the given sentence 𝑠(i.e.,𝑝(𝑠|ℓ)), we
+instead score each language name ℓby𝑝(𝑠|“The following is a sentence in ℓ:”)and select the
+highest-scoring ℓas the answer.
+B BIG-bench Lite
+Figure B.1 shows the performance margin between an average human and zero-shot GPT-3 on tasks
+in BIG-bench Lite, a select subset of tasks chosen by the authors of the benchmark to showcase the
+most important aspects of LLMs that need improvement. The vertical black bar separates the dataset
+into tasks where GPT-3 is already within the margin of just 10% compared to the average human
+accuracy, and the harder tasks (on the left). We show in the main text that some of these harder tasks,
+in particular E ,C ,K ,N ,
+M R andL , the margins are shrunk considerably, often
+exceeding average human performance. Other tasks in BIG-bench lite such as L and
+S share a similar structure to the addressed by ThinkSum , and thus could be
+investigated as part of future work. Another example where ThinkSum can be applied is the C task, where we observe in our preliminary experiments that a simple order inversion can
+significantly outperform average human accuracy.
+C Task descriptions
+C.1 Hallucination detection
+Known unknowns. In this task, the aim is to measure the ability of LLMs to identify whether the answer
+to a question is known, or unknown. If the answer to the question cannot be known, an imaginary answer1231is generated, and the model is asked to choose between the imaginary answer and the word “Unknown”.
+If the question has a correct answer, the correct answer and “Unknown" are provided as options. An
+example question from this task is “How often did Abraham Lincoln cut his toenails?” , and the options
+are“Every Saturday night”,“Unknown” . Similar to the sports understanding task, we can use an LLM
+to generate other plausible answers with the following prompt: How often did Abraham Lincoln cut his
+toenails? A possible answer is: \n 1. Every Saturday night. List 4 other possible answers in the same
+format as the first: \n 2. Then, the answer given in the question is predicted to be “known” if its posterior
+is higher by the second most likely option by some margin. In our experiments, we chose this value to be
+1/𝑁where𝑁is the number of examples, including the original option.
+Sports understanding. In this task, artificial sentences are constructed using the name of professional
+sports players and actions from particular sports. The model is then asked to identify whether the sentence
+is plausible, where a sentence is considered plausible if the sport of the player matches the sport of the
+action described in the sentence. An example from the task is “Statement: Draymond Green threw a
+touchdown. Plausible/implausible?”
+ForThinkSum to be able to parse outputs, GPT-3 generations need to be in a pre-determined format.
+While larger models can obey a format without demonstrations, for smaller models it is helpful to
+demonstrate the format with an example. Thus, we use the following prompt: “ List 4 examples of players
+who scored a rabona goal.\n 1. Cristiano Ronaldo\n 2. Erik Lamela\n 3. Mario Balotelli\n 4. Angel Di
+Maria\n List 4 examples of players who threw a touchdown.\n1. ” .
+C.2 Translation
+Emoji movie. In this task, the LLM is presented with emojis that describe the plot of a movie, and
+the model is asked to guess the correct movie from the given options. The task evaluates the LLMs
+understanding of emojis, and its knowledge of popular movies. An example from the task is “What movie
+does this emoji describe? {lying-face-emoji} \n, pinocchio \n heat \n the big sleep, \n inception \n lilo &
+stitch
+Misconceptions Russian. In this task, the LLM is presented with sentences in Russian that contain mis-
+conceptions, and their true counterparts. The task evaluates if the LLM believes common misconceptions.
+One example of a target pair from the task, translated to English is as follows: “Vaccines do not cause
+autism. \n Vaccines cause autism. ”
+ParsiNLU reading comprehension. This is a standard extractive QA task in which a short passage and
+question are provided in Persian and the model must generate the answer, also in Persian.
+C.3 Semantic relatedness
+Phrase relatedness. In this task, an input phrase, and four target phrases are presented to the language
+model. The language model is asked to identify the most related choice from the listed target options.
+An example from the task is “For each word or phrase, identify the most related choice from the listed
+options. \n Input: home town \n Option: town center \n Option: location \n Option: native city \n Option:
+home run”
+Codenames. In this task, the language model is asked to identify words associated with a given word.
+An example from the task is “Try to identify the 2 words best associated with the word WHITE from the
+following list: \n book, anchor, rainbow, shoulder, tunnel, sack, drum, pacific, page, mark, gear, glacier.
+Give your answer in alphabetical order. ”
+Odd one out. This task is aimed at evaluating the capability of LLMs in semantic relatedness. This
+task presents the model with four to six words, where all words except one word are semantically or
+grammatically related to each other. The goal for the language model is to identify the odd word. An
+example question from the task is “Pick the odd word out: glass, head, arm, leg, hand, foot” .
+C.4 Concept understanding
+In the following tasks, the shared goal is to test the ability of LLMs on concepts over entities that have
+likely not been observed during training.1232Conceptual combinations: Invented words. In this task, the LLM is provided with two invented
+words, and their definitions in the input. The LLM is then asked to infer the most plausible meaning
+resulting from the combination of the invented words. As the words are invented, they are not present
+in the training set, and the LLM needs to understand and combine the definitions of the invented words
+to reason about the meaning of the combination. An example is: “The word ’binne’ means any animal
+that is furry and has four legs, and the word ’bam’ means a simple sort of dwelling. Question: Which of
+the following sentences best characterizes binne bams?” . Similar to S , we can
+use the following prompt to force the LLM to obey a fixed format: “List synonyms of binne, separate
+synonyms by comma:”
+Novel concepts. In this task, the LLM is presented with two to four disparate entities that typically
+would not co-occur frequently, but share an underlying conceptual or linguistic concept. The aim is to test
+the ability of the LLM to reason about entities that are unlikely to have been observed in the same context
+during training. In a multiple-choice setting, the LLM is given concepts relating to the entities, and is
+asked to generate the intended concepts against carefully chosen tempting distractors. The choices are not
+presented in the prompt. An example question from the task is as follows: “What do the following have in
+common? 1) bumble bees 2) 01010101 3) race cars” , and the answer options are They all make noise,
+“They all are yellow, They all are binary, They all go fast, They all have stripes” .
+C.5 Other tasks
+Two multiple-choice tasks test the LLM’s knowledge of specific domains, such as uncommon languages
+and programs.
+Code line description. This task requires the LLM to select the appropriate text description, out of four
+choices, for a short snippet of Python code, that could act as a comment describing the behaviour of a
+function.
+C.5.1 Language identification.
+This task requires the LLM to select, out of eleven choices, the language in which a text is written. The
+languages represent a diversity of language families and writing systems and most are very infrequent in
+text found on the Internet.
+D Additional experimental details
+Our experiments are performed using four different sizes of GPT-2 (Small, Medium, Large, and XL)
+(Radford et al., 2019), GPT-3 with four different model sizes (ada,babbage,curie,davinci) (Brown et al.,
+2020), and InstructGPT (Ouyang et al., 2022). All GPT-3 experiments are run between August 2022 and
+September 2022 by using the OpenAI API. Our GPT-2 experiments were run in PyTorch (Paszke et al.,
+2019) and the Hugging Face Transformers library with a Tesla K80 GPU.
+D.1 Hyperparameters
+Maximum generation length. For tasks that require example and list generation , such as - ,K , and S , we use max_tokens =100.
+Forfact generation in O with auxiliary knowledge and ThinkSum , we use max_tokens =
+1000 .
+Temperature. All GPT-2 experiments used temperature =0.5. For S and
+translation tasks, we used temperature =0.5to promote diversity of generated plausible options. All other
+experiments used temperature =0(greedy decoding).
+Number of examples ( 𝑁).ForC we used𝑁=2, and for K and S we used𝑁=4.
+Threshold. A threshold of 0.01was used for S .1233
+D.2 Using an LLM to evaluate inequalities.
+Using GPT-3 or external algorithms to evaluate inequalities. We show how a LLM can be used
+to find the truth values of inequalities involving small numbers, rather than resorting to calls to an
+external system that is aware of arithmetic. Fig. D.1 shows the matrix of posterior probabilities evaluated
+using InstructGPT (text-davinci-002) for strings of form “ 𝑥=𝑦”, “𝑥<𝑦”, “𝑥>𝑦” for𝑥,𝑦∈{1,..,9}. The
+probabilities are computed using prompts of the form “ True or false: 𝑥<𝑦? The answer is: ” and
+normalizing the probability of the first token over the two options “ true ” and “ false ”. These are the
+probabilities evaluated in (1).
+D.3 Knowledge generation details
+Post-processing. In our knowledge generation experiments for both ThinkSum and the auxiliary
+knowledge approach, we post-process the generated knowledge statements, to ensure formatting does not
+harm the predictions of each method. We first remove the extra spaces and the numbers and punctuation
+generated by the LLM before each fact while enumerating the items of the list. Later, we only keep
+sentences that contain only one of the objects of interest from the task, to make sure each sentence contains
+a knowledge statement into which any of the objects can be substituted. Finally, sentences with less than
+3 words are removed as these are not likely to contain informative statements.
+Auxiliary knowledge. For auxiliary knowledge experiments, we prepend the generated and post-
+processed knowledge statements before the question in the task. An example is illustrated in Figure
+D.2.
+D.4 Inference Cost for ThinkSum
+The inference cost for ThinkSum scales with the number of parallel calls to the LLM, which is determined
+for each task by the number of Think prompts used and the number of objects for which likelihood
+computations are required at the Sum stage. For the tasks that we considered, as the number of Think1234prompts is not typically high and the prompts are short, the inference cost increase is marginal. In some
+cases, ThinkSum is faster than chain-of-thought prompting due to its ability to perform parallel calls to the
+LLM. For instance, ThinkSum is 23% faster for P R compared to chain-of-thought
+approaches with 5 facts generated using InstructGPT.
+E Expectation Maximization
+We model items 𝑖∈𝐼and facts𝑓∈𝐹as being generated from a latent class 𝑐∈{0,1}. The distribution
+is modeled as:
+𝑃(𝑖, 𝑓|𝑐)=𝑃(𝑖|𝑐)𝑃(𝑓|𝑐)𝑃(𝑖, 𝑓)=∑︁𝑃(𝑐)𝑃(𝑖, 𝑓|𝑐)
+where𝑃(𝑖, 𝑓)is a matrix of likelihoods from the LLM and the semantic components, groupings 𝑃(𝑖|𝑐)
+and𝑃(𝑓|𝑐). The iterative expectation-maximization (EM; Dempster et al., 1977) algorithm to derive
+𝑃(𝑖|𝑐)and𝑃(𝑓|𝑐)has the following updates:
+𝑄(𝑐|𝑖, 𝑓)∝𝑃(𝑖|𝑐)𝑃(𝑓|𝑐)𝑃(𝑐)
+𝑃(𝑖|𝑐)∝∑︁𝑃(𝑖, 𝑓)𝑄(𝑐|𝑖, 𝑓)
+𝑃(𝑓|𝑐)∝∑︁𝑃(𝑖, 𝑓)𝑄(𝑐|𝑖, 𝑓)
+𝑃(𝑐)∝∑︁𝑃(𝑖, 𝑓)𝑄(𝑐|𝑖, 𝑓)
+where𝑄(𝑐|𝑖, 𝑓)is the posterior distribution over the latent class 𝑐that we maintain for each pair (𝑖, 𝑓).
+EM is run for 200iterations, which is more than sufficient for convergence.123512361237ACL 2023 Responsible NLP Checklist
+A For every submission:
+/squareA1. Did you describe the limitations of your work?
+See "limitations" section on p.9.
+/squareA2. Did you discuss any potential risks of your work?
+We see no risks beyond those already inherent in large language models, but we include Limitations
+and Ethics sections before the references (p.9).
+/squareA3. Do the abstract and introduction summarize the paper’s main claims?
+See the abstract and introduction.
+/squareA4. Have you used AI writing assistants when working on this paper?
+Left blank.
+B/squareDid you use or create scientiﬁc artifacts?
+We use existing models and datasets. See following answers.
+/squareB1. Did you cite the creators of artifacts you used?
+See the introduction, where we cite the BIG-bench suite.
+/squareB2. Did you discuss the license or terms for use and / or distribution of any artifacts?
+Not applicable. Note that the BIG-bench benchmark, which we use, is licensed for use in academic
+work such as ours.
+/squareB3. Did you discuss if your use of existing artifact(s) was consistent with their intended use, provided
+that it was speciﬁed? For the artifacts you create, do you specify intended use and whether that is
+compatible with the original access conditions (in particular, derivatives of data accessed for research
+purposes should not be used outside of research contexts)?
+We use the BIG-bench suite. In the introduction, we describe it and summarize its motivations.
+/squareB4. Did you discuss the steps taken to check whether the data that was collected / used contains any
+information that names or uniquely identiﬁes individual people or offensive content, and the steps
+taken to protect / anonymize it?
+We used an existing large-scale benchmark to evaluate pretrained language models. We believe the
+data for the speciﬁc tasks we studied is very unlikely to contain such content, which should be clear
+from the task examples (last page of the paper), although this may not be true of all tasks in the
+BIG-bench suite.
+/squareB5. Did you provide documentation of the artifacts, e.g., coverage of domains, languages, and
+linguistic phenomena, demographic groups represented, etc.?
+See the task descriptions in Appendix D.
+/squareB6. Did you report relevant statistics like the number of examples, details of train / test / dev splits,
+etc. for the data that you used / created? Even for commonly-used benchmark datasets, include the
+number of examples in train / validation / test splits, as these provide necessary context for a reader
+to understand experimental results. For example, small differences in accuracy on large test sets may
+be signiﬁcant, while on small test sets they may not be.
+We used existing benchmarks (BIG-bench) for which extensive documentation exists.1238C/squareDid you run computational experiments?
+See section 3 and the Appendix.
+/squareC1. Did you report the number of parameters in the models used, the total computational budget
+(e.g., GPU hours), and computing infrastructure used?
+We use the OpenAI API to run experiments with GPT-3-family models, which accounts for the bulk
+of the computational cost. However, the exact cost is unknown. On the order of 250k queries were
+made to the API to obtain the results in the paper.
+/squareC2. Did you discuss the experimental setup, including hyperparameter search and best-found
+hyperparameter values?
+See Appendix E.
+/squareC3. Did you report descriptive statistics about your results (e.g., error bars around results, summary
+statistics from sets of experiments), and is it transparent whether you are reporting the max, mean,
+etc. or just a single run?
+Most of the experiments are deterministic. A few experiments use sampled decoding of large language
+models (at low temperature), and we describe the settings in Appendix E.
+/squareC4. If you used existing packages (e.g., for preprocessing, for normalization, or for evaluation), did
+you report the implementation, model, and parameter settings used (e.g., NLTK, Spacy, ROUGE,
+etc.)?
+See Appendix E.
+D/squareDid you use human annotators (e.g., crowdworkers) or research with human participants?
+Left blank.
+/squareD1. Did you report the full text of instructions given to participants, including e.g., screenshots,
+disclaimers of any risks to participants or annotators, etc.?
+Not applicable. Left blank.
+/squareD2. Did you report information about how you recruited (e.g., crowdsourcing platform, students)
+and paid participants, and discuss if such payment is adequate given the participants’ demographic
+(e.g., country of residence)?
+Not applicable. Left blank.
+/squareD3. Did you discuss whether and how consent was obtained from people whose data you’re
+using/curating? For example, if you collected data via crowdsourcing, did your instructions to
+crowdworkers explain how the data would be used?
+Not applicable. Left blank.
+/squareD4. Was the data collection protocol approved (or determined exempt) by an ethics review board?
+Not applicable. Left blank.
+/squareD5. Did you report the basic demographic and geographic characteristics of the annotator population
+that is the source of the data?
+Not applicable. Left blank.1239

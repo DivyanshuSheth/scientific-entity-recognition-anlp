@@ -1,1 +1,924 @@
-697 Proceedings of the 2022 Conference of the North American Chapter of the Association for Computational Linguistics : Human Language Technologies , pages 697 716 July 10 - 15 , 2022 © 2022 Association for Computational Linguistics 698 699 700 701 702 703 704 705 706 707 708 709 710 711 712 713 714 715 716 
+
+Jinyi Hu, Xiaoyuan Yi, Wenhao Li, Maosong Sun, Xing XieDepartment of Computer Science and Technology, Tsinghua University, Beijing, ChinaBeijing National Research Center for Information Science and TechnologyInstitute for Artiﬁcial Intelligence, Tsinghua University, Beijing, ChinaInternational Innovation Center of Tsinghua University, Shanghai, ChinaMicrosoft Research Asia
+hu-jy21@mails.tsinghua.edu.cn, xiaoyuanyi@microsoft.com
+Abstract
+The past several years have witnessed Vari-
+ational Auto-Encoder’s superiority in various
+text generation tasks. However, due to the se-
+quential nature of the text, auto-regressive de-
+coders tend to ignore latent variables and then
+reduce to simple language models, known as
+theKL vanishing problem, which would fur-
+ther deteriorate when V AE is combined with
+Transformer-based structures. To ameliorate
+this problem, we propose D , a novel
+variational Transformer framework. D
+learns a series of layer-wise latent variables
+with each inferred from those of lower layers
+and tightly coupled with the hidden states by
+low-rank tensor product. In this way, D
+forces these posterior latent variables to be
+fused deeply with the whole computation path
+and hence incorporate more information. We
+theoretically demonstrate that our method can
+be regarded as entangling latent variables to
+avoid posterior information decrease through
+layers, enabling D to get higher non-
+zero KL values even without any annealing or
+thresholding tricks. Experiments on four un-
+conditional and three conditional generation
+tasks show that D could better alleviate
+KL vanishing and improve both quality and di-
+versity compared to several strong baselines.
+1 Introduction
+Variational Autoencoder (V AE) (Kingma and
+Welling, 2014; Rezende et al., 2014) has proven to
+be successful in generating various kinds of text,
+such as stylistic text (Hu et al., 2017; John et al.,
+2019), dialogue (Zhao et al., 2017), story (Yu et al.,
+2020) and poetry (Yi et al., 2020). The sequen-
+tial nature of the text leads to typically used auto-
+regressive decoders in V AE for language genera-
+tion. However, such strong decoders tend to evade
+the difﬁculty of learning meaningful latent codes
+by heavily relying on previously generated wordsFigure 1: Existing paradigms of Transformer V AE.
+and hence ignore latent variables (Bowman et al.,
+2016), known as KL vanishing orposterior col-
+lapse . This problem causes two drawbacks: (a) the
+posterior distribution quickly turns into the prior
+one (usually standard Gaussian), falling to build
+expressive latent representations; (b) the decoder
+reduces to a naive language model, resulting in
+monotonous generated text (Fu et al., 2019).
+To ameliorate this problem, researchers have de-
+signed various techniques. Among them, three
+broadly used methods include weakening de-
+coders (Bowman et al., 2016; Semeniuta et al.,
+2017; Zhao et al., 2017), KL annealing (Bow-
+man et al., 2016; Fu et al., 2019) and KL thresh-
+old (Kingma et al., 2016; Higgins et al., 2017; Li
+et al., 2019). Nonetheless, the weakening of de-
+coders restrains models’ language modelling capa-
+bility; annealing hyperparameters are hard to tune;
+KL threshold introduces a non-smooth objective
+with some optimization difﬁculties.
+In the era of RNN, V AE can be easily incor-
+porated by using the latent variable as the initial
+decoder state, while how to combine V AE with re-
+cently prevalent Transformer (Vaswani et al., 2017)
+architectures, which have made a breakthrough in
+text generation, still remains an open challenge.697As shown in Fig.1, existing methods of inte-
+grating Transformer into V AE fall into three main
+paradigms: (a) directly adding latent variables to
+input token embeddings (abbr. Embedding ) (Li
+et al., 2020a); (b) using latent variables as a sepa-
+rate memory token vector to be attended by self-
+attention in each layer (abbr. Memory ) (Fang
+et al., 2021); (c) combining latent variables with
+the last-layer decoder states before output softmax
+(abbr. Softmax ) (Wang and Wan, 2019). However,
+paradigm (a) brings noise for self-attention. In
+paradigm (b), memory vectors tend to be ignored
+by attention, even exacerbating KL vanishing. In
+paradigm (c), latent variables couldn’t deeply in-
+terfere with the whole computation path. Sec.3.3
+presents more detailed analyses.
+To better incorporate Transformer into V AE and
+theoretically ameliorate the KL vanishing prob-
+lem, we propose D, a novel variational trans-
+former framework. D learns a series of layer-
+wise latent variables in a Transformer encoder, and
+each is inferred from those of lower layers and then
+tightly coupled with the hidden states in the corre-
+sponding decoder layer by low-rank tensor product.
+Our method theoretically stimulates the entangle-
+ment of latent variables and hence allows propa-
+gation of undiminished latent information through
+layers. As a result, D forces posterior latent
+variables to be deeply fused with the entire compu-
+tation path and encode richer information of input
+text, achieving higher KL values even without any
+annealing or threshold training tricks.
+In summary, our contributions are as follow:
+(i) We are the ﬁrst to propose layer-wise in-
+ferred latent variables in Transformer-based ar-
+chitecture to mitigate KL vanishing; We ( ii) in-
+novatively inject latent variables using low-rank
+tensor product, ( iii) provide a theoretical valid-
+ity of our method and ( iv) demonstrate its effec-
+tiveness on four unconditional and three condi-
+tional generation tasks. Our codes are available
+at https://github.com/OpenVLG/DELLA.git.
+2 Related Work
+Thanks to the representation capacity of latent
+space, V AE has been widely adopted for both im-
+age generation (van den Oord et al., 2017; Vahdat
+and Kautz, 2020) and text generation (Bowman
+et al., 2016; Hu et al., 2017). In the early stage,
+V AE was combined with RNN decoders for gener-ating a broad range of text, varying from dialogue
+(Serban et al., 2016), image caption (Wang et al.,
+2017), text summarization (Gupta et al., 2017) to
+story (Yu et al., 2020) and poetry (Yi et al., 2020).
+In this case, latent variables are usually utilized as
+either the initial decoder state (Li et al., 2018) or
+input at each time step (Gupta et al., 2017).
+In spite of extensive applications, V AE suffered
+from KL vanishing in the scenario of text genera-
+tion (Bowman et al., 2016). Several lines of tech-
+niques have been proposed to alleviate this prob-
+lem. The ﬁrst line is to avoid a too fast decrease of
+the KL divergence by re-weighting. KL annealing
+(Bowman et al., 2016) linearly increased the weight
+of KL term from 0 to 1 during the warm-up period.
+Fu et al. (2019) further proposed cyclical anneal-
+ing, which repeats the warm-up process multiple
+times. The second line guarantees a positive lower
+bound of the KL term. KL thresholding (Kingma
+et al., 2016) achieved a ﬁxed minimum by combin-
+ing a hinge loss, while BN-V AE (Zhu et al., 2020)
+learned more ﬂexible ones via batch normalization.
+δ-V AE (Razavi et al., 2019) chose to restrain the
+family of posterior distributions. The third line
+aims to constraint decoders to force a more infor-
+mative latent variable. Wang et al. (2017) intro-
+duced an auxiliary BOW (bag-of-words) loss. He
+et al. (2019) added additional training loops for the
+encoder. Yang et al. (2017) adopted dilated CNN as
+decoder, and Dieng et al. (2019) added skip connec-
+tions to the decoder. Although the above methods
+mitigate KL vanishing to some extent, it is still
+challenging for either tuning or optimization.
+In these years, the powerful Transformer has
+been integrated with V AE to beneﬁt diverse tasks,
+including text classiﬁcation (Gururangan et al.,
+2019), story generation (Wang and Wan, 2019;
+Fang et al., 2021) and dialogue generation (Lin
+et al., 2020). Optimus (Li et al., 2020a) further
+bridged the pre-trained BERT (Devlin et al., 2019)
+and GPT-2 (Radford et al., 2019) with V AE for
+pre-training. Most existing works inject latent vari-
+ables into the Transformer decoder by the three
+paradigms, Embedding (Li et al., 2020a), Mem-
+ory (Li et al., 2020a; Fang et al., 2021) and Soft-
+max(Wang and Wan, 2019), as discussed in Sec. 1,
+while these methods shallowly fuse the latent vari-
+ables with hidden states. To achieve deeper fusion
+and ameliorate KL vanishing, we propose D .
+The most relevant architecture to our model is
+hierarchical V AE (Sønderby et al., 2016; Klushyn698et al., 2019; Vahdat and Kautz, 2020; Child, 2020),
+which is mainly designed for image generation and
+not suitable for text. For text generation, hierarchi-
+cal latent variables are either independent of each
+other (Serban et al., 2016), or corresponding to dif-
+ferent text granularities (sentence or word level),
+while our D learns conditionally inferred and
+layer-wise latent variables based on Transformer.
+3 Preliminaries
+3.1 Transformer
+Transformer (Vaswani et al., 2017) represents
+an input sequence x={x,...,x,...,x}as
+contextualized distributed hidden states h=
+{h,...,h,...,h}by a series of stacked layers,
+and states in the l-th layer,h, are calculated with
+scaled dot-product attention:
+Attention(Q,K,V ) = softmax/parenleftbiggQK√
+d/parenrightbigg
+V,
+(1)
+whereQ,K,V stand for Query, Key, Value, re-
+spectively, which are projected from outputs of the
+previous layer: Q=Wh,K=Wh,
+V=Wh.dis the dimension of hidden
+states. In practice, multiple groups of states are
+calculated with different attention parameters and
+then concatenated, known as multi-head attention.
+3.2 VAE
+As a kind of generative model, V AE estimates the
+intractable data distribution p(x)by deriving and
+maximizing its lower bound as:
+logp(x)≥L (x;θ,φ) =
+E[logp(x|z)]−KL(q(z|x)||p(z)),(2)
+wherezis the latent variable and p(z)is the prior
+distribution of latent variable which is commonly
+assumed as standard Gaussian; the posterior dis-
+tributionp(z|x)is approximated by an inference
+network (encoder) q(z|x);p(x|z)is a generator
+(decoder) to generate text xfrom the latent variable
+z;θandφare corresponding parameters.
+The whole lower bound in Eq.(2), called Ev-
+idence Lower BOund (ELBO), consists of two
+terms: the reconstruction loss,
+L=−E[logp(x|z)], (3)
+which helps reconstruct the input given the poste-
+rior latent variable z, and the KL divergence,
+L= KL (q(z|x)/bardblp(z)). (4)In practice, V AE is considered as a regularized
+Auto-encoder, and a hyper-parameter βis intro-
+duced to control the strength of KL, βL, usually
+used in KL annealing methods (Fu et al., 2019).
+3.3 Incorporate Transformer into VAE
+For Transformer encoder, the posterior zis mapped
+from the text representation, which can be the pool-
+ing of all hidden states in the last layer (Fang et al.,
+2021), or state of a special token (Li et al., 2020a),
+e.g., [CLS]. Then zis injected into Transformer
+decoder by the paradigms discussed in Sec. 1.
+Now we take a further step and investigate why
+intrinsically these three paradigms, namely Embed-
+ding, Memory and Softmax, would perform poorly.
+Embedding : Deﬁnee,eas two token em-
+beddings and αas the attention weight of i-th
+andj-th tokens. From Eq.(1), we have α=
+(We)(We) =e(W)We, which is
+further abbreviated as /angbracketlefte,e/angbracketright. Such Embedding
+paradigm directly adds zto token embeddings as:
+α=/bracketleftbig
+W(e+z)/bracketrightbig/bracketleftbig
+W(e+z)/bracketrightbig
+=/angbracketlefte,e/angbracketright+/angbracketlefte,z/angbracketright+/angbracketleftz,e/angbracketright+/angbracketleftz,z/angbracketright,(5)
+where we can ﬁnd that a redundant term, /angbracketleftz,z/angbracketright, is
+introduced, bringing extra noise for attention mech-
+anism. Moreover, information in zcould diminish
+with propagation through layers (Fig. 2), aggravat-
+ing KL vanishing.
+Memory : This paradigm treats zas an addi-
+tional memory token and places it at the beginning
+ofxto be attended by other tokens via attention.
+Nevertheless, as mentioned in Sec. 1, the powerful
+Transformer decoder may only rely on preceding
+decoded tokens. Consequently, with no explicit
+constraints ( e.g., auxiliary loss), such a memory
+token is more likely to be ignored by self-attention
+(Fig. 6 & 7), even exacerbating KL vanishing.
+Softmax : This paradigm ﬁrst adds zto the last-
+layer hidden states h, and then projects z+hinto a
+logit vectorp∈Rover the vocabulary, where vis
+vocab size. In this method, latent variables do not
+interact with hidden states until the last layer, which
+erodes the effect of latent variables (see Fig. 2).
+4 Methodology
+As demonstrated in Sec. 3, existing three paradigms
+make latent variables gradually diminish through
+layers, be ignored by self-attention or inadequately
+interact with hidden states, which would not miti-
+gate but even worsen the KL vanishing problem.699To deeply fuse latent variables with the whole
+computation path of Transformer, we propose
+D to learn a series of layer-wise posterior
+latent variables which are conditionally inferred in
+encoder, and injected into hidden states in decoder
+by low-rank tensor product. We present layer-wise
+latent variables in Sec. 4.1, describe the tensor
+product fusion in Sec. 4.2, give the theoretical veri-
+ﬁcation of D ’s effectiveness for ameliorating
+KL vanishing in Sec. 4.3, and then extend D
+to Conditional V AE (CV AE) in Sec. 4.4.
+4.1 Layer-wise Latent Variables
+Different from previous work where only one la-
+tent variablezis calculated and shared by (Li et al.,
+2020a) or projected to (Fang et al., 2021) decoder
+layers, we involve a series of latent variables z=
+{z,z,...,z}, whereLis the number of Trans-
+former layers. Then we reformulate the prior and
+posterior distributions as p(z) =/producttextp(z|z),
+q(z|x) =/producttextq(z|z,x), respectively, with
+eachzstill following Gaussian distribution. Then
+we rewriteLin Eq.(4) similar to Vahdat and
+Kautz (2020):
+L= KL(q(z|x)||p(z))
+=/summationdisplayE[KL(q(z|x,z)||p(z|z))].
+(6)
+Whenl= 1,p(z|z) =p(z)is the standard
+Gaussian distribution, q(z|x,z) =q(z|x).
+We give detailed derivations in Appendix B.1.
+These latent variables zare calculated (inferred)
+layer by layer using representations of the corre-
+sponding layer. Concretely, in l-th layer, we use the
+hidden state of the ﬁrst token in text x, as itsl-th-
+layer representation, denoted as x∈R, where
+dis hidden size. Then we represent latent variables
+in lower layers as zand obtain it by:
+z= tanh(Wz+Wz),(7)
+whereW,W∈R, soz∈Randpis the
+dimension of latent variable. zandzare set as
+zero vector. We calculate the mean and variance
+vectors ofp(z|z)andq(z|z,x)by:
+/parenleftbiggµ
+log(σ)/parenrightbigg
+=Wz,
+/parenleftbiggµ
+log(σ)/parenrightbigg
+=W/parenleftbiggz
+x/parenrightbigg
+,(8)whereW∈R,W∈R.
+The latent variable zis sampled from the pos-
+terior distribution q(z|z,x) =N(µ,σI)
+for training, and from the prior one q(z|z) =
+N(µ,σI)for testing. Since hidden states in
+each layer belong to different vector spaces, the
+parameters to calculate each z,e.g.,Wand
+W,do not share throughout different layers.
+4.2 Low-rank Tensor Product
+We inject the latent variable z, which is obtained
+based onl-th encoder layer, into the correspond-
+ingl-th decoder layer. Instead of simply using z
+as a memory token as discussed in Sec. 3.3, we
+resort to low-rank tensor product, which has been
+successfully utilized for fusing multimodal repre-
+sentations (Liu et al., 2018), to deeply fuse latent
+variables with hidden states in the decoder.
+In detail, we conduct low-rank tensor product on
+zandx’sl-th-layer value vector vas:
+/tildewidev= (/summationdisplayWv)◦(/summationdisplayWz),(9)
+whereris a hyper-parameter, ◦means element-
+wise multiplication, W∈R.W∈Rare
+learnable parameters which are shared across all
+positions (i) but not shared with layers ( l), con-
+sidering distinct vector spaces in different layers,
+as mentioned in Sec. 4.1. Then the fused Value
+/tildewideV={/tildewidev,...,/tildewidev}is used in Eq.(1)
+In this way, layer-wise zis conditionally in-
+ferred from latent variables in previous encoder
+layers, together with l-th-layer text representation,
+and then explicitly fused with the corresponding de-
+coder layer, yielding a deeper intervention through-
+out the whole computation path of Transformer.
+4.3 Why Could D Work Well?
+To theoretically interpret the advantage of layer-
+wise latent variables which contributes most to
+D (Table 4), we give the following theorem:
+Theorem 1 For an observation xand a se-
+quence of latent variables z,z,...z, satis-
+fyingp(z) =/producttextp(z|z), andq(z|x) =/producttextq(z|z,x), then the expectation of the KL
+term,E[L]is an upper bound of:
+−/summationdisplayI(z;...;z|z)−I(z;...;z|x),
+(10)700whereIis the interaction information.
+See Appendix B.2 for proof. Based on Theorem 1,
+minimizingLapproximatively means maximiz-
+ing each interaction information term in Eq.(10),
+which forces the entanglement of all latent varibles
+z;...;zgiven the observation x, alleviating the
+diminishing of information encoded in latent vari-
+ables when propagating through layers.
+4.4 Extension to CVAE
+D could also be applied to CV AE for condi-
+tional generation tasks like storytelling. Given an
+observationxand its condition c, we can optimize:
+logp(x|c)≥E[logp(x|z,c)] (11)
+−KL(q(z|x,c)||p(z|c)),
+and then replace the prior distribution q(z|x,z)
+and posterior distribution p(z|z)in Eq.(6) with
+q(z|x,c,z)andp(z|z,c), respectively.
+In this case, we encode the condition cwith
+the same encoder. Similarly, we can obtain the
+representation of catl-th layer, denoted as c∈
+R, and then calculate the mean and log variance
+ofp(z|z,c)andq(z|z,x,c)by:
+/parenleftbiggµ
+log(σ)/parenrightbigg
+=ˆW/parenleftbiggz
+c/parenrightbigg
+,
+/parenleftbiggµ
+log(σ)/parenrightbigg
+=ˆW
+z
+x
+c
+,(12)
+where ˆW∈R,ˆWR.
+5 Experiment
+5.1 Dataset
+We consider four datasets for language modelling
+and unconditional generation, including the Yelp,
+and Yahoo (Yang et al., 2017; He et al., 2019), Penn
+Treebank (PTB) (Marcus et al., 1993), and SNLI
+(Bowman et al., 2015), and three datasets for con-
+ditional generation tasks, including summarization
+generation with CNN/DailyMail (CNN/DM) (See
+et al., 2017), story generation with WritingPrompts
+(WP) (Fan et al., 2018) and paraphrase generation
+with Quora. Detailed data statistics are listed in
+Table 7. Due to the limited computation capability,
+we use 165,157 samples in CNN/DM and 22,2614
+in WP with the max length of 900 for training.5.2 Implementation Details
+We use pretrained language models as the backbone
+and ﬁne-tune them on each task mentioned above
+with our D as in (Li et al., 2020a). For uncon-
+ditional generation and story generation, encoder
+and decoder shared the same parameters initialized
+with 12-layer GPT-2 (Radford et al., 2019). For
+summarization and paraphrase generation, parame-
+ters are not shared and initialized with BART-base
+(Lewis et al., 2020). We set the dimension of latent
+variable as 32 for all V AE-based models and use
+cyclical annealing for training, following (Li et al.,
+2020a). More details are given in Appendix A.1.
+5.3 Baseline
+We make a comprehensive comparison with strong
+Transformer-based baselines. We do not consider
+RNN-based models that are inferior to Transformer
+for text generation as shown in (Li et al., 2020a).
+Finetuned Pretrained Models . To manifest the
+suitability of D for different pretrained lan-
+guage models, we compare it with ﬁne-tuned GPT2
+on unconditional generation and story generation,
+and with ﬁne-tuned BART-base on summarization
+generation and paraphrase generation.
+Optimus (Li et al., 2020a): a large-scale V AE
+model which takes a pre-trained BERT as encoder
+and pretrained GPT-2 as decoder. This model is
+ﬁrst pretrained as a V AE, which simultaneously uti-
+lizes the two paradigms, Embedding and Memory
+as introduced in Sec. 3.3, for injecting latent vari-
+ables, with both KL annealing and KL threshold
+tricks, and then ﬁne-tuned on downstream tasks.
+Transformer-based VAE . Besides Optimus, we
+also compre the three paradigms, namely Embed-
+ding (Li et al., 2020a), Memory (Fang et al., 2021)
+andSoftmax (Wang and Wan, 2019), and incorpo-
+rate each paradigm into the same pre-trained model
+as D on each dataset for fair comparison.
+5.4 Metrics
+For unconditional generation tasks , we consider
+three types of metrics. (a) Representation Learn-
+ing Capability : we report PPL, ELBO, KL, mu-
+tual information (MI) (Alemi et al., 2016) and acti-
+vate units (AU) (Burda et al., 2016). These metrics
+measure V AE’s ability to mitigate KL vanishing
+and learn meaningful representations. Different
+from traditional language models like GPT-2, V AE-
+based models could not produce exact PPL due to
+randomness, so we use importance-weighted sam-701
+ples to estimate PPL, following He et al. (2019).
+We set the threshold in AU to 0.2 to further distin-
+guish different models. (b) Generation Quality :
+we report BLEU (Papineni et al., 2002), CND (Li
+et al., 2020b) and MAUVE (Pillutla et al., 2021).
+CND and MAUVE measure the divergence be-
+tween human-authored text and the generated one.
+(c) Generation Diversity : we report Self-BLEU
+(Zhu et al., 2018), Dist (Li et al., 2016) and JS (Jac-
+card similarity) (Wang and Wan, 2018) to assess
+the diversity and novelty of generated text.
+For conditional generation tasks , we report
+BLEU, Rouge-1, Rouge-2, Rouge-L (Lin and
+Hovy, 2002), and BERTScore (Zhang et al., 2020)
+to evaluate the quality of generated texts, as well
+as the same diversity metrics used in unconditional
+generation. We also report KL and AU value to
+present representation learning capability. More
+details of metrics are provided in Appendix A.3.
+5.5 Results
+5.5.1 Unconditional Generation
+We present results on Yelp and Yahoo in Table 1
+and leave the those on PTB and SNLI in the Ap-
+pendix A.5 due to space limitations. We also show
+the learning curves of ELBO and KL in Fig. 5.
+As shown in Table 1, D achieves notably
+improvement on almost all the metrics, especially
+superior on representation learning metrics. Much
+higher KL, MI and AU, and a big gap in PPL ob-
+tained by D indicate the latent variables en-
+code more meaningful text information and won’t
+diminish when propagating through Transformerlayers, which strongly supports our motivation that
+fusing latent variables with hidden states more
+deeply could effectively alleviate the KL vanishing
+problem. Such results also empirically verify the
+theoretical advantage of our model (Theorem 1),
+demonstrating entangled layer-wise latent variables
+can preserve more encoded knowledge for decoder.
+We will show that zcan involve more information
+when injected into more layers in Sec. 5.8.
+Besides, D also gets good performance
+(comparable BLEU and much better CND and
+MAUVE) on generation quality. With more in-
+formative latent variables, D could achieve
+a better ELBO and hence further boost the learn-
+ing of data distribution p(x)in Eq.(2), leading to
+satisfactory quality of generated texts.
+Generally, D also outperforms baseline
+models on generation diversity. The reason is two-
+fold: randomly sampled latent variables zshould
+bring diversity, while the V AE-based baselines tend
+to ignorezas mentioned before, losing some ran-
+domness. In contrast, latent variables are deeply
+fused in D , maintaining enough randomness.
+Besides, each latent variable is sampled in corre-
+sponding layer, and thus such a sampling process
+accumulates and enhances randomness, further ben-
+eﬁting diversity while keeping good quality.
+5.5.2 Conditional Generation
+We report the results of WP and CNN/DM in Ta-
+ble 2, and leave those of Quora in Appendix A.5.
+As we can see, D performs better on most
+quality metrics, but gets a little worse on diversity702
+compared to GPT-2. This is because GPT-2 may
+produce some ill-formed contents which ‘improve’
+diversity by cheating the metrics but also lead to
+much worse quality (lower BLEU and Rouge).
+Even so, on both WP and CNN/DM, D still
+beats all previous V AE paradigms in diversity, man-
+ifesting the effectiveness of our D .
+In addition, all baselines methods suffer from
+severer KL vanishing problems on conditional gen-
+eration tasks than on the unconditional ones. This
+is because the given condition text could aggravate
+the reliance of these models on preceding gener-
+ated tokens and the condition, and therefore bypass
+latent variables. By contrast, D could learn
+more informative zand hence keep a relatively
+higher KL value even given the condition text.
+5.6 Human Evaluation
+To better verify the effectiveness of D , we
+also conduct human evaluation on the two condi-
+tional generation tasks. For each model, we gen-
+erated 30 samples on each task, and invite 5 com-
+petent annotators to score these samples in terms
+of three criteria, Fluency ,Coherence andNovelty
+for story generation, and Informativeness ,Coher-
+ence andNovelty for summarization generation.
+As shown in Table 3, D obtains satisfactory
+performance in quality, and is consistently superior
+to all baselines on diversity and novelty. See Ap-
+pendix A.4 for more detailed evaluation protocols.
+5.7 Ablation Study
+Table 4 shows the results of ablation study on Yelp.
+We can ﬁnd both tensor product and the layer-wise
+latent variables beneﬁt the learning of informative703
+latent variables, while the latter contributes the
+most to D . To further verify the performance
+gain originating from Theorem 1 instead of simply
+increasing the number or the dimension of latent
+variables, we conduct two groups of experiments.
+First, we remove the conditional dependence be-
+tween layer-wise latent variables by independently
+sampling each zin both training and testing. We
+can see that removing dependence causes a sig-
+niﬁcant performance drop. Besides, we keep the
+dependence between zbut optimize only one of
+the KL terms in Eq.(6), and ﬁnd all representationcapability metrics deteriorate, especially KL, MI
+and AU. Such results effectively demonstrate the
+necessity of using and optimizing the conditional
+inference of layer-wise latent variables, supporting
+our theoretical interpretation of D .
+Second, we enlarge the dimension of zused in
+the three paradigms to 384(12×32), equal to the
+total latent dimension used in D . The results
+show that simply increasing the dimension of latent
+variables brings a more sparse latent space, even
+exacerbating the KL vanishing problem.
+5.8 Analysis
+Training Tricks To reveal the robustness of our
+model, we evaluate the inﬂuence of three com-
+monly used training tricks to relieve KL vanish-
+ing, i.e., BOW (bag-of-words) loss (Wang et al.,
+2017), batch normalization (Zhu et al., 2020) and
+KL annealing (Fu et al., 2019), to the performance
+ofD and the three paradigms. As shown in
+Table 5, previous methods suffer KL vanishing seri-
+ously without annealing or BOW loss, getting KL,
+MI and AU almost 0. Though not good as using
+annealing, D still maintains acceptable per-
+formance and mitigates KL vanishing even without
+any training tricks. Bow and batch normalization
+dramatically prevent low KL divergence, but ob-
+struct the optimization and thus cause higher PPL.
+Number of Latent Variables We observe the
+change of PPL, KL and ELBO with different num-
+bers of latent variables. We conduct two groups of
+experiments where we produce and utilize layer-
+wise latent variables starting from and ending at
+different layers. As shown in Fig. 2, incorporating
+more latent variables could continuously improve
+performance, consistent to our claim in Sec. 4.
+With the same number of latent variables, start-
+ing from a higher layer is better than ending at a
+lower layer, which indicates that latent variables704
+generated from higher layers encode more help-
+ful information compared to those from lower lay-
+ers, manifesting disadvantages of the two previous
+paradigms, Softmax (starting from the last layer)
+and Embedding (ending at the ﬁrst layer).
+Model size We compare the performance of
+D and three paradigms with 24-layer GPT2-
+medium as backbone. As shown in Table 5, with
+the increasing of model size, D consistently
+achieves better performance than baselines.
+5.9 Case Study
+V AE captures text representations in a smooth la-
+tent space. We take two sentences xandxandsample two posterior latent variables zandz
+fromp(z|x)andp(z|x), and get interpo-
+lated latent variables with z=τz+ (1−τ)z.
+We generate multiple sentences with a continuously
+changedτfrom 0 to 1. As shown in Fig. 3, sen-
+tences generated from interpolated zmix the se-
+mantics of the two initial sentences and smoothly
+change fromxtox, showing D ’s ability of
+learning a ﬂexible latent space.
+Fig. 4 shows the generation examples of D
+and one of baseline, Memory, given the same
+prompt WritingPrompts. We observe that the gen-
+erated text of Memory is irrelevant to the prompt,
+while D generates coherent and vivid text.
+6 Conclusion
+In this paper, we propose a novel variational Trans-
+former framework D . Our framework learns
+a series of layer-wise latent variables with iterative
+dependence. These latent variables are condition-
+ally inferred and injected into corresponding de-
+coder layers by low-rank tensor product for deeper
+fusion. The experiments on both unconditional and
+conditional generation tasks demonstrate D ’s
+ability to signiﬁcantly mitigate KL vanishing and
+improve generated text’s quality and diversity. In
+the future, we plan to explore further the potential
+of D in larger pretrained language models.
+Acknowledgement
+Thanks for the anonymous reviewers for their com-
+ments. This work is supported by the National Key
+R&D Program of China (No. 2020AAA0106502)
+and International Innovation Center of Tsinghua
+University, Shanghai, China.705References706707708A Experiment Details
+A.1 Implementation Details
+We load pretrained model GPT-2 (Radford et al.,
+2019) as initial parameters for unconditional gener-
+ation and story generation, and pretrained BART-
+base (Lewis et al., 2020) for summarization and
+paraphrasing generation tasks. For the summa-
+rization and paraphrasing generation, we keep
+the encoder-decoder attention block. No encoder-
+decoder attention is used in unconditional gener-
+ation and story generation tasks. The number of
+layers and dimensions of hidden states in D
+is consistent with the conﬁgurations of correspond-
+ing pretrained models (GPT-2 has 12 layers and
+Bart-base has 6-layer encoder and 6-layer decoder.
+The hidden size of both is 768). We use the state
+of a special token to obtain the representation in
+the encoder. We utilize cyclical annealing tricks to
+train D and other V AE baselines. Speciﬁcally,
+two epochs are one annealing period. In one period,
+β(the weight of KL term in ELBO) keeps 1e-5 in
+the ﬁrst half, then linearly increases to 1 in the next
+quarter, then keeps at 1 for the last quarter. We se-
+lect batch size over {16,32}and learning rate over
+{5e-5, 7e-5}. We use beam search for D and
+top-k sampling for compared baseline models for
+the unconditional generation and story generation.
+For the summarization and paraphrasing genera-
+tion, we use beam search in all the models.
+We implement D and other V AE baselines
+based on Huggingface Transformers (Wolf et al.,
+2020) library of v4.10.0 and use NVIDIA GeForce
+RTX 3090 to train our model. The total number of
+training GPU hours on different datasets is in Table
+6. The number of parameters for our model is
+193,353,984 in the unconditional generation setting
+and 195,180,114 in the conditional generation one.
+All experimental results are trained and tested in a
+single run.
+A.2 Datasets Details
+The detailed dataset statistics are in Table 7. For
+the licenses of the datasets we use, CNN/DM and
+WritingPrompts use MIT License, while SNLI uses
+CC BY-SA 4.0. Meanwhile, PTB, Quora, and Yelp
+use their own license: LDC User Agreement, Yelp
+Data Agreement, and Quora’s Terms of Service,
+respectively. All of these licenses and agreements
+allow their data for academic use. Unfortunately,
+we did not ﬁnd the license for the Yahoo Dataset.
+A.3 Metrics Details
+Here we provide more details of the metrics used
+in our experiments.
+Perplexity (PPL) .PPL =p(x)is com-
+monly used to evaluate the performance of lan-
+guage models, where nis number of tokens xcon-
+tains. For V AE-based model, we can only obtain
+the lower bound of logp(x). We consider klatent
+variablesz,z,...,zsampled from the posterior
+distributionq(z|x). Based on the fact that average
+importance weights are an unbiased estimator of
+logp(x)(Burda et al., 2016) and Jensen’s Inequal-
+ity, we have:
+L=E/bracketleftBigg
+log1
+k/summationdisplayp(x,z)
+q(z|x)/bracketrightBigg
+(13)
+≤logE/bracketleftBigg
+1
+k/summationdisplayp(x,z)
+q(z|x)/bracketrightBigg
+= logp(x).
+We useLto estimate logp(x)and calculate PPL.
+ELBO . The ELBO is the sum of reconstruction
+loss and KL divergence.
+KL. The KL divergence of the posterior and
+prior distribution.
+Mutual Information(MI) (Alemi et al., 2016).709Mutual Information I(x,z)is deﬁned as:
+I(x,z) (14)
+=EElogq(z|x)−Elogq(z)
+whereqz) =Eq(z|x)is called the aggregated
+posterior.
+Activate Units(AU) (Burda et al., 2016). AU
+is the active units in latent varibles, deﬁned as
+A=Cov(E[z])>δ, whereδis a thresh-
+old, commonly set as 0.01. However, we ﬁnd that
+withδ= 0.01, all V AE models in our experiments
+have full active unit. So we increase the threshold
+to 0.2 to distinguish the performance of different
+models on this metric. Please note thatD in-
+corporates latent variables in all layers, and hence
+we calculate AU for the latent variable in each layer
+and then report the average.
+BLEU (Papineni et al., 2002). BLEU measures
+the n-gram overlap of generated sequences and
+the reference ones. For unconditional setting, we
+regard all samples in the test set as references to
+each generated example.
+CND (Li et al., 2020b). CND approximates the
+divergence of the empirical reference distribution
+and generated text distribution in n-gram spaces.
+MAUVE (Pillutla et al., 2021). MAUVE mea-
+sures the gap between reference text and generated
+text using divergence frontiers.
+Self-BLEU (Zhu et al., 2018). Self-Bleu calcu-
+lates the BLEU score on the generated samples,
+which averages the BLEU score of each generated
+sequence calculated with other generated ones as
+references. This metric measures the diversity of
+a set of generated sequences. Higher Self-BLEU
+means these generated sequences are more distin-
+guishable from each other.
+Dist (Li et al., 2016). Dist measures the propor-
+tion of distinct n-grams on generated samples.
+Jaccard Similarity(JS) (Wang and Wan, 2018).
+JS calculates the average n-gram Jaccard similarity
+between every two generated sequences.
+Rouge (Lin and Hovy, 2002). Rouge computes
+n-gram overlap of generated examples with given
+target samples. We use rouge-score v0.0.4 to evalu-
+ate the rouge score of our model and the baselines.
+BERTScore (Zhang et al., 2020). BERTScore
+uses pre-trained BERT (Devlin et al., 2019) to ob-
+tain the vector representations of generated and
+reference text and calculates their cosine similar-
+ity. We use bert-score v0.3.10 to calculate the
+BERTScore of our model and the baselines.A.4 Human Evaluation Details
+Due to the relatively long length of generated text,
+we randomly sample 30 examples in the test set
+of WP and CNN/DM as input to D and other
+compared baseline models to generate the target.
+We invite ﬁve graduate students proﬁcient in En-
+glish to score the generated text. The criteria for
+story generation include ﬂuency, coherence, and
+novelty, and the criteria for summarization gen-
+eration include informativeness, consistency, and
+novelty. Speciﬁcally, ﬂuency measures whether
+the generated sentences are syntactically ﬂuent;
+coherence measures whether the generated text is
+logically structured and consistent with the input
+text; novelty measures whether the content is novel
+and attractive; informativeness measures to what
+extent the generated summarization summarizes
+the general idea of the article.
+When conducting the human evaluation, we in-
+formed the participants as follows:
+•The following contents are generated by the
+automatic models. Some of them may be of-
+fensive or contain improper arguments. Please
+be conscious of these risks and evaluate these
+contents equitably and adequately.
+•The evaluation you provide will be used only
+for academic use and will never be used com-
+mercially.
+Every evaluator will sign their signature below
+these warnings to conﬁrm that they have read those
+words. After ﬁnishing the annotation, they will re-
+ceive $25. This amount is determined by the time
+of the whole annotation process and the estimation
+of average hourly income. The ethics review board
+for data collection protocol is not essential in our
+country, so we did not conduct this review for our
+data collection protocol.
+A.5 Additional Experimental Result
+Table 8 and Table 9 report the results on PTB, SNLI
+and Quora dataset.
+A.6 Case Study Details
+We take two sentences xandx
+and sample two groups of latent vari-
+ablesz={z,z,...,z}and
+z={z,z,...,z}from posterior distri-
+butionsp(z|x)andp(z|x). We obtain the
+weighted latent variables ˆz={ˆz,ˆz,..., ˆz}by710taking weighted sum at each corresponding ele-
+ment in two groups, i.e. ˆz=τ∗z+(1−τ)∗z.
+The mixed sentence ˆxis generated conditioned on
+p(ˆx|ˆz)by the decoder.
+A.7 Potential Risks and Limitations of our
+work
+Due to the unclean corpus (especially in the WP
+dataset) we use where slang repeatedly appears,
+the model training on this corpus may also output
+some rude expressions during generation. Also, the
+text generated in the unconditional generation task
+is not controllable, which may contain some bias
+or politically sensitive expression. Besides, since
+our model signiﬁcantly improves the quality and di-
+versity of generated, it can produce more plausible
+texts like news, which could be possibly utilized to
+create fake news or disinformation. However, on
+the other hand, our model could beneﬁt fairness in
+language generation. Previous text generation mod-
+els tend to produce biases like gender or nationality
+biases, which means only the majority would be
+appropriately described while the minority may be
+ignored. These biases are mainly caused by the
+biased training corpus. With the same data, our
+model can improve the diversity of generated text,
+which is also potential for mitigating these biased.
+We will try to develop debiased language gener-
+ation systems in future work to avoid these risks
+harming society.
+While D shows good performance on text
+generation, it has one limitation: training efﬁciency.
+D brings more parameters compared with
+three baseline methods. Training efﬁciency needs
+to be considered if we further explore the perfor-
+mance of D on the large pretrained model.711712B Additional Proof
+B.1 Derivation of KL Divergence of Layer-Wise Latent Variables
+KL divergence of layer-wise latent variables
+KL(q(z|x)||p(z))
+=/integraldisplay
+q(z|x) logq(z|x)
+p(z)dz
+=/integraldisplay/productdisplayq(z|x,z) log/producttextq(z|x,z)/producttextp(z|z)dzdz...dz
+=/summationdisplay/integraldisplay/productdisplayq(z|x,z) logq(z|x,z)
+p(z|z)dzdz...dz
+=/summationdisplay/integraldisplay
+q(z|x)q(z|x,z) logq(z|x,z)
+p(z|z)dzdz...dz
+=/summationdisplayEKL(q(z|x,z)||p(z|z))(15)
+B.2 Proof of Theorem 1
+First, we consider on term in the summation and can obtain:
+EE[KL(q(z|x,z)||p(z|z))]
+=/integraldisplay
+q(x)q(z|x)q(z|x,z) logq(z|x,z)
+p(z|z)dxdzdz
+=/integraldisplay
+q(x,z,z) logq(z|x,z)
+p(z|z)dxdzdz
+=/integraldisplay
+q(x,z,z) log/parenleftBigq(z,x|z)
+q(x|z)q(z|z)q(z|z)
+p(z|z)/parenrightBig
+dxdzdz
+=/integraldisplay
+q(z)q(x,z|z) logq(z,x|z)
+q(x|z)q(z|z)dxdzdz+
+/integraldisplay
+q(x|z,z)q(z|z)q(z) logq(z|z)
+p(z|z)dxdzdz
+=/integraldisplay
+q(x,z|z) logq(z,x|z)
+q(x|z)q(z|z)dxdz+
+/integraldisplay
+q(z|z)q(z) logq(z|z)
+p(z|z)dzdz
+=H(z|z)−H(z|z,x) +EKL(q(z|z||p(z|z))
+≥H(z|z)−H(z|z,x)(16)
+whereHis the Shannon entropy. Then, the summation has a lower bound:/summationdisplayEE[KL(q(z|x,z)||p(z|z))]
+≥/summationdisplayH(z|z)−H(z|z,x)
+=H(z,...,z)−H(z,...,z|x)
+=I(x;z,...,z)(17)713whereIis mutual information. Next, we prove the following inequality with induction:
+I(x;z,...,z)≥I(x;z;...;z) (18)
+WhenL= 2, we proofI(x;z,z)≥I(x;z;z). Actually, we have the following facts:
+I(x;z,z)
+=H(x) +H(z,z)−H(x,z,z)(19)
+I(x;z;z)
+=H(x) +H(z) +H(z) +H(x,z,z)
+−H(z,z)−H(x,z)−H(x,z)(20)
+Based on the facts above, we have:
+I(x;z,z)≥I(x;z;z) (21)
+⇔2H(z,z) +H(x,z) +H(x,z)≥H(z) +H(z) + 2H(x,z,z) (22)
+It’s true because we have:
+H(z,z) +H(x,z)
+=H(z|z) +H(x|z) + 2H(z)
+≥H(x,z|z) + 2H(z)
+=H(x,z,z) +H(z)(23)
+Similarly, the following inequality also holds true:
+H(z,z) +H(x,z)≥H(x,z,z) +H(z) (24)
+Therefore, making sum to Eq.(23) and Eq.(24), we conclude that I(x;z,z)≥I(x;z;z). Hence, we
+ﬁnish the proof of the L= 2case.
+WhenL=k, supposeI(x;z,...,z)≥I(x;z;...;z), we consider L=k+ 1. In this case,
+based on the inductive assumption, we have:
+I(x;z,...,z)≥I(x;z,...,z)≥I(x;z;...;z)≥I(x;z;...;z) (25)
+Hence, the case of L=k+ 1 also holds true. Therefore, we conclude that I(x;z,...,z)≥
+I(x;z;...;z).
+Now, we consider the interaction information and can obtain:
+I(x;z;...;z)
+=I(z,z)−/summationdisplayI(z;...;z|z)−I(z;...;z|x)
+≥/summationdisplayI(z;...;z|z)−I(z;...;z|x)(26)
+Finally, based on Eq.(16), (17), (25), (26), we can conclude:
+E[L] =/summationdisplayEE[KL(q(z|x,z)||p(z|z))]
+≥I(x;z,...,z)
+≥I(x;z;...;z)
+≥/summationdisplayI(z;...;z|z)−I(z;...;z|x)(27)714715716

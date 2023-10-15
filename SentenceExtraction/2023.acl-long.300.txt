@@ -1,1 +1,855 @@
-5469 Proceedings of the 61st Annual Meeting of the Association for Computational Linguistics Volume 1 : Long Papers , pages 5469–5485 July 9 - 14 , 2023 © 2023 Association for Computational Linguistics 5470 5471 5472 5473 5474 5475 5476 5477 5478 5479 5480 5481 5482 5483 5484 5485 
+
+Yasumasa Onoe, Michael J.Q. Zhang, Shankar Padmanabhan, Greg Durrett, Eunsol Choi
+Department of Computer Science
+The University of Texas at Austin
+yasumasa@utexas.edu
+Abstract
+Pre-trained language models (LMs) are used
+for knowledge intensive tasks like question an-
+swering, but their knowledge gets continuously
+outdated as the world changes. Prior work has
+studied targeted updates to LMs, injecting indi-
+vidual facts and evaluating whether the model
+learns these facts while not changing predic-
+tions on other contexts. We take a step forward
+and study LMs’ abilities to make inferences
+based on injected facts (or propagate those
+facts): for example, after learning that some-
+thing is a TV show, does an LM predict that
+you can watch it? We study this with two cloze-
+style tasks: an existing dataset of real-world
+sentences about novel entities (ECBD) as well
+as a new controlled benchmark with manually
+designed templates requiring varying levels of
+inference about injected knowledge. Surpris-
+ingly, we find that existing methods for updat-
+ing knowledge (gradient-based fine-tuning and
+modifications of this approach) show little prop-
+agation of injected knowledge. These methods
+improve performance on cloze instances only
+when there is lexical overlap between injected
+facts and target inferences. Yet, prepending
+entity definitions in an LM’s context improves
+performance across all settings, suggesting that
+there is substantial headroom for parameter-
+updating approaches for knowledge injection.
+1 Introduction
+Pre-trained language models (LMs) acquire com-
+prehensive real-world knowledge from massive
+amounts of pre-training data, allowing them to use
+this knowledge effectively in downstream tasks.
+However, without continual updating, the knowl-
+edge contained within these backend LMs will
+eventually become outdated. This temporal mis-
+match affects model performance on downstream
+tasks (Zhang and Choi, 2021; Dhingra et al., 2022a;
+Lazaridou et al., 2021; Jang et al., 2022b). As LMs
+become more widely deployed, their knowledgeFigure 1: Knowledge editing tasks. We study a challeng-
+ingentity knowledge propagation task where language
+models should make inferences after learning entities
+from their definitions. This differs from past knowledge
+editing which evaluates paraphrases of injected facts.
+should be synced with the current state of the world
+while maintaining reasonable deployment costs.
+Prior work has investigated knowledge editing
+in pre-trained LMs, updating model parameters to
+alter outputs to match what users want (Zhu et al.,
+2020; Sinitsin et al., 2020; De Cao et al., 2021;
+Mitchell et al., 2022; Meng et al., 2022; Hase et al.,
+2023). In these studies, the original fact and the
+altered fact are provided (e.g., changing “X was
+born in Y .” to “X was born in Z.”), and models are
+evaluated after a single update on each instance;
+see Figure 1 for an example. These model editing
+methods successfully provide targeted updates, fix-
+ing incorrect or outdated individual facts. Yet, can
+LMs make inferences based on updated knowl-
+edge? Past evaluation has largely focused on two
+aspects of knowledge editing, whether the edits
+were successfully injected and whether other irrel-
+evant sentences were impacted, but do not capture5469whether the LMs now can reason based on the new
+fact that has been injected.
+We take a step further and evaluate whether LMs
+canpropagate updated knowledge about new en-
+tities. We first inject definitions about the entity
+into LMs using various knowledge editing meth-
+ods (Mitchell et al., 2022; Meng et al., 2022), then
+evaluate LMs’ performance on cloze tasks on a
+wide range of sentences about the entity (see Fig-
+ure 1 for an example). We refer to this task as
+entity knowledge propagation and introduce two
+cloze datasets to evaluate this challenging task.
+Our first evaluation benchmark is the Entity
+Cloze By Date ( ECBD ) dataset (Onoe et al., 2022),
+which presents novel entities tagged with orig-
+ination dates (e.g., Hurricane Ian , 2022), their
+definition and probe sentences taken from their
+Wikipedia page. The task is to fill a masked span
+in probe sentences. Because Wikipedia contains
+a wide range of information, much of it not in-
+ferable from an entity’s definition, injecting entity
+knowledge via its definition has an unclear impact
+on the probe sentences; filling in the masked span
+is nontrivial even after the entity definition is pro-
+vided. For more controlled study, we introduce
+a new benchmark ( E I ) with
+manually designed probe sentences with multiple-
+choice answer options. Once one learns about the
+definition of an emerging entity, finding the correct
+answer for these probe sentences is easy.
+We find that existing parameter updating meth-
+ods can handle simpler inferences in E I- , but fail to improve performances in
+ECBD , revealing a limitation in these methods.
+We further analyze the impact of fine-tuning. Dis-
+tressingly, we find that simply prepending infor-
+mation in-context works very well, and match-
+ing the performance of this via parameter up-
+dates is challenging. A deeper analysis finds that
+model editing shows promising results only when
+the injected definition sentence and the cloze in-
+ference have lexical overlap. Our work estab-
+lishes an evaluation paradigm and opens doors
+for work on editing methods that can propagate
+entity knowledge. The code and data are avail-
+able at https://github.com/yasumasaonoe/
+entity_knowledge_propagation .
+2 Entity Knowledge Propagation
+We propose Entity Knowledge Propagation (EKP) ,
+a new task where we want to update model param-eters to reflect an emerging entity that is unseen in
+the LMs’ pre-training corpus. For example, BERT
+was trained in 2018, so COVID-19 is an emerg-
+ing entity to BERT. We explore various ways of
+editing model parameters based on definition sen-
+tences to inject new knowledge. Once we inject the
+knowledge of the emerging entity into the model
+parameters, we evaluate the updated model’s ability
+to reason about the emerging entity.
+2.1 Task Definition
+Formally, we have a language model fwith pa-
+rameters θ. An input to the model consists of a
+(partial) sentence or chunk of text xthat contains
+at least one explicit reference to an emerging entity
+e(i.e., invoking eby name). We use f(y∣x)to
+denote placing a probability distribution over a text
+sequence ygiven the text x.
+Our data instances have the property that y
+represents an inference we make about the entity:
+ymust be related to the entity esuch that an
+LM should give higher probability to it if the LM
+“knows” ewell. We do not expect the raw model f
+to perform well without any updates, since the en-
+tityeis completely unseen during the pre-training
+stage. We assume that the emerging entity comes
+with a short definition sentence dthat provides
+basic information about the entity. This provides
+the basis for the update to f.
+To summarize, each example ⟨e, d, x, y⟩∈D
+consists of an emerging entity e, a definition sen-
+tence d, a probe sentence x, and a gold com-
+pletion y. Knowledge editing methods will com-
+puteθ←update(θ, e, d), updating parameters
+θregarding eand its definition d, to give higher
+probability for future inferences about elike those
+expressed by xandy(examples in Figure 1).
+Metrics Following prior work in the knowledge
+updating literature (Zhu et al., 2020; De Cao et al.,
+2021; Mitchell et al., 2022; Meng et al., 2022; Hase
+et al., 2023), we will evaluate two criteria: update
+success and specificity. Each of these criteria is
+evaluated with respect to a base metric, which is
+either perplexity or accuracy, depending on our
+dataset. We will define them here in the case of
+perplexity (lower is better); we will use the same
+definitions for accuracy, but the desired trends will
+be opposite.5470
+For update success, we will measure if the per-
+plexity of the updated model ppl(f(y∣x))
+is better than the raw model ppl(f(y∣x))
+(lower perplexity is better). For specificity, we
+compute the difference between the post-update
+perplexity and pre-update perplexity ppl(f(y∣
+x))−ppl(f(y∣x))forˆe≠e, entities other
+thane. Ideally, we want this perplexity value to
+be close to zero; a positive value indicates that per-
+plexity has gotten worse on these entities after the
+update. It can theoretically be negative if the up-
+date makes the LM to guess irrelevant examples
+better.
+Comparison with prior tasks Similar editing
+procedures have been explored in the literature,
+but with key differences from our setting. A line
+of work on knowledge editing (Zhu et al., 2020;
+De Cao et al., 2021; Mitchell et al., 2022) addresses
+a version of our task where fis updated to encode
+information about a particular fact. This could be
+written as θ←update(θ, x, y). They then eval-
+uatef(y∣˜x)on perturbed inputs ˜xthat are
+paraphrases of the xthey inject. The answer y
+is visible when the network is updated and it sim-
+ply needs to be preserved for future (paraphrased)
+queries. By contrast, in our setting, yand the in-
+jected definition dmay have little overlap.
+ROME (Meng et al., 2022) addresses knowl-
+edge editing as well as a variant of counterfactual
+model editing . This task involves an update similar
+in spirit to ours: θ←update(θ, e,(x, y))
+that updates a completion of a sentence (e.g.,
+x=the Eiffel Tower is located in ,y=Rome )
+and then expects the knowledge to be usable for
+other inference pairs (x, y). These differ in
+that the injected knowledge is not a complete defi-
+nition of an entity; while their method could theo-
+retically be used for our task, it relies on localizing
+and editing existing information about e. Therefore,
+it is less appropriate in handling emerging entities,
+as our results will show.
+3 Constructing benchmarks for EKP
+We use two different types of datasets to investigate
+how new entity knowledge is propagated into the
+LM’s parameter space. Table 2 summarizes the
+dataset statistics on two benchmarks, including the
+extent to which the target spans yoverlap with the
+definitions d, which will be important later.
+3.1 ECBD
+Entity Cloze By Date (Onoe et al., 2022, ECBD)
+presents entities indexed by their origination dates
+paired with probe sentences containing those enti-
+ties. In addition, the dataset provides the definition
+sentence (first sentence sentence of Wikipedia ar-
+ticle) for each entity. The original task focuses on
+general temporal adaptation of language models,
+evaluating model’s perplexity in predicting masked
+spans in probe sentences. We repurpose this dataset
+to focus on targeted knowledge updates and the
+propagation of entity knowledge. We take entities
+with origination date between 2020/01 and 2021/09
+to ensure they are unseen by the LMs we study.
+These instances fall into the paradigm discussed
+in Section 2.1 (example shown in Table 1):
+e∶Entity : the title of the Wikipedia article5471d∶DefinitionSentence : the first sentence of
+the Wikipedia article for the entity.
+x∶ProbeSentence : a sentence selected from
+the Wikipedia article according to the procedure
+described in Onoe et al. (2022)
+y∶GoldSpan : the target span as described in
+Onoe et al. (2022)
+ECBD- We filter ECBD to create ECBD-
+easy, a subset where knowledge propagation should
+be easier. Specifically, we take cases where the tar-
+get masked span yis contained in the definition
+sentence dverbatim; such examples are more con-
+gruent with the formulation of past work such as
+MEND and are typically easier, as simply boosting
+the probability of the definition tokens can improve
+perplexity on the gold span.
+Evaluation Metrics Following Onoe et al.
+(2022), we compute per-token perplexity over the
+masked spans. Because of differences in model
+architecture such as tokenizer choice, this metric
+does not allow comparison across different base
+models. We randomly sample 40 entities as ˆefrom
+ECBD popular subset to measure specificity.
+3.2 E I
+While ECBD contains real-world sentences span-
+ning a broad domain, it presents a very challenging
+task even for humans, often requiring rich knowl-
+edge and various types of reasoning and inference.
+For a more controlled study targeting on knowl-
+edge propagation, we construct a new dataset we
+name as E I .
+In this dataset, choosing the correct span is much
+easier when given the definition sentence. Further,
+instead of requiring LMs to predict spans from
+open vocabulary, we provide a set of candidate
+spans and evaluate whether LMs can assign higher
+probability to the correct answer candidate. In-
+stances here are designed to be similar to ECBD,
+but the probe sentences xare handcrafted to elicit
+the target inference type, and the gold span ycomes
+with an associated set {C}of options.
+Data Construction Details We first curate en-
+tities tagged with TV shows and natural disasters
+from English Wikipedia and their definition sen-
+tences from the 2020 and 2021 subsets of ECBD.
+In addition to real entities, we generate examples
+of "fake" people where we fabricate person names
+along with their definitions (e.g., Leighanna Smith(born July 21, 1970) is an American film director,
+screenwriter, and producer...).
+We then manually craft probe sentences target-
+ing two types of reasoning: explicit and implicit.
+The explicit probe sentences ask information that
+is explicitly stated in the definition sentence (e.g.,
+genre of a TV show). On the other hand, the im-
+plicit probe sentences require commonsense-like
+information (e.g., people watch a TV show, rather
+than eat a TV show.).
+Evaluation metrics For this multiple-choice
+cloze task, we evaluate knowledge propagation by
+meausring accuracy (i.e., how often the gold label
+gets the highest probability over all answer can-
+didates). In addition, we compute the specificity
+score by evaluating a model on other probe sen-
+tences from similar entities.
+4 Experimental Setup
+4.1 Base Language Models
+Model architectures can have impact on their ca-
+pabilities of acquiring entity knowledge. Thus, we
+consider both left-to-right and seq-to-seq model
+architectures. Specifically, we use GPT-Neo
+1.3B (Black et al., 2021)and T5-large (Raffel
+et al., 2020)as base language models ( f), avail-
+able via Huggingface Transformers (Wolf et al.,
+2020). We additionally consider GPT2-XL (Rad-
+ford et al., 2019) as a base model to closely follow
+the protocol presented in ROME paper (Meng et al.,
+2022).
+4.2 Parameter Updating Methods
+Finetuning is a common way for adapting a pre-
+trained LM to a specific task or domain (Gururan-
+gan et al., 2020). In a similar vein, we aim to adopt
+a pretrained LM to an environment where new en-
+tities constantly arise. Given eand its definition d,
+we update the parameters θto minimize loss on a
+training example formed from d. For left-to-right
+models (e.g., GPT-Neo), we use the standard next
+token prediction language modeling task on the
+entire dexample. For mask filling models (T5),
+we randomly select a spanthat is not overlapping
+with the entity mention span, following Onoe et al.5472(2022). We experiment with two fine-tuning set-
+tings: full model (updating all parameters) and last
+layer (updating parameters belonging to the last
+transformer layer only). We start finetuning from
+the original model checkpoint for each example.
+MEND (Mitchell et al., 2022) can be viewed
+as a hypernetwork that efficiently transforms the
+raw finetuning gradient into a parameter update
+that should successfully edit the base model’s pa-
+rameters in one step. This method is designed for
+injecting or editing individual facts about entities,
+not a collections of facts about entities (i.e., a com-
+plete definition’s worth of entity knowledge). The
+MEND parameters are trained on an editing dataset
+where each example consists of an input-output
+pair, an altered output, and locality examples (for
+measuring sensitivity). The goal of MEND training
+is to learn a network that modifies the target fact
+without affecting unmodified facts.
+We train MEND editors for GPT-Neo and T5
+with the WikiText-103 dataset, which uses gener-
+ated text as altered output following the configura-
+tion used in the original paper.
+ROME (Meng et al., 2022) performs knowledge
+editing by treating a MLP as a key-value storage: it
+uses a subject (such as the Eiffel Tower) to extract
+the “value” associated with that subject in the MLP.
+Then, it uses a rank-one modification of the weights
+of the MLP to “rewrite” this key-value pair.
+We use the ROME editor for GPT2-XL. We for-
+mat according to the subject, relation, and object
+structure of ROME prompts; examples of these
+can be found in the Appendix. The subject is a
+one-word name of the entity, the relation is the defi-
+nition sentence before the <MASK> token, and the
+object is the correct label. Examples in which the
+subject did not appear before the <MASK> token
+(less than 0.5% of our data) were filtered.
+4.3 Input Augmentation
+Finally, as was explored in Onoe et al. (2022), we
+evaluate an approach where information is added
+only in-context: prepending a definition sentenceto a probe sentence ( Definition ). While such in-
+put augmentation will lower the efficiency (as the
+context length has increased) and will not yield
+an updated model, a lower perplexity can indicate
+if the definition sentence contains useful informa-
+tion and can show what gains are achievable. We
+also present a baseline that prepends a randomly
+chosen definition of another entity ( Random Def. ),
+following prior work.
+4.4 Computational Cost
+While input augmentation is the simplest to imple-
+ment out of all the knowledge injection methods
+we experiment with, it comes with an increased
+computational cost at inference time due to the
+longer input sequence. A principal goal of this line
+of work is to update models so they can learn about
+many new entities over time; therefore, we do not
+consider input augmentation a valid solution to the
+overall problem in this work due to poor scaling.
+In contrast, performing knowledge injection via
+finetuning carries the upfront cost of computing
+and performing gradient updates, but has no such
+cost increase during inference. Computing these
+gradient updates, however, can become quite bur-
+densome when injecting many facts into the same
+LM. This, in part, is the motivation behind meth-
+ods like MEND which have an additional upfront
+cost of training a meta-network to predict the nec-
+essary parameter updates. After training the meta-
+network, the amortized cost of updating many in-
+dividual facts becomes much cheaper. While this
+dramatically reduces the cost of performing mul-
+tiple edits to a single LM, meta-networks must be
+retrained for each unique LM we wish to update.
+In our experiments, the updates for an example
+from all of the methods take less than 10 seconds
+on a single Quadro RTX 8000 GPU.
+5 Results
+Table 3 reports the performances of various knowl-
+edge injection approaches on three base models.
+In all experimental setting, we see input augmen-
+tation (prepending definition) boasts robust and
+consistent performances gains. Prepending random
+definitions hurt performances in GPT-Neo while
+does not impact T5. This indicates that the defi-
+nition contains information relevant to the spans
+to predict. As model behaves substantially differ-
+ently across datasets, we first separately discuss
+the results on each dataset, E I ,5473
+ECBD , and ECBD- , and then draw larger
+conclusions.
+5.1 E I
+Here, we observe fine-tuning is broadly effective
+at improving accuracy . Finetuning (full model)
+brings up the post-edit accuracy by more than 20
+points for all three base models. Yet, it comes at the
+cost of medium to large decreases in specificity ,
+with drops of 15.9 and 7.7 points on GPT-Neo and
+GPT2-XL. MEND overall does not cause a substan-
+tial change in the model, as shown by the impact on
+specificity (+0.3). ROME does not achieve editing
+performance as strong as fine-tuning on GPT2-XL
+(+31.8 vs. +23.5), but it does so with a lower im-
+pact to specificity (-8.8 vs. -2.0).
+On this benchmark, where evaluation metric is
+accuracy, we can make comparison across the mod-
+els. Overall we see better performances with T5
+model, despite it being the smallest model we test,
+potentially as it uses both left and right context.
+5.2 ECBD
+On our most challenging benchmark setting,
+ECBD, none of the model editing techniques, in-
+cluding fine-tuning, lead to substantial decreasein perplexity nor increase in specificity. MEND
+even causes a increase in perplexity when the base
+model is GPT-Neo.
+We attempted to evaluate ROME in this setting.
+However, we found very poor performance (per-
+plexities of over 100 for both datasets). We do not
+report these in the table as technically ECBD is
+out of scope for ROME: ROME relies on a par-
+ticular (entity, relation, object) format that is not
+well-suited to updating a model with general defi-
+nitional knowledge of an entity, as opposed to spe-
+cific attributes like The English Game is a drama
+inE I . Attempting to force our
+definitions into ROME’s expected form led to very
+high perplexities (over 100 on both ECBD sets).
+These observation implies that the current model
+editing approaches are not able to propagate en-
+tity knowledge to the probe sentences just from
+the definition sentences. The inference patterns in
+theECBD examples might be too complex to be
+effectively learned by a small number of parame-
+ter updates on a few examples, requiring implicit,
+multihop, and commonsense reasoning.5474
+5.3 ECBD-
+To understand the low performance in the ECBD
+setting, we look more closely into ECBD-
+examples, where the gold spans are always in-
+cluded in the definition sentences. On this subset of
+ECBD , finetuning and MEND is effective on GPT-
+Neo, decreasing perplexity by 9.0and8.5respec-
+tively. T5-large does not change its post perplexity.
+This is potentially because T5 only predicts and
+updates on masked spans (which might not contain
+the gold span), unlike the other two base models.
+Mildly positive results on the easier subset, along
+with robust performances of input augmentations,
+lead us to conclude that the gains are achievable.
+Yet, existing knowledge editing techniques may be
+restricted to reproducing the knowledge directly
+injected into the model. We launch a further inves-
+tigation into what makes this task challenging.
+6 Analysis
+We analyze the challenges in knowledge propaga-
+tion by first estimating an informal upper bound of
+model editing performance (Section 6.1). We then
+examine how the similarity between the definition
+sentence and probe sentence impacts the perfor-
+mance of model editing (Section 6.2), inspired by
+positive performances on ECBD- subset. We
+conduct our analysis with GPT-Neo base model on
+random subsets of E I (half the
+data) and ECBD (100 NP span and 100 random
+span) to reduce computational costs.
+6.1 Targeted Update / Specificity Tradeoff
+Performance Upper Bound We estimate a per-
+formance upper bound for fine-tuning by setting
+the definition and probe sentences to be identi-
+cal. In this case, sufficiently large gradient updates
+should lead to arbitrarily good performance fromfine-tuning. We call this setting Train-on-Test .
+For our three datasets ( E I ,
+ECBD , and ECBD- ), we finetune a model
+for a range of 1 to 8 epochs (i.e., the number of
+updates). We use a learning rate of 5e-5 for E- I and plot the specificity score
+vs accuracy. For ECBD andECBD- , we
+choose a learning rate of 3e-5 and then compare
+the specificity score and perplexity. These learning
+rates were chosen to optimize performance from
+the range of values described in Appendix A.3.
+Findings Figure 2a depicts the perplexity–
+specificity tradeoff curves of fine-tuning approach
+onECBD dataset. The perplexity and the speci-
+ficity score by the base model are drawn as the
+horizontal dotted line and the vertical dotted line
+respectively. Ideally, we want a model to achieve
+low perplexity and the specificity score identical to
+the base score (performance in the lower left cor-
+ner). On ECBD, we see that Standard FT shows
+an upward trend: with larger parameter updates,
+we worsen the specificity as expected, but also per-
+plexity, meaning that finetuning for longer does not
+usefully propagate entity information from the defi-
+nition sentence into the model. Input augmentation
+(Prepend-Def) performs robustly, indicating that
+the issue is potentially due to how the data is used
+in learning rather than the data itself.
+How does this align with past results? ECBD- (Figure 2b) shows a much more optimistic
+picture; recall that this is similar to the setting from
+Mitchell et al. (2022). In this case, MEND and fine-
+tuning both achieve results reasonably close to the
+train-on-test upper bound, with configurations that
+improve perplexity substantially with only mild
+specificity degradation. Methods that succeed
+on injection of exact facts (e.g., injecting yand
+reproducing it later) do not necessarily transfer5475
+to success in realistic knowledge propagation
+settings like ECBD.
+Finally, we plot the accuracy–specificity tradeoff
+curves computed on E I (Fig-
+ure 2c). Table 2 shows that the definition sentences
+of this dataset may contain the gold spans of the
+probe sentences but not always, making it between
+ECBD and ECBD- in this regard. Speci-
+ficity numbers are less monotonic here than on
+ECBD, but we again see the trend of train-on-test
+quickly saturating accuracy. Like ECBD- ,
+fine-tuning can lead to improvements on accuracy,
+in this case matching the performance of Prepend-
+Def. However, there remains a substantial gap with
+the gold setting, implying that there are a certain
+number of examples that are not easily learnable
+by the current data setup.
+6.2 Information Overlap
+Lexical overlap We now examine the importance
+of overlap between the definition and the target
+span more closely. First, we look at instance-level
+behavior on our datasets stratified by whether the
+gold span is included in the definition or not. We
+select 92 such “ Included ” examples in E
+I and 152 from ECBD- and an-
+alyze the delta in the rank of the gold label and
+percent change in perplexity respectively.
+Figure 3a shows violin plots of the performance
+gaps within the two groups. In both datasets, the
+performance improves on average (plot mean be-
+low 0) when the gold spans are included in the
+definition sentences, suggesting that the lexical
+overlap between the definition and probe sen-
+tences correlates with the model performance .
+This trend on ECBD is even stronger with input
+augmentation (Figure 3b). However, the majority
+ofECBD probe sentences fall into the Not Included
+category, and we see here that very few examples in
+this category have substantial perplexity improve-
+ments, most having small changes around zero.
+E I shows a slightly more
+optimistic picture for Not Included cases.
+Soft overlap Although direct inclusion of the
+answer span is clearly valuable, do we see any
+improvements when there is soft overlap between
+the definition and target span; that is, the content
+may be similar even if not exactly the same?
+We investigate the information overlap using5476both lexical (e.g., Jaccard similarity, Rouge) and se-
+mantic (e.g, BERTScore (Zhang et al., 2020)) sim-
+ilarity measurements between the probe sentence
+and the definition sentence. For each dataset, we di-
+vide the examples into bins based on the similarity
+scores and report the performance differences be-
+tween the base model and the fine-tuned model per
+bin (change in rank of the gold answer on E
+I and perplexity change on ECBD).
+Figure 4 shows violin plots of the performance
+gaps within each bin constructed using Jaccard
+similarity (a larger value mean the definition and
+probe sentences are similar). For E I - , we observe that the bins with larger simi-
+larity scores have progressively more negative ∆in
+rank. Surprisingly, we do not see a similar trend for
+ECBD. Not only is it the case that there are fewer
+examples in ECBD exhibiting high overlap, but
+among the distribution of examples that is present,
+there is almost no perceptible correlation between
+the amount of overlap and the percentage change
+in perplexity. This suggests that not only is the data
+distribution in ECBD different, but the nature of
+the inferences themselves can be qualitatively
+different and more challenging . We believe this
+further underscores that new techniques are needed
+to handle knowledge propagation in the real world.
+7 Related Work
+Knowledge Editing Recent work in knowledge
+editing (De Cao et al., 2021; Mitchell et al., 2022;
+Hase et al., 2023) explored performing minimal
+edits to a base LM’s parameters to reflect a fact that
+has changed or corrected. Edited facts are usually
+evaluated in terms of reliability/efficacy (i.e., edit
+success rate), generalization (i.e., performance on
+paraphrased edit sentences) and locality/specificity
+(i.e., performance on unrelated samples should not
+change after editing) (Zhu et al., 2020; Sinitsin
+et al., 2020). Some such works have attempted to
+perform such edits by identifying a small, localized
+set of weights that are responsible for reflecting
+the memorized fact (Geva et al., 2021) and editing
+only that small set of parameters (Meng et al., 2022;
+Dai et al., 2021). Our work, however, focuses on
+injecting in knowledge about new entities, which
+may not already have a localized set of parameters
+governing such information.
+Keeping Language Models Up to Date One
+line of recent work have explored the develop-
+ment and evaluation of language models that areupdated over time (Jang et al., 2022a). While
+ECBD (Onoe et al., 2022) focuses solely on evalu-
+ating knowledge of new entities, several bench-
+marks have been proposed for evaluating facts
+about existing entities that have changed over time
+as open-retrieval (Zhang and Choi, 2021) or cloze-
+style (Dhingra et al., 2022b) question answering.
+Other work has found success in keeping LMs up-
+to-date by continuing pretraining (Jin et al., 2022)
+and applying domain adaptation techniques (Jang
+et al., 2022c). Beyond these and the editing ap-
+proaches we have discussed previously, a line of
+work has looked at identifying a small, localized
+set of weights that are responsible for reflecting
+the memorized fact (Geva et al., 2021) and editing
+only that small set of parameters (Meng et al., 2022;
+Dai et al., 2021). Finally, Choi et al. (2022) also
+contrast prepending information with fine-tuning
+and find that fine-tuning generally works worse,
+framing their approach as distillation.
+Content Transfer and Knowledge Acquisition
+Hase et al. (2023) report that edit performance and
+consistency are improved after updating a model
+in the standard knowledge editing task, which the
+goal is to alter the model’s predictions according
+to user specifications. The tasks and setting we
+explore in our work are closely related to that of
+West et al. (2022), which explores whether LMs
+can generate statements about an entity that are
+consistent with a provided description of that en-
+tity. However, they do not explore updating model
+parameters from these descriptions. Kandpal et al.
+(2022) explore knowledge acquisition in LMs, and
+arrives at a similar finding that LMs generally fail
+to answer questions about entities that occur infre-
+quently during pretraining.
+8 Conclusion
+In this work, we explored the entity knowledge
+propagation setting: to what extent can descrip-
+tions of new entities be injected into language mod-
+els? We find that while fine-tuning models or us-
+ing efficient update strategies enables models to
+reproduce exact facts from descriptions, perform-
+ing inferences based on those facts is substantially
+harder. We characterize several approaches on two
+datasets and conclude that update strategies lag the
+performance of simply prepending the definition in
+the context, suggesting that more work is needed.5477Limitations
+Entity knowledge propagation focuses on updating
+LMs’ knowledge about emerging entities. How-
+ever, there might be cases where knowledge about
+existing entities needs to be updated (e.g., regime
+change, new champion, and renaming etc.). We
+intentionally exclude these cases since they can
+easily become intractable due to their complexity.
+For example, an organization changing its name
+could theoretically reflect a large number of entities
+that have relations to that organization. By investi-
+gating model behavior when a LM encounters new
+information which is completely unseen during
+pretraining, we can experiment in a controlled en-
+vironment. We find ample challenges unaddressed
+by current research even in this setting.
+Our experiments are conducted on English lan-
+guage models only. While we believe the results
+can generalize to multilingual models, it is con-
+ceivable that the internal representations of these
+models make them more or less amenable to the
+sorts of updating explored here. More work is
+needed to benchmark these techniques in broader
+settings such as with larger language models and
+newer parameter-tuning approaches.
+Acknowledgments
+This work was partially supported by NSF Grant
+IIS-1814522, NSF CAREER Award IIS-2145280,
+a grant from Open Philanthropy, UT Machine
+Learning Lab and by the Air Force Research Labo-
+ratory (AFRL), DARPA for the KAIROS program
+under agreement number FA8750-19-2-1003. The
+views and conclusions contained herein are those
+of the authors and should not be interpreted as
+necessarily representing the official policies, either
+expressed or implied, of DARPA, or the U.S. Gov-
+ernment. The U.S. Government is authorized to
+reproduce and distribute reprints for governmental
+purposes notwithstanding any copyright annotation
+therein.
+References54785479A Appendix
+A.1 Licensing
+T5 is released under the Apache v2.0 license. GPT-
+2 and GPT-Neo is released under the MIT license.
+Wikipedia and ECBD are both licensed under CC
+BY-SA.
+A.2 Harmful Data Instances
+In creating our dataset of entity inferences, we, the
+authors, inspect and only create examples that do
+not contain offensive or harmful content. All other
+data used is publically availible from Wikipedia.
+Experiments and data are all in English.
+A.3 Modeling Details
+The main hyperparameters were the size of the
+training batch (always 1), the size of the validation
+batch (always 1), the number of epochs for training
+(in the finetuning case), and the learning rate. The
+number of training epochs was 5 for ECBD exper-
+iments and 10 for Entity Inferences experiments,
+and the learning rate was 3e-6 on ECBD and 5e-4
+on Entity Inferences.
+We run all experiments on a machine with four
+Quadro RTX 8000 GPUs for less than 4 GPU hours.
+All experiments and results reflect just a single run.
+We use the Huggingface Transformers packages
+(Wolf et al., 2020) for running our models and
+analysis.
+For each entity, we manually write several types
+of probe sentences that test LMs’ knowledge in
+different ways. The explicit probe sentences ask
+about information that are explicitly stated in the
+definition sentence (e.g., genre of a TV show, occu-
+pation of a person). On the other hand, the implicit
+probe sentences require commonsense-like infor-
+mation (e.g., people watch a TV show, don’t eat
+a TV show.). Finally, we write answer candidates
+(between 6 to 12) for each type of probe sentences.
+On average, one example has 10 answer candidates.
+Each example consists of elements listed below
+(example in Table 5).
+A.4 More Similarity Scores
+Figure 5 compares two lexical (Jaccard and Rouge-
+L) and one semantic (BERT Score) similarity
+scores.A.5 Analysis of ROME
+A.5.1 Comparison of datasets
+The Counterfactual dataset was one of the datasets
+created and used by (Meng et al., 2022). It con-
+sisted of a set of "counterfacts" - facts that are
+altered slightly. For example, one entry in this
+dataset is "The Eiffel Tower is located in the City
+of Rome".
+As one can see in Table 4, the three datasets scale
+in complexity. Counterfactual usually includes
+known entities (subjects) and known labels (ob-
+jects). Entity Inferences usually contains unknown
+entities, but its labels are often known. Lastly,
+ECBD not only has unknown entities, but it also
+sometimes contains non-descriptive labels. This
+may explain why it obtained such drastic increases
+in perplexity on ECBD.
+A.5.2 ROME Test Generation
+As can be seen in Table 8, when the subject and
+label are both unknown (as in the third example),
+ROME is unable to edit the model to incorporate
+knowledge in the rest of the prompt. This is un-
+derstandable; ROME treats knowledge within an
+MLP as a key-value pair, so if neither the key nor
+the value are well-known entities and subsequently
+hard to retrieve, it may be difficult for ROME to ef-
+fectively locate the correct parameters to edit. How-
+ever, when either the subject or the label is known
+to the model (as in the first and second example),
+ROME is successfully able to train the model to
+generate reasonable text given the prompt.
+Once again due to the way in which it is built,
+ROME is probably unsuccessful in using context
+other than the subject or label to effectively edit
+knowledge within an MLP, and this can be seen
+clearly in the third example.5480548154825483ACL 2023 Responsible NLP Checklist
+A For every submission:
+/squareA1. Did you describe the limitations of your work?
+Limitations
+/squareA2. Did you discuss any potential risks of your work?
+Limitations
+/squareA3. Do the abstract and introduction summarize the paper’s main claims?
+abstract and introduction
+/squareA4. Have you used AI writing assistants when working on this paper?
+Left blank.
+B/squareDid you use or create scientiﬁc artifacts?
+Section 3
+/squareB1. Did you cite the creators of artifacts you used?
+Section 3
+/squareB2. Did you discuss the license or terms for use and / or distribution of any artifacts?
+A2
+/squareB3. Did you discuss if your use of existing artifact(s) was consistent with their intended use, provided
+that it was speciﬁed? For the artifacts you create, do you specify intended use and whether that is
+compatible with the original access conditions (in particular, derivatives of data accessed for research
+purposes should not be used outside of research contexts)?
+Section 3
+/squareB4. Did you discuss the steps taken to check whether the data that was collected / used contains any
+information that names or uniquely identiﬁes individual people or offensive content, and the steps
+taken to protect / anonymize it?
+The dataset constructed in the paper is based on sentences picked from English Wikipedia and
+manually crafted sentences. Non of examples include personal information/offensive contents.
+/squareB5. Did you provide documentation of the artifacts, e.g., coverage of domains, languages, and
+linguistic phenomena, demographic groups represented, etc.?
+Section 3, A3
+/squareB6. Did you report relevant statistics like the number of examples, details of train / test / dev splits,
+etc. for the data that you used / created? Even for commonly-used benchmark datasets, include the
+number of examples in train / validation / test splits, as these provide necessary context for a reader
+to understand experimental results. For example, small differences in accuracy on large test sets may
+be signiﬁcant, while on small test sets they may not be.
+Section 3
+C/squareDid you run computational experiments?
+Section 4, 5, 6
+/squareC1. Did you report the number of parameters in the models used, the total computational budget
+(e.g., GPU hours), and computing infrastructure used?
+Section 4.15484/squareC2. Did you discuss the experimental setup, including hyperparameter search and best-found
+hyperparameter values?
+A2
+/squareC3. Did you report descriptive statistics about your results (e.g., error bars around results, summary
+statistics from sets of experiments), and is it transparent whether you are reporting the max, mean,
+etc. or just a single run?
+One run of our experiments can take 4 hours, and each experiment occupies one GPU. Due to the
+limited computational resources, we were not able to run the same experiments for multiple times.
+/squareC4. If you used existing packages (e.g., for preprocessing, for normalization, or for evaluation), did
+you report the implementation, model, and parameter settings used (e.g., NLTK, Spacy, ROUGE,
+etc.)?
+A2
+D/squareDid you use human annotators (e.g., crowdworkers) or research with human participants?
+The only data constructed in this paper was created semi-synthetically the authors. No other human
+subjects were used. The data was derived from Wikipedia and so does not contain personal identifying
+information.
+/squareD1. Did you report the full text of instructions given to participants, including e.g., screenshots,
+disclaimers of any risks to participants or annotators, etc.?
+No response.
+/squareD2. Did you report information about how you recruited (e.g., crowdsourcing platform, students)
+and paid participants, and discuss if such payment is adequate given the participants’ demographic
+(e.g., country of residence)?
+No response.
+/squareD3. Did you discuss whether and how consent was obtained from people whose data you’re
+using/curating? For example, if you collected data via crowdsourcing, did your instructions to
+crowdworkers explain how the data would be used?
+No response.
+/squareD4. Was the data collection protocol approved (or determined exempt) by an ethics review board?
+No response.
+/squareD5. Did you report the basic demographic and geographic characteristics of the annotator population
+that is the source of the data?
+No response.5485

@@ -1,1 +1,810 @@
-174 Proceedings of the 61st Annual Meeting of the Association for Computational Linguistics Volume 1 : Long Papers , pages 174–189 July 9 - 14 , 2023 © 2023 Association for Computational Linguistics 175 176 177 178 179 180 181 182 183 184 185 186 187 188 189 
+
+Hiroyuki DeguchiTaro WatanabeYusuke Matsui
+Masao UtiyamaHideki TanakaEiichiro SumitaNara Institute of Science and TechnologyThe University of TokyoNational Institute of Information and Communications Technology
+{deguchi.hiroyuki.db0, taro}@is.naist.jp
+matsui@hal.t.u-tokyo.ac.jp
+{mutiyama, hideki.tanaka, eiichiro.sumita}@nict.go.jp
+Abstract
+k-nearest-neighbor machine translation ( kNN-
+MT) ( Khandelwal et al. ,2021 ) boosts the
+translation performance of trained neural ma-
+chine translation (NMT) models by incorpo-
+rating example-search into the decoding algo-
+rithm. However, decoding is seriously time-
+consuming, i.e., roughly 100 to 1,000 times
+slower than standard NMT, because neighbor
+tokens are retrieved from all target tokens of
+parallel data in each timestep. In this pa-
+per, we propose “Subset kNN-MT”, which im-
+proves the decoding speed of kNN-MT by two
+methods: (1) retrieving neighbor target tokens
+from a subset that is the set of neighbor sen-
+tences of the input sentence, not from all sen-
+tences, and (2) efﬁcient distance computation
+technique that is suitable for subset neighbor
+search using a look-up table. Our subset kNN-
+MT achieved a speed-up of up to 132.2 times
+and an improvement in BLEU score of up to
+1.6 compared with kNN-MT in the WMT’19
+De-En translation task and the domain adapta-
+tion tasks in De-En and En-Ja.
+1 Introduction
+Neural machine translation (NMT) ( Sutskever
+et al. ,2014 ;Bahdanau et al. ,2015 ;Luong et al. ,
+2015 ;Wu et al. ,2016 ;Vaswani et al. ,2017 )
+has achieved state-of-the-art performance and be-
+come the focus of many studies. Recently, kNN-
+MT ( Khandelwal et al. ,2021 ) has been pro-
+posed, which addresses the problem of perfor-
+mance degradation in out-of-domain data by in-
+corporating example-search into the decoding al-
+gorithm. kNN-MT stores translation examples as
+a set of key–value pairs called “datastore” and
+retrieves k-nearest-neighbor target tokens in de-
+coding. The method improves the translation
+performance of NMT models without additional
+training. However, decoding is seriously time-
+consuming, i.e., roughly 100 to 1,000 times slower
+than standard NMT, because neighbor tokens areretrieved from all target tokens of parallel data in
+each timestep. In particular, in a realistic open-
+domain setting, kNN-MT may be signiﬁcantly
+slower because it needs to retrieve neighbor tokens
+from a large datastore that covers various domains.
+We propose “Subset kNN-MT”, which im-
+proves the decoding speed of kNN-MT by two
+methods: (1) retrieving neighbor target tokens
+from a subset that is the set of neighbor sentences
+of the input sentence, not from all sentences, and
+(2) efﬁcient distance computation technique that
+is suitable for subset neighbor search using a look-
+up table. When retrieving neighbor sentences for a
+given input, we can employ arbitrary sentence rep-
+resentations, e.g., pre-trained neural encoders or
+TF-IDF vectors, to reduce the kNN search space.
+When retrieving target tokens in each decoding
+step, the search space in subset kNN-MT varies
+depending on the input sentence; therefore, the
+clustering-based search methods used in the origi-
+nalkNN-MT cannot be used. For this purpose, we
+use asymmetric distance computation (ADC) ( Jé-
+gou et al. ,2011 ) in subset neighbor search.
+Our subset kNN-MT achieved a speed-up of
+up to 132.2 times and an improvement in BLEU
+score of up to 1.6 compared with kNN-MT in
+the WMT’19 German-to-English general domain
+translation task and the domain adaptation tasks in
+German-to-English and English-to-Japanese with
+open-domain settings.
+2kNN-MT
+kNN-MT ( Khandelwal et al. ,2021 ) retrieves the
+k-nearest-neighbor target tokens in each timestep,
+computes the kNN probability from the distances
+of retrieved tokens, and interpolates the probabil-
+ity with the model prediction probability. The
+method consists of two steps: (1) datastore cre-
+ation, which creates key–value translation mem-
+ory, and (2) generation, which calculates an out-
+put probability according to the nearest neighbors174
+of the cached translation memory.
+Datastore Construction A typical NMT model
+is composed of an encoder that encodes a source
+sentence x= (x, x, . . . , x)∈ Vand
+a decoder that generates target tokens y=
+(y, y, . . . , y)∈Vwhere|x|and|y|are the
+lengths of sentences xandy, respectively, andV
+andVare the vocabularies of the source language
+and target language, respectively. The t-th target
+token yis generated according to its output proba-
+bility P(y|x,y)over the target vocabulary, cal-
+culated from the source sentence xand generated
+target tokens y.kNN-MT stores pairs of D-
+dimensional vectors and tokens in a datastore, rep-
+resented as key–value memory M⊆ R×V.
+The key (∈R) is an intermediate representa-
+tion of the ﬁnal decoder layer obtained by teacher
+forcing a parallel sentence pair (x,y)to the NMT
+model, and the value is a ground-truth target token
+y. The datastore is formally deﬁned as follows:
+M={(f(x,y), y)|(x,y)∈D,1≤t≤|y|},
+(1)
+whereDis parallel data and f:V×V→
+Ris a function that returns the D-dimensional
+intermediate representation of the ﬁnal decoder
+layer from the source sentence and generated tar-
+get tokens. In our model, as in ( Khandelwal et al. ,
+2021 ), the key is the intermediate representation
+before it is passed to the ﬁnal feed-forward net-
+work.
+Generation During decoding, kNN-MT gener-
+ates output probabilities by computing the linear
+interpolation between the kNN and MT probabili-ties,pandp, as follows:
+P(y|x,y) =λp(y|x,y)
++ (1−λ)p(y|x,y),(2)
+where λis a hyperparameter for weighting the
+kNN probability. Let f(x,y)be the query vec-
+tor at timestep t. The top i-th key and value in
+thek-nearest-neighbor are k∈Randv∈V,
+respectively. Then pis deﬁned as follows:
+p(y|x,y)
+∝∑/x31exp(−∥k−f(x,y)∥
+τ)
+,(3)
+where τis the temperature for p, and we set
+τ= 100 . Note that this kNN search is seriously
+time-consuming(Khandelwal et al. ,2021 ).
+3 Proposed Model: Subset kNN-MT
+Our Subset kNN-MT (Figure 1) drastically ac-
+celerates vanilla kNN-MT by reducing the kNN
+search space by using sentence information (Sec-
+tion3.1) and efﬁciently computing the distance be-
+tween a query and key by performing table lookup
+(Section 3.2).
+3.1 Subset Retrieval
+Sentence Datastore Construction In our
+method, we construct a sentence datastore that
+stores pairs comprising a source sentence vector175
+and a target sentence. Concretely, a sentence
+datastoreSis deﬁned as follows:
+S={(h(x),y)|(x,y)∈D} , (4)
+where h:V→Rrepresents a sentence
+encoder, which is a function that returns a D-
+dimensional vector representation of a source sen-
+tence.
+Decoding At the beginning of decoding, the
+model retrieves the n-nearest-neighbor sentences
+of the given input sentence from the sentence data-
+storeS. Let ˆS⊂S be the subset comprising n-
+nearest-neighbor sentences. The nearest neighbor
+search space for target tokens in kNN-MT is then
+drastically reduced by constructing the datastore
+corresponding to ˆSas follows:
+ˆM={(f(x,y), y)|
+(h(x),y)∈ˆS,1≤t≤|y|},(5)
+where ˆM⊂M is the reduced datastore for the
+translation examples coming from the n-nearest-
+neighbor sentences. During decoding, the model
+uses the same algorithm as kNN-MT except that
+ˆMis used as the datastore instead of M. The
+proposed method reduces the size of the nearest
+neighbor search space for the target tokens from
+|D|ton(≪|D| ) sentences.
+3.2 Efﬁcient Distance Computation Using
+Lookup Table
+Subset kNN-MT retrieves the k-nearest-neighbor
+target tokens by an efﬁcient distance computation
+method that uses a look-up table. In the orig-
+inalkNN-MT, inverted ﬁle index (IVF) is usedfor retrieving kNN tokens. IVF divides the search
+space into Nclusters and retrieves tokens from
+the neighbor clusters. In contrast, in subset kNN-
+MT, the search space varies dynamically depend-
+ing on the input sentence. Therefore, clustering-
+based search methods cannot be used; instead, it
+is necessary to calculate the distance for each key
+in the subset. For this purpose, we use asymmetric
+distance computation (ADC) ( Jégou et al. ,2011 )
+instead of the usual distance computation between
+ﬂoating-point vectors. In ADC, the number of ta-
+ble lookup is linearly proportional to the number
+of keys Nin the subset. Therefore, it is not suit-
+able for searching in large datastore M, but in a
+small subset ˆM, the search is faster than the direct
+calculation of the L2 distance.
+Product Quantization (PQ) The kNN-MT
+datastoreMmay become too large because it
+stores high-dimensional intermediate representa-
+tions of all target tokens of parallel data. For in-
+stance, the WMT’19 German-to-English parallel
+data, which is used in our experiments, contains
+862M tokens on the target side. Therefore, if vec-
+tors were stored directly, the datastore would oc-
+cupy 3.2 TiB when a 1024-dimensional vector as
+a key, and this would be hard to load into RAM.
+To solve this memory problem, product quantiza-
+tion (PQ) ( Jégou et al. ,2011 ) is used in both kNN-
+MT and our subset kNN-MT, which includes both
+source sentence and target token search.
+PQ splits a D-dimensional vector into Msub-
+vectors and quantizes for each-dimensional
+sub-vector. Codebooks are learned by k-means
+clustering of key vectors in each subspace. It is
+computed iteratively by: (1) assigning the code of
+a key to its nearest neighbor centroid (2) and up-
+dating the centroid of keys assigned to the code.
+Them-th sub-space’s codebook Cis formulated
+as follows:
+C={c, . . . ,c},c∈R. (6)
+In this work, each codebook size is set to L= 256 .
+A vector q∈Ris quantized and its code vector
+¯qis calculated as follows:
+¯q= [¯q, . . . , ¯q]∈{1, . . . , L}, (7)
+¯q= argmin∥q−c∥,q∈R.(8)176Asymmetric Distance Computation (ADC)
+Our method efﬁciently computes the distance be-
+tween a query vector and quantized key vectors
+using ADC ( Jégou et al. ,2011 ) (Figure 2). ADC
+computes the distance between a query vector
+q∈RandNkey codes ¯K={¯k}⊆
+{1, . . . , L}. First, the distance look-up table
+A∈Ris computed by calculating the distance
+between a query qand the codes c∈Cin
+each sub-space m, as follows:
+A=∥q−c∥. (9)
+Second, the distance between a query and each key
+d(q,¯k)is obtained by looking up the distance ta-
+ble as follows:
+d(q,¯k) =∑d(q,¯k) =∑A.(10)
+A look-up table in each subspace, A∈R, con-
+sists of the distance between a query and codes.
+The number of codes in each subspace is Land
+a distance is a scalar; therefore, AhasLdis-
+tances. And the table look-up key is the code of
+a key itself, i.e., if the m-th subspace’s code of
+a key is 5, ADC looks-up A. By using ADC,
+the distance is computed only once(Equation 9)
+and does not decode PQ codes into D-dimensional
+key vectors; therefore, it can compute the distance
+while keeping the key in the quantization code,
+and the k-nearest-neighbor tokens are efﬁciently
+retrieved from ˆM.
+3.3 Sentence Encoder
+In our subset kNN-MT, a variety of sentence en-
+coder models can be employed. The more similar
+sentences extracted from M, the more likely the
+subset ˆMcomprises the target tokens that are use-
+ful for translation. Hence, we need sentence en-
+coders that compute vector representations whose
+distances are close for similar sentences.
+In this work, we employ two types of repre-
+sentations: neural andnon-neural . We can em-
+ploy pre-trained neural sentence encoders. While
+they require to support the source language, we
+expect that the retrieved sentences are more simi-
+lar than other encoders because we can use mod-
+els that have been trained to minimize the vectordistance between similar sentences ( Reimers and
+Gurevych ,2019 ). An NMT encoder can also be
+used as a sentence encoder by applying average
+pooling to its intermediate representations. This
+does not require any external resources, but it is
+not trained from the supervision of sentence rep-
+resentations. Alternatively, we can also use non-
+neural models like TF-IDF. However, it is not clear
+whether TF-IDF based similarity is suitable for
+our method. This is because even if sentences
+with close surface expressions are retrieved, they
+do not necessarily have similar meanings and may
+not yield the candidate tokens needed for transla-
+tion.
+4 Experiments
+4.1 Setup
+We compared the translation quality and speed of
+our subset kNN-MT with those of the conven-
+tional kNN-MT in open-domain settings that as-
+sume a domain of an input sentence is unknown.
+The translation quality was measured by sacre-
+BLEU ( Post,2018 ) and COMET ( Rei et al. ,2020 ).
+The speed was evaluated on a single NVIDIA
+V100 GPU. We varied the batch size settings: ei-
+ther 12,000 tokens (B), to simulate the document
+translation scenario, or a single sentence (B), to
+simulate the online translation scenario. The beam
+size was set to 5, and the length penalty was set to
+1.0.
+k-Nearest-Neighbor Search InkNN-MT, we
+set the number of nearest neighbor tokens to
+k= 16 . We used (Johnson et al. ,
+2019 ) to retrieve the kNN tokens in kNN-MT
+and for neighbor sentence search in subset kNN-
+MT. The subset search and ADC were imple-
+mented in PT . We use approximate dis-
+tance computed from quantized keys instead of
+full-precision keys in Equation 3, following the
+original kNN-MT ( Khandelwal et al. ,2021 ) im-
+plementation. The kNN-MT datastore and our
+sentence datastore used IVF and optimized PQ
+(OPQ) ( Ge et al. ,2014 ). OPQ rotates vectors to
+minimize the quantization error of PQ. The sub-
+setkNN-MT datastore is not applied clustering
+since we need to extract subset tokens. In this
+datastore, the 1024-dimensional vector represen-
+tation, i.e., D= 1024 , was reduced in dimen-
+sionality to 256-dimensions by principal compo-
+nent analysis (PCA), and these vectors were then177quantized by PQ. At search time, a query vec-
+tor is pre-transformed to 256-dimensions by mul-
+tiplying the PCA matrix, and then the kNN tar-
+get tokens are searched by ADC. The subset of a
+datastore can be loaded into GPU memory since
+it is signiﬁcantly smaller than the original kNN-
+MT datastore, so we retrieved k-nearest-neighbor
+tokens from a subset on a GPU.
+Sentence Encoder We compared 4 different
+sentence encoders: LaBSE, AvgEnc, TF-IDF, and
+BM25. LaBSE ( Feng et al. ,2022 ) is a pre-trained
+sentence encoder, ﬁne-tuned from multilingual
+BERT. AvgEnc is an average pooled encoder hid-
+den vector of the Transformer NMT model, which
+is also used for translation. TF-IDF ( Jones ,1972 )
+and BM25 ( Jones et al. ,2000 ) compute vectors
+weighted the important words in a sentence. We
+used the raw count of tokens as the term frequency
+and applied add-one smoothing to calculate the in-
+verse document frequency, where a sentence was
+regarded as a document. We set k= 2.0, b=
+0.75in BM25 ( Jones et al. ,2000 ). Both TF-IDF
+and BM25 vectors were normalized by their L2-
+norm and their dimensionality was reduced to 256-
+dimensions by singular value decomposition.
+4.2 In-Domain Translation
+We evaluated the translation quality and speed
+of subset kNN-MT in the WMT’19 De-En
+translation task (newstest2019; 2,000 sentences)
+and compared them with the kNN-MT base-
+lines ( Khandelwal et al. ,2021 ;Meng et al. ,2022 ).
+We used a trained Transformer big implemented in (Ott et al. ,2019 ) as the base MT model.
+We constructed the datastore from the parallel data
+of the WMT’19 De-En news translation task with
+subword lengths of 250 or less and a sentence
+length ratio of 1.5 or less between the source and
+target sentences. The datastore contained 862.6M
+target tokens obtained from 29.5M sentence pairs.
+The subset size was set to n= 512 .
+Table 1shows our experimental results. In
+the table, “tok/s” denotes the number of tokens
+generated per second. The table shows that, al-
+though kNN-MT improves 0.9 BLEU point from
+the base MT without additional training, the de-
+coding speed is 326.1 times and 51.7 times slower
+with the Band Bsettings, respectively. In con-
+trast, our subset kNN-MT ( h: LaBSE) is 111.8
+times (with B) and 47.4 times (with B) faster
+thankNN-MT with no degradation in the BLEU
+score. Subset kNN-MT ( h: AvgEnc) achieved
+speed-ups of 92.7 times (with B) and 38.9 times
+(with B) with a slight quality degradation ( −0.2
+BLEU and−0.05 COMET), despite using no ex-
+ternal models. We also evaluated our subset kNN-
+MT when using non-neural sentence encoders ( h:
+TF-IDF, BM25). The results show that both TF-
+IDF and BM25 can generate translations with al-
+most the same BLEU score and speed as neural
+sentence encoders. In summary, this experiment
+showed that our subset kNN-MT is two orders of
+magnitude faster than kNN-MT and has the same
+translation performance.
+4.3 Domain Adaptation
+German-to-English We evaluated subset kNN-
+MT on out-of-domain translation in the IT, Ko-
+ran, Law, Medical, and Subtitles domains ( Koehn
+and Knowles ,2017 ;Aharoni and Goldberg ,2020 )
+with open-domain settings. The datastore was
+constructed from parallel data by merging all tar-
+get domains and the general domain (WMT’19
+De-En) assuming that the domain of the input
+sentences is unknown. The datastore contained
+895.9M tokens obtained from 30.8M sentence
+pairs. The NMT model is the same as that used
+in Section 4.2trained from WMT’19 De-En. The
+subset size was set to n= 256 , and the batch size
+was set to 12,000 tokens.
+Table 2shows the results. Compared with
+base MT, kNN-MT improves the translation per-
+formance in all domains but the decoding speed
+is much slower. In contrast, our subset kNN-
+MT generates translations faster than kNN-MT.
+However, in the domain adaptation task, there are
+differences in translation quality between those
+using neural sentence encoders and those using
+non-neural sentence encoders. The table shows178
+that the use of non-neural sentence encoders (TF-
+IDF and BM25) causes drop in translation qual-
+ity, whereas the use of neural sentence encoders
+(LaBSE and AvgEnc) do not. In addition, com-
+pared with kNN-MT, our subset kNN-MT with
+neural encoders achieves an improvement of up to
+1.6 BLEU points on some datasets. In summary,
+these results show that neural sentence encoders
+are effective in retrieving domain-speciﬁc nearest
+neighbor sentences from a large datastore.
+English-to-Japanese We also evaluated our
+model on English-to-Japanese translation. We
+used a pre-trained Transformer big model trained
+from JParaCrawl v3 ( Morishita et al. ,2022 ) and
+evaluated its performance on Asian Scientiﬁc Pa-
+per Excerpt Corpus (ASPEC) ( Nakazawa et al. ,
+2016 ) and Kyoto Free Translation Task (KFTT;
+created from Wikipedia’s Kyoto articles) ( Neubig ,
+2011 ). The datastore was constructed from paral-
+lel data by merging ASPEC, KFTT, and the gen-
+eral domain (JParaCrawl v3). Note that ASPEC
+contains 3M sentence pairs, but we used only the
+ﬁrst 2M pairs for the datastore to remove noisy
+data, following Neubig (2014 ). The datastore con-
+tained 735.9M tokens obtained from 24.4M sen-
+tence pairs. The subset size was set to n= 512 ,
+and the batch size was set to 12,000 tokens.
+Table 3shows the results. These show that
+kNN-MT improves out-of-domain translation per-
+formance compared with base MT on other lan-
+guage pairs other than German-to-English. On
+English-to-Japanese, subset kNN-MT improves
+the decoding speed, but subset kNN-MT with TF-
+IDF and BM25 degrades the translation quality
+compared with kNN-MT. However, subset kNN-
+MT still achieves higher BLEU scores than base
+MT without any additional training steps, and it
+is two orders of magnitude faster than kNN-MT.In summary, subset kNN-MT can achieve better
+translation performance than base MT in exchange
+for a small slowdown in open-domain settings.
+5 Discussion
+5.1 Case Study: Effects of Subset Search
+Translation examples in the medical domain are
+shown in Table 4and the search results of the top-
+3 nearest neighbor sentences are shown in Table 5.
+In the table, the subset kNN-MT results are ob-
+tained using a LaBSE encoder. Table 4shows that
+subset kNN-MT correctly generates the medical
+term “Co-administration”. The results of the near-
+est neighbor sentence search (Table 5) show that
+“Co-administration” is included in the subset. In
+detail, there are 30 cases of “Co-administration”
+and no case of “A joint use” in the whole sub-
+set consisting of k= 256 neighbor sentences.
+Base MT and kNN-MT have the subwords of “Co-
+administration” in the candidates; however, the
+subwords of “A joint use” have higher scores. Ta-
+ble6shows the negative log-likelihood (NLL) of
+the ﬁrst three tokens and their average for each
+model. The second token of subset kNN-MT, “-
+” (hyphen), has a signiﬁcantly lower NLL than
+the other tokens. The number of “joint” and “-
+” in the subset were 0 and 101, respectively, and
+thek-nearest-neighbor tokens were all “-” in sub-
+setkNN-MT. Therefore, the NLL was low be-
+cause p(“-”) = 1 .0, so the joint probabil-
+ity of a beam that generates the sequence “Co-
+administration” is higher than “A joint use”.
+In summary, the proposed method can retrieve
+more appropriate words by searching a subset that
+consists only of neighboring cases.179
+5.2 Diversity of Subset Sentences
+We hypothesize that the noise introduced by sen-
+tence encoders causes the difference in accuracy.
+In this section, we investigate whether a better sen-
+tence encoder would reduce the noise injected into
+the subset. In particular, we investigated the rela-
+tionship between vocabulary diversity in the sub-
+set and translation quality in the medical domain.
+Because an output sentence is affected by the sub-
+set, we measured the unique token ratio of both
+source and target languages in the subset as the di-
+versity as follows:
+number of unique tokens
+number of subset tokens. (11)
+Table 7shows the BLEU score and unique to-
+ken ratio for the various sentence encoders, in
+which “source” and “target” indicate the diversity
+of the neighbor sentences on the source-side and
+target-side, respectively. The results show that the
+more diverse the source-side is, the more diverse
+the target-side is. It also shows that the less diver-
+sity in the vocabulary of both the source and target
+languages in the subset, the higher BLEU score.
+We also investigated the relationship be-
+tween sentence encoder representation and BLEU
+scores. We found that using a model more accu-
+rately represents sentence similarity improves the
+BLEU score. In particular, we evaluated trans-
+lation quality when noise was injected into the
+subset by retrieving nsentences from outside the
+nearest neighbor. Table 8shows the results of var-
+iousn-selection methods when LaBSE was used
+as the sentence encoder. In the table, “Top” indi-
+cates the n-nearest-neighbor sentences, “Bottom180
+of2n” the nfurthest sentences of 2nneighbor
+sentences, and “Random of 2n”nsentences ran-
+domly selected from 2nneighbor sentences. The
+“Bottom of 2n” and “Random of 2n” have higher
+diversity than the “Top” on both the source- and
+target-sides, and the BLEU scores are correspond-
+ingly lower. These experiments showed that a sen-
+tence encoder that calculates similarity appropri-
+ately can reduce noise and prevent the degradation
+of translation performance because the subset con-
+sists only of similar sentences.
+5.3 Analysis of Decoding Speed
+Efﬁciency of ADC Subset kNN-MT computes
+the distance between a query vector and key vec-
+tors using ADC as described in Section 3.2. The
+efﬁciency of ADC in WMT’19 De-En is demon-
+strated in Table 9. The results show that “w/ ADC”
+is roughly 4 to 5 times faster than “w/o ADC”.
+Effect of Parallelization The method and im-
+plementation of our subset kNN-MT are designed
+for parallel computing. We measured the trans-
+lation speed for different batch sizes in WMT’19
+De-En. Figure 3(a)shows that subset kNN-MT
+(h: LaBSE) is two orders of magnitude faster than
+kNN-MT even when the batch size is increased.
+Subset Size We measured the translation speed
+for different subset sizes, i.e., the number of n-
+nearest-neighbor sentences in WMT’19 De-En.
+Figure 3(b)shows the translation speed of subset
+kNN-MT ( h: LaBSE). Subset kNN-MT is two or-
+ders of magnitude faster than kNN-MT even whenthe subset size is increased. The results also show
+that the speed becomes slower from n= 256 com-
+pared with base MT. We also found that 71.7% of
+the time was spent searching for the kNN tokens
+from the subset when n= 2048 . Although ADC
+lookup search is slow for a large datastore, it is
+fast for kNN search when the subset size nis not
+large ( Matsui et al. ,2018 ), e.g., n= 512 .
+Figure 3(c)shows the results for translation
+quality on the development set (newstest2018).
+The results show that a larger nimproves BLEU
+up to n= 512 , but decreases for greater values
+ofn. In terms of both the translation quality and
+translation speed, we set n= 512 for WMT’19
+De-En.
+6 Related Work
+The ﬁrst type of example-based machine transla-
+tion method was analogy-based machine transla-
+tion ( Nagao ,1984 ).Zhang et al. (2018 );Gu et al.
+(2018 ) incorporated example-based methods into
+NMT models, which retrieve examples according
+to edit distance. Bulte and Tezcan (2019 ) and Xu
+et al. (2020 ) concatenated an input sentence and
+translations of sentences similar to it. Both kNN-
+MT and subset kNN-MT retrieve kNN tokens ac-
+cording to the distance of intermediate representa-
+tions and interpolate the output probability.
+To improve the decoding speed of kNN-MT,
+fastkNN-MT ( Meng et al. ,2022 ) constructs ad-
+ditional datastores for each source token, and re-
+duces the kNN search space using their datastores
+and word alignment. Subset kNN-MT requires a
+sentence datastore that is smaller than source to-
+ken datastores and does not require word align-
+ment. Martins et al. (2022 ) decreased the number
+of query times by retrieving chunked text; their
+model led to a speed-up of up to 4 times, com-
+pared with kNN-MT. In contrast, subset kNN-MT
+reduces the search space. Dai et al. (2023 ) reduced
+thekNN search space by retrieving the neighbor
+sentences of the input sentence. They searched for
+neighboring sentences by BM25 scores with Elas-
+ticSearch, so our subset kNN-MT with BM25 can
+be regarded as an approximation of their method.
+They also proposed “adaptive lambda”, which dy-
+namically computes the weights of the lambda of
+linear interpolation in Equation 2from the dis-
+tance between the query and the nearest neighbor181
+key vectors. However, adaptive lambda requires
+an exact distance and cannot employ datastore
+quantization and the ADC lookup. To improve
+the translation performance of kNN-MT, Zheng
+et al. (2021 ) computed the weighted average of
+kNN probabilities pover multiple values of
+k. Each weight is predicted by “meta- knetwork”,
+trained to minimize cross-entropy in the training
+data. For the other tasks, kNN-LM ( Khandelwal
+et al. ,2020 ), Efﬁcient kNN-LM ( He et al. ,2021 ),
+and RETRO ( Borgeaud et al. ,2022 ) used kNN
+search for language modeling (LM). Our subset
+search method cannot be applied to LM because
+the entire input cannot be obtained.
+In the ﬁeld of kNN search, Matsui et al. (2018 )
+allowed search in dynamically created subsets,
+whereas conventional search methods assume only
+full search. Subset kNN-MT retrieves kNN to-
+kens from a subset depending on a given input. In
+our subset kNN-MT, the decoding speed is slow
+when the subset size nis large. The bottleneck is
+the lookup in the distance table, and this can be
+improved by efﬁcient look-up methods that uses
+SIMD ( André et al. ,2015 ;Matsui et al. ,2022 ).
+7 Conclusion
+In this paper, we proposed “Subset kNN-MT”,
+which improves the decoding speed of kNN-MT
+by two methods: (1) retrieving neighbor tokens
+from only the neighbor sentences of the input sen-
+tence, not from all sentences, and (2) efﬁcient dis-
+tance computation technique that is suitable for
+subset neighbor search using a look-up table. Our
+subset kNN-MT achieved a speed-up of up to
+132.2 times and an improvement in BLEU of up
+to 1.6 compared with kNN-MT in the WMT’19
+De-En translation task and the domain adaptationtasks in De-En and En-Ja. For future work, we
+would like to apply our method to other tasks.
+Limitations
+This study focuses only on improving the speed of
+kNN-MT during decoding; other problems with
+kNN-MT remain. For example, it still demands
+large amounts of memory and disk space for the
+target token datastore. In addition, our subset
+kNN-MT requires to construct a sentence datas-
+tore; therefore, the memory and disk requirements
+are increased. For example, the quantized target
+token datastore has 52GB ( |M| = 862 ,648,422)
+and our sentence datastore has 2GB ( |S|=
+29,540,337) in the experiment of WMT’19 De-En
+(Section 4.2). Although subset kNN-MT is faster
+than the original kNN-MT in inference, datastore
+construction is still time-consuming. The decod-
+ing latency of our subset kNN-MT is still several
+times slower than base MT for large batch sizes.
+The experiments reported in this paper evaluated
+the inference speed of the proposed method on a
+single computer and single run only; the amount
+of speed improvement may differ when different
+computer architectures are used.
+Ethical Consideration
+We construct both kNN-MT and subset kNN-MT
+datastores from open datasets; therefore, if their
+datasets have toxic text, kNN-MT and our sub-
+setkNN-MT may have the risk of generating toxic
+contents.
+Acknowledgements
+This work was partially supported by JSPS KAK-
+ENHI Grant Number JP22J1127 and JP22KJ2286.182References183184
+A Datasets, Tools, Models
+Datasets Parallel data of the WMT’19 De-En
+translation task can be used for research purposes
+as described in https://www.statmt.org/
+wmt19/translation-task.html . The ﬁve
+domain adaptation datasets in De-En can be
+used for research purposes as described in the
+paper ( Aharoni and Goldberg ,2020 ). AS-
+PEC can be used for research purposes as de-
+scribed in https://jipsti.jst.go.jp/
+aspec/ . KFTT is licensed by Creative Commons
+Attribution-Share-Alike License 3.0.
+Tools and are MIT-licensed.
+Models We used the following pre-trained NMT
+models implemented in .
+•De-En: https://dl.
+fbaipublicfiles.com/fairseq/
+models/wmt19.de-en.ffn8192.
+tar.gz
+•En-Ja: http://www.kecl.ntt.
+co.jp/icl/lirg/jparacrawl/
+release/3.0/pretrained_models/
+en-ja/big.tar.gz
+The De-En model is included in and
+it is MIT-licensed. The Ja-En model is li-
+censed by Nippon Telegraph and Telephone Cor-
+poration (NTT) for research use only as de-
+scribed in http://www.kecl.ntt.co.jp/
+icl/lirg/jparacrawl/ .
+We used the pre-trained LaBSE model licensed
+by Apache-2.0.
+B Pseudo Code for ADC lookup
+Algorithm 1shows the pseudo code for the ADC
+lookup described in Section 3.2. The function _ calculates the squared Eu-
+clidean distances between a query vector and each
+quantized key vector by looking up the distance
+table.
+C Tuning of the Subset Size in Domain
+Adaptation
+Section 5.3showed that n= 256 and512are in
+balance between speed and quality. To tune theAlgorithm 1 ADC lookup
+Require:
+query; q∈R
+quantized keys; ¯K={¯k}⊆{1, . . . , L}
+codebook;C={C, . . . ,C},
+whereC={c}⊆R
+Ensure:
+distances; d∈Rfunction _ (q,¯K,C) form= 1, . . . , M do forl= 1, . . . , L do A←∥q−c∥ end for end for fori= 1, . . . , N do d←∑A end for return dend function
+subset size nin the domain adaptation task, we
+evaluated for n= 256 and512on the develop-
+ment set of each domain, and the choice of nwas
+judged by the averaged BLEU. Table 10and11
+show the results of the domain adaptation transla-
+tion on each development set. We tuned the sub-
+set size by using LaBSE for the sentence encoder.
+Finally, we chose n= 256 for the German-to-
+English and n= 512 for the English-to-Japanese
+domain adaptation tasks.
+D Details of Translation Quality
+We evaluated all experiments by BLEU, COMET,
+and chrF scores.
+Table 12,13, and 14show the results of
+the WMT’19 De-En translation task, the domain
+adaptation task in De-En, and En-Ja, respectively.
+Note that Table 13only shows COMET and chrF
+scores and the BLEU scores are shown in Table 2
+due to space limitations.
+E Details of kNN Indexes.
+The details of the kNN indexes are shown in Ta-
+ble15.185n ASPEC KFTT Avg.
+256 31.7 24.5 28.1
+512 32.0 25.5 28.8
+F Domain Adaptation with Closed
+Domain Settings
+We carried out the German-to-English domain
+adaptation experiments faithful to the original
+kNN-MT settings. In this experiment, the datas-
+tore for each domain was created only from the
+parallel data of the target domain, assuming a sce-
+nario where the domain of the input sentences is
+known. Note that the general domain data, i.e.,
+the training data of the WMT’19 De-En transla-
+tion task, is not included in the datastores.
+Table 16shows the German-to-English domain
+adaptation translation results in closed-domain
+settings. The original kNN-MT is faster than that
+of open-domain settings because the datastore is
+smaller; however, our subset kNN-MT is still 10
+times faster than the original kNN-MT.186
+kNN-MT Subset kNN-MT
+DS;M Sentence DS;SDS; ˆM
+Search Method IVF IVF Linear ADC look-up
+Vector Transform OPQ OPQ PCA:
+(Ge et al. ,2014 ) (Ge et al. ,2014 )1024→256dim
+# of PQ Sub-vectors; M 64 64 64
+# of Centroids; N 131,072 32,768 —
+# of Probed Clusters 64 clusters 64 clusters —
+Size of Search Target∑|y||D|∑|y|187ACL 2023 Responsible NLP Checklist
+A For every submission:
+/squareA1. Did you describe the limitations of your work?
+After Conclusion ("Limitations" section)
+/squareA2. Did you discuss any potential risks of your work?
+After Limitations ("Ethical Consideration" section)
+/squareA3. Do the abstract and introduction summarize the paper’s main claims?
+Section 1
+/squareA4. Have you used AI writing assistants when working on this paper?
+We use tools that only assist with language: deepl, grammarly.
+B/squareDid you use or create scientiﬁc artifacts?
+Section 4
+/squareB1. Did you cite the creators of artifacts you used?
+Section 4
+/squareB2. Did you discuss the license or terms for use and / or distribution of any artifacts?
+Appendix (Section A: Dataset, Tools, Models)
+/squareB3. Did you discuss if your use of existing artifact(s) was consistent with their intended use, provided
+that it was speciﬁed? For the artifacts you create, do you specify intended use and whether that is
+compatible with the original access conditions (in particular, derivatives of data accessed for research
+purposes should not be used outside of research contexts)?
+Appendix (Section A: Datasets, Tools, Models)
+/squareB4. Did you discuss the steps taken to check whether the data that was collected / used contains any
+information that names or uniquely identiﬁes individual people or offensive content, and the steps
+taken to protect / anonymize it?
+We noted in the Ethical Consideration section that our used data may contain toxic contents.
+/squareB5. Did you provide documentation of the artifacts, e.g., coverage of domains, languages, and
+linguistic phenomena, demographic groups represented, etc.?
+Section 4
+/squareB6. Did you report relevant statistics like the number of examples, details of train / test / dev splits,
+etc. for the data that you used / created? Even for commonly-used benchmark datasets, include the
+number of examples in train / validation / test splits, as these provide necessary context for a reader
+to understand experimental results. For example, small differences in accuracy on large test sets may
+be signiﬁcant, while on small test sets they may not be.
+Section 4
+C/squareDid you run computational experiments?
+Section 4 and 5
+/squareC1. Did you report the number of parameters in the models used, the total computational budget
+(e.g., GPU hours), and computing infrastructure used?
+Section 4188/squareC2. Did you discuss the experimental setup, including hyperparameter search and best-found
+hyperparameter values?
+Section 4 and 5
+/squareC3. Did you report descriptive statistics about your results (e.g., error bars around results, summary
+statistics from sets of experiments), and is it transparent whether you are reporting the max, mean,
+etc. or just a single run?
+We report the experimental results of just a single run and that is noted in Limitations section.
+/squareC4. If you used existing packages (e.g., for preprocessing, for normalization, or for evaluation), did
+you report the implementation, model, and parameter settings used (e.g., NLTK, Spacy, ROUGE,
+etc.)?
+Section 4
+D/squareDid you use human annotators (e.g., crowdworkers) or research with human participants?
+Left blank.
+/squareD1. Did you report the full text of instructions given to participants, including e.g., screenshots,
+disclaimers of any risks to participants or annotators, etc.?
+No response.
+/squareD2. Did you report information about how you recruited (e.g., crowdsourcing platform, students)
+and paid participants, and discuss if such payment is adequate given the participants’ demographic
+(e.g., country of residence)?
+No response.
+/squareD3. Did you discuss whether and how consent was obtained from people whose data you’re
+using/curating? For example, if you collected data via crowdsourcing, did your instructions to
+crowdworkers explain how the data would be used?
+No response.
+/squareD4. Was the data collection protocol approved (or determined exempt) by an ethics review board?
+No response.
+/squareD5. Did you report the basic demographic and geographic characteristics of the annotator population
+that is the source of the data?
+No response.189

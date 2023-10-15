@@ -1,1 +1,693 @@
-15200 Proceedings of the 61st Annual Meeting of the Association for Computational Linguistics Volume 1 : Long Papers , pages 15200–15212 July 9 - 14 , 2023 © 2023 Association for Computational Linguistics 15201 15202 15203 15204 15205 15206 15207 15208 15209 15210 15211 15212 
+
+Yi Tu, Ya Guo, Huan Chen, Jinyang Tang
+Ant Group, China
+{qianyi.ty,guoya.gy,chenhuan.chen,jinyang.tjy}@antgroup.com
+Abstract
+Visually-rich Document Understanding
+(VrDU) has attracted much research attention
+over the past years. Pre-trained models on
+a large number of document images with
+transformer-based backbones have led to
+significant performance gains in this field.
+The major challenge is how to fusion the
+different modalities (text, layout, and image)
+of the documents in a unified model with
+different pre-training tasks. This paper focuses
+on improving text-layout interactions and
+proposes a novel multi-modal pre-training
+model, LayoutMask. LayoutMask uses local
+1D position, instead of global 1D position,
+as layout input and has two pre-training
+objectives: (1) Masked Language Modeling:
+predicting masked tokens with two novel
+masking strategies; (2) Masked Position
+Modeling: predicting masked 2D positions
+to improve layout representation learning.
+LayoutMask can enhance the interactions
+between text and layout modalities in a unified
+model and produce adaptive and robust multi-
+modal representations for downstream tasks.
+Experimental results show that our proposed
+method can achieve state-of-the-art results on
+a wide variety of VrDU problems, including
+form understanding, receipt understanding,
+and document image classification.
+1 Introduction
+Visually-rich Document Understanding (VrDU) is
+an important research area that aims to understand
+various types of documents ( e.g., forms, receipts,
+and posters), and it has attracted much attention
+from both academia and industry. In recent years,
+pre-training techniques (Devlin et al., 2019; Zhang
+et al., 2019) have been introduced into this area
+and self-supervised pre-training multi-modal mod-
+els have demonstrated great successes in various
+VrDU tasks (Xu et al., 2020, 2021; Hong et al.,
+2022; Li et al., 2021a).Figure 1: A receipt image from SROIE dataset and the
+global/local 1D positions of tokens based on global/in-
+segment reading orders. Local 1D positions restart with
+“1” for each individual segment. Blue Arrow: When
+using global 1D position, the reading order is explicitly
+implied by the ascending numbers, so the word after
+“Qty” is “Price”. Red Arrows: When using local 1D
+position, the successor of “Qty” is not directly given
+and can have more possible choices, so their semantic
+relations and 2D positions will be considered during
+pre-training.
+However, existing document pre-training mod-
+els suffer from reading order issues. Following the
+idea of BERT (Devlin et al., 2019), these methods
+(Xu et al., 2020, 2021; Hong et al., 2022) usually
+adopt ascending numbers ( e.g., 0, 1, 2,.., 511) to
+represent the global reading order of tokens in the
+document. Then, these numbers are encoded into
+1D position embeddings to provide explicit reading
+order supervision during pre-training, which are
+called “global 1D position”. While such global
+1D positions are widely used in NLP models for
+textual data, it is not a good choice for document
+data. Firstly, plain texts always have definite and
+linear reading orders, but the reading order of a
+document may not be unique or even linear, which15200cannot be simply encoded with monotonically in-
+creasing numbers. Secondly, the global reading
+order of a document is usually obtained by order-
+ing detected text segments from OCR tools with
+empirical rules, so it heavily relies on stable and
+consistent OCR results, affecting the generalization
+ability in real-world applications. Moreover, the
+empirical rules to obtain reading orders ( e.g., “top-
+down and left-right”) may not be able to handle
+documents with complex layouts, thus providing
+inaccurate supervision.
+Some previous studies have attempted to solve
+the above reading order issues. LayoutReader
+(Wang et al., 2021) proposes a sequence-to-
+sequence framework for reading order detection
+with supervised reading order annotations. XYLay-
+outLM (Gu et al., 2022) utilizes an augmented XY
+Cut algorithm to generate different proper reading
+orders during pre-training to increase generaliza-
+tion ability. ERNIE-Layout (Peng et al., 2022)
+rearranges the order of input tokens in serialization
+modules and adopts a reading order prediction task
+in pre-training. While these studies propose data-
+based or rule-based solutions to provide explicit
+reading order supervision, we believe that the self-
+supervised pre-training process on a large number
+of documents without using extra supervision is
+sufficient to help the model to learn reading order
+knowledge, and such knowledge can be implic-
+itly encoded into the pre-trained model with better
+adaptiveness and robustness to various document
+layouts.
+We proposed a novel multi-modal pre-training
+model, LayoutMask , to achieve this goal. Lay-
+outMask only uses text and layout information as
+model input and aims to enhance text-layout inter-
+actions and layout representation learning during
+pre-training. It differs from previous studies in
+three aspects: choice of 1D position, masking strat-
+egy, and pre-training objective.
+Instead of global 1D position, LayoutMask pro-
+poses to use the in-segment token orders as 1D
+position, which is referred to as “ local 1D position ”
+(See illustration in Figure 1). As local 1D posi-
+tion does not provide cross-segment orders, Layout-
+Mask is supposed to infer global reading order by
+jointly using 1D position, 2D position, and seman-
+tic information, thus bringing in-depth text-layout
+interactions. To further promote such interactions,
+we equip the commonly used pre-training objec-
+tive, Masked Language Modeling (MLM), withtwo novel masking strategies, Whole Word Mask-
+ingandLayout-Aware Masking , and design an
+auxiliary pre-training objective, Masked Position
+Modeling , to predict masked 2D positions during
+pre-training. With the above designs, we increase
+the difficulty of pre-training objectives and force
+the model to focus more on layout information to
+obtain reading order clues in various document lay-
+outs in self-supervised learning, thus producing
+more adaptive and robust text-layout representa-
+tions for document understanding tasks.
+Experimental results show that our proposed
+method can bring significant improvements to
+VrDU tasks and achieve SOTA performance with
+only text and layout modalities, indicating that pre-
+vious studies have not fully explored the poten-
+tial power of layout information and text-layout
+interactions. The contributions of this paper are
+summarized as follows:
+1.We propose LayoutMask, a novel multi-modal
+pre-training model focusing on text-layout
+modality, to generate adaptive and robust
+multi-modal representations for VrDU tasks.
+2.In LayoutMask, we use local 1D position in-
+stead of global 1D position to promote read-
+ing order learning. We leverage Whole Word
+Masking and Layout-Aware Masking in the
+MLM task and design a new pre-training ob-
+jective, Masked Position Modeling, to en-
+hance text-layout interactions.
+3.Our method can produce useful multi-modal
+representations for documents and signifi-
+cantly outperforms many SOTA methods in
+multiple VrDU tasks.
+2 Related Work
+The early studies in VrDU area usually use uni-
+modal models or multi-modal models with shallow
+fusion (Yang et al., 2016, 2017; Katti et al., 2018;
+Sarkhel and Nandi, 2019). In recent years, pre-
+training techniques in NLP (Devlin et al., 2019;
+Zhang et al., 2019; Bao et al., 2020) and CV (Bao
+et al., 2021; Li et al., 2022) have become more
+and more popular, and they have been introduced
+into this area. Inspired by BERT (Devlin et al.,
+2019), LayoutLM (Xu et al., 2020) first improved
+the masked language modeling task by using the
+2D coordinates of each token as layout embed-
+dings, which can jointly model interactions be-15201tween text and layout information and benefits doc-
+ument understanding tasks. Following this idea,
+LayoutLMv2 (Xu et al., 2021) propose to concate-
+nate image patches with textual tokens to enhance
+text-image interactions, and LayoutLMv3 (Huang
+et al., 2022) proposed to learn cross-modal align-
+ment with unified text and image masking.
+While the above methods focus on text-image
+interactions, some other studies have realized the
+importance of layout information. StructuralLM
+(Li et al., 2021a) utilizes segment-level layout fea-
+tures to provide word-segment relations. Doc-
+Former (Appalaraju et al., 2021) combines text,
+vision, and spatial features with a novel multi-
+modal self-attention layer and shares learned spa-
+tial embeddings across modalities. LiLT (Wang
+et al., 2022) proposes a language-independent lay-
+out transformer where the text and layout infor-
+mation are separately embedded. ERNIE-Layout
+(Peng et al., 2022) adopts a reading order predic-
+tion task in pre-training and rearranges the token
+sequence with the layout knowledge.
+3 Methodology
+LayoutMask is a multi-modal transformer that can
+encode text and layout information of documents
+and produce multi-modal representations. The
+pipeline of LayoutMask can be seen in Figure 2.
+LayoutMask uses the transformer model with a
+spatial-aware self-attention mechanism proposed
+in LayoutLmv2 (Xu et al., 2021) as the backbone
+and follows its preprocessing settings for text and
+layout embeddings. In Section 3.1, we will dis-
+cuss the different choices of layout information in
+LayoutMask. In Section 3.2, we will introduce the
+pre-training tasks and masking strategies used in
+LayoutMask.
+3.1 Selection of Layout Information
+For VrDU tasks, there are two types of commonly
+used layout information: 1D position and 2D po-
+sition. We list the 1D and 2D positions used in
+previous studies in Table 1.
+1D Position: As we discussed in Section 1, us-
+ing global 1D position will bring read order issues
+and could damage the adaptiveness and robustness
+of pre-trained models. Different from some pre-
+vious models that leverage global 1D position as
+model input, we propose to use local 1D position
+in LayoutMask. Local 1D position only encodes
+the token orders within each segment and always
+restarts with 1 for each individual segment. Illus-
+trations of the global and local 1D positions can
+be seen in Figure 1 and Figure 2. Compared with
+global 1D position, the major difference of using
+local 1D position is the lack of cross-segment or-
+ders, so the global reading order has to be inferred
+with other layout and semantic clues. Besides, the
+in-segment orders implied by local 1D position are
+more reliable and trustworthy than cross-segment
+orders when meeting complex document layouts.
+2D Position: The 2D position is represented as
+a 4-digit vector like [x, y, x, y], where [x, y]
+and[x, y]are the normalized coordinates of
+the top-left and bottom-right corners of a text
+box. There are two commonly used types of
+2D positions: word-level 2D position (Word-2D)
+and segment-level 2D position (Segment-2D). For
+Word-2D, tokens of the same word will have
+the same word-level boxes as their 2D position.
+While for Segment-2D, the segment coordinates
+are shared by tokens within each segment.
+In our model, we choose local 1D position and
+segment-level 2D position as our model input,
+where local 1D position can provide in-segment
+orders, and segment-level 2D position can pro-
+vide cross-segment reading order clues, so the pre-
+trained model can learn the correct global reading
+order by jointly using 1D and 2D positions. We
+will compare the experimental results using differ-
+ent 1D & 2D position combinations in Section 4.3.1
+and provide detailed discussions.
+3.2 Pre-training Objectives
+3.2.1 Masked Language Modeling
+The Masked Language Modeling task is the most
+essential and commonly used pre-training task in
+multi-modal pre-training. In this task, we randomly
+mask some tokens with a given probability P
+(e.g., 15%) and recover these tokens during pre-15202
+training.
+For each document, we use Mto denote the
+number of masked tokens. yand¯ yrepresent
+the ground truth and prediction of the i-th masked
+token. Then the loss of this task is the average cross
+entropy loss of all masked tokens:
+L=−1
+MCE(y,¯ y). (1)
+In preliminary experiments, we find that the
+naive MLM task is not optimal for multi-modal pre-
+training. Thus we propose to adopt two novel strate-
+gies, Whole Word Masking (WWM) and Layout-
+Aware Masking (LAM), to enhance this task.
+Whole Word Masking: The WWM strategy was
+first proposed for Chinese language models to in-
+crease the task difficulty (Cui et al., 2021). Fol-
+lowing this strategy, we set masks at word-level
+instead of token-level, which is much more chal-
+lenging. When using WWM, the semantic relations
+between masked and unmasked tokens of the same
+words are eliminated, so the model has to find more
+context to predict masked words, which can pro-
+mote text-layout interactions.
+Layout-Aware Masking: As we use Local-1D and
+Segment-2D as model input, the global reading or-
+der should be obtained by jointly using 1D and 2D
+positions, where Local-1D provides in-segment or-
+ders and segment-2D provides cross-segment clues.We find that the cross-segment orders are harder to
+be learned, so we propose Layout-Aware Masking
+(LAM) strategy to address this issue. Unlike naive
+masking strategy where each token has an equal
+masking probability P, in LAM strategy, the
+first and last word of each segment has a higher
+probability ( i.e.,3×P) to be masked. In order
+to predict such masked words, the model has to
+pay more attention to finding their contexts in the
+preceding or succeeding segment, thus promoting
+learning cross-segment orders.
+3.2.2 Masked Position Modeling
+To further promote the representation learning of
+layout information in the MLM task, we design an
+auxiliary task, Masked Position Modeling (MPM),
+which has a symmetric pre-training objective: re-
+covering randomly masked 2D positions during
+pre-training (See illustration in Figure 2). Inspired
+by WWM, we also apply the MPM task at word-
+level instead of token-level. For each pre-training
+document, we randomly choose some unduplicated
+words with a given probability P. Then, for
+each selected word, we mask their 2D positions
+with the following two steps:
+Box Split: We first split the selected word out of
+its segment so the original segment box becomes 2
+or 3 segment pieces (depending on if the word is at
+the start/end or in the middle). The selected word15203
+becomes a one-word segment piece with just itself.
+Then we update the local 1D positions (restarting
+with 1) and segment 2D positions for each new
+segment piece. With the above operations, we can
+eliminate the local reading order clues implied by
+original 1D and 2D positions, so the model has to
+focus on semantical clues and new 2D positions.
+Box Masking: For each selected word, we mask its
+2D position with pseudo boxes: [0,0,0, n]where
+n∈[0,1,2, ...]is a random number. Notice that
+segment 2D position is shared among tokens in
+the same segment, so the pseudo boxes will act
+as identifiers to distinguish identical tokens from
+different masked boxes, thus avoiding ambiguity.
+During pre-training, our model is supposed to
+predict the masked 2D positions with GIoU loss
+(Rezatofighi et al., 2019):
+Here, i∈[1,2, ..., N ]is the index of Nmasked
+2D positions. Bis the ground truth box normalized
+to [0,1], and ¯Bdenotes the predicted 2D position.
+Cis the smallest convex shapes that covers Band
+¯B.L is the average GIoU loss of Nmasked
+2D positions.
+The MPM task is very similar to the cloze test,
+where a group of randomly selected words is sup-
+posed to be refilled at the right positions in theoriginal document. To predict the masked 2D posi-
+tions of selected words, the model has to find the
+context for each word based on semantic relations
+and then infer with 2D position clues from a spa-
+tial perspective. The joint learning process with
+both semantic and spatial inference can promote
+text-layout interactions and help the model to learn
+better layout representations.
+With the above two pre-training objectives, the
+model is pre-trained with the following loss:
+L=L+λL, (3)
+where λis a hyper-parameter that controls the bal-
+ance of the two pre-training objectives.
+4 Experiments
+4.1 Pre-training Settings
+LayoutMask is pre-trained with IIT-CDIP Test Col-
+lection (Lewis et al., 2006). It contains about 42
+million scanned document pages, and we only use
+10 million pages. We use a public OCR engine,
+PaddleOCRto obtain the OCR results.
+We train LayoutMask with two parameter sizes.
+LayoutMask has 12 layers with 16 heads, and
+the hidden size is 768. LayoutMask has 24
+layers with 16 heads where the hidden size is
+1024. LayoutMask and LayoutMask are15204
+initialized with pre-trained XLM-RoBERTa mod-
+els (Conneau et al., 2020).
+For hyper-parameters, we have P=25% and
+P=15% (See ablation study in Section A of the
+Appendix). The weight of MPM loss λis set to be
+1.
+4.2 Comparison with the State-of-the-Art
+In this section, we compare LayoutMask with
+SOTA models on two VrDU tasks: form & receipt
+understanding and document image classification.
+4.2.1 Form and Receipt Understanding
+In this task, we conduct entity extraction task on
+three document understanding datasets: FUNSD
+(Jaume et al., 2019), CORD (Park et al., 2019), and
+SROIE (Huang et al., 2019). The FUNSD dataset
+is a form understanding dataset, which contains
+199 documents (149 for training and 50 for test)
+and 9707 semantic entities. The CORD dataset is a
+receipt understanding dataset, and it contains 1000
+receipts (800 for training, 100 for validation, and
+100 for test) with 30 semantic labels in 4 categories.
+The SROIE dataset is another receipt understanding
+dataset with four types of entities, containing 626
+receipts for training and 347 receipts for test.
+For evaluation, we adopt the word-level F1 score
+as the evaluation metric for FUNSD and CORD and
+use the entity-level F1 score for SROIE. Since these
+datasets are quite small, in order to provide stable
+and reliable results, we repeat our experiments ten
+times for each test and report the average F1 scores
+and standard errors as the final results.
+The results of previous methods and Layout-
+Mask on these datasets are listed in Table 2. We
+have categorized them by the modalities used inpre-training: “T” for text, “L” for layout, and “I”
+for image. Notice that LayoutMask is a “T+L”
+model that does not use image modality.
+For the base version, LayoutMask out-
+performs other methods, including “T+L+I”
+models, on all three datasets (FUNSD+2.62%,
+CORD+0.43%, SROIE+0.62%). For the large ver-
+sion, LayoutMask ranks first on FUNSD and
+has comparable results on CORD and SROIE.
+These results show that LayoutMask has com-
+petitive performance with SOTA methods, demon-
+strating the effectiveness of our proposed modules.
+Since LayoutMask only uses text and layout in-
+formation, we believe that the potential power of
+layout information has not been fully explored in
+previous studies.
+4.2.2 Document Image Classification
+In the document image classification task, we aim
+to classify document images in RVL-CDIP dataset
+(Harley et al., 2015). This dataset is a subset of
+the IIT-CDIP collection with 400,000 labeled doc-
+ument images (320,000 for train, 40,000 for valida-
+tion, and 40,000 for test) in 16 categories. We use
+PaddleOCR to extract text and layout information
+as model input. We compare different methods
+with the overall classification accuracies on RVL-
+CDIP, and the results are in Table 3.
+It is observed that LayoutMask has beaten all uni-
+modality models (“I” and “T”). For “T+L” models,
+LayoutMask outperforms other base models
+with a margin of 1.48%, while LayoutMask
+takes the second place in large models. Compared
+with “T+L+I” models where image modality is
+utilized, LayoutMask falls behind due to the lack
+of visual features from image modality. We have
+found that the image modality plays an important
+role in this task because RVL-CDIP images contain
+many elements that cannot be recognized by OCR
+engines ( e.g., figures, table lines, and handwritten
+texts) and have orientation issues (See examples
+in Figure 5 of the Appendix). So the lack of im-
+age modality will bring difficulties that cannot be
+solved with only text and layout information.
+4.3 Ablation Study on LayoutMask
+4.3.1 Comparison of Layout Information
+We first compare the performance of LayoutMask
+using different layout information. To make a
+fair comparison, we use LayoutMask with only
+the MLM task and the WWM strategy during pre-
+training. For each test, LayoutMask is pre-trained15205
+and fine-tuned with a specific 1D and 2D position
+combination. The results are listed in Table 4.
+Performance of 1D Position: For 1D position,
+Local-1D outperforms Global-1D on both FUNSD
+(+9.48%/+0.69% with Word-2D/Segment-2D) and
+SROIE (+0.52%/+0.36%) and falls a little behind
+on CORD (-0.07%/-0.01%).
+To understand the benefits of using Local-
+1D, we provide entity-level F1 score on SROIE
+dataset in Table 5 (#1 for Local+Segment and
+#2 for Global+Segment). It is obvious that the
+performance gap between Local+Segment and
+Global+Segment mainly comes from entity “To-
+tal” (from 94.02% to 92.72%), while other entities
+have similar F1 scores. We illustrate two example
+images of SROIE and their entities annotations in
+Figure 3. The right image, which contains entity
+“Total”, has both vertical layout (first two lines) and
+horizontal layout and has multiple misleading num-
+bers with the same content as ground truth ( i.e.,
+“193.00”). So it is hard to recognize the entity “To-
+tal” by using the ordinary reading order implied by
+Global-1D. Therefore, using Local-1D can perform
+better since it is more adaptive to such cases.
+Performance of 2D Position: For 2D position, us-
+ing segment-level 2D position brings better results
+on all three datasets, regardless of the 1D position
+types. An important reason is that the segment
+information is highly indicative of recognizing en-
+tities. For example, every entity in FUNSD and
+CORD exactly shares the same segment. Therefore,
+although Word-2D contains more layout details, it
+will break the alignments between 2D positionsand entities, thus bringing performance drops. A
+typical result of such phenomenoncan be seen
+on FUNSD, where replacing Global+Segment to
+Global+Word will result in a significant decrease
+of 9.44%.
+Robustness Comparison: Besides performance
+superiority, another important reason to choose the
+local 1D position is its robustness to layout distur-
+bance. In real-world cases, a typical layout distur-
+bance is “Segment Swap”, where segments in the
+same line are indexed with wrong orders due to
+document rotation or OCR issues. In such scenar-
+ios, the incorrect cross-segment order will lead to
+incorrect global 1D positions and can be harmful to
+model inference. Fortunately, the local 1D position
+is naturally immune to such disturbance since it
+does not rely on cross-segment orders, making it
+more robust than global 1D position.
+To quantify such differences in robustness, we
+demonstrate how the segment swap will influence
+the performance of using global 1D position by
+simulating it on test datasets. For each test docu-
+ment, we randomly choose some lines with a given
+probability P and then swap the segments in
+it. We conduct experiments on LayoutMask
+(MLM+WWM) in Global+Segment setting with
+different P (i.e., 10%, 20%, and 30%) and the
+results are reported in Table 5 (#3-5).
+During our experiments, we have found that the
+segment swap does not bring significant perfor-15206
+mance changes on FUNSD and CORD datasets (so
+these results are not listed due to the limited space).
+A possible reason is that FUNSD and CORD do
+not contain cross-segment entities, so the segment
+swap can not break the order of words in each
+entity. Evidence for this explanation is that the
+SROIE dataset is significantly affected by segment
+swap, and its cross-segment entities (“Address” and
+“Company”) have obvious performance drops. In
+SROIE, the majority of “Address” entities and a few
+“Company” entities are printed in multiple lines
+(See examples in Figure 3), so the segment swap
+can change the in-entity orders of entity words.
+The results show that the “Address” entity has the
+largest drop among all entities (-4.81%, -6.51%,
+and -8.42% for P=10%, 20%, 30%). Besides,
+the “Total” entity has the second largest decrease
+(-0.86%, -1.06%, and -1.54%). As aforementioned,
+the “Total” entities are usually surrounded by com-
+plex layouts and misleading numbers, so the seg-
+ment swap will bring extra difficulties in recogniz-
+ing the correct entities.
+The above performance decreases of using
+global 1D position prove the superiority of using
+local 1D position since it is not affected by such
+layout disturbance and can have more robust per-
+formance in real-world scenarios.4.3.2 Effectiveness of Proposed Methods
+In Table 6, we provide results using different pre-
+training tasks and masking strategies to demon-
+strate the effectiveness of our proposed modules.
+Comparing #1 and #2 in Table 6, we observe that
+WWM brings significant performance improve-
+ments on all datasets. The reason is that it in-
+creases the difficulty of the MLM task, so we can
+obtain a stronger language model. We also find that
+LAM can also brings consistent improvements on
+all dataset because LAM can force the model to
+learn better representations for layout information,
+which is beneficial to downstream tasks.
+Comparing #2 to #4 and #3 to #5, it is observed
+that the MPM task also brings considerable im-
+provements on all datasets. MPM works as an aux-
+iliary task to help the MLM task and can increase
+the pre-training difficulty, contributing to learning
+better and more robust layout representations.
+Moreover, the full-version LayoutMask (#5) out-
+performs the naive version (#1) by a large margin
+(FUNSD+3.18%, CORD+0.67%, SROIE+1.11%,
+and RVL-CDIP+1.09%), demonstrating the effec-
+tiveness of our proposed modules when working
+together. To better illustrate the effectiveness of
+our model design, we list category-level accuracy
+improvements on RVL-CDIP dataset and provide
+detailed discussions in Section B of the Appendix.
+5 Conclusion
+In this paper, we propose LayoutMask, a novel
+multi-modal pre-training model, to solve the read-
+ing order issues in VrDU tasks. LayoutMask
+adopts local 1D position as layout input and can
+generate adaptive and robust multi-modal represen-
+tations. In LayoutMask, we equip the MLM task
+with two masking strategies and design a novel pre-
+training objective, Masked Position Modeling, to
+enhance the text-layout interactions and layout rep-
+resentation learning. With only using text and lay-
+out modalities, our method can achieve excellent
+results and significantly outperforms many SOTA
+methods in VrDU tasks.15207Limitations
+Our method has the following limitations:
+Datasets: In multi-modal pre-training, we rely on
+downstream datasets to evaluate the performance
+of pre-trained models. The commonly used entity
+extraction datasets are relatively small and lack di-
+versity, so the proposed method may not generalize
+well to real word scenarios.
+Lack of Image Modality: In LayoutMask, we fo-
+cus on text-layout interactions, leaving the image
+modality unexplored. However, documents in the
+real world contain many elements that can not be
+described by text and layout modalities, like fig-
+ures and lines, so incorporating image modality
+is important in building a universal multi-modal
+pre-training model for document understanding.
+References1520815209
+A Ablation Study of Masking
+Probabilities
+We compare LayoutMask using different Pand
+P, and the results are in Figure 4. We first find
+the best Pwithout using the MPM task, and the
+optimal value is 25%. Then we fix such optimal
+Pto find the best P, which is 15% as the
+results show.
+B Ablation Study on RVL-CDIP
+To further understand the effectiveness of our
+model design, we list the detailed classification
+results on RVL-CDIP dataset with the naive ver-
+sion and the full version in Table 7. It is observed
+that the major performance improvements come
+from three categories: presentation (+3.36%), ad-CategoryModel SettingsDiff. (%)Naive Full
+letter 90.30 90.86 0.56
+form 85.71 86.77 1.07
+email 98.17 98.33 0.15
+handwritten 93.96 94.26 0.30
+advertisement 88.47 91.40 2.93
+sci-report 87.87 89.38 1.51
+sci-publication 93.08 93.73 0.65
+specification 95.91 96.56 0.64
+file folder 91.29 92.71 1.42
+news article 90.09 92.44 2.35
+budget 94.01 94.96 0.95
+invoice 94.02 94.54 0.52
+presentation 86.14 89.50 3.36
+questionnaire 92.44 92.88 0.44
+resume 98.31 98.70 0.39
+memo 94.93 95.12 0.19
+Overall 92.17 93.26 1.09
+vertisement (+2.93%), and news article (+2.35%).
+We find these categories have more diverse lay-
+outs (See examples in Figure 5), so classifying
+these documents requires a better understanding
+of the document structure, which also indicates
+the effectiveness of our methods in helping layout
+understanding.15210ACL 2023 Responsible NLP Checklist
+A For every submission:
+/squareA1. Did you describe the limitations of your work?
+in Section Limitations
+/squareA2. Did you discuss any potential risks of your work?
+in Section 4
+/squareA3. Do the abstract and introduction summarize the paper’s main claims?
+in Section 1
+/squareA4. Have you used AI writing assistants when working on this paper?
+Left blank.
+B/squareDid you use or create scientiﬁc artifacts?
+in Section 4
+/squareB1. Did you cite the creators of artifacts you used?
+in Section 4
+/squareB2. Did you discuss the license or terms for use and / or distribution of any artifacts?
+We use datasets in public domain and licensed for research purposes.
+/squareB3. Did you discuss if your use of existing artifact(s) was consistent with their intended use, provided
+that it was speciﬁed? For the artifacts you create, do you specify intended use and whether that is
+compatible with the original access conditions (in particular, derivatives of data accessed for research
+purposes should not be used outside of research contexts)?
+Our use of dataset is consistent with their intended use.
+/squareB4. Did you discuss the steps taken to check whether the data that was collected / used contains any
+information that names or uniquely identiﬁes individual people or offensive content, and the steps
+taken to protect / anonymize it?
+We use datasets in public domain and licensed for research purposes.
+/squareB5. Did you provide documentation of the artifacts, e.g., coverage of domains, languages, and
+linguistic phenomena, demographic groups represented, etc.?
+In Section 4
+/squareB6. Did you report relevant statistics like the number of examples, details of train / test / dev splits,
+etc. for the data that you used / created? Even for commonly-used benchmark datasets, include the
+number of examples in train / validation / test splits, as these provide necessary context for a reader
+to understand experimental results. For example, small differences in accuracy on large test sets may
+be signiﬁcant, while on small test sets they may not be.
+In Section 4
+C/squareDid you run computational experiments?
+In Section 4
+/squareC1. Did you report the number of parameters in the models used, the total computational budget
+(e.g., GPU hours), and computing infrastructure used?
+In Section 415211/squareC2. Did you discuss the experimental setup, including hyperparameter search and best-found
+hyperparameter values?
+In Section 4
+/squareC3. Did you report descriptive statistics about your results (e.g., error bars around results, summary
+statistics from sets of experiments), and is it transparent whether you are reporting the max, mean,
+etc. or just a single run?
+In Section 4
+/squareC4. If you used existing packages (e.g., for preprocessing, for normalization, or for evaluation), did
+you report the implementation, model, and parameter settings used (e.g., NLTK, Spacy, ROUGE,
+etc.)?
+In Section 4
+D/squareDid you use human annotators (e.g., crowdworkers) or research with human participants?
+Left blank.
+/squareD1. Did you report the full text of instructions given to participants, including e.g., screenshots,
+disclaimers of any risks to participants or annotators, etc.?
+No response.
+/squareD2. Did you report information about how you recruited (e.g., crowdsourcing platform, students)
+and paid participants, and discuss if such payment is adequate given the participants’ demographic
+(e.g., country of residence)?
+No response.
+/squareD3. Did you discuss whether and how consent was obtained from people whose data you’re
+using/curating? For example, if you collected data via crowdsourcing, did your instructions to
+crowdworkers explain how the data would be used?
+No response.
+/squareD4. Was the data collection protocol approved (or determined exempt) by an ethics review board?
+No response.
+/squareD5. Did you report the basic demographic and geographic characteristics of the annotator population
+that is the source of the data?
+No response.15212

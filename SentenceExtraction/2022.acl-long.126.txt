@@ -1,1 +1,643 @@
-1797 Proceedings of the 60th Annual Meeting of the Association for Computational Linguistics Volume 1 : Long Papers , pages 1797 1806 May 22 - 27 , 2022 c(cid:13)2022 Association for Computational Linguistics 1798 1799 1800 1801 1802 1803 1804 1805 1806 
+
+Haochen Liu, Joseph Thekinen, Sinem Mollaoglu, Da Tang,
+Ji Yang, Youlong Cheng, Hui Liu, Jiliang TangMichigan State University, East Lansing, MI, USAUniversity of Calgary, Calgary, AB, CanadaByteDance Inc., Mountain View, CA, USA
+liuhaoc1@msu.edu; joseph.thekinen@ucalgary.ca; sinemm@msu.edu;
+{da.tang,ji.yang,youlong.cheng}@bytedance.com; {liuhui7,tangjili}@msu.edu
+Abstract
+Crowdsourcing has emerged as a popular ap-
+proach for collecting annotated data to train
+supervised machine learning models. However,
+annotator bias can lead to defective annotations.
+Though there are a few works investigating in-
+dividual annotator bias, the group effects in
+annotators are largely overlooked. In this work,
+we reveal that annotators within the same de-
+mographic group tend to show consistent group
+bias in annotation tasks and thus we conduct an
+initial study on annotator group bias. We first
+empirically verify the existence of annotator
+group bias in various real-world crowdsourcing
+datasets. Then, we develop a novel probabilis-
+tic graphical framework GroupAnno to cap-
+ture annotator group bias with an extended Ex-
+pectation Maximization (EM) algorithm. We
+conduct experiments on both synthetic and real-
+world datasets. Experimental results demon-
+strate the effectiveness of our model in model-
+ing annotator group bias in label aggregation
+and model learning over competitive baselines.
+1 Introduction
+The performance of supervised machine learning
+algorithms heavily relies on the quality of the anno-
+tated training data. Due to the heavy workload of
+annotation tasks, researchers and practitioners typi-
+cally take advantage of crowdsourcing platforms to
+obtain cost-effective annotation data (Snow et al.,
+2008; Buhrmester et al., 2016). However, the labels
+collected from multiple crowdsourcing annotators
+could be not consistent, since the expertise and reli-
+ability of the annotators are uncertain, and the task
+itself could be subjective and difficult. In recent
+years, a lot of efforts from the machine learning
+community have been conducted to mitigate the
+effect of these noisy crowdsourcing labels (Zheng
+et al., 2017). Various approaches have been pro-
+posed to model the quality (Liu et al., 2012; Aydin
+et al., 2014), confidence (Joglekar et al., 2013),expertise (Ma et al., 2015; Zheng et al., 2016), re-
+liability (Li et al., 2019) of annotators; or model
+the difficulty of the tasks (Whitehill et al., 2009;
+Ma et al., 2015). With such information, we can
+infer the truth label from the noisy labels more ac-
+curately and correspondingly train a more desirable
+model.
+In terms of annotator modeling, existing studies
+mainly concentrated on factors like quality, confi-
+dence, expertise, etc., which could affect the anno-
+tation results. Besides, the bias held by the anno-
+tators can also lead to defective annotations (Sap
+et al., 2019), which is, however, rarely studied. In
+addition, studies in social science (Eagly, 2013)
+suggest that people from different demographic
+groups tend to apply different standards to eval-
+uate the same thing due to their different experi-
+ences, which causes group bias. We observe that
+annotators in different demographic groups tend
+to show different bias in annotation tasks. For ex-
+ample, in a preliminary study, we examine the in-
+stances annotated by both two groups of annotators
+in the Wikipedia Toxicity dataset (Wulczyn et al.,
+2017). We observe that native speakers of English
+rate5.1%more comments as toxic than non-native
+speakers. Similarly, annotators over 30 years old
+rate2.5%more comments as toxic than younger
+annotators. More details of the preliminary study
+can be found in Section 2. Thus, a thorough in-
+vestigation of such annotator group bias is desired.
+Similar to existing studies, by considering the ef-
+fect of annotator group bias, we have the potential
+to achieve a more accurate inference of true labels
+and train a better model. Meanwhile, it is often
+hard to estimate the individual bias of one annota-
+tor with limited annotation data. With annotator
+group bias as the prior knowledge, we can estimate
+the bias more effectively based on the demographic
+groups the annotator belongs to. Thus, annotator
+group bias could mitigate the “cold-start” problem
+in modeling the annotator individual bias.1797In this paper, we aim to study how to detect anno-
+tator group bias under text classification tasks, and
+how to mitigate the detrimental effects of annotator
+group bias on model training. We face several chal-
+lenges. First, given noisy annotated data without
+the true labels, how should we detect the annotator
+bias? We first make a comparison of the annotation
+results from different groups of annotators and find
+that there is a significant gap between them. Then,
+we use two metrics sensitivity andspecificity to
+measure the annotator bias, and conduct an analy-
+sis of variance (ANOV A) which demonstrates that
+the bias of each individual annotator shows obvious
+group effects in terms of its demographic attributes.
+Second, how can we estimate the annotator group
+bias, and perform label aggregation and model
+training with the knowledge of annotator group
+bias? Following the traditional probabilistic ap-
+proaches for label aggregation (Raykar et al., 2010;
+Rodrigues and Pereira, 2018; Li et al., 2019), we
+propose a novel framework GroupAnno that mod-
+els the production of annotations as a stochastic
+process via a novel probabilistic graphical model
+(PGM). Inspired by the results of ANOV A, we as-
+sume that the bias of an annotator can be viewed
+as a superposition of the effects of annotator group
+bias and its individual bias. We thereby extend the
+original PGM for label aggregation with additional
+variables representing annotator group bias. By
+learning the PGM, we estimate the annotator group
+bias, infer the true labels, and optimize our classifi-
+cation model simultaneously. Third, how can we
+learn this PGM effectively? With the unknown true
+label as the latent variable, typical maximum likeli-
+hood estimation (MLE) method cannot be directly
+applied to estimate the parameters. To address this
+challenge, we propose an extended EM algorithm
+for GroupAnno to effectively learn all the parame-
+ters in it, including the parameters of the classifier
+and the newly introduced variables for modeling
+annotator group bias.
+We summarize our contributions in this paper
+as follows. First, we propose metrics to measure
+the annotator group bias and verify its existence
+in real NLP datasets via an empirical study. Sec-
+ond, we propose a novel framework GroupAnno
+to model the annotation process by considering the
+annotator group bias. Third, we propose a novel
+extended EM algorithm for GroupAnno where we
+estimate the annotator group bias, infer the true
+labels, and optimize the text classification modelsimultaneously. Finally, we conduct experiments
+on synthetic and real data. The experimental results
+show that GroupAnno can accurately estimate the
+annotator group bias. Also, compared with com-
+petitive baselines, GroupAnno can infer the true
+label more accurately, and learn better classifica-
+tion models.
+2 Understanding Annotator Group Bias
+In this section, we perform an empirical study to
+get a rudimentary understanding of annotator group
+bias.
+2.1 Data and Tasks
+We investigate the group annotator bias on three
+datasets that involve various text classification
+tasks. These datasets are released in the Wikipedia
+Detox project (Wulczyn et al., 2017): Personal
+Attack Corpus, Aggression Corpus, and Toxicity
+Corpus where each instance is labeled by multiple
+annotators from the Crowdflower platform. For
+all the datasets, the demographic attributes of the
+annotators are collected. The data statistics of the
+three Wikipedia Detox datasets, i.e. Personal At-
+tack, Aggression, and Toxicity are shown in Table
+1, where “#Instances” indicates the total number of
+instances in a dataset; and “#Annotators” denotes
+the total number of annotators.
+Dataset #Instances #Annotators
+Personal Attack 115,864 2,190
+Aggression 115,864 2,190
+Toxicity 159,686 3,591
+The Personal Attack dataset and the Aggression
+dataset contain the same comments collected from
+English Wikipedia. Each comment is labeled by
+around 10 annotators on two tasks, respectively.
+The task of the former dataset is to determine
+whether the comment contains any form of per-
+sonal attack, while the task of the latter dataset is
+to judge whether the comment is aggressive or not.
+For each annotator, four demographic categories
+are collected: gender ,age,language , and educa-
+tion. Although the original dataset provides more
+fine-grained partitions, for simplicity, we divide
+the annotators into only two groups in terms of1798each demographic category. We consider two
+groups: male and female for gender , under 30 and
+over 30 for age, below bachelor and above bache-
+lor (including bachelor) for education , and native
+and non-native speaker of English for language .
+The toxicity dataset contains comments collected
+from the same source. Similarly, each comment is
+labeled by around 10 annotators on whether it is
+toxic or not. The toxicity dataset includes the same
+demographic information of the annotators as the
+former two datasets.
+2.2 Empirical Study
+To investigate whether the annotators from different
+groups behave differently in annotation tasks, we
+first perform a comparison of the annotation results
+from different annotator groups. For each demo-
+graphic category, we collect the instances which are
+labeled by annotators from both groups, and report
+the proportion of instances that are classified as pos-
+itive. The results are shown in Table 2. First, we
+note that there are obvious gaps between the anno-
+tations given by different annotator groups. Second,
+given that the tasks of the three datasets are similar
+(i.e., all of them are related to detecting inappro-
+priate speech), the annotation tendency of each
+annotator group is the same. For example, young
+and non-native speaker annotators are less likely
+to annotate a comment as attacking, aggressive, or
+toxic. Third, in terms of different demographic cat-
+egories, the gaps between the annotations from the
+two groups are different. For example, compared
+with other group pairs, the annotations provided by
+native speakers and non-native speakers are more
+different.
+Analysis of Variance. The results in Table 2
+suggest that annotators show group bias in the an-
+notation tasks, which is manifested in that different
+groups hold different evaluation criteria in the same
+task. Specifically for classification tasks, different
+annotators are unevenly likely to label instances
+belonging from one class to another class. In this
+paper, we only consider binary classification tasks
+for simplicity. Thus, we use sensitivity (true pos-
+itive rate) and specificity (1−false positive rate)
+(Yerushalmy, 1947) to describe the bias of an indi-
+vidual annotator.Next, we seek to verify the existence of anno-
+tator group bias. We are interested in whether the
+demographic category of an individual annotator
+has a significant impact on its bias. Thus, we first
+estimate the bias (i.e., sensitivity and specificity)
+of each individual annotator from its annotation
+data. Since we don’t have the true labels, we use
+majority vote labels as the true labels to approxi-
+mately estimate the bias of each annotator. Then,
+we perform an ANOV A (Scheffe, 1999) with the
+demographic category as the factors, the groups
+as the treatments, and the bias of an annotator as
+the response variable, to analyze the significance
+of the annotator’s demographic groups against its
+own bias. The corresponding statistical model can
+be expressed as:
+˜π=u+π+···+π+ϵ (1)
+where ˜πindicates the bias of an individual annota-
+torr;uis the average bias of all annotators; π
+is the effect of the group gin terms of category
+p; and ϵis the random error which follows a nor-
+mal distribution with the mean value as 0. To test
+whether category phas a significant impact on ˜π,
+we consider the null hypothesis H:π=π,
+which indicates that the demographic category p
+has no significant effect on the annotator bias. In
+other words, there is no significant difference be-
+tween the annotation behaviors of the two groups
+in terms of category p.
+The results are shown in Table 3. In the table, we
+report the inter-group sum of squares, which repre-
+sent the deviation of the average group bias from
+the overall average bias. We also use “ ∗” to denote
+the significance of the hypothesis tests. We observe
+that in categories of gender, age and language, the
+two opposing groups show obvious different sensi-
+tivity and specificity in most cases. Moreover, the
+ANOV A suggests that we are confident to reject the
+null hypotheses in these cases, which means that
+the above three demographic categories can affect
+the annotator bias significantly in different datasets.
+Based on our observations, we conclude that the
+demographic attribute of an annotator can have a
+significant impact on its annotation behavior, and
+thereby, annotator group bias does exist.
+3 Modeling Annotator Group Bias
+In this section, we discuss our approaches for anno-
+tator group bias estimation, as well as bias-aware1799
+label aggregation and model training. We first in-
+troduce the metrics for measuring annotator group
+bias, and then present the problem statement. Next,
+we detail GroupAnno , the probabilistic graphical
+model for modeling the production of annotations.
+Finally, we describe our extended EM algorithm
+for learning the proposed model.
+3.1 Measurements
+To measure the annotator bias in terms of demo-
+graphic groups, we extend the definitions of sen-
+sitivity and specificity to the group scenario. For-
+mally, we define group sensitivity andgroup speci-
+ficity of a group gin terms of category pas follows
+α=Pr(z= 1|y= 1, g=g)
+β=Pr(z= 0|y= 0, g=g)
+where yis the true label and zis the annotated label.
+g=grepresents that the annotator rbelongs to
+group gin terms of demographic category p.
+We use π= (α, α, β, β)to denote
+the bias parameters of demographic category p.
+The bias parameters of all the Pcategories are
+denoted as π={π}.
+3.2 Problem Statement
+Suppose that we have a dataset D =
+{x, z,···, z}which contains Ninstances.
+Each instance xis annotated by Rdifferent anno-
+tators, which results in labels z,···, z. We also
+have an annotator set A={(g,···, g)}
+that records the demographic groups of a total
+ofRannotators. Here, g∈ {0,1}indicates the
+group that the r-th annotator belongs to in terms
+of the p-th demographic category. We consider Pdemographic categories for each annotator, and we
+have two groups (i.e., 0 and 1) for each category.
+Given DandA, we seek to (1) estimate the
+annotator group bias π; (2) estimate the true label
+yof each instance x; and (3) learn a classifier
+P(y|x)which is parameterized by w.
+Next, we introduce our GroupAnno to model the
+annotation process, and propose an extended EM
+algorithm to estimate the parameters Θ ={w, π}.
+3.3 GroupAnno: The Probabilistic Graphical
+Model
+As shown in Figure 1, GroupAnno models the gen-
+eration procedure of annotations as follows. Given
+an instance x, its true label yis determined by an
+underlying distribution P(·|x). The distribution
+is expressed via a classifier with parameters wthat
+we will learn. Given the true label y, the annotated
+label zfrom an annotator ris determined by its
+bias˜π= (˜α,˜β). For simplicity, in the following
+formulations, we use ˜πto represent ˜αor˜β. In
+Section 2.2, we show that the annotator bias can be
+modeled by a superposition of the effects of anno-
+tator group bias with a random variable reflecting
+the annotator individual bias. Thus, following Eq
+1, we assume that the annotator bias of annotator r
+can be decomposed as
+˜π=u+π+···+π+π
+To sum up, the parameters we introduced to
+model annotator bias are π={u} ∪ { π}∪
+{π}. To estimate the parameters Θ ={w, π},
+one way is to use maximum likelihood estimation.
+Under the assumption that instances are sampled1800
+independently, the likelihood function of Θcan be
+written as
+P(D|Θ) =YP(z,···, z|x; Θ)
+Therefore, the MLE parameters can be found by
+maximizing the log-likelihood
+ˆΘ ={ˆw,ˆπ}= argmaxlnP(D|Θ) (2)
+3.4 The extended EM algorithm
+However, we cannot directly apply MLE to solve
+Eq 2, because there is an unknown latent variable
+(i.e. the true label y) in the probabilistic graphical
+model. Thus, we propose an extended EM algo-
+rithm to effectively estimate the parameters Θin
+GroupAnno.
+Since the true label yis an unknown latent vari-
+able, the log-likelihood term in Eq 2 can be decom-
+posed as
+lnP(D|Θ)
+=Xln[P(y= 1|x)P(z,···, z|y= 1; ˜α)
++P(y= 0|x)P(z,···, z|y= 0;˜β)]
+where ˜α={˜α}and˜β={˜β}represent
+the collections of the sensitivity and the specificity
+of all the annotators. We further assume that the
+annotations for one instance from different annota-
+tors are conditionally independent given their de-
+mographic attributes (Raykar et al., 2010). Thenwe have
+lnP(D|Θ)
+=Xlnh
+P(y= 1|x)×YP(z|y= 1; ˜α)
++P(y= 0|x)×YP(z|y= 0;˜β)i
+=Xln[pa+ (1−p)b] (3)
+where we denote
+Note that due to the existence of the latent vari-
+abley, Eq 3 contains the logarithm of the sum of
+two terms, which makes it very difficult to calcu-
+late its gradient w.r.t Θ. Thus, to solve the obstacle,
+we instead optimize a lower bound of lnP(D|Θ)
+via an EM algorithm.
+E-step. Given the observation Dand the current
+parameters Θ, we calculate the following lower
+bound of the real likelihood lnP(D|Θ)
+lnP(D|Θ)≥E[lnP(D,y|Θ)]
+=Xµlnpa+ (1−µ) ln(1−p)b(4)
+where µ=P(y= 1|z, . . . , z, x,Θ)and it
+can be computed by the Bayes’ rule
+µ=ap
+ap+b(1−p)(5)
+M-step. In the M-step, we update the model
+parameters Θby maximizing the conditional ex-
+pectation in Eq 4
+Θ←Θ +α∇E[lnP(D,y|Θ)]
+where αis the learning rate.
+The training algorithm is summarized in Algo-
+rithm 1. We first initialize the posterior probability
+of the labels µbased on majority voting (line 1).
+Next, we perform the extended EM algorithm to
+update the model parameters iteratively. In the E-
+step, we update µby Bayes’ rule in Eq 5, and then1801calculate the expectation by Eq 4 (from lines 3 to
+5). Afterward, we perform the M-step, where the
+gradients of the conditional expectation w.r.t the
+model parameters are calculated, and the model pa-
+rameters are updated through gradient ascent. The
+iterative process is terminated when some specific
+stop requirements are satisfied. In our implemen-
+tation, we execute the EM optimization steps for a
+fixed number of epochs.
+Algorithm 1: The optimization algo-
+rithm.
+4 Experiment
+In this section, we evaluate the proposed method
+via comprehensive experiments. We test our model
+on both synthetic and real-world data. Through
+the experiments, we try to answer three research
+questions: (1) is our method able to accurately
+estimate the annotator group bias? (2) can our
+method effectively infer the true labels? and (3)
+can our approach learn more accurate classifiers?
+4.1 Baselines
+We compare our proposed framework GroupAnno
+with eight existing true label inference methods
+(Zheng et al., 2017), including majority voting
+(MV), ZenCrowd (Demartini et al., 2012), Mini-
+max (Zhou et al., 2012), LFC-binary (Raykar et al.,
+2010), CATD (Li et al., 2014a), PM-CRH (Aydin
+et al., 2014), KOS (Karger et al., 2011), and VI-MF
+(Liu et al., 2012).
+4.2 Data
+Synthetic Data. We first create two synthetic
+datasets on a simple binary classification task with
+2-dimension features. As shown in Figure 2, the
+instances in the datasets are in the shape of circleand moon, respectively. In each dataset, we sam-
+ple 400 instances for both classes. We simulate 40
+annotators with two demographic attributes. We
+first randomly set the group bias for the two de-
+mographic attributes. Then, based on our assumed
+distribution that has been verified in Section 2, we
+sample the bias for each annotator. Finally, we
+suppose that each instance is labeled by 4 different
+annotators and simulate the annotations based on
+the sampled annotator bias. With the knowledge
+of actual annotator group bias and true labels in
+synthetic data, we can verify the capability of the
+proposed framework in group bias estimation and
+truth label inference.
+Wikipedia Detox Data. We conduct experi-
+ments on all the three subsets (i.e. Personal Attack,
+Aggression, and Toxicity) of the public Wikipedia
+Detox dataset. The details of this dataset are intro-
+duced in Section 2.1. For the three subsets in the
+Wikipedia Detox Corpus, we use the training/test
+sets split by the publisher of the data (Wulczyn
+et al., 2017). Since there is no available ground-
+truth label in this dataset, we pick up a subset of
+instances in the test set on which more than 80%
+annotations reach an agreement and treat the MV
+label as the ground-truth label. These instances are
+less controversial, thus we are confident that the
+MV labels are true labels. We report the perfor-
+mance of the models trained under various label
+inference approaches on this set.
+Information Detection Data. This dataset
+consists of text transcribed from conversations
+recorded in several in-person and virtual meetings.
+Each text is assigned an information label which
+groups the text into three categories: give informa-
+tion (G), ask information (A), and other (O). Five
+different data annotators classified the text into one
+of G, A, or O categories. We conducted a survey to
+collect data on demographic characteristics of the
+annotators such as gender, race, and native speaker
+of English. We convert the three categories into
+two classes by treating G and A as positive (i.e., in-
+formation exchange) and O as negative (i.e., other).
+There are 2,483 instances in total in this dataset.
+After the annotation, we randomly select 762 in-
+stances and ask the annotators to discuss and reach
+an agreement on their labels. We treat these labels
+as true labels. We construct the training set with
+the remaining 1,721 instances without true labels,
+plus 430 of the instances with true labels. Thus, we
+have 20% training data with true labels, on which1802we will report the truth inference performance. The
+rest 332 instances with true labels make up our test
+set.
+4.3 Implementation Details
+For text classification tasks on the Wikipedia Detox
+data and the Information Detection data, we employ
+an one-layer recurrent neural network (RNN) with
+gated recurrent units (GRUs) as the classifier. In
+the RNN classifier, the word embedding size is set
+as 128 and the hidden size is set as 256. The classi-
+fier is optimized by an Adam optimizer (Kingma
+and Ba, 2014) with a learning rate of 0.001. When
+modeling annotator group bias, we consider 1-2
+demographic categories with the most significant
+group effects. For the Personal Attack dataset and
+the Aggression dataset, we consider age and lan-
+guage. For the Toxicity dataset, we consider gender.
+For the Information Detection dataset, we consider
+language.
+4.4 Results on Synthetic Data
+Group Bias Estimation. In each of the syn-
+thetic datasets, we simulate the annotations based
+on presented annotator group bias. We simulate
+two demographic attributes for each annotator,
+where there are two groups in terms of each at-
+tribute. Thus, there are eight bias parameters to
+estimate: sensitivities αand specificities β,
+where p= 0,1andq= 0,1. We compare the
+real values of the annotator group bias and the esti-
+mations from GroupAnno. The results are shown
+in Table 4. We observe that the bias parameters
+are estimated accurately within an acceptable error
+range. The results demonstrate the ability of our
+extended EM algorithm to estimate the parameters
+in GroupAnno.
+Truth Label Inference. The experimental re-
+sults of truth label inference on synthetic data are
+shown in Table 5. In the table, we list the perfor-
+mance of different approaches on truth label infer-
+ence. We make the following observations. First,
+MV performs the worst among all the methods.
+In fact, a majority vote often does not mean the
+truth. By explicitly modeling the annotation behav-
+iors of the annotators, an algorithm can infer the
+true labels more accurately than the majority vote.
+Second, the baselines Minimax and LFC-binary
+outperform other baselines. LFC-binary leverages
+PGM to model the individual annotator bias for
+truth label inference, which achieves desirable per-
+formance. Third, our framework GroupAnno fur-
+ther improves the accuracy of truth label inference
+on the basis of LFC-binary, since GroupAnno finds
+and exploits the group annotator bias as additional
+information. GroupAnno models the group annota-
+tor bias as prior information of the individual bias
+of each annotator so that individual bias can be es-
+timated more accurately. As a result, GroupAnno
+achieves the best performance on truth label infer-
+ence.
+4.5 Results on Wikipedia Detox Dataset
+The experimental results on the Wikipedia Detox
+datasets are shown in the left section of Table 6.
+For LFC-binary and GroupAnno, where truth la-
+bel inference and model training are conducted
+simultaneously, we directly report the performance
+of the resulting model on the test set. For other
+pure truth label inference approaches, we first infer
+the truth labels and then train the model on the in-
+ferred labels. Finally, we report the performances
+of these models on the test set. The results show
+that GroupAnno achieves better performances than
+the state-of-the-art methods, which demonstrates
+the effectiveness and superiority of our framework
+in practice.1803
+4.6 Results on Information Detection Dataset
+The experimental results on the information detec-
+tion dataset are shown in the right section of Table
+6. Since we have 20% training data with available
+true labels, we first examine the accuracy of truth
+label inference of various methods on this part of
+the data, and then report the performance of the
+trained classifiers on the test data. We find that our
+proposed method still outperforms all the baselines
+on both truth inference and resulting classifier per-
+formance, which further verifies the superiority of
+GroupAnno in real-world data.
+5 Related Work
+Bias and fairness issues are crucial as machine
+learning systems are being increasingly used in
+sensitive applications (Chouldechova and Roth,
+2018). Bias is caused due to pre-existing soci-
+etal norms (Friedman and Nissenbaum, 1996), data
+source, data labeling, training algorithms, and post-
+processing models. Data source bias emerges when
+the source distribution differs from the target distri-
+bution where the model will be applied (Shah et al.,
+2019). Training algorithms can also introduce bias.
+For example, if we train a model on data that con-
+tain labels from two populations - a majority and a
+minority population - minimizing overall error will
+fit only the majority population ignoring the minor-
+ity (Chouldechova and Roth, 2018). Data labeling
+bias exists when the distribution of the dependent
+variable in the data source diverges from the ideal
+distribution (Shah et al., 2019). Many of these data
+labels are generated by human annotators, who can
+easily skew the distribution of training data (Dixon
+et al., 2018). Various factors such as task difficulty,task ambiguity, amount of contextual information
+made available, and the expertise of the annotator
+determine annotation results (Joseph et al., 2017).
+Prior literature studies various approaches to en-
+sure the reliability of data annotations. Demar-
+tini et al. (2012); Aydin et al. (2014) use worker
+probability to model the ability of an annotator
+to correctly answer a task, and some other works
+(Whitehill et al., 2009; Li et al., 2014b) introduce
+a similar concept, worker quality, by changing
+the value range from [0,1]to(−∞,+∞). Welin-
+der et al. (2010) model the bias and variance of
+the crowdsourcing workers on numeric annotation
+tasks. Moreover, Fan et al. (2015) and Ma et al.
+(2015) find that annotators show different qualities
+when answering different tasks, and thereby pro-
+pose to model the diverse skills of annotators on
+various tasks. Li et al. (2019) realize that annotators
+perform unevenly on each annotation instance, so
+they propose a novel method to model the instance-
+level annotator reliability for NLP labeling tasks.
+Geva et al. (2019) use language generated by anno-
+tators to identify annotator identity and showed that
+annotator identity information improves model per-
+formance. All these studies have been individual-
+focused and ignore group effects. Our approach
+differs in that we study systemic bias associated
+with annotators of a specific demographic group.
+6 Conclusion
+In this work, we investigate the annotator group
+bias in crowdsourcing. We first conduct an empiri-
+cal study on real-world crowdsourcing datasets and
+show that annotators from the same demographic
+groups tend to show similar bias in the annotation
+tasks. We develop a novel framework GroupAnno
+that considers the group effect of annotator bias,
+to model the whole annotation process. To solve
+the optimization problem of the proposed frame-
+work, we propose a novel extended EM algorithm.
+Finally, we empirically verify our approach on two
+synthetic datasets and four real-world datasets. The
+experimental results show that our model can ac-
+curately estimate the annotator group bias, achieve
+more accurate truth inference, and also train bet-
+ter classifiers that outperform those learned under
+state-of-the-art true label inference baselines. As
+future work, we plan to investigate the annotator
+group bias in tasks beyond classification such as
+regression tasks and text generation tasks.1804
+Acknowledgements
+This research is supported by the National
+Science Foundation (NSF) under grant num-
+bers IIS1714741, CNS1815636, IIS1845081,
+IIS1907704, IIS1928278, IIS1955285,
+IOS2107215, and IOS2035472. Any opin-
+ions, findings, conclusions, or recommendations
+expressed in this material are those of the re-
+searchers and do not necessarily reflect the views
+of NSF. This research is also supported by the
+Army Research Office (ARO) under grant number
+W911NF-21-1-0198, the Home Depot, Cisco
+Systems Inc, SNAP, and the Startup Funding at the
+University of Calgary.
+References18051806

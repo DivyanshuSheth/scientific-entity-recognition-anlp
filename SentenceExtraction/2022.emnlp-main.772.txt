@@ -1,1 +1,952 @@
-11238 Proceedings of the 2022 Conference on Empirical Methods in Natural Language Processing , pages 11238 11254 December 7 - 11 , 2022 © 2022 Association for Computational Linguistics 11239 11240 11241 11242 11243 11244 11245 11246 11247 11248 11249 11250 11251 11252 11253 11254 
+
+Weizhe Lin
+Department of Engineering
+University of Cambridge
+United Kingdom
+wl356@cam.ac.ukBill Byrne
+Department of Engineering
+University of Cambridge
+United Kingdom
+bill.byrne@eng.cam.ac.uk
+Abstract
+Outside-Knowledge Visual Question Answer-
+ing (OK-VQA) is a challenging VQA task that
+requires retrieval of external knowledge to an-
+swer questions about images. Recent OK-VQA
+systems use Dense Passage Retrieval (DPR) to
+retrieve documents from external knowledge
+bases, such as Wikipedia, but with DPR trained
+separately from answer generation, introducing
+a potential limit on the overall system perfor-
+mance. Instead, we propose a joint training
+scheme which includes differentiable DPR in-
+tegrated with answer generation so that the sys-
+tem can be trained in an end-to-end fashion.
+Our experiments show that our scheme out-
+performs recent OK-VQA systems with strong
+DPR for retrieval. We also introduce new di-
+agnostic metrics to analyze how retrieval and
+generation interact. The strong retrieval ability
+of our model significantly reduces the num-
+ber of retrieved documents needed in training,
+yielding significant benefits in answer quality
+and computation required for training.
+1 Introduction
+Visual Question Answering (VQA) is a challenging
+problem that lies at the intersection of Computer
+Vision, Natural Language Processing, and Infor-
+mation Retrieval. The objective in VQA is to read
+an image and provide an answer to an accompa-
+nying question about the image content. Current
+approaches to VQA employ deep-learning-based
+systems to jointly understand images and text.
+VQA is particularly challenging when the an-
+swer to the question is not directly available in
+the image. In Knowledge-based VQA (KB-VQA),
+the VQA system must access external knowledge
+sources to find a correct and complete answer. The
+Ouside-Knowledge VQA task (OK-VQA) (Marino
+et al., 2019) consists of questions that requires gen-
+eral knowledge and simple inference to answer
+(Fig. 1). Such questions are even hard for humans.
+Unlike other KB-VQA datasets (e.g. FVQA (Wanget al., 2017)) which provide an associated knowl-
+edge base, OK-VQA encourages using any outside
+knowledge in answering questions.Figure 1: OK-VQA contains questions whose answer
+cannot be found within the image.
+The need to adapt and refresh knowledge sources
+motivates the study of KB-VQA systems that can
+extract knowledge from both structured (e.g. Con-
+ceptNet (Speer et al., 2017)) and unstructured
+knowledge representations (e.g. Wikipedia pas-
+sages). Recent designs (Luo et al., 2021; Gao et al.,
+2022) approach VQA in two distinct steps: (1)
+Knowledge Retrieval extracts documents from a
+large knowledge base; (2) Answer Generation pro-
+duces an answer from these documents. Knowl-
+edge Retrieval can be done via Dense Passage Re-
+trieval (DPR) (Karpukhin et al., 2020), which con-
+sists of a question encoder and a document encoder
+(both Transformer-based) that encode questions
+and documents into separate dense representations.
+The DPR system is trained to assign higher scores
+to documents intended to be helpful in answering
+questions, so that document sets can be retrieved
+and passed to Answer Generation.
+Knowledge Retrieval based on DPR is powerful
+but has some readily observed limitations, particu-
+larly in model training. Firstly, whether a retrieved
+document is useful in answering a question cannot
+be easily determined, even if an answer is provided.
+Prior work (Qu et al., 2021; Luo et al., 2021) has
+addressed this problem using “ Pseudo Relevance
+Labels ” which are based on whether a document
+contains a given answer. However, these are only11238a weak signal of potential relevance and may en-
+courage DPR to retrieve misleading documents.
+Secondly, the document retriever and answer gen-
+erator are trained separately. To ensure that the an-
+swer generator sees relevant documents in training,
+systems can retrieve large numbers of documents
+(∼50+) (Gao et al., 2022; Gui et al., 2021), but at
+the cost of slower training and more GPU usage,
+and also possibly presenting misleading material
+to the answer generator.
+Joint training of the retriever and answer genera-
+tor offers a solution to these problems. The aim is
+twofold: (1) to improve the retrieval of documents
+truly relevant to providing a given answer; and (2)
+to reject documents with pseudo relevance but not
+actual relevance.
+Retrieval Augmented Generation (RAG) (Lewis
+et al., 2020) has shown that end-to-end joint train-
+ing of a DPR-based QA system can outperform
+baseline two-step systems. A notable feature of
+RAG is a loss function that incorporates marginal-
+ized likelihoods over retrieved documents such that
+the training score of a document is increased when-
+ever it improves prediction.
+However, in preliminary OK-VQA experiments
+we found that RAG did not perform well. Our in-
+vestigations found that a good portion of OK-VQA
+training questions are answerable in closed-book
+form (i.e. using pre-trained models such as T5 (Raf-
+fel et al., 2020)) with information extracted only
+from the image, with the unintended consequence
+that the RAG loss function awards credit to docu-
+ments that did not actually contribute to answering
+a question. We also found that difficult questions
+that are unanswerable with the knowledge avail-
+able to retrieval were more prevalent in OK-VQA
+than in the Open QA datasets (e.g. Natural Ques-
+tions (Kwiatkowski et al., 2019)) on which RAG
+was developed. In both of these scenarios, the RAG
+loss function leads to counter-intuitive adjustments
+to the document scores used in training the retrieval
+model, leading to decreased VQA performance.
+Motivated by these findings, we propose a novel
+neural-retrieval-in-the-loop framework for joint
+training of the retriever and the answer generator.
+We formulate a loss function that avoids sending
+misleading signals to the retrieval model in the
+presence of irrelevant documents. This formalism
+combines both pseudo relevance labels and model
+predictions to refine document scores in training.
+We find significantly better performance on OK-VQA compared to RAG. In this paper:
+•We present a novel joint training frame-
+work Retrieval Augmented Visual Question
+Answering (RA-VQA) for Knowledge Re-
+trieval and Answer Generation that improves
+over RAG and two-step baseline systems
+based on DPR (Karpukhin et al., 2020).
+•We investigate visually grounded features
+transformed into ‘language space’ and assess
+their contribution to OK-VQA performance.
+•We study the role of document retrieval in
+KB-VQA and evaluate its interaction with
+retrieval-augmented generation. We also show
+that retrieval becomes more efficient in joint
+training, requiring retrieval of relatively few
+(∼5) documents in training.
+2 Related Work
+Open-domain QA systems. These QA systems are
+designed to answer questions from datasets such
+as Natural Questions (Kwiatkowski et al., 2019).
+The knowledge needed to answer questions can
+be in pre-trained models (Roberts et al., 2020),
+knowledge-graphs (KGs) (Lin et al., 2019; Feng
+et al., 2020; Lv et al., 2020; Saffari et al., 2021) or
+document collections (Chen et al., 2017; Izacard
+and Grave, 2021; Guu et al., 2020; Lee et al., 2019;
+Lewis et al., 2020). In retrieval-based systems,
+differential retrieval can be combined with extrac-
+tive question answering, as in REALM (Guu et al.,
+2020) and ORQA (Lee et al., 2019), as well as with
+generative answer generation, as in RAG (Lewis
+et al., 2020).
+VQA Systems. Modelling vision and language
+is central to VQA. Models can aggregate visual
+and textual features via cross-modality fusion (Yu
+et al., 2018; Singh et al., 2019; Yu et al., 2019;
+Jiang et al., 2020; Guo et al., 2021). Systems can
+also be pre-trained on large vision-and-language
+collections (Jia et al., 2021) and then fine-tuned
+for VQA tasks (Tan and Bansal, 2019; Chen et al.,
+2020; Gan et al., 2020; Li et al., 2020b; Wang et al.,
+2022; Zhang et al., 2021; Li et al., 2021) with VQA
+datasets such as VQA 2.0 (Antol et al., 2015).
+Knowledge-based VQA Systems. KB-VQA can
+access both structured data, such as ConceptNet
+and other KGs (Narasimhan et al., 2018a; Garderes
+et al., 2020; Li et al., 2020a; Wu et al., 2022;
+Marino et al., 2021), as well as unstructured data
+such as Wikipedia passages (Wu et al., 2022; Gao11239et al., 2022; Gui et al., 2021). A variety of multi-
+modal approaches have been explored to access
+external knowledge. ConceptBERT (Garderes
+et al., 2020) uses attention to aggregate graph node
+embeddings from ConceptNet. KRISP (Marino
+et al., 2021) uses a “symbolic knowledge mod-
+ule” to match ConceptNet KG entities with lan-
+guage/visual elements in questions. MA VEx (Wu
+et al., 2022) uses multiple information sources
+(Google Images, Wikipedia sentences, and Con-
+ceptNet) to validate promising answer candidates.
+VRR (Luo et al., 2021) uses Google Search in a
+retriever-reader pipeline to perform open-ended an-
+swer generation.
+We also note unpublished contemporaneous
+work on OK-VQA at the time of submission.
+TRiG (Gao et al., 2022) shows that it is feasible
+to transform images into textual features for VQA.
+The features used are similar to those presented
+here, although without an emphasis on the role
+of knowledge retrieval. PICa (Yang et al., 2022)
+‘prompts’ GPT-3 with descriptive captions gener-
+ated from images, and KAT (Gui et al., 2021) ex-
+ploits an ensemble of DPR, T5, and GPT-3 to im-
+prove OK-VQA performance.
+3 Methodology
+We present our RA-VQA framework that con-
+sists of: (1) Vision-to-Language Transformation
+(Sec. 3.1); (2) Weakly-supervised Dense Passage
+Retrieval (Sec. 3.2); (3) Joint Training of Retrieval
+and Answer Generation (Sec. 3.3).
+3.1 Vision-to-Language Transformation
+Prior work has established that images can be
+transformed into text such that large pre-trained
+language-based Transformers (e.g. BERT (Devlin
+et al., 2019), GPT-2 (Radford et al., 2019), and T5)
+can be applied to VQA tasks (Luo et al., 2021; Yang
+et al., 2022). Systems can be based on straightfor-
+ward image caption, but we have found improve-
+ments by introducing additional visually-grounded
+features. In RA-VQA, each image is represented
+by visual objects and their attributes, image cap-
+tion, and any text strings detected within the image.
+We use an object detection model VinVL (Zhang
+et al., 2021) that was pre-trained on large object
+detection datasets to extract visual elements and
+their attributes (e.g. color and material).
+Formally, for an image Iwe use VinVL to ex-
+tract a set of visual objects {o}, along with a set oftext attributes for each visual object {a}. Visual
+objects and their attributes are extracted by VinVL
+at confidence thresholds 0.8and0.6, respectively.
+Image captioning is performed to extract rela-
+tionships and interactions among visual elements
+such as “a woman holding a knife cuts a cake”.
+The pre-trained captioning model Oscar+ (Zhang
+et al., 2021) is applied to process visual features
+extracted from the VinVL model to generate a cap-
+tion for the image. To answer questions related
+to text strings in images (e.g. “which language is
+the book written in?”), Google OCR (Optical Char-
+acter Recognition) APIs are used to extract text
+strings from each image.
+Hence, a VQA training set {(I, q,S)}, where
+Sis a set of answers to a question qabout I, can
+be transformed into a text-only training set T=
+{(x,S)}that we use for RA-VQA. The string x
+contains all the text features extracted from the
+image (the question, the textual attributes for each
+identified visual object, the generated caption, and
+any OCR’d text), with special tokens marking the
+start and end of each type of feature (Fig. 2).
+3.2 Weakly-supervised Dense Passage
+Retrieval
+Dense Passage Retrieval in RA-VQA consists of
+a query encoder Fand a document encoder F,
+both as Transformer-like encoders. The aim is to
+retrieve Kdocuments from an external knowledge
+database Z={z}(e.g. Wikipedia passages)
+that are expected to be useful for answering a ques-
+tion. DPR encodes questions and documents sepa-
+rately into dense feature vectors F(x)∈Rand
+F(z)∈R. A scoring function is used to retrieve
+documents for each question as the inner product
+between the representations of xandz
+r(x, z) =F(x)F(z) (1)
+RA-VQA training aims to maximize r(x, z)when
+document zis relevant to answering the question.
+As discussed in Sec. 1, the relevance between qand
+zcannot be easily obtained and “pseudo relevance
+labels” serve as a proxy. We use a pseudo relevance
+function H(z,S)which is 1 if zcontains an answer
+inS(by string match), and 0 otherwise.
+For each question-answer pair (x,S)one posi-
+tive document z(x)is extracted for training. In-
+batch negative sampling is used: all documents in
+a training batch other than z(x)are considered
+to be negative for (x,S)(Karpukhin et al., 2020).11240
+Denoting the negative documents as N(x,S)and
+the score of the positive document as /hatwider(x)leads
+to the DPR loss L :
+−/summationdisplaylogexp (/hatwider(x))
+exp (/hatwider(x)) +/summationdisplayexp (/hatwider(x, z))
+(2)
+3.3 RA-VQA: Joint Training of Document
+Retrieval and Answer Generation
+Given a full query string xextracted from the
+image-question pair (I, q), DPR returns the K
+highest scoring documents {z}. The score
+assigned by the document retriever p(·|x)to a
+retrieved document is
+p(z|x) =exp(/hatwider(x, z))/summationtextexp(/hatwider(x, z))(3)
+Open-ended answer generation for each re-
+trieved document zis performed with a generative
+model, such as T5, with parameters ϕ:
+y= argmaxp(y|x, z) (4)
+For each document zretrieved for a training
+item (x,S), we train the answer generator to pro-
+duce the answer string sfrom the concatenation
+ofxandz(as shown in Fig. 2). We select the most
+popularhuman response sfromSsuch that sis
+contained in z; in the case that zdoes not contain
+any answer, the most popular answer s∈ Sis se-
+lected s=s. Through this design, we customizethe generation target sfor each retrieved docu-
+ment instead of training all (x, z)pairs towards
+the most popular human response s. This has
+been proved to improve the system performance
+(Appendix B.1).
+We identify two subsets of the retrieved docu-
+ments {z}based on pseudo relevance labels
+and model predictions:
+P(x,S) ={k:y=s∧H(z,S) = 1};
+P(x,S) ={k:y̸=s∧H(z,S) = 0}.(5)
+Pare indices of pseudo relevant documents that
+also help the model generate popular answers
+whereas Pidentifies documents not expected to
+benefit answer generation. In joint training, we
+intend to increase the scores of documents in P
+while decreasing the scores for those in P.z
+will be put into the negative set if it does not con-
+tain any answer ( H(z, S) = 0 ) and the generation
+is incorrect ( y̸=s).This is motivated by our
+intention to reduce scores for those documents that
+contain no answers and fail to answer questions.
+Formally, joint training of retrieval and answer
+generation is achieved with a loss L that
+reflects both model predictions and pseudo rele-
+vance:
+−/summationdisplay/parenleftbig/summationdisplaylogp(s|x, z)
++/summationdisplaylogp(z|x)−/summationdisplaylogp(z|x)/parenrightbig(6)11241The first term in the loss improves answer gener-
+ation from queries and retrieved documents, taken
+together. The remaining terms affect document
+retrieval: the second term encourages retrieval of
+documents that are not only pseudo relevant but
+also lead to production of correct answers, while
+the third term works to remove irrelevant items
+from the top ranked retrieved documents. The in-
+formation flow is demonstrated in Fig. 3. Retrieval
+and generation complement each other in train-
+ing: pseudo relevance labels and model predictions
+provide positive and negative signals to improve
+retrieval, and the improved retrieval leads to im-
+proved answer generation by training towards s,
+a customized generation target for each retrieved
+document z.
+3.4 RA-VQA Generation
+Given an image query (I, q), a full query xis cre-
+ated (Sec. 3.1) and answer generation searches for
+the answer with the highest joint probability:
+{z}= argmaxp(z|x)
+/hatwidey,/hatwidez= argmaxp(y|x, z)p(z|x)(7)
+Answers reflect both generation and retrieval mod-
+els and retrieval confidence plays a strong role,
+unlike some prior work such as Luo et al. (2021).
+3.5 Pre-Computed FAISS Document Indices
+Since repeated computation of embeddings for all
+documents is costly, we follow Lewis et al. (2020)
+who find that it is enough to train only the ques-
+tion encoder Fand leave document encoder F
+fixed. As shown in Fig. 2, document embeddings
+are pre-extracted with a pre-trained DPR document
+encoder. The FAISS system (Johnson et al., 2019)
+is used to index all document embeddings which en-
+ables fast nearest neighbour search with sub-linear
+time complexity. In training, question embeddings
+are generated dynamically and documents withhighest scores are retrieved using the pre-computed
+index.
+4 Experiments
+4.1 Datasets and RA-VQA Configurations
+OK-VQA (Marino et al., 2019) is currently the
+largest knowledge-based VQA dataset. It consists
+of 14,031 images and 14,055 questions. These
+questions are split into a training set (9,009 ques-
+tions) and a test set (5046 questions). In addition
+to understanding images and questions, external
+knowledge sources are needed to answer questions.
+As outside knowledge we use the knowledge
+corpus collected by Luo et al. (2021) from Google
+Search. We use the corpus GS-full which con-
+sists of 168,306 documents covering training and
+test questions. In Appendix B.1 we also report on
+GS-train , which contains documents relevant to
+OK-VQA training set questions only.
+Pre-training: We start with pre-trained versions
+of BERT-base and T5-large as the document re-
+triever and the answer generator, respectively. The
+retriever was refined by training it on GS-full un-
+der the DPR loss (Equation 2) with pseudo rele-
+vance labels released by Luo et al. (2021). The
+already strong retriever serves as a good starting
+point for all DPR-based models presented in this
+paper (including RA-VQA and our replication of
+baselines in the literature).
+OK-VQA Fine-tuning: Our RA-VQA frame-
+work trains the answer generator and the retriever
+jointly under Equation 6.
+We also report on variants of RA-VQA, to in-
+vestigate the contribution of various model compo-
+nents to overall performance:
+RA-VQA-NoDPR omits retrieval entirely so that
+answers are generated by the fine-tuned T5 alone.
+RA-VQA generation in Equation 7 simplifies to
+/hatwidey = argmaxp(y|x) (8)
+RA-VQA-FrDPR leaves the retriever frozen after
+pre-training and fine-tunes the generator only.
+RA-VQA-NoPR is a version of RA-VQA in which
+document retrieval is trained only with model pre-
+dictions. The loss function is as Equation 6, but
+with positive and negative document sets defined
+asP(x,S) ={k:y=s};
+P(x,S) ={k:y̸=s}.(9)
+RA-VQA-NoCT replaces the customized gener-
+ation targets by the single most popular response11242(sbecomes sin Equation 6) so that the generator
+is trained to produce the same answer from every
+retrieved document.
+4.2 Evaluation
+The following metrics are applied to assess the
+quality of individual answers generated and docu-
+ments retrieved. Average scores are then computed
+over the evaluation set. The average of 3 runs with
+different seeds is reported.
+4.2.1 Answer Evaluation
+VQA Score : We follow Marino et al. (2019) to
+compute VQA Scores using pre-processed human
+annotations S:
+VQAScore (y,S) = min/parenleftbig#(y)
+3,1/parenrightbig
+, (10)
+where #(y)is the number of annotators who
+answered y. This score ensures that a model is
+partially rewarded even if it generates one of the
+less popular answers from amongst the human re-
+sponses.
+Exact Match (EM) treats annotated answers
+equally: EM (y,S) = min(#(y),1).
+4.2.2 Retrieval Evaluation
+Following Luo et al. (2021), we use pseudo rele-
+vance to ascertain whether the retrieved documents
+are relevant to the response. It concerns pseudo
+relevance instead of actual relevance but is still a
+reasonable metric for retrieval evaluation.
+Pseudo Relevance Recall (PRRecall)@K mea-
+sures how likely the retrieved Kdocuments con-
+tains at least one positive document:
+PRRecall@K = min/parenleftbig/summationdisplayH(z,S),1/parenrightbig
+.(11)
+4.2.3 Integrated System Evaluation
+The above methods evaluate retrieval and answer
+generation as separate processes. We propose ad-
+ditional metrics that assess how the two processes
+behave in an integrated VQA system.
+TheHit Success Ratio (HSR) counts questions
+that require external knowledge to answer:
+HSR = 1/braceleftbig
+/hatwidey∈ S ∧/hatwidey /∈ S/bracerightbig
+. (12)
+HSR reflects the value of incorporating external
+documents into answer generation.
+By contrast, Free Success Rate (FSR) counts
+questions that can be answered without external
+knowledge.FSR = 1/braceleftbig
+/hatwidey∈ S ∧/hatwidey ∈ S/bracerightbig
+. (13)
+A high FSR suggests a model can generate cor-
+rect answers ‘freely’ without being distracted by
+retrieved documents if they are not needed.
+We also assess performance as a function of the
+number of documents retrieved during training and
+testing,KandK. In practice, Khas the
+greater effect on GPU usage, since a large Kre-
+quires at least Kforward passes for each ques-
+tion and an Adam-like optimizer must compute
+and store the associated gradients (Kingma and Ba,
+2015). In contrast, GPU memory required during
+testing is significantly less, as there is no optimizer
+involved. We are in particular interested in the abil-
+ity of knowledge-augmented systems that can be
+robustly trained with small Kwhile yielding
+improved performance with large K.
+4.3 Baseline Systems
+4.3.1 Retrieval Augmented Generation
+RAG (Lewis et al., 2020) is based on DPR and an
+answer generator that are trained jointly by approx-
+imately marginalizing the probability of yover the
+retrieved documents. In the notation of Sec. 3:
+p(y|x)≈/summationdisplayp(y|x, z)p(z|x) (14)
+The answer generator and the retriever are
+jointly trained by optimizing the RAG loss:
+−/summationtextlog/parenleftbig
+p(s|x)/parenrightbig
+. The rationale is
+thatp(z|x)will increase if zhas a positive im-
+pact on answer generation (Lewis et al., 2020). We
+consider RAG as an important baseline and have
+carefully replicated its published implementation.
+4.3.2 Baseline Systems in the Literature
+We compare against the published OK-VQA results
+from systems described in Sec. 2: ConceptBERT ,
+KRISP ,MA VEx , and VRR . We also report per-
+formance against unpublished (non peer-reviewed)
+systems TRiG,PICa , and KAT .TRiG uses a
+similar image-to-text transform as this work, so to
+enable fair comparison with our model we replicate
+their knowledge fusing method with our features.
+Baseline results are reported in Table 1; baseline
+results marked *are our own. TRiG* , our own
+implementation of TRiG, concatenates Kencoder
+outputs for the decoder to use in generation.
+We make some particular observations. Our
+TRiG* improves over the results released in its11243
+paper (VQA Score of 48.32 vs 45.51) at K=
+K= 5; TRiG and TRiG Ensemble both bene-
+fit from more retrieved documents in training and
+testing ( K=K= 100 ), although at great
+computational cost. Best performance with KAT-
+T5 and VRR similarly requires large document
+collections in training and in test.
+We include results from GPT-3 based systems
+because they are amongst the best in the literature,
+but we note that GPT-3 is so much bigger than
+T5 (175 billion parameters in GPT-3 v.s. 770 mil-
+lion in T5-large) that simply switching a system
+implementation from T5 to GPT-3 can give sig-
+nificant improvements: KAT-T5 achieved a 44.25
+VQA Score while ensembling it with GPT-3 yields
+54.41; and GPT-3 alone already achieved good per-
+formance with prompting (PICa with 48.00 VQA
+Score). Our RA-VQA system is based on T5, but
+we still find competitive results even in comparison
+to systems incorporating GPT-3 (54.48 vs 54.41 of
+KAT-Ensemble).
+4.4 RA-VQA Performance Analysis
+We find that RA-VQA matches or improves over all
+baseline systems with a VQA Score of 54.48. This
+is with a configuration of K= 5 andK=
+50, thus validating our claim that RA-VQA can use
+a large number of retrieved documents in testing
+(50) while using relatively few retrieved documentsin training (5). We find that reducing the number
+of retrieved documents in test ( K= 5) reduces
+the VQA Score, but still yields performance better
+than all baselines except the KAT ensemble.
+We also find that RA-VQA performs well rela-
+tive to GPT-3 baselines. RA-VQA yields a higher
+VQA score than KAT-Knowledge-T5 (54.48 vs.
+51.97) and matches the KAT-Ensemble system. We
+emphasize that RA-VQA is significantly smaller
+in terms of parameters (and in model pre-training
+data) than these GPT-3 based systems and that
+training RA-VQA requires much less memory
+(K= 5vsK= 40 ).
+4.4.1 Contributions of Query Features and
+DPR to Overall Performance
+A detailed ablation study on input features is
+presented in Table 2. As shown, the T5 model11244fine-tuned on OK-VQA achieves a 28.05 VQA
+Score. The VQA Score increases to 46.16 as ob-
+jects, object attributes, image captions, and OCR
+texts are incorporated into RA-VQA-NoDPR. With
+5retrieved documents, RA-VQA-FrDPR yields
+a 51.22 VQA Score, with a further improvement
+(53.81 VQA Score) in full training of retrieval and
+answer generation, confirming that outside knowl-
+edge is needed to answer OK-VQA questions.
+4.4.2 Benefits of Integrated Training
+Joint training is a key benefit of our proposed RA-
+VQA framework: model predictions combine with
+pseudo relevance labels to improve retrieval, and
+the resulting improved retrieval in turn provides
+customized answer generation targets. To quan-
+tify these effects, we take RA-VQA-FrDPR as a
+starting point (Table 1). Comparing it with other
+RA-VQA models suggests that DPR training in
+itself is necessary, as using only pre-trained DPR
+(RA-VQA-FrDPR) leads to weaker VQA Score
+(51.22). Using model predictions alone in joint
+DPR training (RA-VQA-NoPR) leads to a higher
+VQA Score (52.98 vs 51.22), but a significantly
+lower PRRecall (77.67% vs 81.25%). The model
+decides to remove some pseudo relevant documents
+but achieves better performance. This points to a
+potential problem that can arise. Pseudo relevance
+is only an imperfect indication of true relevance
+and so is not an ideal criteria on its own. Training
+DPR to retrieve pseudo relevant documents could
+result in misleading documents being used in an-
+swer generation.
+Using both pseudo relevance labels and model
+predictions in DPR training (RA-VQA) improves
+VQA Score to 53.81 and notably improves
+PRRecall to 82.84%. Including pseudo relevance
+ensures that potentially useful documents are re-
+tained, even while the generator is still learning to
+use them.
+We also note that when generation targets are
+not customized for each retrieved document (RA-
+VQA-NoCT), VQA Score drops by 1.14 relative
+to RA-VQA, showing that customized generation
+targets play an important role in the overall sys-
+tem: by training the model to extract the reliable
+answers available in retrieved documents, answer
+generation and retrieval are both improved.
+4.4.3 Interaction of Retrieval and Generation
+Table 1 also reports our investigation into the inter-
+action between document retrieval and answer gen-eration. In comparing RA-VQA-FrDPR (frozen
+DPR) to RA-VQA, we see that joint training of
+DPR yields not only improved EM but also signif-
+icantly higher HSR (+1.74%) and FSR (+1.21%).
+Manual inspection of OK-VQA reveals that there
+are many general knowledge questions. For ex-
+ample, document retrieval is not needed to answer
+the question "Is this television working?" in refer-
+ence to a picture of a broken television lying in a
+field. A high FSR indicates good performance on
+such questions. By contrast, a high HSR reflects
+the ability to use document retrieval to answer the
+questions that truly require external documents.
+Both EM and HSR are further improved for
+K= 50 in RA-VQA, with little change in FSR.
+The increased HSR to FSR ratio (0.41 vs. 0.40)
+indicates that RA-VQA is using these additional
+retrieved documents to answer the questions that
+need outside knowledge.
+HSR and FSR also explain the relatively weak
+performance of RAG*. We see that although RAG*
+and RA-VQA-FrDPR have similar FSRs, RAG*
+has higher PRRecall but lower HSR (by -2.73%).
+This suggests RAG*’s DPR model is not well
+matched to its answer generator. The result is that
+retrieved documents remain unexploited. In man-
+ual examination of gradients of document scores
+in training, we find anecdotally that adjustments to
+document scores are often counter-intuitive: doc-
+uments that do not contain answers can still have
+their scores upvoted if the answer generator hap-
+pens to find a correct answer by relying only on the
+ability of T5 model. This works against a model’s
+ability to find answers in retrieved documents even
+when those documents are relevant.
+4.4.4 Effects of K
+As noted, retrieving a large collection of documents
+in training is costly (large K). Fig. 4 shows
+that RA-VQA can be trained with relatively few
+retrieved documents ( K= 5). We gradually in-
+crease Kwhile fixing K=K(dash lines)
+andK= 50 (solid lines). RA-VQA achieves
+consistent performance ( ∼54.4 VQA Score) at
+K≥5andK= 50 , which suggests that
+our joint training scheme is able to gather most
+useful knowledge into a top- 50list even when the
+model is trained to retrieve fewer documents. This
+is not the case for the frozen DPR systems which re-
+quire increasing Kto obtain best performance.
+RA-VQA’s superior performance shows that joint
+training of retrieval and generation yields clear ben-11245
+efits in computation and answer quality.
+We also note that K= 5is an optimal design
+choice that strikes a balance between training com-
+putational cost and system performance. The green
+curves at K<5also suggest that it is beneficial
+to include at least 5 documents in training. This is
+because K≥5offers a good PRRecall (over
+80%), which provides documents of higher quality
+for training the system.
+4.5 Additional Analyses
+We redirect readers to other interesting analyses
+(e.g. an analysis of computational cost) and case
+studies in Appendices B-E.
+In addition, in Appendix F, we evaluate
+our proposed framework on another popular
+Knowledge-based VQA dataset, FVQA (Fact-
+based VQA) (Wang et al., 2017). Similarly, the RA-
+VQA framework with joint training achieves bet-
+ter results over the baseline systems with a frozen
+DPR component, showing the generalizability of
+our proposed framework.
+5 Conclusion
+Retrieval-Augmented Visual Question Answering
+is a novel modelling framework for integrated train-
+ing of DPR and answer generation. We have evalu-
+ated RA-VQA on the OK-VQA task and we find
+significantly better performance than the indepen-
+dent training of component system. Through diag-
+nostic metrics such as HSR and FSR we analysed
+the interaction between retrieval and generation,and have also shown how RA-VQA’s gains arise
+relative to other approaches, such as RAG. As a
+further practical benefit, we found that RA-VQA
+can be used with larger numbers of retrieved docu-
+ments than were used in system training, yielding
+computational savings without sacrificing perfor-
+mance.
+The code for this paper will be released
+at https://github.com/LinWeizheDragon/Retrieval-
+Augmented-Visual-Question-Answering.
+6 Acknowledgement
+W. Lin was supported by a Research Stu-
+dentship funded by Toyota Motor Europe
+(RG92562(24020)). We thank our colleagues,
+Daniel Olmeda Reino (Toyota Motor Europe) and
+Jonas Ambeck (Toyota Motor Europe), who pro-
+vided insight and expertise in this project.
+We thank Zhilin Wang (University of Wash-
+ington) and Alexandru Coca (University of Cam-
+bridge) for comments that greatly improved the
+manuscript. We would also like to thank all the
+reviewers for their knowledgeable reviews.
+7 Limitations
+One possible limitation is that some relevant infor-
+mation (such as relative positioning of objects in
+the image) could be lost in transforming images
+independently of the information being sought. Ex-
+tracting visual features based on queries could be a
+natural next step, although query-specific process-
+ing of the image collection would be computation-
+ally expensive.
+We selected the Google Search corpus (Luo
+et al., 2021) as the knowledge base for our ques-
+tion answering system. Its advantages are that it is
+large, openly available, and can be readily used
+to replicate the results in this paper. However
+some visual question types (e.g. ‘Is the athlete
+right or left handed?’) could plausibly require both
+complex reasoning and more closely relevant doc-
+uments from additional knowledge sources (such
+as Wikipedia). Our system may be limited with
+respect to these considerations.
+References112461124711248
+A Training Details and Artifacts
+Adam (Kingma and Ba, 2015) was used in this pa-
+per. In DPR pre-training, the retriever was trained
+for 6 epochs with a constant learning rate 10. In
+RA-VQA training (including RAG*), the learning
+rates are 10for the retriever, and 6×10for
+the answer generator, linearly decaying to 0after
+10epochs. In the training of RA-VQA-NoDPR
+and TRiG*, the initial learning rate is 6×10.
+Empirically, the checkpoints at epoch 6 were used
+in testing. All experiments were run on Nvidia A-
+100 GPU clusters. With K= 5, the RA-VQA
+training takes around 5 hours (10 epochs) while
+testing takes 5 minutes. The time cost increases as
+Kincreases, approximately linearly.
+Pre-trained model parameters (e.g. T5-large and
+BERT-base) are provided by huggingface (Wolf
+et al., 2020) accompanied by Python libraries (un-
+der Apache License 2.0). FAISS (Johnson et al.,
+2019) is under MIT License.
+B Supplementary Tables and Figures
+Limited by space available, we present supplemen-
+tary tables and figures in this section, offering more
+findings to readers.
+B.1 Full Version of Table 1
+We provide the full version of Table 1 in Table 8.
+Some more discussions about customized genera-
+tion target in joint training is provided.
+As noted, RA-VQA improves retrieval with the
+feedback of model predictions, and in turn the im-
+proved retrieval leads to improved answer gener-
+ation by training towards s, a customized gener-
+ation target for each retrieved document z. We
+remove this interaction from RA-VQA models by
+enforcing s=s(the most popular human re-
+sponse), independent of the retrieved z. The ab-
+lated models are denoted with a *-NoCT suffix.
+As shown in Table 8, customizing generation
+targets for each retrieved zin training yields per-
+formance boost for both RA-VQA-FrDPR and RA-
+VQA, showing that this supervision signal is benefi-
+cial to overall system performance. We also notice
+that the improvement to RA-VQA (+1.14 VQA11249
+Score) is larger compared to RA-VQA-FrDPR
+(+0.56 VQA Score), showing that customizing the
+generation target brings more benefits when the re-
+trieval is improved within our proposed RA-VQA
+joint training framework. This further confirms that
+the two components, retrieval and answer genera-
+tion, complement each other bi-directionally.
+B.2 Retrieval Performance of RA-VQA
+In addition to Pseudo Relevance Recall (PRRecall)
+introduced in the paper, we further evaluate re-
+trieval performance with Pseudo Relevance Preci-
+sion (PRPrec)@K , which is calculated as the rate
+of pseudo positive documents in all the Kdocu-
+ments retrieved for a question:
+PRPrec@K =1
+K/summationdisplayH(z,S) (15)
+where H(·)is the pseudo relevance function intro-
+duced in Sec. 3.2.
+The success of our RA-VQA model can be fur-
+ther explained by Table 3. As expected, RA-VQA-
+FrDPR (pre-trained DPR) achieves similar retrieval
+performance as VRR (Luo et al., 2021) since they
+are both based on DPR and are trained with the
+same pseudo-relevance-based labels. Our proposed
+RA-VQA, with a substantial improvement in Re-
+call over RA-VQA-FrDPR (82.84 PRRecall@5 vs
+81.25 PRRecall@5), achieves significantly higher
+Precision (57.39 PRPrec@5 vs 51.82 PRPrec@5).
+This also yields substantial improvements to both
+EM (+3.05%) and VQA Score (+2.59%). This
+suggests that training the retriever jointly presents
+more potentially relevant documents to answer gen-
+eration, improving the quality of the top-ranked
+documents.
+B.3 Effects of Retrieving More Documents in
+Test
+Fig. 5 presents the change of VQA Score and
+PRRecall as additional documents are retrieved
+in test (increasing K).
+PRRecall is improved dramatically as Kin-
+creases from 5 to 50, after which only marginal im-
+provement is observed. Similarly, the VQA Score
+of these models is improved as more documents
+are presented in test, and the performance peaks
+atK∼50. This suggests that including more11250additional documents in test is more likely to in-
+clude the truly relevant document to help answer
+the question yet along with more distracting and
+misleading documents.
+RA-VQA-NoPR (introduced in Sec. 4.1), which
+uses only model predictions in training to adjust
+document scores without pseudo relevance labels,
+yields a significantly lower PRRecall curve (orange
+curve in Fig. 5(b)) than RA-VQA-FrDPR (blue
+curve) across all Ks, but achieves much higher
+VQA performance (Fig. 5(a)). This further con-
+firms that Pseudo Relevance Labels are a weak
+signal and a high PRRecall does not necessarily
+guarantee to gather truly relevant knowledge in
+retrieval.
+C Evaluation of Computational Cost
+As shown in Fig. 4, comparing with the DPR
+baseline, the wall time is increased by only 20
+mins for RA VQA joint training. Our method does
+not significantly increase the computation needs.
+In comparing with TRiG, the total training time is
+also reduced; this is because TRiG concatenates
+allKhidden states for decoding (Gao et al., 2022),
+which is computationally expensive.
+AsKincreases, the DPR-based system takes
+significantly more time to train. This is a real issue
+for other DPR-based systems that use very high
+K(e.g. TRiG, KAT), but not the case for our
+framework: we verified in Sec.4.4.4 that K= 5
+achieves almost the same results as K≥10, whichis a desirable feature that can significantly reduce
+the required computation cost for achieving the
+best performance.
+D Random Guess with OK-VQA
+Questions
+From the feature ablation study we found that
+our RA-VQA-NoDPR achieved ∼28 VQA Score
+relying on only questions. This is due to the fact
+that∼75% of answers to training questions ap-
+pear in the answers to test questions. As shown
+in Table 6, for each distinct question, the model
+learned to generate the same answer without access
+to the associated images. These random guesses
+can match to the answers of some test questions by
+chance, leading to a good VQA Score. By inspec-
+tion we report that most of the successful cases are
+random guesses, and these questions are still not
+directly answerable without reading the associated
+images.
+E Case Study
+We present a case study in Fig. 6 to compare RA-
+VQA-FrDPR and our proposed RA-VQA frame-
+work. Conclusions are provided to each case in the
+figure.1125111252FGeneralizing RA VQA to Other Datasets
+We are also interested in whether this approach is
+also generalisable to other similar VQA tasks that
+may benefit from improved passage retrieval.
+We implement our framework on another
+knowledge-based VQA task, Fact-based VQA
+(FVQA) (Wang et al., 2017). This dataset con-
+tains commonsense factoid VQA questions, such as
+“Question: which object in the image can cut you?
+Answer: the knife”. In contrast to OKVQA where
+no knowledge base is provided, FVQA grounds
+each question-answer pair with a fact (a triplet from
+several ‘common sense’ knowledge bases, includ-
+ing ConceptNet (Speer et al., 2017), Webchild (Tan-
+don et al., 2017), and DBpedia (Auer et al., 2007)).
+A triplet contains a head node, a relation, and a tail
+node (e.g. [Car] /r/HasA [4 wheels]). To cope with
+passage retrieval, these knowledge triplets are flat-
+tened into surface texts (e.g. “[car] has [4 wheels]”)
+such that DPR can be directly applied to retrieve
+them. We replace pseudo relevance with ground-
+truth relevance since relevant triplets for answering
+questions are given.
+The metrics used for assessing performance are
+Accuracy and Recall, with their standard devia-
+tions of 5 splits. Accuracy counts the portion of
+questions that are successfully answered, while
+Recall@ Kmeasures how likely the retrieved K
+knowledge triplets contain the answer node. Since
+FVQA was designed for answer selection instead
+of open-ended answer generation, prior works used
+accuracy as “whether the answer node is success-
+fully selected from all KG nodes”. To enable fair
+evaluation with our open-ended framework, in cal-
+culating accuracy, a question is considered success-
+fully answered if the answer node is the closest
+node to the generated answer string (shortest in
+Levenshtein distance). For example, the generated
+answer ‘knives’ is still a valid answer since the an-
+swer node ‘[knife]’ can be matched with a shortest
+Levenshtein distance.
+The significance of performance is guaranteed
+by reporting the average of 5 splits (as in the official
+FVQA evaluation). In total we trained 5 DPR mod-
+els and 5 ×3 models (RA VQA, RA VQA-FrDPR,
+and RA VQA-NoDPR) with the same hyperparam-
+eters. Each split has approximately half questions
+for training and the remaining for testing.
+We compare with three systems in prior work:
+(1) FVQA (Wang et al., 2017): the baseline sys-
+tem provided in the official FVQA dataset paper.(2) GCN (Narasimhan et al., 2018b): a
+model that leverages graph convolutional net-
+works (GCNs) to aggregate features from vi-
+sual/language/fact modalities.
+(3) Mucko (Zhu et al., 2020): the current state-
+of-the-art system that uses GCNs to combine visual,
+fact, and semantic graphs.
+As shown in Table 7, RA VQA-NoDPR achieves
+an already strong result (67.93% accuracy) com-
+pared to early work in FVQA, showing that the
+extracted vision-to-language features are useful
+and text-based Transformers are able to learn to
+answer commonsense VQA questions well with-
+out accessing the provided knowledge graph (Con-
+ceptNet). The incorporation of DPR boosts the
+performance to 68.81% with 64.54% Recall@5,
+showing that retrieval works as expected and the re-
+trieved knowledge triplets are exploited in answer
+generation. The joint training scheme improves the
+retrieval (64.54% to 68.77% Recall@5) as well as
+the overall performance (68.81% to 69.88% Accu-
+racy). This demonstrates that our proposed joint
+training framework is generalizable to other KB-
+VQA tasks, though the passages used in retrieval
+are simply flattened surface texts of KG triplets.
+In comparing with other systems in the FVQA
+benchmark, our best system ranks second without
+an explicit design for leveraging KG structures.
+This shows the power of open-ended answer gen-
+eration with text-based Transformers. But we em-
+phasise that better performance could be achieved
+through designing a more specialised retrieval com-
+ponent for the structured knowledge base used in
+this task.
+To summarise, our system shows great gener-
+alizability in an external KB-VQA task that was
+constructed very differently. Therefore, the pro-
+posed framework can serve as a strong basis for
+future improvements.1125311254

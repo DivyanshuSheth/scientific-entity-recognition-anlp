@@ -1,1 +1,869 @@
-15354 Proceedings of the 61st Annual Meeting of the Association for Computational Linguistics Volume 1 : Long Papers , pages 15354–15373 July 9 - 14 , 2023 © 2023 Association for Computational Linguistics 15355 15356 15357 15358 15359 15360 15361 15362 15363 15364 15365 15366 15367 15368 15369 15370 15371 15372 15373 
+
+Barun Patra, Saksham Singhal, Shaohan Huang,
+Zewen Chi ,Li Dong ,Furu Wei ,Vishrav Chaudhary ,Xia Song
+Microsoft
+{bapatra, saksingh, shaohanh, v-zewenchi, lidong1,
+fuwei, vchaudhary, xiaso}@microsoft.com
+Abstract
+In this paper, we elaborate upon recipes for
+building multilingual representation models
+that are not only competitive with existing state-
+of-the-art models but are also more parameter
+efficient, thereby promoting better adoption in
+resource-constrained scenarios and practical ap-
+plications. We show that going beyond English-
+centric bitexts, coupled with a novel sampling
+strategy aimed at reducing under-utilization
+of training data, substantially boosts perfor-
+mance across model sizes for both Electra and
+MLM pre-training objectives. We introduce
+XY-LENT :X-Y bitext enhanced Language
+ENcodings using Transformers which not only
+achieves state-of-the-art performance over 5
+cross-lingual tasks within all model size bands,
+is also competitive across bands. Our XY-
+LENTvariant outperforms XLM-Rand
+exhibits competitive performance with mT5
+while being 5x and 6x smaller respectively. We
+then show that our proposed method helps ame-
+liorate the curse of multilinguality, with the XY-
+LENTachieving 99.3% GLUE performance
+and 98.5% SQuAD 2.0 performance compared
+to a SoTA English only model in the same size
+band. We then analyze our models performance
+on extremely low resource languages and posit
+that scaling alone may not be sufficient for im-
+proving the performance in this scenario.
+1 Introduction
+Recent advancements in Natural Language Pro-
+cessing (NLP) have been a direct consequence of
+leveraging foundational models (Bommasani et al.,
+2021), pretrained on a large text corpora in a self-
+supervised fashion. This has also been the case
+for multilingual NLP where pre-trained models
+like multilingual BERT (mBERT) (Devlin, 2018;
+Devlin et al., 2019), XLM (Conneau and Lample,
+2019), XLM-Roberta (Conneau et al., 2020), XLM-
+Electra (Chi et al., 2022) and mT5 (Xue et al., 2021)
+Figure 1: The proposed XY-LENT model (green line)
+achieves SoTA performance within all band sizes and
+is competitive performance across larger model-size
+bands. The parameter efficiency of XY-LENTpartic-
+ularly stands out, outperforming XLM-Rand being
+competitive with mT5while being 5x and 6x smaller
+than them respectively. We also present the performance
+of XLM-E which used as a baseline in this paper.
+have all shown non-trivial performance gains, es-
+pecially in the setup of zero-shot transfer, and have
+been the work-horse for a diverse number of mul-
+tilingual tasks. Given their ubiquitous applicabil-
+ity in zero-shot downstream scenarios, improving
+the quality and enabling their usage in resource-
+constrained applications is also an important vein
+of research which we explore in this paper.
+A source of improvement for these models has
+been leveraging bitext data for better representation
+learning (Conneau and Lample, 2019; Chi et al.,
+2022). Most prior work, however, has focused
+on leveraging English-centric ( EN-X ) bitext data.
+Contemporaneously, the related area of Massively
+Multilingual Machine Translation (a single model
+for translating between different pairs of languages,
+eg: Aharoni et al. (2019); Zhang et al. (2020); Fan15354et al. (2021)) has shown tremendous progress, with
+Fan et al. (2021) showing that a crucial aspect of
+this improvement has been moving beyond EN-X
+parallel corpora and leveraging web-based mined
+X-Ybitexts spanning 1000s of translation directions
+(Schwenk et al., 2021a; El-Kishky et al., 2020;
+Schwenk et al., 2021b). This makes a compelling
+case to explore if leveraging X-Ybitexts can also
+improve multilingual representation learning.
+In this work, we introduce XY-LENT (pro-
+nounced as " Excellent "):X-Y bitext enhanced
+Language ENcodings using Transformers. We first
+identify problems with using the commonly used
+sampling strategy proposed in Fan et al. (2021),
+showing that it induces sparse sampling distribu-
+tions leading to under-utilization of data, and thus
+propose a novel strategy to mitigate this issue
+(§3.2). We then propose leveraging X-Y bitexts
+in conjunction with the improved sampling strat-
+egy, as well as a V oCAP (Zheng et al., 2021) style
+sentencepiece vocabulary re-construction for im-
+proving multilingual representation learning (§3.1).
+We show that our proposed method improves per-
+formance across all model size bands (§6). Fur-
+thermore, these performance gains hold for both
+Masked Language Models (MLM) and ELECTRA
+style models. Our approach results in an almost
+12x speedup in training for MLM model training
+(§6.2). We systematically analyse the impact of
+model scaling with respect to the curse of multilin-
+guality (Conneau et al., 2020) to observe that the
+gap between current English only SoTA models
+and multilingual models can be considerably re-
+duced (§6.3). Our analysis reveals that XY-LENT
+improves performance across language families
+(§6.4) and helps reduce the cross-lingual transfer
+gap in multilingual tasks (§6.5). We then demon-
+strate that the training dynamics of such models
+can be used to better understand the underlying
+datasets and use it to find interesting defects in
+them (§6.6). Finally, we show some limitations of
+such multilingual representational models vis-à-vis
+extremely low resource languages, identifying po-
+tential shortcomings that are not addressed with
+scaling of such models, as well as issues around
+catastrophic forgetting in the way current models
+are used for domain adaptation.
+In doing so, we establish state of the art on 5 mul-
+tilingual downstream tasks (XNLI, PAWS-X, TY-
+DIQA, XQuAD and MLQA) within a model size
+band, and achieve competitive performance acrosssize bands, thereby showing for the first time (to
+the best of our knowledge) an interesting notion of
+parameter efficiency: XY-LENToutperforms
+XLM-R(Goyal et al., 2021) and performs com-
+petitively with mT5(Xue et al., 2021), whilst
+being 5x and 6x smaller respectively (Figure 1).
+Furthermore, our proposed model reduces the gap
+for English specific tasks: XY-LENTachieves
+99.3% GLUE performance and 98.5% SQuAD 2.0
+performance compared to a SoTA English only
+model in the same size band.
+2 Related Work
+Large scale self-supervised learning has emerged
+as a prominent way of building cross-lingual lan-
+guage models that can be adapted for numer-
+ous multilingual downstream applications. Es-
+pecially for building multilingual encoder trans-
+former (Vaswani et al., 2017) models, two popular
+paradigms have been Masked language modeling
+(MLM; Devlin et al. (2019); Conneau et al. (2020))
+and pre-training encoders as discriminators (ELEC-
+TRA; Clark et al. (2020b); Chi et al. (2022)), with
+the latter showing considerable compute efficiency.
+These approaches can further be improved by lever-
+aging parallel corpora in different ways: Conneau
+and Lample (2019) propose a Translation Language
+Modeling task (TLM) wherein the model predicts
+masked tokens in concatenated translation pairs,
+Chi et al. (2022) propose a Translation Replaced
+Token Detection (TRTD) task, an analogous task
+for Electra-style models. Other approaches include
+using bitexts to construct code-switched sequences
+as inputs during pre-training (ALM; Yang et al.
+(2020)) and for contrastive learning (InfoXLM; Chi
+et al. (2021a)), or using token-level alignments in
+parallel data to improve cross-lingual modeling
+(Hu et al., 2021; Chi et al., 2021b, inter alia ). How-
+ever, all the aforementioned works rely on English-
+centric bitexts.
+Fan et al. (2021) show that moving beyond EN-X
+bitexts for Massively Multilingual Machine Trans-
+lation affords substantial improvements over ap-
+proaches that rely solely on English-centric data
+(Aharoni et al., 2019; Zhang et al., 2020). The
+primary factor responsible for this improvement
+has been the curation of X-Y aligned bitext data,
+constructed by mining bitexts from publicly avail-
+able web data (Schwenk et al., 2021a; El-Kishky
+et al., 2020; Schwenk et al., 2021b). The dataset
+construction either follows a local mining approach15355(first aligning documents using heuristics, and then
+mining parallel bitexts from the aligned documents;
+used in CCAligned (El-Kishky et al., 2020)), or a
+global mining approach (all bitexts are embedded
+in a common vector space, and then aligned candi-
+dates are found by looking at the normalized near-
+est neighbors; used in CCMatrix (Schwenk et al.,
+2021b)). Fan et al. (2021) also propose a sampling
+strategy for leveraging the X-Y bitexts, wherein
+the marginals are constrained to be similar to what
+is used for En-X bitexts, and show their proposed
+method improves over uniform sampling. How-
+ever, as we show in (§3.2), their proposed strategy
+has the undesirable artefact of inducing extremely
+sparse solutions, thereby resulting in data wastage.
+3 Leveraging Many-to-Many Bitexts
+3.1 Dataset
+Prior representation learning works usually con-
+sider English-centric ( EN-X ) bitexts to improve
+model quality. Thus, given the emergence of min-
+ing based approaches for extracting parallel bitexts
+from large monolingual datasets that are approxi-
+mate translations of each other and are multi-way
+aligned (the source and target languages are not
+restricted to be English only), in this work we ex-
+plore leveraging these many-to-many ( X-Y) bitext
+datasets for better representation learning. We con-
+sider two such publicly available datasets: CCMa-
+trix and multiCCAligned.
+3.2 Sampling Distribution
+A common method used for balancing training
+data for the EN-X framework is using a temper-
+ature based exponential sampling approach (Aha-
+roni et al., 2019), wherein the probability of sam-
+pling a language is chosen from a temperature
+smoothed distribution to downsample high re-
+source languages, whilst upsampling low resource
+languages. This work was extended by Fan et al.
+(2021), wherein the authors propose Sinkhorn Tem-
+perature sampling: given a joint probability matrix
+Qacross L×Llanguage pairs ( Lbeing the number
+of unique languages), and the marginal distribution
+pof the Llanguages, the authors estimate a sam-
+pling distribution Pas:
+maxTr(PQ)|P1=p=P1 (1)
+where Tris the trace operator. The primary ad-
+vantage of using this is that Pcan be efficientlyestimated with the Sinkhorn-Knopp algorithm and
+also allows us to set the marginal to be the temper-
+ature sampled based distribution which we know
+works well in practice. The authors found this to
+work better than uniform sampling.
+However, in practice, we observed this to gener-
+ate extremely sparse sampling distributions: Figure
+2a show the sparsity induced by the naive applica-
+tion of Eq. 1.
+We note that one potential way of overcoming
+the above issue is by modifying the optimization
+problem to also maximize the entropy of P. Con-
+sequently, we propose the following modified opti-
+mization objective :
+P=argminTr (P(−logQ))− H(P)
+|P1=p=PQ)|P1=p=P1
+(2)
+where H(P)denotes the entropy of Pand
+KL(P||Q)denotes the Kullback-Leibler diver-
+gence between PandQ.
+This can be solved by using the Sinkhorn-Knopp
+algorithm for the entropic regularized optimal trans-
+port problem (Cuturi, 2013), by setting the cost
+matrix to be −log(Q+ϵ)(in practice, since Qcan
+have zero entries, ϵis used for smoothing). Since
+the cost of assigning a non-zero probability value
+to a zero entry is extremely high ( −log (ϵ)), we
+never observe any entry of Pto be non-zero if
+it’s corresponding entry in Qwas zero. In addi-
+tion, since Eq. 2 also maximizes the entropy of P,
+it encourages its entries to be non-sparse, thereby
+avoiding the problem present in the solution of Eq.
+1. In practice, we did not see this losing out on any
+data: if Qwas non-zero, then Pwas also non-zero
+(Figure 2b).
+3.3 Vocabulary Construction
+We construct our vocabulary using Sentence Piece
+Models (SPM) (Kudo and Richardson, 2018) which
+cater to language specific complexities (tokeniza-
+tion, accent removal, etc. ). We increase the vo-
+cabulary size to 500k tokens to better serve the
+varied scripts encountered while working in the
+multilingual setting. For this construction, we fol-
+low the V oCAP algorithm (Zheng et al., 2021)
+to quantify the vocabulary capacity for each lan-
+guage separately and account for varied corpora
+sizes across languages. Better capacity allocation
+leads to smaller representative sequences (espe-
+cially for mid and low resource languages) which15356
+in-turn improves the computational efficiency of
+the model. Increasing the size of the vocabulary,
+however, comes at the cost of inflating the model
+parameters which is particularly observed in the
+case of XY-LENTandXY-LENT where
+the embeddings layer constitute 80.5% and62.9%
+of the total parameters respectively.
+4 Pretraining Details
+We follow the XLM-E (Chi et al., 2022) pretrain-
+ing approach and only introduce a few architectural
+changes to improve the overall performance of the
+model. We use the Transformer model (Vaswani
+et al., 2017) trained with ELECTRA (Clark et al.,
+2020b) style of replace token detection (RTD) on
+both monolingual (MRTD) and bitext (TRTD) data.
+In the current setup of training, we use two Trans-
+former encoders in conjunction: a generator Gand
+a discriminator D, where the generator Gis trained
+with masked language modeling objective (MLM;
+Devlin et al. (2019)) and the discriminator is trained
+on replaced token detection objective (RTD; Clark
+et al. (2020b) on all the tokens passing through the
+generator.
+In addition to using the Gated Relative Position
+Bias introduced in Chi et al. (2022), we do not mask
+the [CLS] token and flip bitext language order with
+probability p= 0.5for the TRTD task.
+5 Experiments
+Baselines: We compare the cross-lingual perfor-
+mance of our proposed model against 3 popularcross-lingual models: XLM-R, mT5 and XLM-E
+(across all model size variations). Note that Chi
+et al. (2022) use a 250k vocabulary size for XLM-
+Eand 500k vocabulary for their large and XL
+variants. As a follow-up, we re-train XLM-E
+with the same vocabulary as used by XY-LENT
+for a fair comparison. Thus all references to XLM-
+Erefer to the re-trained model variant with a
+500k vocabulary size.For our downstream En-
+glish evaluation (§6.3), we compare against the
+SoTA English model METRO-LM(Bajaj et al.,
+2022). Note that Bajaj et al. (2022) also train the
+models in an ELECTRA style framework, thereby
+allowing for a fair comparison.
+Pretraining Data: For our monolingual data,
+we follow Chi et al. (2022) and use the CC-100
+dataset(Conneau et al., 2020; Wenzek et al., 2020)
+which contains texts in 100 languages collected
+from Common Crawl. As mentioned in (§3.1), we
+explore the utility of the CCMatrix and the mul-
+tiCCAligned X-Y aligned bitext data. CCMatrix
+consists of 1015 language pairs (97 unique lan-
+guages); while the multiCCAligned dataset con-
+sists of 2959 language pairs (92 unique languages). We contrast this against only using EN-X bitexts
+(CCAligned, El-Kishky et al. (2020)).15357Model Size Bands: While our base andlarge
+models have more parameters when compared with
+XLM-R, most of the additional parameters come
+from the increased vocabulary size (§3.3). Con-
+cretely, our base model has 12 layers and 768 hid-
+den states, while the large model has 24 layer and
+1024 hidden states, which is identical to XLM-
+Rand XLM-R respectively. However, even
+with the increased parameter count, the computa-
+tion cost on a text classification task is roughly the
+same within a model size family (since mapping
+tokens to an embedding is a lookup operation). Fi-
+nally, it is noteworthy that even with the increased
+vocabulary size, the number of parameters for XY-
+LENTis less compared to the XL and XXL
+variants of both XLM-R and mT5.
+Pretraining Setup: For the base model, we train
+for 125k steps with a batch size of 8192 for MRTD
+task and for the large model, we train the model
+for 500k steps with a batch size of 2048. Finally
+for the XL model, we train for 150k steps with a
+batch size of 8192. We use a dynamic batch size for
+TRTD task which is based on original length of the
+translated bi-text pair. Please refer Appendix A for
+additional details. We adopt the standard practice
+of using a linear warmup schedule for the learning
+rate and use the Adam (Kingma and Ba, 2014) op-
+timizer for all the models. Following Meng et al.
+(2021), we do not apply any dropout to the genera-
+tor.
+Cross-lingual Downstream Evaluation: For
+evaluating the cross-lingual understanding of the
+model, we consider 5 multilingual evaluation
+benchmarks. We consider 2 classification tasks and
+3 question answering tasks. For classification, we
+evaluate on the cross-lingual Natural Language In-
+ference dataset (XNLI; Conneau et al. (2018)) and
+the cross-lingual paraphrase adversaries from word
+scrambling dataset (PAWS-X; Yang et al. (2019)).
+For cross-lingual question answering, we consider
+MLQA (Lewis et al., 2019), XQuAD (Artetxe et al.,
+2019) and TyDiQA-GoldP (Clark et al., 2020a).
+For all the aforementioned tasks, we perform the
+evaluation in zero-shot setting, i.e. only using the
+English data for fine-tuning. To further assess the
+model’s performance when translated data is avail-
+able, we evaluate the model on the translate-train
+setup for the classification tasks.
+English Downstream Evaluation: To further as-
+sess XY-LENT ’s performance on English and seehow the curse of multilinguality impacts the model,
+we also assess the model’s performance on the
+commonly used GLUE benchmark (Wang et al.,
+2018), comprising of 8 tasks: MNLI (Williams
+et al., 2017), SST-2 (Socher et al., 2013), QNLI (Ra-
+jpurkar et al., 2018a), MRPC (Dolan and Brockett,
+2005), CoLA (Warstadt et al., 2018), QQP , STS-B
+(Cer et al., 2017) and RTE. Additionally, we also
+evaluate the English performance of our model on
+a question answering task, using the SQuAD 2.0
+dataset (Rajpurkar et al., 2018b).
+Please refer to Appendix B for additional details
+on the datasets.
+6 Results and Analysis
+6.1 Main Results
+Table 1 presents our proposed model’s performance
+across different model sizes for zero-shot transfer
+on sentence classification as well as question an-
+swering tasks (detailed results for all languages and
+all tasks can be found in Appendix D). We see that
+XY-LENT outperforms the baselines of XLM-E,
+XLM-R and mT5 across all model sizes, establish-
+ing (to the best of our knowledge) the state-of-the-
+art (SoTA) for all the 5 considered multilingual
+datasets within the model size bands: with XY-
+LENToutperforming XLM-Eby 3.1 pts,
+XY-LENT outperforming XLM-E by 1.8
+pts and XY-LENToutperforming XLM-E
+by 0.9 pts (averaged across all 5 datasets). An-
+other interesting observation is that XY-LENT is
+competitive across model size families: the XY-
+LENTmodel out-performs XLM-R and
+mT5 variants on 4 out of 5 datasets, simi-
+larly the XY-LENT outperforms the mT5
+model on 4 out of 5 datasets. Furthermore, the
+XY-LENTmodel outperforms XLM-Rand
+is competitive with mT5while being 5x and
+6x smaller respectively. A practical implication of
+these better performing smaller models is their easy
+usage in downstream tasks.
+This behaviour is also consistent in the Translate-
+Train setting where the translated version of the
+training data is present across all languages for
+training. Table 1 presents XY-LENT ’s perfor-
+mance on this setup for sentence classification
+tasks. We see that even in this setting, XY-LENT
+outperforms other models with the same size band,
+and is competitive across model size bands.15358
+6.2 Ablations
+Different Many-to-Many Datasets Table 2
+shows the impact of moving from English-centric
+bitexts to X-Ybitext data. Using multiCCAligned
+dataset gives a +1.4 pt improvement on average
+XNLI performance over the baseline which uses
+only the CCAligned data, thereby showing that the
+utility of leveraging multi-way bitext data is not
+limited to CCMatrix dataset. However, we still see
+an additional improvement of 1.0 pt with usage
+of CCMatrix data and we hypothesize this gain to
+more diversity present in it which in-turn helps in
+improving the multilingual representations.
+Different Pretraining Objectives While the
+gains are more substantial with ELECTRA trainingobjective, Table 2 shows that the benefits of hav-
+ing a better quality bitext data is not just restricted
+to the ELECTRA paradigm of training and can
+also be observed with the Masked LM objective.
+For the ablation experiment, we train a base model
+model with the MLM objective for 125k steps with
+a batch size of 8192. Comparing this with XLM-
+R’s setup, which uses only monolingual data
+with MLM objective and trains for 1.5M steps ( i.e.
+12 times longer ), finally achieving an XNLI (Avg)
+of 76.2, we observe that introduction of X-Ydata
+not only brings performance gains but also signif-
+icantly improves the training efficiency of these
+models.
+6.3 On English Performance of Multi-Lingual
+Models
+Given the strong performance of multilingual mod-
+els on the English subset of XNLI, one interest-
+ing question that arises is how does model scaling
+impact the performance on English centric down-
+stream tasks. In order to evaluate that, we measure
+the performance of XY-LENT on the commonly
+used GLUE benchmark (Wang et al., 2018) and
+the SQuAD 2.0 benchmark. To compare the mul-
+tilingual model performance on English, we also
+consider English specific encoder models trained
+in an Electra pre-training paradigm. Specifically,
+we consider the Base, Large, XL and XXL models15359
+presented in (Bajaj et al., 2022).
+Table 3 shows the performance of our proposed
+method against the SoTA monolingual as well as
+other multilingual baselines. As observed in the
+results, with an increase in the number of param-
+eters, we see that the gap in the performance of
+an English centric model and a multilingual model
+decreases, with the XL model being just 0.6 points
+behind on GLUE and 1.3 points on SQuAD 2.0.
+We hypothesize that an increase in model capacity
+alleviates the issues caused by the curse of multilin-
+guality (Conneau et al., 2020); and when that is the
+case, English performance actually benefits from
+the presence of other languages in the training data.
+It is noteworthy that the even for the English lan-
+guage performance, having an X-Y centric data
+is more beneficial compared to an EN-X data
+(XLM-E vsXY-LENT ). Furthermore, our pro-
+posed method outperforms XLM-R on large and
+XL sizes.
+6.4 Performance Across Language Families
+Figure 3 shows the performance the delta of per-
+formance between XLM-E andXY-LENT across
+different language families. Following Hu et al.
+(2020), we use the number of Wikipedia articles
+as a proxy for a language family being high or low
+resource. As can be seen, leveraging X-Y bitexts
+helps improves performance consistently across
+language families.
+6.5 Crosslingual Transfer Gap
+In order to further evaluate the cross-lingual trans-
+ferrability of our model, we follow Hu et al. (2020)
+and evaluate the cross-lingual transfer gap (the dif-
+ference between the performance on the English
+test set and the average test set performance for15360other languages) for XY-LENT. This score in-
+dicates how much end task knowledge is not trans-
+ferred to other languages post fine-tuning, with a
+smaller gap indicating better transferrability. As
+seen in Table 4, XY-LENT achieves lower scores
+on 3 out of 5 tasks, thereby demonstrating strong
+transferrability.
+6.6 Using Training Dynamics to Explore
+Dataset Quality
+So far we have seen that leveraging X-Y aligned
+bitexts improves model quality. In this section, we
+consider the inverse direction: whether training
+dynamics of representation learning models can be
+used to identify dataset artifacts. Given these bitext
+datasets span over 1000 language pairs, a manual
+inspection of these datasets is extremely hard. Thus
+an automated method for spot-checking the dataset
+quality is quite valuable.
+To do so, we first train a model in line with
+the methodology presented by Zhou et al. (2021)
+for Distributionally Robust Multilingual Machine
+Translation. Specifically, we train XY-LENT with
+the following modified objective:
+minsup/summationdisplayp(L(x;θ)+
+λL(x;θ))(3)
+Here LandLrefer to the generator
+and discriminator losses respectively (§4), P
+is the joint distribution over the bitext lan-
+guage pairs that we want to estimate (i.e P=
+p|1≤i≤L×L;/summationtextp= 1); andQis the orig-
+inal training distribution (i.e the probability dis-
+tribution over the bitexts when the training starts,
+equal to Pas estimated in §3.2). At a high level,
+the objective minimizes the training loss over a χ
+ball around the original training distribution, with
+the supremum up-weighing language pairs with
+higher loss values, and down-weighing languages
+with lower loss values. We train a model with
+the Distributional Robustness Optimization objec-
+tive (DRO) using Iterated Best Response strategy,
+as proposed by Zhou et al. (2021) and resample
+10 times throughout the training. We hypothesize
+that the two extremities (i.e language pairs that are
+highly upsampled as well as those that are down-
+sampled) would be bitext datasets of interest for
+spot-checking.
+Figure 4 presents the top 10 upsampled and 10
+downsampled languages between the initial and
+final language distributions. Manual inspection
+of these language pairs shows that our hypothe-
+sis indeed holds true: we observe that the transla-
+tions for English and Xhosa (en - xh) are extremely
+noisy and aligned with non-sensical text, with mul-
+tiple different English sentences being aligned to
+the same Xhosa sentence. This can potentially
+be a manifestation of the hubness issue for Near-
+est Neighbor lookups in high dimensional spaces
+(Radovanovi ´c et al., 2010; Dinu and Baroni, 2014).
+Bitexts for Catalan and Spanish (ca - es) and Czech
+and Slovak (cs - sk) are near duplicates, since the
+language pairs are very similar. Both of these issues
+can cause the TRD task to be trivial, explaining the
+downsampling. Similarly, looking at languages
+that are up-sampled, we observe a lot of translation
+quality noise in bitexts for Spanish and Tamil (es
+- ta), Turkish and Urdu (tr - ur) and Sinhala and
+Turkish (si - tr).
+7 Conclusion
+In this work, we introduced a family of models
+which achieve SoTA performance over 5 multilin-
+gual benchmarks compared to other models belong-
+ing to similar model size bands and are competitive
+across the bands. Our XY-LENTmodel outper-
+forms XLM-Rand is competitive with mT5
+being 5x and 6x smaller respectively. Furthermore,
+the XL model variant also achieves 99.3% and
+98.5% of the current best performant models on
+GLUE and SQuAD 2.0 respectively, thereby aid-
+ing in reducing the curse of multilinguality. The15361performance gains are consistent across language
+families.
+8 Limitations
+Even though XY-LENT paves the way towards
+better general-purpose multilingual representation
+foundation models, in this section, we highlight
+the limitations associated with this work. We first
+expound upon the limitations associated with self-
+supervised learning on large web extracted corpora.
+Then we show that while XY-LENT achieves
+strong performance on multiple multilingual bench-
+marks, when the downstream task involves unseen
+(during pretraining) languages, the performance
+drops by a substantial margin. Finally, we show
+the potential limitation associated with a common
+methodology used for domain adaptation associ-
+ated with leveraging these multilingual foundation
+models, illustrating how catastrophic forgetting ex-
+acerbates certail issues pertaining to low resource
+language performance.
+Training Data
+XY-LENT uses CC-100 which a static multilin-
+gual corpus extracted from Common Crawl for
+100 languages. As noted by Wenzek et al. (2020),
+several data filtering strategies have been applied
+to remove duplicated documents, paragraphs with
+high ratio of punctuations, digits and profanities,
+the resultant data may still result in many poten-
+tial biases requiring further analysis. Additionally,
+these issues might be aggravated for models that
+leverage bitext data, since the bitexts themselves
+are mined from web crawls, and thus potentially
+have all the associated biases, stereotypes and other
+associated harms. Furthermore, the raw data was
+compiled from static Common Crawl snapshots
+from January, 2020 to December, 2020 and hence
+may not include information about some of the
+recent events such as COVID-19.
+Performance on Unseen Languages
+Given the performance improvements observed
+with scaling, we investigate how it impacts ex-
+tremely low resource languages which are not
+present in the pre-training data. In order to do
+so, we consider our model’s performance on the
+AmericasNLI dataset (Ebrahimi et al., 2022) which
+extends the XNLI dataset to 10 Indigenous lan-
+guages of the Americas.
+Table 5 presents the results on the AmericasNLIdataset. As can be seen, XY-LENT does outper-
+form XLM-R, indicating that better representation
+learning also benefits these extremely low resource
+languages. However, we do not see an increase
+in performance while scaling our models. Specifi-
+cally, the performance of XY-LENTandXY-
+LENTmodel is nearly the same, and substan-
+tially worse that the performance observed on the
+XNLI dataset. This indicates that, while parame-
+ter scaling can help improve performance on lan-
+guages that the model has seen during pre-training,
+it does not automatically improve performance in
+the extremely low-resource regime. Thus, while
+model scaling allows for improvements across nu-
+merous dimensions, it is far from a panacea, espe-
+cially if not done in conjunction with data scaling
+efforts. To be able to improve performance for
+unseen languages, an intervention would need to
+be made at the data collection efforts during pre-
+training, which we aim to assess in future works.
+Continued Training for Domain Adaptation in
+Pre-Trained Encoders
+In recent years, continued training on domain spe-
+cific corpora has been considered a viable approach
+for domain adaptation of MLM style pre-trained
+models (Gururangan et al., 2020; Yao et al., 2021)
+where the core idea is to continue train the pre-
+trained model on domain specific corpora with the
+goal of improving in-domain downstream evalua-
+tion.
+We first show that this phenomenon can be ex-
+tended to models pretrained with an ELECTRA
+style training objective. Concretely, we apply do-
+main adaptation in the biomedical domain where
+we continue to train our XY-LENTas well as
+XY-LENT model on the PubMed data
+presented in Yao et al. (2021), and evaluate it on the
+ChemProt task (which aims at extracting relations
+between chemicals and proteins) presented in Gu-
+rurangan et al. (2020) as the in-domain downstream
+task.
+We observe that the continued training approach
+presented in Gururangan et al. (2020) for the ELEC-
+TRA style models, using the same peak learning
+rate as used during pre-training, results in diver-
+gence. Interestingly, this neither happens for the
+generator of the ELECTRA model nor for the15362
+MLM style pre-trained model. Thus, for an ELEC-
+TRA style continued training setup, we posit reduc-
+ing the peak learning rate to be a crucial change.
+Table 7 shows the performance on the downstream
+task post the continued training approach and un-
+surprisingly it helps with improving in-domain per-
+formance.
+However, given the multilingual nature of such
+models, we test the multilinguality of these modelsbefore and after continued training; using cross-
+lingual zero-shot XNLI as a proxy for multilingual
+model quality. Table 6 shows the drop in perfor-
+mance across all languages pre and post contin-
+ued training. We first note that this drop in perfor-
+mance is present for both MLM and ELECTRA
+style of models, and thus is not an artifact of the
+pre-training objective. We observe that the drop
+in performance is not uniform across all languages
+and the drop is worse for MLM style models (with
+using the same peak learning rate suffering more
+from this issue; Table 7). While we expect the drop
+in English performance to be relatively less, we
+do see that the drop is substantially more for the
+mid and low resource languages (especially Hindi,
+Turkish, Urdu and Swahili; see Fig. 5). While this
+can potentially be ameliorated by using techniques
+like Adapters (Houlsby et al., 2019) etc., we would
+like to draw attention towards the fact that general
+purpose continued training does suffer from this
+issue.
+References15363153641536515366Appendix
+A Pre-Training and Model
+Hyperparameters
+Table 8 shows the hyper-parameters of XY-
+LENT across various model sizes. All the models
+are trained with a vocabulary size of 500K and we
+use batch size of 1M or 4M tokens based on model
+size as mentioned in Table 9. For multilingual re-
+place token detection task we work with a fixed
+input sequence length of 512 and hence maintains
+a constant batch size. For translation replace token
+detection task, the input sequence length is dynam-
+ically set as the length of original translation pair
+and the max one is chosen across the batch. For
+the base and large models, we train on 128 Nvidia
+A100-40GB GPU cards, and for the XL model, we
+use 512 Nvidia A100-80GB GPU cards.
+B Downstream Performance
+For evaluating cross lingual understanding, we con-
+sider five multilingual evaluation benchmarks. We
+use XNLI (Cross-Lingual Natural Language Infer-
+ence) and PAWS-X for classification and XQuAD,
+MLQA and TyDiQA-GP for question answer-
+ing. Additionally, we use GLUE benchmark and
+SQuAD2.0 to evaluate the English performance of
+our model.
+XNLI The XNLI dataset (Conneau et al., 2018)
+comes with ground-truth dev and test sets in 15languages, and a ground-truth English training set.
+The training set has been machine-translated to the
+remaining 14 languages, providing synthetic train-
+ing data for these languages as well. We evaluate
+our model on cross-lingual transfer from English
+to other languages in two modes: (i) zero-shot : the
+model is fine-tuned only using the English training
+data and (ii) translate-train-all : the English train-
+ing set is machine-translated to each language and
+we fine-tune a multilingual model on all training
+sets. For translations, we use the original XNLI
+data for consistency.
+PA WS-X The PAWS (Paraphrase Adversaries
+from Word Scrambling) dataset (Zhang et al.,
+2019) requires to determine whether two sentences
+are paraphrases. We use the subset of the PAWS
+dev and test sets translated to six other languages
+by professional translators, dubbed as PAWS-X
+(Yang et al., 2019) for evaluation, while using the
+PAWS set for training.
+XQuAD The English SQuAD v1.1(Rajpurkar
+et al., 2016) requires identifying the answer to a
+question as a span in the corresponding paragraph.
+In XQuAD(Artetxe et al., 2019), a subset of the
+English dev set was translated into ten other lan-
+guages by professional translators which is then
+used for evaluation.
+MLQA The Multilingual Question Answer-
+ing(Lewis et al., 2019) dataset is another cross-
+lingual question answering dataset. In this dataset,
+the evaluation data for English and six other lan-
+guages was obtained by automatically mining tar-
+get language sentences that are parallel to sentences
+in English from Wikipedia, crowd-sourcing anno-
+tations in English, and translating the question and
+aligning the answer spans in the target languages.
+We use the SQuAD v1.1(Rajpurkar et al., 2016)
+training data for training and evaluate on the test
+data of the corresponding task.
+TyDiQA-GP We use the gold passage version
+of the Typologically Diverse Question Answer-
+ing(Clark et al., 2020a) dataset, a benchmark for
+information-seeking question answering, which
+covers nine languages. The gold passage version is
+a simplified version of the primary task, which uses
+only the gold passage as context and excludes unan-
+swerable questions. It is thus similar to XQuAD
+and MLQA, while being more challenging as ques-
+tions have been written without seeing the answers,15367
+leading to 3 ×and 2 ×less lexical overlap compared
+to XQuAD and MLQA respectively. We use the
+English training data for training and evaluate on
+the test sets of the target languages.
+GLUE and SQuAD 2.0 We evaluate English per-
+formance of our model on the GLUE benchmark
+(Wang et al., 2018) which is a benchmark of eight
+diverse NLU tasks spanning over single-sentence
+tasks (CoLA, SST-2), similarity and paraphrase
+tasks (MRPC, STS-B, QQP) and inference tasks
+(RTE, MNLI, QNLI). The benchmark is also var-
+ied in terms of the training data sizes across tasks
+which makes it an effective benchmark for test-
+ing NLU capabilities of a pretrained model in a
+robust fashion. We also evaluate the English perfor-
+mance on SQuAD 2.0 (Rajpurkar et al., 2018b) task
+which is a collection of 100k crowdsourced ques-
+tion/answer pairs collected from Wikipedia where
+given a passage and a question, the task is to pre-
+dict the answer span in the passage. The task also
+has the possibility that no answer exists, making
+the problem more grounded.
+C Sampling Sparsity Across All
+Language Pairs
+Figure 6 shows the sampling distribution as in-
+duced by the M2M sampling method and by our
+proposed method for all language pair directions.
+Our proposed method induces a much less sparse
+distribution, resulting in less data wastage.
+DDetailed Performance on All Tasks and
+Languages
+We present the detailed results associated with all
+tasks and languages in this section.153681536915370
+E Hyperparameters for Fine-Tuning
+In Table 15, we report the hyperparameters for fine-tuning XY-LENT on the downstream tasks.15371ACL 2023 Responsible NLP Checklist
+A For every submission:
+/squareA1. Did you describe the limitations of your work?
+8
+/squareA2. Did you discuss any potential risks of your work?
+8
+/squareA3. Do the abstract and introduction summarize the paper’s main claims?
+1
+/squareA4. Have you used AI writing assistants when working on this paper?
+Left blank.
+B/squareDid you use or create scientiﬁc artifacts?
+Left blank.
+/squareB1. Did you cite the creators of artifacts you used?
+No response.
+/squareB2. Did you discuss the license or terms for use and / or distribution of any artifacts?
+No response.
+/squareB3. Did you discuss if your use of existing artifact(s) was consistent with their intended use, provided
+that it was speciﬁed? For the artifacts you create, do you specify intended use and whether that is
+compatible with the original access conditions (in particular, derivatives of data accessed for research
+purposes should not be used outside of research contexts)?
+No response.
+/squareB4. Did you discuss the steps taken to check whether the data that was collected / used contains any
+information that names or uniquely identiﬁes individual people or offensive content, and the steps
+taken to protect / anonymize it?
+No response.
+/squareB5. Did you provide documentation of the artifacts, e.g., coverage of domains, languages, and
+linguistic phenomena, demographic groups represented, etc.?
+No response.
+/squareB6. Did you report relevant statistics like the number of examples, details of train / test / dev splits,
+etc. for the data that you used / created? Even for commonly-used benchmark datasets, include the
+number of examples in train / validation / test splits, as these provide necessary context for a reader
+to understand experimental results. For example, small differences in accuracy on large test sets may
+be signiﬁcant, while on small test sets they may not be.
+No response.
+C/squareDid you run computational experiments?
+5
+/squareC1. Did you report the number of parameters in the models used, the total computational budget
+(e.g., GPU hours), and computing infrastructure used?
+Appendix A15372/squareC2. Did you discuss the experimental setup, including hyperparameter search and best-found
+hyperparameter values?
+Appendix A and E
+/squareC3. Did you report descriptive statistics about your results (e.g., error bars around results, summary
+statistics from sets of experiments), and is it transparent whether you are reporting the max, mean,
+etc. or just a single run?
+6
+/squareC4. If you used existing packages (e.g., for preprocessing, for normalization, or for evaluation), did
+you report the implementation, model, and parameter settings used (e.g., NLTK, Spacy, ROUGE,
+etc.)?
+3
+D/squareDid you use human annotators (e.g., crowdworkers) or research with human participants?
+Left blank.
+/squareD1. Did you report the full text of instructions given to participants, including e.g., screenshots,
+disclaimers of any risks to participants or annotators, etc.?
+No response.
+/squareD2. Did you report information about how you recruited (e.g., crowdsourcing platform, students)
+and paid participants, and discuss if such payment is adequate given the participants’ demographic
+(e.g., country of residence)?
+No response.
+/squareD3. Did you discuss whether and how consent was obtained from people whose data you’re
+using/curating? For example, if you collected data via crowdsourcing, did your instructions to
+crowdworkers explain how the data would be used?
+No response.
+/squareD4. Was the data collection protocol approved (or determined exempt) by an ethics review board?
+No response.
+/squareD5. Did you report the basic demographic and geographic characteristics of the annotator population
+that is the source of the data?
+No response.15373

@@ -1,1 +1,1334 @@
-8760 Proceedings of the 61st Annual Meeting of the Association for Computational Linguistics Volume 1 : Long Papers , pages 8760–8785 July 9 - 14 , 2023 © 2023 Association for Computational Linguistics 8761 8762 8763 8764 8765 8766 8767 8768 8769 8770 8771 8772 8773 8774 8775 8776 8777 8778 8779 8780 8781 8782 8783 8784 8785 
+
+Yuxi Feng, Xiaoyuan Yi, Xiting Wang, Laks V .S. Lakshmanan, Xing XieThe University of British Columbia, Vancouver, CanadaMicrosoft Research Asia, Beijing, China
+{fyx14, laks}@cs.ubc.ca,
+{xiaoyuanyi, xitwan, xing.xie}@microsoft.com
+Abstract
+Self-training (ST) has prospered again in lan-
+guage understanding by augmenting the fine-
+tuning of big pre-trained models when la-
+beled data is insufficient. However, it remains
+challenging to incorporate ST into attribute-
+controllable language generation. Augmented
+only by self-generated pseudo text, generation
+models over-exploit the previously learned text
+space and fail to explore a larger one, suffering
+from a restricted generalization boundary and
+limited controllability. In this work, we pro-
+pose DuNST, a novel ST framework to tackle
+these problems. DuNST jointly models text
+generation and classification as a dual process
+and further perturbs and escapes from the col-
+lapsed space by adding two kinds of flexible
+noise. In this way, our model could construct
+and utilize both pseudo text generated from
+given labels and pseudo labels predicted from
+available unlabeled text, which are gradually
+refined during the ST phase. Theoretically, we
+show that DuNST can be viewed as enhancing
+the exploration of the potentially larger real text
+space while maintaining exploitation, guaran-
+teeing improved performance. Experiments on
+three controllable generation tasks show that
+DuNST significantly boosts control accuracy
+with comparable generation fluency and diver-
+sity against several strong baselines.
+1 Introduction
+Recently, Pretrained Language Models (PLM) (Liu
+et al., 2019; Dong et al., 2019; Radford et al.,
+2019; Raffel et al., 2020) have shown superior-
+ity in Natural Language Processing (NLP). How-
+ever, the ever-growing size of these models de-
+mands more training data, which destabilizes the
+fine-tuning of PLMs when labeled data is highly
+insufficient (Zhang et al., 2021). In this case, Self-
+training (ST) (Scudder, 1965; Yarowsky, 1995;Figure 1: Classic Self-training (ST) procedure. ST trains
+a base classifier on a small labeled dataset, then itera-
+tively predicts pseudo labels for unlabeled data to aug-
+ment the original labeled training set, and finally fits the
+model to the augmented dataset.
+Grandvalet and Bengio, 2004), a classical semi-
+supervised paradigm, has come to the fore again.
+As depicted in Fig. 1, ST produces pseudo labels
+for text using a classifier and then retrains the clas-
+sifier with augmented data in an iterative process.
+By this means, ST utilizes massive unlabeled text
+to denoise the pseudo-annotated neighbors and im-
+prove the generalization on real data (Wei et al.,
+2021; Zhang et al., 2022), boosting various Natural
+Language Understanding (NLU) tasks (Mukherjee
+and Hassan Awadallah, 2020; Li et al., 2021).
+Nevertheless, how to apply ST to Natural Lan-
+guage Generation (NLG), especially the data-
+hungry attribute-controllable NLG, remains an
+open question. Different from typical NLU tasks
+like text classification, controllable NLG takes an
+attribute label as input to generate a textual se-
+quence meeting the given attribute rather than pre-
+dicting labels given input text. This brings two new
+challenges for ST. Challenge 1 : since model inputs
+become discrete labels, there is no massive unla-
+beled data for the NLG model to extend the learned
+distribution boundary. Challenge 2 : augmented
+only by self-generated text, NLG models focus on
+exploitation and cannot explore a larger space. As8760a result, classic ST merely works for a few NLG
+tasks, e.g., Machine Translation (He et al., 2020;
+Jiao et al., 2021) where adequate in-domain text
+exists, but fails to benefit controllable NLG.
+To handle these challenges, we propose a
+novel DualNoisy SelfTraining ( DuNST ), for
+semi-supervised controllable NLG. DuNST jointly
+learns to generate text from given attribute labels
+and predict labels for text, characterizing these two
+directions as a dual variational generation process.
+Such duality allows our model to leverage not only
+generated pseudo text but also pseudo labels pre-
+dicted for available unlabeled text. Both genera-
+tion and classification would be augmented by the
+two kinds of pseudo data and thus gradually re-
+fined during the ST process, handling Challenge
+1. Besides, DuNST incorporates two new types of
+flexible noise into generated pseudo text, namely
+softmax temperature and soft pseudo text, to fur-
+ther perturb and escape from the text space learned
+at the previous ST iteration, which helps propa-
+gate local smoothness and enhance robustness (Xie
+et al., 2020; Chen et al., 2021), addressing Chal-
+lenge 2 . Our method can be theoretically regarded
+as exploring a larger potential space, thus facil-
+itating an extended generalization boundary and
+improved attribute coverage, balancing exploration
+and exploitation better. Hence, DuNST could fur-
+ther boost controllability while maintaining com-
+parable generation fluency and diversity. Our code
+is available at https://github.com/peter
+fengyx/DuNST .
+In summary, our contributions are as follows:
+•To the best of our knowledge, we are the
+first to incorporate Self-training into semi-
+supervised controllable language generation
+and propose a novel and effective ST method.
+•We demonstrate that DuNST explores a larger
+potential text space and extends the general-
+ization boundary, providing a theoretical inter-
+pretation for our method.
+•We conduct thorough experiments on three
+attribute-controllable generation tasks and
+demonstrate the superiority of DuNST in im-
+proving control accuracy with competitive
+quality of the generated text, further extending
+the capacity of powerful PLMs for NLG.2 Related Work
+Controllable Language Generation: Attribute-
+controllable language generation aims to generate
+high-quality text satisfying desired attributes, e.g.,
+sentiment, topic, and style, which could facilitate
+diverse downstream applications, such as stylis-
+tic writing (Ficler and Goldberg, 2017; Yi et al.,
+2020) and language detoxification (Gehman et al.,
+2020). In the era of PLM, an effective paradigm for
+this task is fine-tuning PLMs on datasets contain-
+ing labeled text (Keskar et al., 2019; Gururangan
+et al., 2020). Nonetheless, with the increasing scale
+of PLMs, inadequate labeled data severely ham-
+pers the effectiveness of fine-tuning (Zhang et al.,
+2021). As a remedy, two lines of research have
+been developed. Lightweight tuning searches a trig-
+ger (Sheng et al., 2020) or optimizes only a few
+parameters (Ribeiro et al., 2021; Yang et al., 2023)
+or prefix (Li and Liang, 2021; Qian et al., 2022),
+requiring much less training data. Plug-in control
+steers the generation probability of NLG models
+towards target attributes through updating cached
+hidden states (Dathathri et al., 2020) or rectifying
+the output distribution (Liu et al., 2021; Krause
+et al., 2021; Yang and Klein, 2021) guided by off-
+the-shelf attribute classifiers or conditional PLMs
+at the inference time, without fine-tuning the gen-
+erators. Despite no/weak dependence on labeled
+data, these two lines of work would cause limited
+control accuracy or decreased fluency.
+Self-training: Recently, Self-training has flour-
+ished again by iteratively generating pseudo la-
+bels and augmenting the tuning of data-hungry
+PLMs, showing great advantages in further enhanc-
+ing NLU (Meng et al., 2020; Vu et al., 2021; Du
+et al., 2021; Bhat et al., 2021; Chen et al., 2021)
+and Neural Machine Translation (NMT) (He et al.,
+2020; Jiao et al., 2021) where massive unlabeled
+input text exists. Beyond naive ST, Mukherjee
+and Hassan Awadallah (2020) select unlabeled in-
+stances based on the prediction uncertainty of the
+classifier to improve model confidence. Jiao et al.
+(2021) also collect informative (high-uncertainty)
+monolingual sentences to enhance the translation
+quality of hard examples. Relevant to our work, He
+et al. (2020) corrupts the pseudo target sentences in
+NMT by synthetic noise like token shuffle or para-
+phrase to propagate local smoothness. However, as
+mentioned in Sec.1, due to Challenges 1&2 , it is
+challenging to apply these ST methods to attribute-8761controllable NLG directly.
+Dual Learning and Variational Generation:
+Dual Learning (DL) (He et al., 2016) has been
+traditionally proposed and applied in NMT and
+then extended to joint optimization of NLU-NLG
+tasks (Xia et al., 2017), which is promising for tack-
+ling Challenge 1. Tseng et al. (2020) successfully
+combined table-to-text and text-to-table generation,
+but their model cannot simultaneously optimize the
+two directions with shared features, not compatible
+with our design for Challenge 1. Variational Gen-
+eration (Kingma and Welling, 2014) has proven to
+be effective in learning flexible semantic properties
+and thus generating more diverse and controllable
+text (Hu et al., 2017; Li et al., 2020; Hu et al., 2022),
+more suitable for our scenarios.
+Unlike the aforementioned work, we revisit the
+challenges of incorporating Self-training with con-
+trollable generation and utilize the duality and flex-
+ible noise to handle these challenges, leading to a
+novel and practical ST framework.
+3 Methodology
+3.1 Formulation and Overview
+Letxbe the text, ybe the attribute label, D=
+{x, y}be a labeled dataset with paired text and
+its corresponding label, and D={x}be an
+unlabeled dataset from the same domain. We
+aim to learn an attribute-controllable generator
+G=q(x|y)parameterized by θ(e.g., a large PLM)
+to generate high-quality text x∼q(x|y)(in an
+auto-regressive manner) satisfying the given label
+y. We also endow our model with the ability to
+produce pseudo attribute labels for x∈Dthrough
+jointly learning a text classifier C=q(y|x). We
+simultaneously model and optimize GandCwith a
+shared PLM as a dual process (Sec. 3.2).
+During the training of DuNST (Sec. 3.3), the
+pseudo labels predicted by Chelp cover more un-
+seen samples and hence extend the learned distri-
+bution boundary ( tackling Challenge 1 ), while the
+noisy pseudo text generated by Ghelps perturb the
+previously learned space, further improving gen-
+eralization ( addressing Challenge 2 ). Though we
+emphasize generation in this work, both GandC
+would be promoted and thus keep refining the aug-
+mentation data during ST, which acts as a joint
+exploration and exploitation process (Sec.3.4).3.2 Dual Generation and Classification
+We jointly learn the conditional distribution of text
+q(x|y)and label q(y|x)to match the real ones.
+However, we don’t directly optimize them with
+traditional cross-entropy loss but resort to the vari-
+ational approaches (Kingma and Welling, 2014).
+In detail, we involve a latent variable zto capture
+the underlying semantics and hence have q(x|y)=/integraltext
+q(x,z|y)dz. We could sample a generated text x
+by the decomposition q(x,z|y)=q(x|z, y)∗q(z|y).
+To this goal, we minimize a generation loss as:
+L=−E[logq(x|z, y)]
++KL[p(z|x, y)||q(z|y)], (1)
+where p(z|x, y)andq(z|y)are approximated
+posterior and prior distributions of zandKLis
+the Kullback–Leibler divergence, respectively. Op-
+timizing this loss is equivalent to maximizing a
+lower bound of q(x|y).
+The posterior p(z|x, y)is typically assumed
+as a multivariate Gaussian N(µ, σ)and ap-
+proximated by [µ,logσ] =MLP([h,h])
+with h=Encoder (x), where his the label em-
+bedding of y.Encoder is a Transformer (Vaswani
+et al., 2017) encoder, and MLP is a multi-
+layer perceptron. Similarly, we could build the
+prior q(z|y)∼N(µ, σ)where
+[µ,logσ]=MLP(h).
+Symmetrically, we optimize classification by:
+L=−E[logq(y|z,x)]
++KL[p(z|x, y)||q(z|x)]. (2)
+The text is generated by an autoregressive Trans-
+former decoder x=Decoder (z)and the label is
+predicted by y=MLP(z)with zdrawn from the
+posterior distribution in training and from the prior
+ones in testing. GandCshare most parameters
+(e.g., encoder), as well as the same posterior dis-
+tribution p(z|x, y), to enhance the connection of
+text and corresponding labels, and better utilize the
+knowledge learned via the two directions.
+The final loss is computed as follows:
+L=λL+λL, (3)
+where λandλare hyper-parameters to balance
+the importance of classification and generation. We
+will show later that such variational dual learn-
+ing further boosts controllability and text diversity
+(Sec. 4.7) and helps refine pseudo labels (Sec. 4.8).8762Algorithm 1: Training Process of DuNST
+Input: Labeled set D, unlabeled set D,
+attribute set Y.Jointly train base model G,ConDby
+optimizing Eq.(3), store the best G,C.forepoch ←1toMaxEpoch do forxinDdo ˆy=C(x) end Build pseudo label set: D={x,ˆy} foryinYdo Sample tpriors:
+{z}∼q(z|y) fork←0totdo form←0toMaxLength do Compute soft pseudo token
+dusingGand
+Eq.(4). Set y←y. end end end Build soft pseudo text: D={d, y} TrainG,Con
+{D, D, D}by optimizing
+Eq.(3) and Eq.(5), update the
+parameters to G andC .end
+3.3 Dual Noisy Self-training
+As discussed in Sec. 1, augmented only by self-
+generated text, the model would increasingly en-
+hance the exploitation of the previously learned
+space but fail to explore more, resulting in con-
+strained attribute distributions and thus marginal
+improvement of control accuracy ( Challenge 2 , see
+Table 1). Injecting noise into pseudo text is a prac-
+tical way to facilitate exploration. However, the
+typical synthetic noise (He et al., 2020) ( e.g., ran-
+domly shuffle tokens in pseudo text) encourages
+isotropic exploration, which may diverge far from
+the valid space and get too noisy for NLG.
+To address this problem, we propose two novel
+and effective types of soft noise to enable safer
+exploration, namely High-temperature Generation
+andSoft Pseudo Text , in what follows.
+High-temperature Generation (HTG): We in-
+troduce temperature τin the softmax layer:
+d=σ(G(y,ˆ x,z)/τ), (4)where dis the output token distribution for the
+m-th token, ˆ xis the previously generated m−1
+tokens and σmeans softmax. Lower τ(e.g.,τ <1
+) leads to a sharper distribution and thus motivates
+more certain output (usually used in NMT). Differ-
+ently, we choose τ >1to encourage more diverse
+but semantically reasonable (high generation prob-
+ability) tokens which could enhance local smooth-
+ness and help explore more potential directions.
+Besides, the degree of noise is easy to control by
+adjusting τfor a better trade-off.
+Soft Pseudo Text (SPT): HTG improves the di-
+versity of pseudo text, but also takes the risk of sam-
+pling invalid tokens and propagating errors in an au-
+toregressive generation. Moreover, HTG produces
+discrete pseudo text (a point in text space) and thus
+requires numerous sampled pseudo text (points) to
+cover a small neighborhood (Fig. 2). Therefore, we
+further propose to generate soft pseudo text, where
+we directly store the output token distribution d
+and let Gdirectly learn to reproduce d. Then we
+replace Eq.(1) with:
+L=
+
+−logq(x|z, y)+
+KL[p(z|x, y)||q(z|y)],x, y∈D, D
+KL[d||q(x|z, y)]+
+KL[p(z|x, y)||q(z|y)],x, y∈D.
+(5)
+Such SPT acts as a kind of Knowledge Distill-
+ing (Hinton et al., 2015) in an iterative manner.
+In this way, we avoid losing relevant semantic in-
+formation in dand reduce needed samples, fur-
+ther extending the generalization boundary (see
+Table 3).
+The complete algorithm is described in Alg. 1.
+3.4 Theoretical Analysis
+To understand why DuNST could work well, we
+interpret its advantages with the following theorem:
+Theorem 1. Optimizing the training objective of
+DuNST is equivalent to approximately minimizing
+the upper bound of
+KL[p||q] +KL[p||q] +KL[u||q],(6)
+where pis the real text distribution, qandq
+are models estimated at the current and last ST
+iteration, respectively, and uis a noise distribution.
+Proof . See Appendix B.8763
+In Theorem 1, the first KL term corresponds to
+the optimization of Eq.(3) that approximates the
+real distribution. The second term corresponds to
+classic Self-training, which works as a regulariza-
+tion. As depicted in Fig. 2, such regularization
+forces the model to fit the already learned space,
+causing over-exploitation. The last one is the noise
+to enhance exploration. Compared to the isotropic
+synthetic noise (too noisy) and the hard pseudo text
+(too sparse), DuNST with soft pseudo text could ex-
+plore potential directions, cover larger space more
+smoothly, and thus further push the boundary.
+4 Experiments
+4.1 Tasks
+We conduct exhaustive experiments on three con-
+trollable generation tasks, described below:
+Sentiment control with prompt: We evaluate
+the controllability of sentiment on the IMDb
+movie review dataset (Maas et al., 2011). Follow-
+ing (Dathathri et al., 2020), we use their 15 manu-
+ally created prompts and another 85 sampled from
+IMDb (100 in total) as model input and generate
+10 samples for each prompt and each sentiment.
+Topic control w/o prompt: We use the AGNews
+dataset (Zhang et al., 2015) to evaluate topic con-
+trollability. We assess our model’s ability to gen-
+erate from scratch on this dataset and sample 300
+generations for each topic.
+Text detoxification: We use the Jigsaw Toxic
+Classification Dataset. Following (Qian et al.,
+2022), we use the 203 “challenging” prompts (toxi-
+city < 0.5) from (Gehman et al., 2020), and gener-
+ate 10 non-toxic sentences for each prompt.
+We sample 5% of IMDb training samples as
+labeled data and directly take their provided unla-beled set. Since there is no separate unlabeled text
+in AGNews, we sample 3% of training samples as
+labeled data and use the others as unlabeled ones.
+For a fair comparison, we keep the ratio of the
+original human-labeled data/generated pseudo tex-
+t/unlabeled data with pseudo label ( D/D/D
+(in Alg. 1)) to 1:1:30. More details of the dataset
+are provided in Appendix A.2.
+4.2 Experimental Settings
+We use UniLM-base-cased (Dong et al., 2019) as
+the shared encoder and decoder of DuNST. The di-
+mension of latent zis 128 for sentiment control and
+256 for topic control. We use AdamW (Loshchilov
+and Hutter, 2019) with learning rate =5e-5, warm-
+up steps =one epoch, and batch size =8 for op-
+timization across all tasks. λ= 1andτ= 5for
+all tasks, λis 10 for IMDb and 1 for AGNews.
+As a common practice (Holtzman et al., 2019), we
+use top- pwithp=0.9sampling method for decod-
+ing. To stabilize training, we further incorporate
+BOW (Wang et al., 2017) and annealing (Fu et al.,
+2019) techniques. Following ST in NLU (Mukher-
+jee and Hassan Awadallah, 2020), we start ST from
+a base model tuned on Dwithout any sample
+selection as in (Vu et al., 2021). More implementa-
+tion details are provided in Appendix A.1.
+4.3 Evaluation Metrics
+We mainly focus on the controllable NLG side, con-
+sidering the following four kinds of metrics. Those
+for classification are provided in Appendix C.1.
+Fluency: We evaluate generation fluency by the
+perplexity (PPL) of generated text measured by
+GPT2-XL (Radford et al., 2019), i.e.,Output PPL .
+Generalizability: We calculate the PPL of each
+model on the held-out test set in each dataset, i.e.
+Model PPL , to evaluate how well the model could
+generalize to test data in a specific unseen domain.
+Controllability: We evaluate the control accu-
+racy through classification Macro-F1( F1)) on the
+generated text by RoBERTa-large based classifiers
+fine-tuned on corresponding full training data for
+sentiment and topic, respectively. For toxicity eval-
+uation, we use the Perspective API.
+Diversity: To evaluate the diversity of generated
+text, we consider Dist-n (Li et al., 2016) and Self-
+BLEU (S-BL) (Zhu et al., 2018).8764
+More metrics details are described in Appendix
+A.3.
+4.4 Baselines
+We compare our model with three kinds of (super-
+vised or semi-supervised) strong NLG baselines.
+Finetune PLM: We finetune different power-
+ful PLMs on each downstream dataset, including
+GPT2 (Radford et al., 2019), UniLM (Dong et al.,
+2019) and T5 (Raffel et al., 2020).
+Lightweight fine-tuning methods: (1) Prefix-
+tuning (PF) (Li and Liang, 2021): this method only
+tunes the prefix and freezes all parameters of the
+PLM, requiring less data. (2) Ctr-PF(Qian et al.,
+2022): A contrastive version of PF.
+Self-training methods: (1) PT: the classical Self-
+training (Grandvalet and Bengio, 2004), which
+generates pseudo text in each ST iteration and
+updates parameters with both real and pseudo
+text from the last iteration. (2) PT(noise): Noisy
+Self-training (He et al., 2020), which brings syn-
+thetic noise (token drop, swap and mask) to the
+pseudo text for self-training. (3) PT(noise)+PL:
+We combine PT(noise) and pseudo labeling to pro-
+duce and utilize both pseudo text and pseudo la-
+bels, which are predicted from the real unlabeled
+text by a BERT-base (Devlin et al., 2019) fine-
+tuned on our labeled data. (4) PT(select)+PL:
+PT(select) is a modified ST method with sample se-
+lection (Mukherjee and Hassan Awadallah, 2020),
+which over-generates noisy pseudo text and selectshigh-quality ones by the classifier confidence and
+uncertainty.
+For a fair comparison, we choose the PLM with
+the best fine-tuning performance on each task (and
+a similar model size to ours) as the backbone of
+these ST variants (GPT2 for sentiment and UniLM
+for the others). Besides, we also provide the evalu-
+ation results of Ground Truth as an upper bound of
+performance. We give more details of the baseline
+models above in Appendix A.4.
+4.5 Results
+As shown in Table 1, on both tasks, our DuNST
+achieves significant improvement in controllabil-
+ity compared to fine-tuned PLMs and lightweight
+tuning and is comparable in fluency, generalizabil-
+ity, and diversity. Fine-tuned PLMs obtain limited
+F1 improvement but severely decreased diversity
+(+6.7 S-BLEU at most), indicating they are overfit-
+ted to these few labeled data points and fail to cover
+larger attribute spaces. PF and Ctr-PF only reduce
+required data but perform even worse than tuned
+PLMs. The unnatural O-PPL (much lower than
+that of ground truth) shows they lose the capacity
+of PLMs and cause degenerated results. In contrast,
+thanks to the duality, DuNST simultaneously re-
+fines pseudo labels and enhances the quality and di-
+versity of pseudo text in an iterative manner, boost-
+ing controllability and diversity ( Challenge 1 ).
+We also have some interesting findings about
+existing self-training methods. 1) The classic ST
+method even hurts controllability and generaliz-
+ability in the sense of Challenge 2 . As discussed8765
+in Sec. 1, merely self-generated text over-stresses
+exploitation of the learned space and hinders explo-
+ration. 2) Traditional synthetic noise PT(noise) mo-
+tivates isotropic exploration, which diverges from
+valid attribute distributions (poorer O/M-PPL). 3)
+Sample selection brings a marginal improvement
+but costs 50% more training time. Thus we did
+not apply such a selection in DuNST. 4) Additional
+pseudo-labels significantly improve performance.
+However, unlike our dual method, the fixed pseudo
+labels by PT(noise)+PL cannot evolve during ST.
+By comparison, DuNST utilizes high-temperature
+sampling and soft text to introduce flexible noise,
+encouraging safer exploration and better controlla-
+bility and diversity while maintaining good quality.
+Due to space limitations, we report the results of
+text detoxification under both automatic and human
+evaluation in Appendix C.1.
+4.6 Human Evaluation
+To better verify the effectiveness of DuNST, we
+also conduct a human evaluation. We generated
+100 samples for each model and each task and in-
+vite 5 competent annotators to score the samples on
+Fluency ,Novelty , and Attribute Relevance . As
+shown in Table 2, DuNST consistently outperforms
+baselines on all three criteria, which indicates that
+DuNST not only has better attribute controllabil-
+ity but also generates fluent and diverse texts. See
+Appendix A.6 for detailed evaluation protocol.
+4.7 Ablation Study
+We conduct an ablation study on the IMDb dataset.
+As shown in Table 3, we can find: 1) variational
+learning further enhances control accuracy and di-
+versity with slight PPL loss, which is worthwhile
+since the generated text is already fluent enough
+(close to ground truth PPL). 2) pseudo labels lead
+to a significant improvement. 3) soft pseudo text
+outperforms the hard one on controllability and di-
+versity but with marginal fluency loss. Solely hard
+pseudo text in ST limits model coverage, while the
+soft one brings a smoother noise and helps push
+the learned boundary.
+4.8 Analysis
+Effect of Duality: We compare our model with a
+variant ( −Dual ) where we annotate pseudo labels
+in advance and cut off classification losses through
+self-training. As depicted in Fig. 3, since classifica-
+tion and generation share parameters, without opti-
+mizing the classifier and pseudo labels, the learned
+distribution qwould gradually shift and thus the
+classification performance greatly drops. As a re-
+sult, generation F1 reaches its maximum soon and
+stops increasing. On the other hand, thanks to the
+simultaneously optimized classifier, DuNST keeps
+improving classification and refining pseudo labels,
+further enhancing controllability.8766
+Number of pseudo text: We also evaluate
+DuNST on varying numbers of pseudo text, keep-
+ing other settings unaltered. As shown in Fig. 4,
+DuNST performs the best with equal size of pseudo
+text and labeled data. More pseudo text brings too
+much noise, which hurts generation quality as the
+model learns more noise than semantics. Too less
+pseudo text makes the model lose exploration abil-
+ity and thus fail to extend the learned distribution
+boundary. Therefore, we should find a suitable
+noise level to balance exploration and exploitation.
+Number of labeled data: Besides, we also as-
+sess our model with varying numbers of labeled
+training instances (with the same unlabeled data
+size) and observe consistent superiority to baseline
+models. Though all models benefit from more an-
+notations, our DuNST could quickly learn from
+pseudo labels and text and thus achieve better per-
+formance with much less labeled data. Detailed
+analyses are described in Appendix C.3.
+Effect of Noise (temperature): To illustrate why
+noise encourages exploration and improves con-
+trol, we plot the posterior of generations in differ-
+ent temperatures and visualize the estimated deci-
+sion boundaries based on training data in Fig. 5(a).
+We find that higher noise leads to more challeng-
+ing points (and thus more informative pseudo text)
+closer to the current boundary. Such refined pseudo
+data enables the model to learn to distinguish rep-
+resentations under different attributes better and
+push the generalization boundary, thus potentially
+improving generation controllability. Besides, the
+noisy pseudo text also helps further improve ex-
+ploration and attribute coverage. We discuss it in
+Appendix C.3.
+Fig. 5(b) shows the generation performance of
+DuNST with different temperatures. We achieve
+the best controllability and diversity when the tem-
+perature is 5 in our setting. Less noise would
+lose the exploration ability and damage general-
+ization, while too-noisy pseudo text runs a risk of
+approaching invalid space (Sec. 3.4), which indi-
+cates a suitable temperature is necessary to balance
+exploration and exploitation.
+Case Study: In order to verify the generation
+quality and attribute relevance, we present some
+cases sampled from different models in Table 4. We
+can see that Ctr-PF and ST (GPT2) suffer from re-
+peating expressions (e.g., “poor quality” and “got
+bored”). In contrast, DuNST produces more di-
+verse and fluent expressions, which are also more
+faithful to the given negative attribute. We provide
+more generated cases in Appendix D.
+5 Conclusion and Future Work
+We propose a novel DuNST method to apply
+Self-training to semi-supervised controllable NLG.
+DuNST (1) jointly optimizes generation and classi-
+fication via a dual variational learning framework
+to leverage both pseudo text and pseudo labels,
+and (2) incorporates two kinds of soft noise into
+ST, better exploring larger potential text space and8767
+extending the attribute distribution boundary. Theo-
+retical analysis demonstrates that DuNST acts as a
+combination of regularization-like exploitation and
+attribute boundary exploration, which makes a bet-
+ter balance of the two requirements, significantly
+improving control accuracy with satisfactory gener-
+ation fluency and diversity. Since the pseudo data
+is generated in an auto-regressive manner, which
+takes longer training time, we plan to explore ways
+to accelerate the self-training process in the future.
+6 Limitations
+Though DuNST works well, it has four kinds of
+limitations as follows:
+•Decelerated training process. As with all other
+Self-training methods, DuNST also needs to
+reproduce pseudo labels and pseudo text at
+each ST iteration. Since the pseudo text
+(both hard and soft) is generated in an auto-
+regressive manner, which is hard to be done
+parallelly, leading to longer training time.
+•Reliance of unlabeled in-domain text. As we
+discussed in Sec. 4, though our soft pseudo
+text brings non-trivial improvement, the over-
+all performance of all ST methods still re-
+lies on pseudo labels from unlabeled text.
+When unlabeled text is extremely inadequate
+or even unavailable (e.g., low-resource sce-
+narios), how to better utilize pseudo text for
+further improvement is an open challenge.
+•Efforts of tuning noise level. As we discussed
+in Sec. 4.8, the noise level τis essential for a
+balanced performance, which should be care-
+fully tuned for each downstream task.•Task generalization and scalability. We mainly
+investigate controllable NLG in this work,
+while it is still unknown whether our method
+works for other NLG tasks, like NMT and
+Text Summarization. Besides, as we analyzed
+in Sec. 3.4, ST actually acts as a kind of regu-
+larization and smoothing. How to apply this
+paradigm to super large PLMs ( e.g., GPT2-
+XL and GPT3), where the supervision signals
+from limited labeled data become extremely
+weak, is also an open question.
+7 Ethics Statement
+Since the Jigsaw dataset is unclean, the model
+trained on this corpus may also output some toxic
+and offensive expressions. Besides, our model may
+also be utilized to produce toxic and harmful con-
+tent by simply setting the attribute label as toxic,
+which would take the risk of producing and propa-
+gating harmful information. Also, topic/sentiment-
+controlled generated text may contain some so-
+cially biased, offensive, or politically sensitive ex-
+pressions. Besides, since our model significantly
+improves the controllability of generated text, it
+is likely to produce more plausible texts like fake
+news and movie reviews, which could possibly be
+utilized to produce and propagate disinformation.
+However, these generated texts can also be used
+as pseudo data in data augmentation for fake news
+detection and thus have the potential to increase
+the current fact-checking and fake news detection
+model.
+Acknowledgement
+Feng’s and Lakshmanan’s research was supported
+in part by grants from NSERC (Canada) and UBC
+Data Science Institute.
+References8768876987708771A Detailed Setting
+A.1 Implementation Details
+We use pre-trained UniLM-base-cased (Dong et al.,
+2019) as the encoder and decoder of our V AE
+model since UniLM shares the parameter of trans-
+former blocks in the encoder and decoder. We use
+the state of [CLS] token to obtain the representa-
+tion in the encoder. The dimension of latent zis
+set to 128 for sentiment-controlled generation and
+detoxification(2-class) and 256 for topic-controlled
+generation (4-class). To fuse the latent zbetter
+with the Transformer decoder, we use a simplified
+fusion method of DELLA (Hu et al., 2022) where
+we concatenate zto the attention output of each
+token in each Transformer layer, and then add a lin-
+ear layer to transfer the new attention output to the
+original shape of attention output. We did not use
+the low-rank tensor to compute layer-wise latent z
+to save the number of parameters.
+To avoid KL-vanishing, we utilize cyclical an-
+nealing tricks (Fu et al., 2019) to train DuNST and
+set the cycle length equal to training steps in each
+epoch. In each cycle, first the KL weight increases
+from 0 to 1 linearly for the first 80% steps in a cycle,
+and keeps to be 1 for the remaining 20% steps. KL
+annealing is activated for 5 epochs for classification
+KL-loss and 7 epochs for generation KL-loss. Be-
+sides, we use the KL thresholding scheme (Li et al.,
+2020) to give up driving down KL for dimensions
+ofzthat are already beneath the target compression
+rateKL-lambda .
+We tuned KL-lambda ∈ {0.01,0.03,0.05,0.1}
+(following Li et al. (2020)), λ∈ {1,5,10}, the
+ratio of Pseudo Texts (Fig. 4), and softmax tem-
+perature τ∈ {0.2,1,5,10}(Fig. 5(b)) to obtain
+the reported results. We set KL-lambda to be 0.05
+for sentiment-controlled generation, 0.03 for detox-
+ification, and 0.01 for topic-controlled generation.
+λis 10 for sentiment-controlled generation and 1
+for topic-controlled generation and detoxification.
+Softmax temperature τis set to be 5 for all tasks.
+For other hyperparameters, λis set to be 1, and
+weight for BOW loss (Wang et al., 2017) λis set
+to be 0.2 for all tasks. We use AdamW (Loshchilov
+and Hutter, 2019) as an optimizer. The training
+batch size is 8 and the learning rate is 5e−5. We
+apply linear warmup to the optimizer and the num-
+ber of warm-up steps is one epoch.
+We implement DuNST and all other baselines
+based on Huggingface Transformers (Wolf et al.,
+2020) library of v4.21.1 and use NVIDIA A100 totrain our model. The total number of training GPU
+hours is around 8h for IMDb, 10h for Jigsaw, and
+9h for AGNews. The number of parameters of our
+model is 134.56M for sentiment-controlled genera-
+tion and text detoxification. For a topic-controlled
+generation, the number of parameters is 136.19M.
+In the generation phase, we use top- psampling
+(p= 0.9) as the decoding method. Other generator
+configurations include a length penalty to be 1.0, a
+repetition penalty to be 1.0, and a no-repeat-ngram-
+size to be 4 for all baselines. All experimental
+results are trained and tested in a single run.
+A.2 Dataset Description
+For IMDbdataset (Maas et al., 2011), the authors
+claimed in their paper that In the interest of pro-
+viding a benchmark for future work in this area,
+we release this dataset to the public without claim-
+ing any further copyright . For AGNewsdataset
+(Zhang et al., 2015), it is claimed in the website
+thatYou are encouraged to download this corpus
+for any non-commercial use . For Jigsawdataset,
+the dataset is under CC0, with the underlying com-
+ment text being governed by Wikipedia’s CC-SA-
+3.0. All datasets we used are open-sourced and
+are used for research only, which is consistent with
+their intended use.
+For IMDb dataset and AGNews dataset, we leave
+10% of the training set as validation data, and oth-
+ers as training data. For the AGNews dataset, we
+use the description for text generation and wrote a
+script to resolve HTML tags. For Jigsaw dataset,
+we apply a binary setting where we keep the “non-
+toxic” class unchanged and group all other classes
+into “toxic” class.
+The details of datasets are described in Table A1.
+For the Jigsaw dataset, there are only 414 toxic
+data (9.6%) in the Jigsaw dataset, which shows
+that Jigsaw is an extremely imbalanced dataset,
+bringing difficulty in detoxification.
+A.3 Evaluation Metric Details
+We set the minimum generation length to 10. For
+the maximum length, 490 for sentiment, 50 for
+detoxification, and 40 for topic. We evaluate gener-
+ation quality on the following metrics:8772labeled Unlabeled Dev Test Avarage Length
+IMDb(5%) 1125 33750 2500 25000 270
+AGNews(3%) 3240 97200 12000 7600 41
+Jigsaw(3%) 4308 43080 15957 63978 73
+Acc.↑F1↑AUC↑
+IMDb
+RoBERTa-large 96.15 96.20 99.22
+BERT-base 88.40 88.62 95.21
+AGNews
+RoBERTa-large 94.88 94.89 99.34
+BERT-base 89.93 89.91 98.23
+Fluency: We evaluate generation fluency by the
+perplexity of generated text measured by GPT2-
+XL (Radford et al., 2019), i.e.,Output PPL .
+Generalizability: We calculate the perplexity
+of each model on each testing set, i.e.,Model
+PPL , to evaluate the generalizability of the model.
+For V AE-based models, we can only obtain the
+lower bound of logp(x). Following (Li et al.,
+2020; Hu et al., 2022), We consider klatent vari-
+ables z, z, ..., zsampled from the posterior dis-
+tribution q(z|x), and PPL based on these latents
+p(x, z). Based on the fact that average impor-
+tance weights are an unbiased estimator of logp(x)
+(Burda et al., 2016) and Jensen’s Inequality, we
+have:
+L=E/bracketleftigg
+log1
+k/summationdisplayp(x, z)
+q(z|x)/bracketrightigg
+≤logE/bracketleftigg
+1
+k/summationdisplayp(x, z)
+q(z|x)/bracketrightigg
+= log p(x)(7)
+Thus we use Lto estimate the output PPL in V AE-
+like models.
+Controllability: We evaluate the control accu-
+racy through classification performance (accuracy
+(Acc) and Macro-F1( F1) ) on the generated text
+by the two fine-tuned RoBERTa-large classifiers
+for sentiment and topic. Table A2 presents the per-
+formance of our evaluator RoBERTa-large. Wefind that RoBERTa-large has a satisfactory classi-
+fication accuracy and F1 on these two tasks, and
+thus is able to act as a good evaluator of generation
+quality. For detoxification, we report the percent-
+age of toxic sentences ( Toxic % ) using Google
+Perspective API. Perspective API is a free API for
+scoring the toxicity of text. Following Qian et al.
+(2022) we also use this Perspective API for toxicity
+evaluation.
+Diversity: To evaluate the diversity of gener-
+ated text, we consider the following metrics: (1)
+Dist-n (Li et al., 2016): the percentage of distinct
+n-grams on generated samples. We evaluate on
+n= 1,2,3,4and compute the geometric mean
+asDist. (2) Self-BLEU (Zhu et al., 2018). Self-
+Bleu calculates the BLEU score on the generated
+samples, which averages the BLEU score of each
+generated sequence calculated with other generated
+ones as references. The BLEU score is computed
+as the geometric mean of BLEU- n(n= 2,3,4).
+This metric measures the diversity of a set of gen-
+erated sequences. Lower Self-BLEU means these
+generated sequences are more distinguishable from
+each other.
+Among all the above metrics, Accuracy, F1,
+AUC, Dist-n, and Self-BLEU are reported as 100
+times their original value for convenience.
+A.4 Baseline Details
+For Finetune LM, we feed a prepend sentence as a
+control sentence. For sentiment-controlled gener-
+ation, we use This is a [positive/negative] review
+as control sentence. For topic-controlled genera-
+tions, we use The following is about [topic] . For
+detoxification, we use This is a [toxic/non-toxic]
+comment as control sentence. For T5, since it acts
+in a sequence-to-sequence manner, we feed the con-
+trol sentence to the encoder and training text to the
+decoder. We fine-tune all pre-trained LMs under
+learning rate 5e-5 for 10 epochs and warmup steps
+to be 1 epoch.
+For GPT2+PT+Noise, we use the same imple-
+mentation of Noise Layer as He et al. (2020). We8773set the token drop rate and mask rate to 5%. Since
+GPT2 does not have a Mask token, we randomly
+substitute this token for another token. We set the
+parameter of word shuffle to 1.1.
+For the pseudo-labeling-based method, we re-
+port the performance of pseudo labeler BERT-base-
+cased in Table A2.
+For GPT2+PT(select)+PL, we over-generate two
+times of pseudo text and compute the uncertainty
+score and classification confidence from the BERT-
+base-cased classifier. The classification confidence
+s is the softmax probability of the predicted
+label. Uncertainty score s is Bayesian
+Active Learning by Disagreement (BALD) com-
+puted by Monte-Carlo Dropout (Mukherjee and
+Hassan Awadallah, 2020). A high BALD score
+means the model is highly confused. We want to
+select the sample that is of high confidence and low
+BALD score. Thus we select samples based on the
+following score:
+s =s+1e−5
+s
+For prefix-tuning (PF) and contrastive prefix-
+tuning (Ctr-PF). We follow the implementation de-
+tails described in Qian et al. (2022).
+A.5 Additional Settings for Detoxification
+Tasks
+As mentioned in A.2, the Jigsaw dataset suffers
+from severe imbalanced labels where toxic data
+only counts for 9.6% of training data. To alleviate
+this problem, we can tune the ratio of toxic and
+non-toxic data when generating pseudo texts and in
+conclusion balance the whole training set. We can
+obtain a less imbalanced dataset if we increase the
+ratio of toxic to non-toxic data in PT. We propose
+DuNST(pos) where all pseudo texts are generated
+from toxic attributes.
+Similarly, in the baseline for detoxification tasks,
+we additionally tested a new variant for GPT2-
+based self-training methods. GPT2+PT(select, all
+toxic)+PL refers to all pseudo texts generated from
+toxic attributes, while GPT2+PT(select)+PL refers
+to generating 1:1 toxic/non-toxic pseudo texts.
+A.6 Human Evaluation Details
+We invite 5 competent annotators to score gener-
+ated samples. All of the annotators are graduate
+students. Each annotator is assigned 420 generated
+text: 120/180/120 for sentiment/topic/detoxifica-
+tion tasks. Each sentiment/topic-controlled gener-ated text is annotated by 2 annotators. Each text in
+the detoxification task is annotated by 3 annotators.
+Annotators will be paid 30$ for completion, and
+they were aware of the potential risks or ethical
+concerns of machine-generated texts. Below we
+attach the instruction for workers.
+Attention: all machine-generated text involved is
+used for research only. The generation may contain
+toxic content including discrimination and offen-
+sive content.
+Metrics:
+Sentiment/Topic:
+Fluency: Whether the generated text is fluent/-
+grammatically correct. A small number of HTML
+tags/special words (like <br>) are permitted. The
+score ranges from 1 (least fluent) to 5 (most fluent).
+Novelty: The extent of novelty INSIDE the gen-
+erated text. E.g., distinct words/expressions, and
+repeated phrases. The score ranges from 1 (least
+novel, a sentence/word repeat till the end) to 5
+(most novel, all sentence describes new stuff).
+Attribute Relevance: whether the generated text
+is relevant to its label. There might exist exam-
+ples that contain both positive/negative expressions.
+5=exactly relevant; 4=mostly relevant; 3=neutral
+(not contain sentiment or 50/50); 2=slightly rele-
+vant, but more similar to another class;1=totally
+opposite.
+Detoxification: Please only evaluate the qual-
+ity of generated text AFTER prompts, since the
+prompt itself might be toxic. Toxicity: whether
+the provided textual sequences contain any toxic
+content, including but not limited to offensive text,
+abusive language, swearwords, hate speech, deni-
+grating messages, microaggression, discrimination,
+sex, rude words, and hominem attack. The score
+ranges from 1 (most non-toxic) to 5 (most toxic).
+B Derivation and Proof
+B.1 Derivation of Dual V AE ELBO
+To optimize the attribute-controllable generation
+direction, we aim at learning the conditional dis-
+tribution of text, namely q(x|y), and derive the8774evidence lower bound (ELBO) as:
+logq(x|y)
+= log/integraldisplay
+q(x, z|y)p(z|x, y)
+p(z|x, y)dz
+= logE[q(x, z|y)
+p(z|x, y)]
+≥E[logq(x|z, y)q(z|y))
+p(z|x, y)]
+=E[logq(x|z, y)]−KL[p(z|x, y)||q(z|y)]
+=− L,
+where we approximate the true prior and poste-
+rior distributions q(z|y),p(z|x, y)with a prior
+network and a posterior network (a.k.a. recog-
+nition network). When we input a prompt cas
+in our experiments on IMDB, similarly we can
+getlogq(x|y, c)≥E[logq(x|z, y, c )]−
+KL[p(z|x, y, c )||q(z|y, c)].
+For attribute label classification, we maximize
+q(y|x)and get a ELBO symmetrically:
+logq(y|x)
+= log/integraldisplay
+q(y, z|x)p(z|x, y)
+p(z|x, y)dz
+= logE[q(y, z|x)
+p(z|x, y)]
+≥E[logq(y|z, x)q(z|x))
+p(z|x, y)]
+=E[logq(y|z, y)]−KL[p(z|x, y)||q(z|x)]
+=− L,
+where we similarly approximate the true prior
+q(z|x)with another prior network.
+Please note that the two optimization directions
+shared most parameters, and utilize the same recog-
+nition network but incorporate different prior dis-
+tributions.
+B.2 Proof of Theorem 1
+For brevity, we ignore the hyper-parameters λ. De-
+finepas the real data distribution while qas the
+estimated one. We assume we could approximate
+the real prior distribution of label, q(y), by statistics
+under the i.i.d. assumption, and assume our model
+also estimates the real text distribution, q(x), well
+enough with a large unlabeled dataset D. That is,
+KL[p(x)||q(x)]< ϵandKL[p(y)||q(y)]< ϵ. Thenover the whole labeled dataset p(x, y)we have:
+L+L
+=E{−E[logq(x|z, y)
++ log q(y|z, x)] + KL[p(z|x, y)||q(z|y)]
++KL[p(z|x, y)||q(z|x)]}
+=E{/integraldisplay
+p(z|x, y)[logp(z|x, y)
+q(x|y, z)q(z|y)
++ logp(z|x, y)
+q(y|x, z)q(z|x)]dz}.
+Then we consider the left term of the above equa-
+tion and have:
+E{/integraldisplay
+p(z|x, y)[logp(z|x, y)
+q(x|y, z)q(z|y)dz
+=E{logp(x, y, z )q(y, z)q(y)
+p(x, y)q(x, y, z )q(y, z)}
+=KL[p(x, y, z )||q(x, y, z )] +E[logq(y)
+p(x, y)]
+≈KL[p(x, y, z )||q(x, y, z )] +H(x|y)
+≥KL[p(x, y, z )||q(x, y, z )],
+where the second last step is because by assumption
+we have p(y)≈q(y). Similarly, for the left term,
+we have:
+E{/integraldisplay
+p(z|x, y)[logp(z|x, y)
+q(y|x, z)q(z|x)dz
+≈KL[p(x, y, z )||q(x, y, z )] +H(y|x).
+≥KL[p(x, y, z )||q(x, y, z )].
+Combining all the results above, we conclude:
+L+L≥KL[p(x, y, z )||q(x, y, z )].(8)
+Then we consider the scenario of Self-training.
+Define the real distribution formed by the dataset
+asp(x, y, z ), the estimated distribution at the last
+ST iteration as q(x, y, z )which is formed by the
+generated pseudo labels and text, and the one at the
+current ST iteration as q(x, y, z ). As discussed in
+Sec. 3.3, we add noise to pseudo text to enhance
+exploration. Therefore, the previously learned
+q(x, y, z )is disturbed and becomes q(x, y, z )+u
+where uis the noise distribution. For brevity, we
+abbreviate these distributions as p,q,qandu, re-
+spectively. In Self-training, we are actually fitting
+qto not only qbut also qandu. Therefore, we
+are minimizing an upper bound of:
+KL[p+q+u||q]
+=/integraldisplay
+(p+q+u) logp+q+u
+qd.8775Consider the first term:
+/integraldisplay
+plogp+q+u
+qd
+=/integraldisplay
+plogp
+q∗p+q+u
+pd
+=KL[p||q]−KL[p||p+q+u]. (9)
+Since p,qanduare all fixed at the current
+iteration, we can ignore the last term KL[p||p+
+q+u]. Similarly, we have that minimizing
+KL[p+q+u||q]equals to minimizing KL[p||q]+
+KL[q||q] +KL[u||q], concluding the proof.
+C Additional experimental results
+C.1 Detoxification Results
+As shown in Table C4, our DuNST outperforms
+all the other baselines on controllability. DuNST
+outputs the least toxic text while keeping a rel-
+atively high diversity. We find that generating
+all toxic pseudo texts performs better than gen-
+erating 1:1 toxic/non-toxic pseudo texts for GPT2
+and UniLM, which shows that adding pseudo text
+in self-training can tackle the issue of the imbal-
+anced dataset. The Output PPL and Model PPL of
+DuNST are larger than the baselines. We explain
+the reason as follows. Since we are choosing toxic
+prompts marked as “challenging”, it means that
+toxic sentences would be more likely to be gener-
+ated and thus have a lower PPL score. Similarly,
+some non-toxic continuation might get a high PPL
+score from the GPT2-XL model, since it is rarer
+to be seen and is less natural from the challenging
+prompt. This does not mean that generation fluency
+is worse. Human evaluation on detoxification tasks
+(see Table C1) demonstrates that DuNST gener-
+ation does not have a significant difference from
+UniLM generation in fluency and novelty. On the
+other hand, its toxicity level is significantly lower
+than the two baselines, which further demonstrates
+that DuNST can improve generation controllability.C.2 Classification Results
+Table C2 reports the classification performance of
+our model on 3 tasks. We find that self-training
+on pseudo-labeled data could significantly improve
+classification performance, and thus improve gen-
+eration quality. Pseudo texts have a slight improve-
+ment in classification performance on sentiment-
+controlled and topic-controlled generation tasks.
+For the detoxification task, the classification per-
+formance drops a little. We explain the reason as
+follows. We assume that attribute distribution in the
+test set is the same as the training set. The attribute
+distribution of the whole training data is shifted
+since all pseudo texts are toxic, which makes the
+distribution of classifier prediction far away from
+the testing set.
+C.3 Finer illustration of analysis
+Table C3 shows the comparison result on the topic
+generation task. We can see that without duality
+the generation performance drops significantly.
+Fig. C1 depicts the distribution of BERT-large
+embedding of training data and DuNST-generated
+data in different temperatures under World topic.
+Here we use the [CLS] embedding of the BERT-
+large model to represent sentence embedding.
+We find that larger generation temperature leads
+to more diverse sentence representation, which
+demonstrates that high-temperature generation of
+pseudo data could improve generation diversity.
+C.4 Effect of Different Numbers of Labeled
+Data
+We show the effectiveness of different models over
+changing sizes of training data in Fig. C2. We find8776Sentiment Topic Detoxification
+Acc.↑F1↑AUC↑Acc.↑F1↑AUC↑Acc.↑F1↑AUC↑
+DuNST 91.8 91.9 95.8 88.8 88.8 95.8 90.3 63.0 94.4
+-PT 91.7 91.8 95.5 87.7 87.7 96.3 91.5 65.6 95.4
+-PL-PT 89.3 89.3 95.1 86.9 86.9 94.8 90.9 63.7 94.2
+BERT-base 88.40 88.62 95.21 89.93 89.91 98.23 91.5 64.3 95.2
+Output PPL ↓F1↑Dist↑
+DuNST 34.73 93.59 59.42
+−Dual 50.26 90.33 55.83
+that all models obtain improved generation perfor-
+mance with more labeled data, but our DuNST per-
+forms similarly when using only 5% of labeled
+data compared to 100%. Such results demon-
+strate the superiority of DuNST, which additionally
+learns from unlabeled and pseudo data through self-
+training.
+C.5 Full version of experimental results
+Table C5, Table C6, and Table C7 reports com-
+plete experimental results of IMDb, AGNews, and
+Ablation Study.
+D Example of Generation
+We sample some generated texts based on Ctr-PF,
+GPT2-ST, UniLM-ST, and DuNST and place them
+on Table D1, D2, Table D3 and Table D4. Due to
+the offensive content generated by these modelsin the detoxification task, we do not include their
+examples in detoxification experiments.877787788779Model Generation
+Sentiment :Negative ;Prompt :At 20 years old
+Ctr-PF At 20 years old , ichorous and unrepentant, ichanarito is a well-liked celebrity, but a poor
+quality actor, and a poor quality movie...
+GPT2-
+STAt 20 years old , I grew up with it and had no expectations. I was a big fan of the series, I
+thought it was great, and I wanted to see more of it. But soon enough, I got bored and just
+got bored watching it...
+UniLM-
+STAt 20 years old , I didn’t expect much when I heard this movie was being made. My initial
+reaction was that it was an art - house movie ( a very low budget movie at that ), but when I
+saw how they did it, it just got boring and boring...
+DuNST At 20 years old , the poorest hour of my life had me scratching my head. This was an insult
+to the intelligence of mankind, and a complete disregard for anyone else’s intelligence. Do
+not watch this movie. It is a disgrace to any religion...
+Sentiment :Positive ;Prompt :At 20 years old
+Ctr-PF At 20 years old , ixxoxx was a fan favorite and loved his work and movies like it was his own
+and his own. A hard worker who enjoyed getting his hands dirty and trying to figure out the
+best ways to make a buck, ixixx made his name on film and television...
+GPT2-
+STAt 20 years old , ixTch was my first exposure to the French film industry. I immediately knew
+the "circles" of French cinema, where each character had a particular expression in their
+mind, but the film itself was only a very short one. I was not interested in the story or the
+plot, just in the characters...
+UniLM-
+STAt 20 years old , it is still one of my favorite films and the music still rings true. I have seen it
+countless times and each time I hear it, it gets better and better...
+DuNST At 20 years old , I was 13 when this came out. I remember it as being a typical 1950’s soap
+opera. The writing was excellent. It was realistic, the characters were believable. The story
+was accurate, but the real problems the family had with adult life in particular were out to
+bother with...8780Model Generation
+Sentiment :Negative ;Prompt :The book
+Ctr-PF The book I loved a lot about The Legend of Zelda: Breath of the Wild. Its protagonist, Zelda,
+is an ordinary woman who grows up playing on a farm. She gets to choose a young boy in
+her village who can only dream about Zelda. The village gets more and more out of her. She
+tries to save the villagers by making them happy by getting them into a happy life. The game
+takes this into an extreme (it’s not like Zelda is a good actress, just a poor one)...
+GPT2-
+STThe book , "Fatal Attraction" by R.D.Hilbert, was a great book and even if the book had been
+better, they probably would have given it a 10 out of 10. I was disappointed by this movie. I
+do not believe that a movie can be this boring, with actors playing their roles and acting like
+the movie would give it a realistic look...
+UniLM-
+STThe book was wonderful. The film is a mess. I could watch this and then get frustrated. It is
+very much like an extended stage play. The actors do what they can with little money and
+they do a wonderful job in acting. I will not make this up.
+DuNST The book was a rather confusing and disappointing adaptation of a classic. It may very well
+have been a good book if it had been adapted to a movie, but this movie could have been
+much better. It’s impossible to pinpoint exactly what exactly was the point of this film...
+Sentiment :Positive ;Prompt :The book
+Ctr-PF The book has an overall feel to it and is quite good. There are plenty of laughs and a decent
+ending to the book. However, there are some other issues with the author, who has some
+questionable editing that can ruin the book, making the movie and television series too good
+to be true...
+GPT2-
+STThe book is a perfect example of why not to make a movie. The dialogue, the actors, the sets,
+everything. That said, the book is perfect, despite the fact that it has very little plot, and that
+is good. The acting is good and is also very funny. The story is even more funny than the
+book...
+UniLM-
+STThe book was excellent. And it was not only about an alien invasion of Earth, but a series
+of events in the near future. I was a bit reluctant to read the book as it was written after the
+global collapse of the european market. But then again, it would still be hard to buy the movie
+More or less, the book is just brilliant, with wonderful characters and good animation...
+DuNST The book ( which I’m in a "Truly Hip" ) is a fantastic comic book. The movie adaptation of
+the book is a superb one. It’s faithful to the spirit of the book and looks to the footage and
+characters. I highly recommend this film if you like and appreciate the story...8781Model Generation
+Topic :World
+Ctr-PF (1)On Wednesday, the Iraqi security forces stormed the main Islamic State office, killing
+nine members, killing 12 people, but did not withdraw from the building and taking over two
+other buildings.
+(2)He said this could not be confirmed, but was quoted by Reuters. Hide Caption : A woman
+reacts after her car was blown up near an Islamist group rally in Dhaka.
+GPT2-
+ST(1)LOS ANGELES (Reuters) - A former crematory operator agreed on Wednesday to plead
+guilty to dumping bodies and ashes at the same crematory site where he was born, officials
+said
+(2)GAZA (Reuters) - A rocket killed two Israeli soldiers in Gaza on Wednesday, the first
+time the army in occupied territory in more than a year that Hamas militants have launched a
+fierce...
+UniLM-
+ST(1) The Israeli Army has suspended a company commander accused of emptying an ammu-
+nition clip into a 13 - year - old Palestinian girl.
+(2) BAGHDAD, Iraq - A roadside bomb killed two American soldiers and wounded three
+others in Iraq, the U. S. command said Friday, as insurgents hit Baghdad targets with rocket
+and rocket bombs...
+DuNST (1) AP - An Italian aid worker walked free from the southern Philippines on Sunday, a day
+after he was abducted at gunpoint on the streets of Real Aires.
+(2) AFP - The United States and South Korea failed to hammer out a deal over a timetable
+for the planned reduction of US forces in Iraq, with Seoul asking for more troops to join
+another group.
+Topic :Sport
+Ctr-PF (1)This past weekend, when the Los Angeles Lakers drafted Michael Jordan, he looked like
+a real contender to play the role of mentor at the small forward spot.
+(2)Houston is now playing "The V oice of America" at Madison Square Garden. The Knicks
+are 0-5 and facing a 10-point Los Angeles Lakers team that, if they win tonight...
+GPT2-
+ST(1) SEATTLE (Reuters) - Olympic chiefs may have to reconsider their decision to stage a
+one-day event in Atlanta after protests from marchers in the southern city...
+(2)NEW YORK (Reuters) - Tommy Haas looked as though he had the flu, as he sat in his
+BMW 712 at the World Championship in Akron, Ohio, on Friday.
+UniLM-
+ST(1) England coach Sven - Goran Eriksson says striker Michael Owen must prove in training
+Monday that he deserves to face Wales in a World Cup qualifier.
+(2) ATHENS - - The tears were from the Brazilian women’s soccer team, who had just won
+their first Olympic gold medal in women’s tennis, beating Australia 4 - 2 in the final...
+DuNST (1) South Carolina assistant Skip Holtz left the game with an injured tailback Ciatrick Fason.
+Freshman Adrian Peterson rushed for 140 yards and two touchdowns and Ronnie Brown
+added 127 yards.
+(2) AP - The New York Yankees wasted little time getting down to business, and their
+starting pitcher, Tony Womack, was allowed to sit out Saturday night after missing two
+games because of an elbow injury...8782Model Generation
+Topic :Business
+Ctr-PF (1)President Barack Obama has said his administration is "very concerned about Iran’s
+nuclear program and concerns about the growing threat from terrorist groups in Iran.
+(2) A number of firms have taken steps to make their online business more efficient and more
+efficient. New York-based Gartner says that new companies such as AT&T, Bell, IBM...
+GPT2-
+ST(1)NEW YORK (Reuters) - U.S. blue chips sank on Thursday after Ford Motor Co.
+(2)SINGAPORE (Reuters) - Asian stock markets opened lower on Thursday, helped by poor
+weather forecasts and gains by technology firms, but some oil-related stocks remained higher.
+UniLM-
+ST(1) TORONTO ( CP ) - Stock markets were poised for an early rally Thursday as crude oil
+prices reached record highs and energy stocks surged on easing supply fears.
+(2) In the latest move by the US Justice Department, The Washington Post has announced
+that it will pay $ 60 million cash to buy the parent company of CBS MarketWatch.
+DuNST (1) Tokyo stocks plunged Monday morning as investors took profits from recent gains. The
+US dollar was up against the Japanese yen. The Nikkei Stock Average of 225 issues was up
+36.
+(2) NEW YORK, Aug 18 ( Reuters ) - Rupert Murdoch’s News Corp. Ltd. has agreed to sell
+its stake in Sky Latin America to DirecTV Group D
+Topic :Sci/Tech
+Ctr-PF (1)$1,000 for ’Millionaire’s ’Rape Crisis’ Victim Fund By Michael S. Osterholm - 6/9/17
+07:08:04:
+(2) US government has approved a $10 million loan to provide medical equipment to the
+Palestinian Authority for ’humanitarian and medical equipment’ on the West Bank. The
+agreement provides $3 million for a...
+GPT2-
+ST(1)NEW YORK (Reuters) - The U.S. Securities and Exchange Commission has voted 5-0 to
+recommend that Internet advertising services stop soliciting fees from Web sites, according
+to a...
+(2)LOS ANGELES (Reuters) - "Cell " phones offer fast data rates, low prices and no worries
+about getting fat in the long run, says a survey by analysts at research firm...
+UniLM-
+ST(1) Sony Corp.’s music unit is abandoning its CDs that use built - in technology that limits
+copying them, after pushing the program for two years.
+(2) The future of the internet could be in doubt in around two years’time, according to two
+leading internet watchers, who outlined a series of steps they hope will turn the internet into
+a business...
+DuNST (1) Toshiba has announced a new transmission system for routers and switches that will
+improve automatic transmission rates. The 6500 Super_GSM/GPRS system will feature high
+clock speed...
+(2) At a press conference this week, Bill Murray, Microsoft’s CEO, expressed doubt that the
+software giant’s strategy for regaining PC identity is considerable, but heard little reason to
+believe it8783ACL 2023 Responsible NLP Checklist
+A For every submission:
+/squareA1. Did you describe the limitations of your work?
+Section 6
+/squareA2. Did you discuss any potential risks of your work?
+Section 7
+/squareA3. Do the abstract and introduction summarize the paper’s main claims?
+Section 1
+/squareA4. Have you used AI writing assistants when working on this paper?
+Left blank.
+B/squareDid you use or create scientiﬁc artifacts?
+Appendix A.1, A.2, A.3, A.4
+/squareB1. Did you cite the creators of artifacts you used?
+Appendix A.2
+/squareB2. Did you discuss the license or terms for use and / or distribution of any artifacts?
+Appendix A.2
+/squareB3. Did you discuss if your use of existing artifact(s) was consistent with their intended use, provided
+that it was speciﬁed? For the artifacts you create, do you specify intended use and whether that is
+compatible with the original access conditions (in particular, derivatives of data accessed for research
+purposes should not be used outside of research contexts)?
+Appendix A.2.
+/squareB4. Did you discuss the steps taken to check whether the data that was collected / used contains any
+information that names or uniquely identiﬁes individual people or offensive content, and the steps
+taken to protect / anonymize it?
+Not applicable. Left blank.
+/squareB5. Did you provide documentation of the artifacts, e.g., coverage of domains, languages, and
+linguistic phenomena, demographic groups represented, etc.?
+Appendix A.3.
+/squareB6. Did you report relevant statistics like the number of examples, details of train / test / dev splits,
+etc. for the data that you used / created? Even for commonly-used benchmark datasets, include the
+number of examples in train / validation / test splits, as these provide necessary context for a reader
+to understand experimental results. For example, small differences in accuracy on large test sets may
+be signiﬁcant, while on small test sets they may not be.
+Appendix A.2.
+C/squareDid you run computational experiments?
+Section 4, Appendix C.
+/squareC1. Did you report the number of parameters in the models used, the total computational budget
+(e.g., GPU hours), and computing infrastructure used?
+Appendix A.1.8784/squareC2. Did you discuss the experimental setup, including hyperparameter search and best-found
+hyperparameter values?
+Appendix A.1.
+/squareC3. Did you report descriptive statistics about your results (e.g., error bars around results, summary
+statistics from sets of experiments), and is it transparent whether you are reporting the max, mean,
+etc. or just a single run?
+Appendix A.1. All experiments are done in a single run under a ﬁxed random seed.
+/squareC4. If you used existing packages (e.g., for preprocessing, for normalization, or for evaluation), did
+you report the implementation, model, and parameter settings used (e.g., NLTK, Spacy, ROUGE,
+etc.)?
+Appendix A.1 and A.4
+D/squareDid you use human annotators (e.g., crowdworkers) or research with human participants?
+Left blank.
+/squareD1. Did you report the full text of instructions given to participants, including e.g., screenshots,
+disclaimers of any risks to participants or annotators, etc.?
+Appendix A.6.
+/squareD2. Did you report information about how you recruited (e.g., crowdsourcing platform, students)
+and paid participants, and discuss if such payment is adequate given the participants’ demographic
+(e.g., country of residence)?
+Appendix A.6
+/squareD3. Did you discuss whether and how consent was obtained from people whose data you’re
+using/curating? For example, if you collected data via crowdsourcing, did your instructions to
+crowdworkers explain how the data would be used?
+Appendix A.6
+/squareD4. Was the data collection protocol approved (or determined exempt) by an ethics review board?
+Not applicable. Left blank.
+/squareD5. Did you report the basic demographic and geographic characteristics of the annotator population
+that is the source of the data?
+Not applicable. Left blank.8785

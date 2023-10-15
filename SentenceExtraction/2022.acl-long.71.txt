@@ -1,1 +1,682 @@
-1001 Proceedings of the 60th Annual Meeting of the Association for Computational Linguistics Volume 1 : Long Papers , pages 1001 1011 May 22 - 27 , 2022 c(cid:13)2022 Association for Computational Linguistics 1002 1003 1004 1005 1006 1007 1008 1009 1010 1011 
+
+Chang Liu, Chongyang Tao, Jiazhan Feng, Dongyan ZhaoWangxuan Institute of Computer Technology, Peking UniversityCenter for Data Science, Peking UniversityMicrosoft CorporationArtificial Intelligence Institute of Peking UniversityState Key Laboratory of Media Convergence Production Technology and Systems
+{liuchang97,fengjiazhan,zhaody}@pku.edu.cn ,
+chotao@microsoft.com
+Abstract
+Transferring the knowledge to a small model
+through distillation has raised great interest in
+recent years. Prevailing methods transfer the
+knowledge derived from mono-granularity lan-
+guage units (e.g., token-level or sample-level),
+which is not enough to represent the rich seman-
+tics of a text and may lose some vital knowl-
+edge. Besides, these methods form the knowl-
+edge as individual representations or their sim-
+ple dependencies, neglecting abundant struc-
+tural relations among intermediate representa-
+tions. To overcome the problems, we present
+a novel knowledge distillation framework that
+gathers intermediate representations from mul-
+tiple semantic granularities (e.g., tokens, spans
+and samples) and forms the knowledge as more
+sophisticated structural relations specified as
+the pair-wise interactions and the triplet-wise
+geometric angles based on multi-granularity
+representations. Moreover, we propose distill-
+ing the well-organized multi-granularity struc-
+tural knowledge to the student hierarchically
+across layers. Experimental results on GLUE
+benchmark demonstrate that our method out-
+performs advanced distillation methods.
+1 Introduction
+Recent years have witnessed a surge of pre-trained
+language models (Devlin et al., 2019; Lewis et al.,
+2020; Clark et al., 2020; Brown et al., 2020). Build-
+ing upon the transformer architecture (Vaswani
+et al., 2017) and pre-trained on large-scale cor-
+pora using self-supervised objectives, these PLMs
+have achieved remarkable success in a wide range
+of natural language understanding and generation
+tasks. Despite their high performance, these PLMs
+usually suffer from high computation and memory
+costs, which hinders them from being deployedinto resource-scarce scenarios, e.g., mobile phones
+and embedded devices.
+Various attempts have been made to compress
+the huge PLMs into small ones with minimum
+performance degradation. As one of the main
+approaches, knowledge distillation (Hinton et al.,
+2015) utilizes a large and powerful teacher model
+to transfer the knowledge to a small student model.
+Based on the teacher-student framework, Jiao et al.
+(2020); Wang et al. (2020) distilled the token-level
+representations and attention dependencies to the
+student, Sanh et al. (2019); Sun et al. (2019) taught
+the student to mimic the output logits of the teacher,
+Sun et al. (2020) enforced the student’s represen-
+tation to be closed to the teacher’s while pushing
+negative samples to be far apart. Although proved
+effective, existing approaches have some flaws. For
+one thing, these distillation methods only adopted
+the representations of mono-granularity language
+units (i.e., token-level or sample-level), while ne-
+glecting other granularity. For another, their distil-
+lation objectives either matched the corresponding
+representations between the teacher and the stu-
+dent or aligned the attention dependencies, failing
+to capture more sophisticated structural relations
+between the representations.
+To address these issues, in this paper we pro-
+pose a novel knowledge distillation framework
+named Multi-Granularity Structural Knowledge
+Distillation (MGSKD) through answering the three
+research questions: (1) which granularity should
+the knowledge be, (2) what form of knowledge
+is effective to transfer and (3) how to teach the
+student using the knowledge. For the “ which ” ques-
+tion, given that natural languages have multiple
+semantic granularities, we consider the intermedi-
+ate representations in three granularities: tokens,
+spans and samples. Specifically, we first take the
+sub-word tokens as the smallest granularity, then1001select phrases and whole words as spans for they
+hold complete meanings, and finally treat the whole
+input texts as samples. We use mean-pooling to
+obtain the representations of spans and samples
+based on token representations. For the “ what ”
+question, we propose to leverage the sophisticated
+structural relations between the representations as
+the knowledge. Concretely, instead of aligning the
+corresponding representations of the teacher and
+the student, we propose to form the knowledge as
+the pair-wise interactions and the triplet-wise geo-
+metric angels of a group of representations. For the
+“how” question, following the recent findings that
+the bottom layers capture syntactic features while
+the upper layers encode semantic features (Jawahar
+et al., 2019), we conduct hierarchical distillation
+where the bottom layers of the student are taught
+token-level and span-level knowledge while the
+upper layers learn sample-level knowledge.
+We conduct comprehensive experiments on
+standard language understanding benchmark
+GLUE (Wang et al., 2018). Experimental results
+demonstrate that our knowledge distillation frame-
+work outperforms strong baselines methods. Sur-
+prisingly, MGSKD achieves comparable or better
+performance than BERTon most of the tasks
+on GLUE, while keeping much smaller and faster.
+Our contributions in this paper are three folds:
+•We are the first to leverage multi-granularity se-
+mantic representations in language (i.e., the repre-
+sentations of tokens, spans and samples) for knowl-
+edge distillation.
+•We propose to form the knowledge as sophisti-
+cated structural relations specified as the pair-wise
+interactions and the triplet-wise geometric angles
+based on multi-granularity representations.
+•We conduct comprehensive experiments on
+GLUE benchmark and MGSKD achieves superior
+results over other knowledge distillation baselines.
+2 Related Work
+Language Model Compression. Pre-trained lan-
+guage models (Devlin et al., 2019; Clark et al.,
+2020; Brown et al., 2020) perform remarkably well
+on various applications but at the cost of high com-
+putation and memory usage. To deploy these pow-
+erful models into resource-scarce scenarios, var-
+ious attempts have been made to compress the
+language models into small ones. Quantization
+methods (Zafrir et al., 2019; Shen et al., 2020;
+Zhang et al., 2020; Bai et al., 2021) convert themodel parameters to lower precision. Pruning ap-
+proaches identify then remove unimportant individ-
+ual weights or structures (Michel et al., 2019; Fan
+et al., 2019; Gordon et al., 2020; Hou et al., 2020).
+Weight sharing techniques (Dehghani et al., 2018;
+Lan et al., 2019) allow the model to reuse the trans-
+former layer multiple times to reduce parameters.
+Knowledge Distillation. Knowledge distilla-
+tion (Hinton et al., 2015) is another major line of re-
+search to do model compression, which is the main
+concentration in this paper. Hinton et al. (2015)
+first proposed to minimize the KL-divergence be-
+tween the predicted distributions of the teacher
+and the student. Sanh et al. (2019); Sun et al.
+(2019); Liang et al. (2020) adopted this objective
+to teach the student on masked language model-
+ing or text classification tasks. Romero et al.
+(2014) proposed to directly match the feature acti-
+vations of the teacher and the student. Jiao et al.
+(2020) followed the idea and took the intermedi-
+ate representations in each transformer layer of
+the teacher as one of the knowledge to be trans-
+ferred. Tian et al. (2019) proposed a contrastive
+distillation framework where the teacher’s represen-
+tations were treated as positives to the correspond-
+ing student’s representations. Sun et al. (2020);
+Fu et al. (2021) customized this idea to language
+model compression and proved its effectiveness.
+Researchers also attempted to use the mutual rela-
+tions of representations as the knowledge to trans-
+fer. In the literature of image classification, Peng
+et al. (2019); Tung and Mori (2019); Park et al.
+(2019) pointed out that the relations of the image
+representations of the teacher should be preserved
+in the student’s feature space, and adopted a series
+of geometric measurements to model the sample
+relations. For distilling transformer models, Park
+et al. (2021) enforced the relations across tokens
+and layers between the teacher and the student to
+be consistent. Jiao et al. (2020); Wang et al. (2020,
+2021) used the attention dependencies between to-
+kens to teach the student. In this paper, we propose
+to transfer the multi-granularity knowledge to the
+student. Different from previous works that only
+considered a single granularity of representations,
+we jointly transfer the token-level, span-level and
+sample-level structural knowledge. And compared
+with Shao and Chen (2021) which considered the
+multi-granularity visual features in an image as the
+knowledge, our method works in a different modal-
+ity, presents a different definition of granularity,1002
+and prepares the multi-granularity knowledge as
+the structural relations among representations.
+3 Method
+We propose Multi-Granularity Structural
+Knowledge Distillation, a novel framework to
+distill the knowledge from a large transformer
+language model to a small one. Different from
+previous works that transferred the knowledge
+derived from either token-level or sample-level
+outputs, we prepare the knowledge in three
+semantic granularities: token-level, span-level
+and sample-level. Given some granularity of
+representations of the teacher model, we form
+the knowledge as the structural relations, i.e.,
+the pair-wise interactions and the triplet-wise
+geometric angles, between the representations. We
+then distill the well-organized structural knowledge
+to the student hierarchically across layers, where
+the token-level and the span-level knowledge
+are transferred to the bottom layers to provide
+more syntactic guidance while the sample-level
+knowledge is transferred to the upper layers to
+offer more help of semantic understanding. The
+framework of MGSKD is illustrated in Figure 1.
+3.1 Multi-granularity Representation
+Natural languages have multiple granularities of
+conceptual units. In the context of pre-trained
+transformers (Devlin et al., 2019), the basic unit is
+the tokens produced by sub-word tokenizers (Wu
+et al., 2016; Radford et al., 2019). Several consec-utive tokens become a text span, and the sample
+is comprised of all the tokens it contains. Exist-
+ing knowledge distillation approaches (Jiao et al.,
+2020; Wang et al., 2020; Sun et al., 2020; Fu et al.,
+2021) focused on one granularity of representation,
+neglecting that texts are built upon language units
+from multiple granularities. Intuitively, incorporat-
+ing multi-granularity representations in knowledge
+distillation may provide more guidance since the
+student can be taught how to compose the semantic
+concepts from small granularities to larger ones.
+Therefore, we propose to gather multi-granularity
+representations for knowledge distillation. We con-
+struct three granularities of representations: tokens,
+spans that hold complete meanings, and samples.
+Token Representation. The first granularity is
+the sub-word token, which is the foundation of
+high-level granularity. Given an input text, a tok-
+enizer such as WordPiece (Wu et al., 2016) splits
+it into ntokens x= [t, t, . . . , t]. The tokens
+are converted to a sequence of continuous repre-
+sentations E= [e,e, . . . ,e]∈Rthrough
+the embedding layer. For the sake of clarity, we
+treat the embedding layer as the 0-th layer and
+setH=E. Then the token embeddings H
+are passed to Lstacked transformer layers. The
+l-th layer takes the output representations H
+of the previous layer as its input, and returns the
+updated representations Husing multi-head at-
+tention (MHA) and position-wise feed-forward net-
+work (FFN). Herein, we obtain L+1layers of token1003representations {H}where H∈R.
+Span Representation. The second granularity is
+the span, which is comprised of several consecu-
+tive tokens. Different from SpanBERT (Joshi et al.,
+2020) that randomly selects token spans whose start
+positions and lengths are sampled from some dis-
+tributions for masked language modeling, we pro-
+pose to extract spans that have complete meanings.
+Widely adopted sub-word tokenizers in pre-trained
+transformers split some of the English words into
+several sub-word tokens. We consider these whole
+words consisting of multiple sub-word tokens, and
+phrases, as meaningful spans. Sub-word tokens for
+whole words are easy to obtain using WordPiece
+tokenizer (Wu et al., 2016). While for phrase iden-
+tification, we train a classifier-based English chun-
+ker on CoNLL-2000 corpus (Tjong Kim Sang and
+Buchholz, 2000) following the instructions. We
+then use the trained chunker to extract noun phrases
+(NP), verb phrases (VP), and prepositional phrases
+(PP). These identified phrases are tokenized by
+WordPiece tokenizer to obtain tokens. Herein, we
+can obtain ntoken spans x= [s, s, . . . , s],
+where s= [t, t, . . . , t]denotes the i-
+th span that starts at the j-th token and contains n
+tokens. We then build span representations based
+on token representations using mean pooling:
+ˆh=Pool(H), (1)
+where ˆh∈Ris the representation of the i-th
+span in layer l. We obtain L+ 1layers of span
+representations as {ˆH}where ˆH∈R.
+Sample Representation. The third granularity is
+the input text sample itself. Based on token rep-
+resentations again, we use mean-pooling to aggre-
+gate all the token representations in a text sample
+to form sample representation:
+˜h=Pool(H), (2)
+Herein, we get L+ 1layers of sample representa-
+tions as {˜h}where ˜h∈R.
+3.2 Structural Knowledge Extraction
+With multi-granularity representations, we then
+need to formulate the specific knowledge we aim
+to transfer from the teacher to the student. Con-
+sidering that an element holds its meaning only
+when it is put into a semantic space where it hasvarious relations to other elements, we propose
+that the knowledge is better specified as the struc-
+tural relations of the representations in a seman-
+tic space, instead of the individual representations
+themselves. Therefore, instead of directly match-
+ing each hidden representation between the teacher
+and the student, we propose to extract structural
+relations from multi-granularity representations as
+the knowledge to teach the student. We first project
+the representations into multiple sub-spaces, then
+we extract two types of structural knowledge: pair-
+wise interactions and triplet-wise geometric angles.
+Multi-head Modeling. A recent study by Wang
+et al. (2021) pointed out that distilling knowl-
+edge with multiple relation heads helps the student
+learn better. Therefore, before extracting struc-
+tural knowledge for intermediate representations,
+we first project them into msub-spaces, which
+we call multi-head modeling. Specifically, given
+a set of nrepresentations R∈R, we linearly
+project them into msub-spaces whose dimensions
+ared/m .We use R∈Rto denote the
+multi-head representations which are then used for
+extracting structural knowledge.
+Pair-wise Interaction. Given two vectors
+r,r∈Rin a sub-space, we calculate their
+interaction as their scaled dot product:
+φ(r,r) =r·rp
+d/m. (3)
+Herein, we obtain the multi-head pair-wise inter-
+action features for each pair as P∈R,
+where Pdenotes the interaction between the
+i-th representation and the j-th representation in
+the sub-space of the h-th relation head. Note that
+Pcan be considered as the unnormalized self-
+attention (Vaswani et al., 2017) scores for the given
+representations, the difference lies in that in our
+calculation the queries are identical to the keys.
+Triplet-wise Geometric Angle. Pair-wise inter-
+action features only consider two vectors at once,
+which is not enough to represent the complicated
+structural relations between representations in the
+high-dimensional space. Therefore, we propose
+to model the high-order relations as the geometric
+angles for triplets of vectors. Specifically, given1004a triplet of representations r,r,r∈R, we
+calculate their geometric angle as:
+ψ(r,r,r) =cos∠rrr=⟨r,r⟩
+r=r−r
+∥r−r∥,r=r−r
+∥r−r∥.(4)
+We can calculate the geometric angles for all the
+triplets, and obtain T∈Rwhere T
+stands for the angle of ∠rrrin the sub-space
+of the h-th relation head. As the computation com-
+plexity increases cubically with n, such a calcu-
+lation is infeasible when the number of represen-
+tations is large. Hereby, we propose a two-stage
+selection strategy to sequentially select important
+representations to form angles. Similar to Goyal
+et al. (2020), we assume that the more attention a
+representation receives from others, the more im-
+portant it is. Therefore, we first calculate the self-
+attention distributions A∈Rby applying
+softmax function on the last dimension of P. Then
+for the j-th representation, we calculate a global
+salient score sby summing up self-attention dis-
+tributions across all heads and all queries. Based
+on the score, we pick the top- ksalient representa-
+tions as vertices. Next, if the i-th representation is
+selected as vertex, we pick krepresentations with
+the highest local salient score to form angles with
+the vertex. We define the local salient score s
+as the attention posed by the i-th representation on
+thej-th representation, The salient scores sand
+sare calculated as follows:
+s=XXA, s=XA.(5)
+Therefore, by sequentially selecting salient repre-
+sentations to form angles, we reduce the computa-
+tion complexity from O(mn)toO(mkk). By
+choosing proper kandk, we can facilitate the
+computation of triplet-wise geometric angles for
+any number of representations.
+3.3 Hierarchical Distillation
+We utilize the structural knowledge extraction ap-
+proach described in Sec. 3.2 to prepare knowledge
+based on three granularities of representations pre-
+sented in Sec. 3.1 for distillation. Based on the
+findings that the bottom layers capture syntactic
+features while the upper layers encode semantic
+features (Jawahar et al., 2019), we propose to con-
+duct hierarchical distillation for the student wheredifferent granularities of knowledge are transferred
+to different layers. For a teacher model with L
+layers and a student model with Llayers, we first
+define a layer mapping function g(·)that maps each
+student layer to a teacher layer that it learns from.
+Following previous work (Jiao et al., 2020), we
+adopt the “uniform strategy” for g(·). Then we
+transfer token-level and span-level knowledge to
+the bottom- Mlayers of the student, while lever-
+aging sample-level knowledge to teach its upper
+L+ 1−Mlayers.
+Token- and Span-level. Specifically, given the
+token-level and the span-level representations of
+the teacher {H,ˆH}, we use Eq. 3 and Eq. 4
+to calculate the pair-wise interactions and the
+triplet-wise geometric angles among tokens and
+spans within a single sample as {P,ˆP}and
+{T,ˆT}. Similarly, we can obtain the struc-
+tural relations of the students: {P,ˆP}and
+{T,ˆT}. We then teach the student by mini-
+mizing the differences of the structural relations
+among their representations between the teacher
+and the student:
+L =X(ℓ(P,P) +ℓ(T,T))
+L=X(ℓ(ˆP,ˆP) +ℓ(ˆT,ˆT)).
+(6)
+Sample-level. Recall that we obtain {˜h}and
+{˜h}for the teacher and the student where
+˜h,˜h∈R. Different from the structural knowl-
+edge of tokens and spans which is modeled within
+a sample, the sample-level structural relations rely
+on a group of sample representations. Although
+the choice of samples may make a difference to
+the overall performance, here we simply gather
+all the sample representations in a mini-batch to
+calculate their structural relations as the sample-
+level knowledge. Specifically, we only focus on
+the triplet-wise relations {˜T}and{˜T}:
+L =Xℓ(˜T,˜T). (7)
+ℓandℓin Eq. 6 and Eq. 7 are loss functions
+that measure the distance between the structural
+relations of the teacher’s and the student’s repre-
+sentations. We empirically choose MSE for ℓand
+Huber loss ( δ= 1) forℓ.1005
+Overall Objectives. The overall distillation ob-
+jective for multi-granularity structural knowledge
+distillation is:
+L=λL +λL+λL,(8)
+where λ,λandλare weights of loss functions
+of different granularities.
+After this, we also teach the student to match the
+prediction distributions with the teacher’s for text
+classification tasks:
+L=τD(z/τ∥z/τ), (9)
+wherezandzare the predicted probability distri-
+butions of the teacher and the student respectively,
+τdenotes the temperature.
+4 Experiments
+4.1 Datasets and Metrics
+We conduct our experiments on the General Lan-
+guage Understanding Evaluation (GLUE) bench-
+mark (Wang et al., 2018). Sepcifically, there are 2
+single-sentence tasks: SST-2 (Socher et al., 2013),
+CoLA (Warstadt et al., 2019), 3 similarity and para-
+phrase tasks: MRPC (Dolan and Brockett, 2005),
+STS-B (Cer et al., 2017), QQP (Chen et al., 2018),
+and 4 inference tasks: MNLI (Williams et al.,
+2018), QNLI (Rajpurkar et al., 2016), RTE (Ben-
+tivogli et al., 2009), WNLI (Levesque et al., 2012).
+Following previous work (Jiao et al., 2020; Wang
+et al., 2021; Park et al., 2021), we evaluate our
+method on 8 datasets except WNLI. We report ac-
+curacy on 5 datasets: SST-2, QQP, MNLI, QNLI
+and RTE. We report F1 score on MRPC, Matthews
+correlation coefficient on CoLA, and Spearman’s
+rank correlation coefficient on STS-B.4.2 Implementation Details
+We focus on task-specific distillation. We follow
+Jiao et al. (2020) to augment the training sets for
+each of the GLUE tasks using the codethey re-
+leased. We fine-tune ELECTRAon the origi-
+nal training sets as the teacher model, and utilize
+TinyBERT-4-312which is distilled on general cor-
+pora as the initialization of our student model. For
+token-level and span-level distillation, we use 64
+relation heads for calculating pair-wise interactions,
+and 1 relation head for triplet-wise angles due to its
+huge computation and memory costs. And we set
+k=k= 20 for calculating angles. For sample-
+level distillation, we use 64 relation heads and set
+kandkas the batch size. We distill token-level
+and span-level knowledge to the bottom-2 layers
+of the student and distill sample-level knowledge
+to the other layers. For the structural distillation
+objective, we set λ= 4,λ=λ= 1to maintain
+their gradient norms in the same order of magni-
+tude. We first distill the student model using Eq. 8
+for 50 epochs on CoLA and 20 epochs on other
+tasks. The learning rate is 1e-5 and the batch size is
+32. Then we use Eq. 9 to distill the predictions for
+all tasks except STS-B since we empirically find
+that directly fine-tuning after distillation using Eq.
+8 yields better performance for it. For QQP and
+CoLA, we adopt the original training set and distill
+the student for 10 epochs while for other 5 tasks
+we use the augmented training sets and distill the
+student for 3 epochs. We set τas 1.0, the learning1006Method SST-2 MNLI-(m/mm)
+MGSKD 92.5 83.6/82.9
+MGSKD 92.9 83.9/83.3
+MGSKD 93.3 84.3/83.9
+MGSKD 93.7 84.7/84.3
+MGSKD 93.5 84.8/84.2
+rate as 1e-5, and the batch size as 32. We release
+our code to facilitate future research.
+4.3 Comparison Methods
+Medium-sized Student Models. Most of the
+existing knowledge distillation methods are con-
+ducted on medium-sized student models which
+have 6 transformer layers, 768 hidden neurons, 12
+attention heads, and overall 66M parameters. We
+adopt 3 of them as baselines: DistilBERT (Sanh
+et al., 2019), MiniLMv2 (Wang et al., 2021) and
+CKD (Park et al., 2021). Notice that these mod-
+els adopted different distillation settings. Dis-
+tilBERT and MiniLMv2 were firstly under task-
+agnostic distillation then directly fine-tuned on
+GLUE, while CKD was under both task-agnostic
+and task-specific distillation. The corpora they
+adopted for task-agnostic distillation were also not
+exactly the same. Nevertheless, we list the results
+as they reported on GLUE dev set as baselines, and
+we implement MiniLMv2 and CKD, two state-of-
+the-art distillation methods under the same distilla-
+tion setting as ours for a fair comparison, which is
+described in the next paragraph.
+Small-sized Student Models. For fair compar-
+isons, we implement two state-of-the-art distilla-
+tion methods: MiniLMv2 (Wang et al., 2021),
+CKD (Park et al., 2021) under the same distilla-
+tion setting as ours. All these methods use the
+same student model as ours which has 4 trans-
+former layers, 312 hidden neurons, 12 attention
+heads and overall 14M parameters. We adopt the
+fine-tuned ELECTRAas the teacher, and con-
+duct task-specific distillation using the same distil-
+lation schedule and hyperparameters on the same
+augmented training sets as ours.
+4.4 Main Results
+We first evaluate the effectiveness of our pro-
+posed distillation framework. The main results
+are shown in Table 1. We calculate #Params
+by summing up the number of parameters con-
+tained in the embedding layer and all the trans-
+former layers. The speed-up ratios are directly
+taken from previous works (Jiao et al., 2020; Wang
+et al., 2021). It can be observed that under the
+same distillation setting (models with †in Table 1),
+Studentoutperforms strong baseline meth-
+ods (i.e., Studentand Student) on 7 of
+the 8 GLUE tasks. When compared with medium-
+sized models from the literature which have more
+parameters but under different distillation settings
+(e.g., CKD), our method can still beat them on the
+majority of the 8 tasks. And surprisingly, with a
+stronger teacher model and data augmentation tech-
+nique, our method MGSKD enables a 14M student
+transformer model to achieve comparable perfor-
+mance with BERTon most of the GLUE tasks,
+while keeping 9.4 times faster. Also, we observe
+that although MGSKD performs well on most of
+the GLUE tasks, it lags behind some baselines on
+CoLA, where the model is asked to judge the gram-
+matical acceptability of a sentence. One reason
+might be that CoLA requires the model to focus on
+syntactic information while paying less attention to
+the sample-level semantic meanings, thus reducing
+the need for multi-granularity semantic knowledge
+that we propose to transfer to the student.
+4.5 Discussions
+The Impact of Relation Heads. Recall that
+when calculating the structural relations between
+representations, we project them into mrelation
+heads. We show how the number of relation heads
+impacts the performance on SST-2 and MNLI. As
+shown in Table 2, the performance gets better as the1007
+number of relation heads increases, since it eases
+the trouble for the student to learn the structural
+relations in the very high-dimensional vector space
+by providing fine-grained supervision in multiple
+relatively low-dimensional spaces. We also find
+that when mis large, continuing to increase mis
+not worthwhile since the time and memory com-
+plexity increase linearly with m. Therefore we
+choose m= 64 in our setting.
+Ablation Study of Knowledge Granularity. We
+transfer the structural knowledge to the student
+in three granularities: token-level, span-level, and
+sample-level. We extract pair-wise and triplet-wise
+structural relations for token- and span-level, while
+we adopt triplet-wise relations for sample-level.
+To verify the effectiveness of each granularity of
+knowledge and each form of structural relations,
+we conduct ablation studies and present the results
+in Table 3. (1) We first remove each granularity
+of knowledge from the objectives of MGSKD indi-
+vidually.We can conclude that the sample-level
+knowledge is most crucial for the overall perfor-
+mance, the token-level knowledge provides mod-
+erate benefit, and the span-level knowledge con-
+tributes the least. We assume the reason why span-
+level knowledge distillation performs a little bit
+worse than token-level lies in that the average num-
+ber of meaningful spans per sample on the 8 tasks
+is 7.19, which is 5.2 times fewer than the aver-
+age number of tokens. Nevertheless, distillation
+with span-level knowledge still yields comparable
+performance. Overall, the results prove that each
+granularity of knowledge brings a positive effect
+to the model performance. (2) Then for each gran-
+ularity, we study the effect of each form of struc-
+tural knowledge (i.e., pair-wise and triplet-wiserelations). In this stage, we distill each granularity
+of knowledge into all the student layers for a fair
+comparison. It can be observed that for token-level
+and span-level knowledge, pair-wise relations are
+more effective than triplet-wise relations, and the
+model performs better when jointly utilizing both.
+While for sample-level knowledge, we find that
+using triplet-wise relations outperforms using pair-
+wise relations by a large margin. Moreover, jointly
+utilizing the sample-level pair-wise and triplet-wise
+relations can’t further improve the model’s perfor-
+mance, therefore we only employ triplet-wise rela-
+tions as sample-level knowledge.
+The Impact of kandkfor Calculating Angles.
+To ease the computation and memory complexity,
+we propose to sequentially select important repre-
+sentations to form angles, leading to the hyperpa-
+rameters kandk. We test different choices of k
+andkby adopting token-level and sample-level
+triplet-wise relations to teach the student respec-
+tively. To reduce the search space, we simply set
+k=k. We draw the accuracy curve for different
+choices of k, k, as shown in Fig. 2. For token-
+level objectives, we find that increasing k, kim-
+proves the accuracy when they are small and when
+k, k≥20, the curves begin to vibrate. Therefore
+we choose k=k= 20 for token-level angle
+calculation. While for the triplet-wise relations of
+sample-level features, we observe that the accuracy
+increases monotonically with k, k. Therefore we
+just set k, kas the batch size.
+The Choice of the Boundary Layer M.We pro-
+pose the hierarchical distillation strategy where we
+distill the token- and span-level knowledge into the
+bottom- Mlayers of the student and transfer the
+sample-level knowledge to the upper layers. To
+verify the effectiveness as well as to find the best
+choice of the boundary layer M, we conduct exper-1008iments and show the results in Fig. 3. The dashed
+lines represent the setting dubbed as “ all”, where
+we distill token-, span- and sample-level knowl-
+edge into all the student layers. And the solid lines
+denote our hierarchical distillation setting with dif-
+ferent choices of the boundary layer M. When
+M= 0andM= 4, the student learns sample-level
+knowledge or token- and span-level knowledge for
+all layers. Without the help of other knowledge
+granularities, the student yields relatively poor per-
+formance on both tasks. As Mincreases from 0to
+4, we find the model’s performance curves surpass
+the dashed lines, which verifies the effectiveness
+of our proposed hierarchical distillation strategy
+which transfers the knowledge to the proper posi-
+tions of the student. We find the model achieves
+the highest accuracy when M= 2, i.e., the middle
+layer, indicating that both the syntactic knowledge
+transferred by token- and span-level features and
+the semantic knowledge derived from sample-level
+features are indispensable.
+5 Conclusion
+In this paper, we propose a novel knowledge dis-
+tillation framework named MGSKD. We leverage
+intermediate representations of multi-granularity
+language units (i.e., tokens, spans and samples),
+and form the knowledge as the sophisticated struc-
+tural relations between the representations rather
+than the individual representations themselves. The
+well-organized structural knowledge is then dis-
+tilled into the student hierarchically across layers.
+Evaluation results on GLUE benchmark verify the
+effectiveness of our method. In the future, we plan
+to explore more forms of structural knowledge.
+Acknowledgements
+We would like to thank the anonymous re-
+viewers for their constructive comments. This
+work was supported by the National Key Re-
+search and Development Program of China (No.
+2020AAA0106600).
+Ethical Statement
+This paper proposes a knowledge distillation frame-
+work that leverages multi-granularity structural
+knowledge to compress a large and powerful lan-
+guage model into a small one with minimum perfor-
+mance degradation, which is beneficial to energy-
+efficient NLP applications. The research will notpose ethical problems or negative social conse-
+quences. The datasets used in this paper are all
+publicly available and are widely adopted by re-
+searchers as the general testbed for natural lan-
+guage understanding evaluation. The proposed
+method doesn’t introduce ethical/social bias or ag-
+gravate the potential bias in the data.
+References100910101011

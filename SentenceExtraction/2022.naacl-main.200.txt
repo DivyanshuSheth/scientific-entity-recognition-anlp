@@ -1,1 +1,821 @@
-2777 Proceedings of the 2022 Conference of the North American Chapter of the Association for Computational Linguistics : Human Language Technologies , pages 2777 2790 July 10 - 15 , 2022 © 2022 Association for Computational Linguistics 2778 2779 2780 2781 2782 2783 2784 2785 2786 2787 2788 2789 2790 
+
+Besnik Fetahu, Anjie Fang, Oleg Rokhlenko, Shervin Malmasi
+Amazon, USA
+{besnikf, njfn, olegro, malmasi}@amazon.com
+Abstract
+Named entity recognition (NER) in a real-
+world setting remains challenging and is im-
+pacted by factors like text genre , corpus qual-
+ity, and data availability. NER models trained
+on CoNLL do not transfer well to other do-
+mains, even within the same language. This
+is especially the case for multi-lingual models
+when applied to low-resource languages, and
+is mainly due to missing entity information.
+We propose an approach that with limited ef-
+fort and data, addresses the NER knowledge
+gap across languages and domains. Our novel
+approach uses a token-level gating layer to
+augment pre-trained multilingual transformers
+with gazetteers containing named entities (NE)
+from a target language or domain. This ap-
+proach provides the ﬂexibility to jointly in-
+tegrate both textual and gazetteer informa-
+tion dynamically: entity knowledge from
+gazetteers is used only when a token’s textual
+representation is insufﬁcient for the NER task.
+Evaluation on several languages and domains
+demonstrates: (i) a high mismatch of reported
+NER performance on CoNLL vs. domain spe-
+ciﬁc datasets, (ii) gazetteers signiﬁcantly im-
+prove NER performance across languages and
+domains, and (iii) gazetteers can be ﬂexibly in-
+corporated to guide knowledge transfer. On
+cross-lingual transfer we achieve an improve-
+ment over the baseline with F1=+17.6%, and
+with F1=+21.3% for cross-domain transfer.
+1 Introduction
+Advances in pre-trained models have achieved state
+of the art results for NER (Conneau et al., 2020;
+Yamada et al., 2020). Models like XLM-RoBERTa
+(XLMR) (Conneau et al., 2020) offer advantages as
+they can be applied on several languages with little
+ﬁne-tuning to obtain optimal NER performance,
+with an F1 score of 92.92for English and an aver-
+age of 89.43across all languages in CoNLL (Sang
+and Meulder, 2003).
+Table 1: Example snippets in multiple-languages and
+domains. NER needs to resolve equivalent NE surface
+forms across languages, e.g. “Presidency of the Euro-
+pean Council” to“EU-Ratspresidäntschaft” , or across
+domains where entity distribution change (second row,
+where entity types are marked in different colors).
+While NER results obtained on CoNLL have
+reached remarkable levels, in real-world settings,
+NER faces many challenges, related to application
+domain ,language , ordata quality . For uses cases
+such as Web search queries or utterances coming
+from voice assistants, data quality and obtaining
+annotations are an issue. Such corpora usually have
+low context and no casing information, or contain
+syntactic errors. For instance, by just dropping
+the casing information on CoNLL test set the NER
+performance drastically drops to F1=0.35 (Mayhew
+et al., 2019). Moreover, such snippets often cover
+diverse domains with named entities that are not
+part of the training data.
+Table 1 shows example sentencesin different
+languages and genres/domains. For NER knowl-
+edge transfer across languages, a typical challenge
+is the signiﬁcant surface form variations of NEs, in
+terms of their compositional nature, ambiguity of
+surface forms, and as well script. Similarly, a chal-
+lenge across domains are the diverging named en-
+tity distributions or ambiguities that surface forms
+resolve to different entity types. To date, there are
+no existing datasets that allow to probe NER sys-
+tems for cross-lingual and cross-domain transfer
+(e.g domains like Q&A or Web search).2777Considering the above challenges, our objective
+in this work is to propose approaches and training
+strategies that fulﬁll the following desiderata:
+•Cross-Linguality: Models trained on a source
+language should transfer with minimal effort to a
+target language. The challenges are the composi-
+tionality of NEs across languages and script (c.f.
+NEs in green for EN and DE in Table 1).
+•Cross-Domain: Models should transfer across
+domains that have diverging NE distributions.
+Speciﬁcally, determine entity boundaries (e.g.
+generalize from Person toCreative Work ,
+which are often complex noun orverb phrases).
+We propose an NER approach that fulﬁlls the
+two desiderata. First, we address multi-linguality
+by encoding sentences using the pre-trained XLMR
+model (Conneau et al., 2020). Second, to account
+for domain differences, we enhance XLMR with
+multi-lingual gazetteers that can be extracted from
+resources like Wikidata, or domain-speciﬁc re-
+sources (e.g. product catalogs). Gazetteers aid
+the NER knowledge transfer and provide the mod-
+els with explicit signal about NEs from a target
+language/domain. Since the two modules provide
+complementary information, we combine them us-
+ing the mixture of experts (MoE) (Shazeer et al.,
+2017), allowing the model to dynamically deter-
+mine which portion of the information is used
+for NER. Finally, we construct multi-lingual and
+-domain NER datasets, addressing some of the de-
+ﬁciencies of existing datasets like WikiAnn (Pan
+et al., 2017), which consists of sentences with popu-
+lar entities across all languages, limiting knowledge
+transfer for low-contextual and emerging domains.
+Experiments on 7 languages and multiple do-
+mains conﬁrm that our model can adapt across
+domains and languages using few-shot learning
+(with as much as 500 instances transfer from high
+to low resource languages). Gazetteer informa-
+tion combined through MoE, provides an advan-
+tage over baselines with an average improvement
+of MD=+33.21% in mention detection across do-
+mains and F1=+17.6% across languages.
+In this work, our contributions are threefold:
+•gazetteer integration into NER models for cross-
+lingual and -domain NER knowledge transfer,
+•novel means in integrating text and gazetteer rep-
+resentations through Mixture-of-Experts (MoE),
+•mLOWNER a low-contextual and multilingual,
+and MSQ a multilingual questions dataset.2 Related Work
+The use of gazetteers is not new. It has been a
+core principle in doing NER using feature-based
+approaches (Curran and Clark, 2003; Toral and
+Muñoz, 2006; Cucchiarelli et al., 1998). How-
+ever, with neural models and recent pre-trained
+transformer models achieving state of the art re-
+sults (Vaswani et al., 2017; Conneau et al., 2020;
+Devlin et al., 2019), the utility of gazetteers on
+standard benchmarks has diminished. Our related
+work discussion is focused towards works that have
+utilized gazetteers for NER.
+Liu et al. (2019) propose the use of gazetteers
+with neural NER models, utilizing them in the form
+of a sub-tagger. For each token a matching score to
+the gazetteer entries needs to be pre-computed and
+then fed into the NER framework. The main utility
+of gazetteers is to provide ﬂexibility and be easy
+to swap, allowing NER models to adapt on out-of-
+domain data. Contrary to Liu et al. (2019), we
+ﬂexibly combine gazetteers with the textual infor-
+mation and depending on the context are weighted
+accordingly. Gazetteers can be swapped during the
+test-phase without any ﬁne-tuning. We compare
+against this approach and show the advantages of
+our approach both in terms monolingual and cross-
+domain performance.
+Shang et al. (2018) create dictionaries for a given
+corpus on which the NER task is performed. This
+avoids ambiguous matches of named entities across
+domains. The task is to determine whether the
+tokens in a span belong together or not, as part of an
+entity, otherwise they can be two different entities
+or not be entities at all. Finally, the type of those
+spans is predicted. We differ from (Shang et al.,
+2018) on three main points. First, the dictionary
+creation is tied to the corpus. Second, the model
+ﬁts parameters to predict if a text span on a given
+corpus represents an entity. Finally, the dictionary
+information and model weights are ingrained into
+the model, which is not the case for our approach.
+Ding et al. (2019) create a di-graph from a sen-
+tence and gazetteer matches. Adjacent nodes are
+connected via a directed edge, after which, edges
+between the matched characters to the gazetteer
+nodes are added. The di-graph is then fed to a
+graph neural network for training and resolve am-
+biguous matches. Contrary to our work, here the
+gazetteer matches are ingrained into the model, and
+changes in gazetteers induce changes in the graph
+structure and thus require complete retraining.2778Rijhwani et al. (2020) integrate entity linking
+systems in matching the tokens or token spans to
+some target entity or candidate entities. For each
+match, different features are proposed, e.g. top
+scoring entity for a span, top–3 candidate scores,
+top–3 entities, type counts etc. While, using pre-
+deﬁned feature sets (Zirikly, 2015; Rijhwani et al.,
+2020) has the advantages of interpretability, how-
+ever, generalizing models to unseen languages or
+domains is challenging. A direct comparison be-
+tween feature-based models and our approach is
+not possible. Our approach automatically integrates
+external gazetteers without having the need to run
+entity linking or any hand-crafted features.
+Lin et al. (2019) propose to integrate gazetteers
+for NER by training a gazetteer network to predict
+whether a text snippet represents a name or not.
+There are two diverging points to our work. First,
+the gazetteer network weights of Lin et al. (2019)
+are tied to the training data, thus, for any new data
+the gazetteer network needs to be retrained to accu-
+rately predict if a snippet represents an entity. Sec-
+ond, our approach performs a soft-match w.r.t the
+gazetteer entries, where each match is represented
+as a binary vector w.r.t NER matching classes. This
+allows us to ﬂexibly change at inference time the
+gazetteer data, since the model captures only the
+structural information present in tokens and sen-
+tences. Furthermore, using the mixture of experts
+module to combine both the textual and gazetteer
+token representations, we can ﬂexibly determine
+which representation to use for NER classiﬁcation.
+Finally, Jia et al. (2019) propose the use of mix-
+ture of experts, where the experts correspond to
+separate classiﬁers per NER class. We differ in that
+we utilize MoE to compute a uniﬁed representation
+of text and gazetteers.
+3 Dataset Construction
+Models trained on CoNLL typically perform poorly
+when applied on out-of-domain data. Similarly,
+WikiAnn (Pan et al., 2017), which consists of con-
+textually rich sentences, is not suitable for domain
+transfer where context is scarce (e.g. Web search).
+We describe the process of constructing the mul-
+tilingual and multi-domain datasets. We include
+the following languages: English–EN, Spanish–
+ES, Dutch–NL, Russian–RU, Turkish–TR, Korean–
+KO, Farsi–FA, a mix of high and low resource
+languages. The data is available for download.mLOWNER. Which stands for multilingual low–
+context Wikipedia NER dataset (Malmasi et al.,
+2022), extracted from the different localized ver-
+sions of Wikipedia. We extract low-context sen-
+tences that contain interlinked entities and resolve
+theentity types using Wikidata as reference, accord-
+ing to the NER class taxonomy from (Derczynski
+et al., 2017).
+Ensuring that the extracted sentences and the
+interlinked entities therein are of high quality we
+follow two ﬁltering strategies. First, we apply reg-
+ular expression to identify and ﬁlter out sentences
+that contain named entities that are not interlinked.
+This step removes long and high-context sentences.
+Second, we ﬁlter out sentences, in which the links
+could not be resolved to Wikidata entities. Apply-
+ing the two steps ﬁlter out over 90% of the sen-
+tences from the respective Wikipedia versions. The
+resulting dataset is diverse in domains and multi-
+lingual, including low-resource languages FA, KO,
+TR. For more details regarding the mLOWNER
+dataset, we refer to the reader to dataset paper (Mal-
+masi et al., 2022), and additional details provided
+in the paper appendix.
+Sentences in mLOWNER have on average 15 to
+19 tokens. Based on a manual inspection of 400
+sample sentences in EN, the quality of the NER
+gold-labels is with 94% accuracy.
+MSQ. From the MS-MARCO Q&A cor-
+pus (Nguyen et al., 2016) we construct question
+templates , where the entities are replaced by
+their type following the same NER taxonomy as
+mLOWNER. We identify entities in a question
+using spaCy. For example, from the template
+“who produced/angbracketleftCW|PROD/angbracketright”, we generate multiple
+instances by varying entities of type CWorPROD .
+MSQ is used only for testing and to assess cross-
+domain knowledge transfer of NER models. Since
+the questions are only in English language, we
+translate the extracted templates using Amazon
+Translate.The translation quality is good con-
+sidering that the question templates are short. The
+number of questions per language is around 17.5k
+with an average number of tokens 4.9±1.73.27794 Approach
+Figure 1 shows an overview of our approach based
+our prior work (Meng et al., 2021; Fetahu et al.,
+2021), which we adopt for our cross-lingual and
+cross-domain application scenario. It consists of
+three main components: (i) multi-lingual sentence
+representation, (ii) external gazetteer knowledge
+integration, and (iii) dynamic combination of text
+and gazetteer information.
+For a sentence s={w,...,w}withNto-
+kens we compute token representation as follows.
+4.1 Multi-Lingual Text Representation
+Using XLMR (Conneau et al., 2020) as a text en-
+coder, we are able to encode sentences from mul-
+tiple languages, and compute the sentence repre-
+sentation h={h,...,h}, where h∈R
+represents the sentence representation for Ntokens
+withLoutput dimensions.
+While XLMR has remarkable NER performance
+on the CoNLL dataset, textual representation alone
+is not sufﬁcient for cross-domain transfer. Such
+limitations are even higher when consider cross-
+lingual transfer on distant languages. Depend-
+ing on the pre-training resources for a language,
+XLMR tokenization (Kudo and Richardson, 2018)
+of infrequent tokens or tokens from low-resource
+languages, can be problematic, often leading to
+over-segmentation. This in turn, introduces am-
+biguity for the NER task, e.g., “wunderkind little
+amadeus“→“_wunder kind _little _amade us ”, is
+tokenized into sub-words with ambiguous meaning
+within and across languages, e.g. wunder, kind, us .
+4.2 Gazetteer Representation
+Gazetteers inject explicit information about target
+NEs (e.g. Products from an e-commerce site). This
+provides the ﬂexibility to adapt on target domains
+and for entities with variable surface forms (e.g.
+Movies, Product names). Typically complex enti-
+ties (e.g. movie titles) consist of complex noun or
+word phrases that are to capture (cf. Figure 1).
+Overall, gazetteers are easy to obtain from
+open resources like Wikidata. A gazetteer
+Gconsists of entities and their type, e.g.
+/angbracketleft,CW/angbracketright.
+Gazetteer Matcher. For a token or sequence of
+tokenssfroms⊆s, we extract the longest matchfrom entries inG.The gazetteerGconsists of a trie
+built from all the named entity entries of interest.
+The matcher yields a sparse encoding g∈
+N, where g={x,...,x}andx∈
+(0,1)is a binary vector of length k(kis the num-
+ber of target NE types in Gin IBO format). More
+speciﬁcally, if our sequence of tokens is s={the,
+late, show, with, stephen, colbert }, the resulting
+matcher would yield the following matrix g:
+The sparse vectors in gare converted into a
+dense representation by projecting them through a
+dense layerθ, which are encoded using a BiLSTM,
+G=/bracketleftBig−−−→LSTM (θ[g]);←−−−LSTM (θ[g])/bracketrightBig
+∈R.
+The ﬁnal gazetteer representation G, a BiL-
+STM encoder learns the context of sentence s,
+and using its context learns to resolve ambiguous
+matches a token may have in G, e.g., “stephen col-
+bert” , matches to both CWandPER entries.
+4.3 Combined Representation
+The encoded textandgazetteer representations cap-
+ture complementary information. Depending on
+s, not always both representations are deemed as
+useful. For instance, if hcaptures the contextual
+information of sand the pre-trained knowledge of
+XLMR for the tokens therein is not ambiguous,
+thenGmay not be necessary. Otherwise, when
+the model is applied to out-of-domain sentences
+or tokens are ambiguous and match to multiple
+named entity types, in such cases G, which en-
+codes explicit information from a target domain or
+languages provides the necessary context.
+At token level we learn a function that combines
+dynamically both representations by computing an
+importance score for handG. The importance
+wis computed based on the mixture of experts
+approach (MoE) (Shazeer et al., 2017). Since we
+have two representations only, we use a Sigmoid
+function to split the importance accordingly:
+w=σ/parenleftbig
+Λ[h;G]/parenrightbig
+(1)
+h=w·h+ (1−w)·G (2)
+where, Λ∈R. From husing a conditional
+random ﬁeld (CRF) layer (Lafferty et al., 2001) we
+predict the token NER tags.2780
+Lastly, by feeding the gazetteer matches as a bi-
+nary matrix, which corresponds to the NER class
+matches of a given text span, and combining this
+information jointly with the hrepresentation, we
+allow our model to abstract the gazetteer represen-
+tation Gand learn structural NE properties for a
+given text span (i.e. in terms of NER classes the
+span may belong to), given that textual represen-
+tation is provided by XLMR. This is a signiﬁcant
+improvement over existing work, which compute
+gazetteer representations w.r.t tokens and thus re-
+quire re-training, whenever the gazetteer informa-
+tion is updated (Liu et al., 2019).
+4.4 Multi-Stage Training Strategy
+Our approach consists of modules like XLMR,
+whose parameters contain pre-trained knowledge,
+and the randomly initialized gazetteer and MoE
+modules. To align the parameter spaces of these
+components, and avoid that the NER model is
+not biased towards the pre-trained knowledge of
+XLMR, we device a two-stage training strategy.
+First Stage. XLMR’s weights are frozen, while
+gazetteer encoder is trained, allowing it to learn
+how to resolve ambiguities tokens matches.
+Second Stage. All components are jointly trained,
+further ﬁne-tuning XLMR and MoE to weigh be-
+tween handGaccording to their impact on pre-
+dicting the NER class.5 Experimental Setup
+Here we describe the NER approaches under com-
+parison for knowledge transfer across domains and
+languages. Next, we introduce the multilingual
+training data, and the corresponding test sets for
+cross-lingual and cross-domain evaluation.
+5.1 Baselines and Approach Setup
+Baseline – XLMR: The XLMR trans-
+former (Conneau et al., 2020) with a CRF layer
+trained for the NER task is considered as a baseline.
+We use the AdamW optimizer (Loshchilov and
+Hutter, 2019) with a learning rate of lr= 1e−5
+to minimize the negative log-likelihood loss ( NLL),
+and use a batch size of 64. This represents an
+ablation of our model without gazetteers and the
+MoE mechanism .
+Baseline – Gazetteer Lookup (BaG): To assess
+that gazetteers alone are insufﬁcient, we consider a
+gazetteer lookup to the longest matching text span
+to the gazetteer entries. For a more favorable set-
+ting for BaG, ambiguous span matches are counted
+as correct if the NER class is in the set of classes
+assigned by the gazetteer.
+SubTagger (Liu et al., 2019): We train the Sub-
+Tagger’s gazetteer matcher on EN gazetteer data
+and test its monolingual andcross-domain perfor-2781mance for English. This is due to the fact that
+GloVe (Pennington et al., 2014) and ELMo embed-
+dings (Peters et al., 2018) are available only for
+English, and are key components in training the
+gazetteer and NER model. Evaluating SubTagger
+for cross-lingual transfer is not possible since it
+uses monolingual embeddings and for any target
+language, the model needs to be retrained from
+scratch using the gazetteer and the word represen-
+tations from the target language.
+Approach (Ours): Our approach consists of
+three components that are trained using the intro-
+duced multi-stage training strategy . Training de-
+tails are provided in the Appendix B.
+5.2 Datasets
+Below are shown the datasets ( without casing ) used
+for training and testing NER models.
+CoNLL: exists in 4 languages (EN, DE, ES, NL)
+with sentences (Sang, 2002; Sang and Meulder,
+2003), and used for training only.
+mLOWNER: mLOWNER (Malmasi et al.,
+2022) is used for training. mLOWNER test set
+is used to assess cross-lingual transfer. For training
+and development, for each language, we use 15.2k
+and 800, respectively. For testing we limit the num-
+ber of instances to 10k per language. Additional
+details are provided in Appendix A.
+MSQ: This dataset is used only to test the cross-
+domain transfer of pre-trained NER models.
+WNUT: WNUT17 (Derczynski et al., 2017) is
+another test set for cross-domain evaluation, con-
+sisting of social media posts in EN language.
+Twitter Data: Additionally, we collected a ran-
+dom sample of 10k tweets in the English language,
+to assess the competing approaches (XLMR base-
+line and our approach) in a zero-shot setting.
+Gazetteers: Entries are extracted from Wikidata
+entity titles (from types corresponding to the NER
+taxonomy). More details in Appendix A.5.3 Cross-domain & Cross-lingual Scenarios
+Cross-Domain: Pre-trained models on CoNLL
+and mLOWNER are assessed for out-of-domain
+transfer on MSQ in terms of mention detection
+(MD). MD measures the ability to predict the en-
+tity boundaries , disregarding the actual entity type.
+We also consider cross-domain transfer from EN-
+LOWNER to WNUT and report NER micro F1.
+Cross-Lingual: Models trained on an
+mLOWNER source language are assessed
+on a target language under zero-shot and few-shot
+learning.
+6 Evaluation
+Here we assess the monolingual NER model per-
+formance and impact of the multi-stage training
+strategy and that of MoE. Finally, we assess their
+knowledge transfer across languages and domains.
+6.1 Model Comparison
+For the CoNLL and mLOWNER datasets, we
+trained separate models for both our approach and
+baselines. Table 2 shows the micro-averaged F1
+scores across all NER classes. Table 2 shows that
+in the case of CoNLL, there is a saturation in terms
+of the improvement we achieve across the different
+languages. One explanation for this is that pre-
+trained transformer models like XLMR, are already
+highly efﬁcient on news corpora and can exploit the
+regularities on how named entities are mentioned
+in text. Hence, the difference when comparing the
+baseline and our approach on the CoNLL test set
+varies from 1% to 2%, for EN and NL, respectively.
+Contrary to CoNLL, in the case of mLOWNER,
+which is a more diverse dataset and with sentences
+that do not follow the strict language style present
+in news corpora, we achieve signiﬁcant gains over
+the baseline approach. The average gains are
+around 10.6%absolute improvement in terms of2782
+micro averaged F1. Moreover, it is encouraging
+to note that for low-resource languages such as
+KO or FA, the gains are even higher. This shows
+that when pre-trained transformer models do not
+contain knowledge about a speciﬁc token, integrat-
+ing external gazetteers through MoE, we can ac-
+curately predict the NER class of a token. The
+gains are not evenly distributed across the differ-
+ent NER classes. Figure 2 shows the absolute F1
+gains over the XLMR baseline. The highest gains
+are achieved for the classes PROD, CW, CORP
+(with an average absolute increase of F1=+14.02),
+which contain NEs that do not follow typical syn-
+tactic patterns as is the case for PER, LOC .
+For the BaG baseline, we see a large gap. This
+is due to the inability to resolve ambiguous cases,
+which highlights the difﬁculty of the task, and that
+gazetteers alone lead to noisy NER.
+Finally, comparing against SubTagger on the
+LOWNER test set, our approach achieves an in-
+crease of F1=+5%. Given that both models are
+trained on the same dataset, the improvements
+comes mainly from the way we model our ap-
+proach. Namely, the contributions can be attributed
+on the way how we incorporate gazetteer matches
+using the MoE, which allows the model to either
+weigh higher or downweight matches according to
+the token’s NER tag accuracy.
+Multi-stage training impact. We assessed the
+performance of our approach without the multi-
+stage training. The results are negligibly better
+than the baseline. Given that the GAZ encoder and
+MoE module are randomly initialized, the model
+relies solely on XLMR for NER. Furthermore, a
+low learning rate is not suitable for GAZ and MoE,
+while a higher lris not suitable for XLMR, hence,
+the multi-stage training is appropriate.MoE Impact. The combined representation com-
+puted via MoE is highly effective, especially for
+cross-domain transfer. Simply concatenating the
+text/gazetteer vectors, we note an average decrease
+of MD=-22% across all languages for MSQ. For
+in-domain evaluation, the difference is negligible.
+This is due to two reasons: (i) the model’s repre-
+sentation for out-of-domain entity tokens are not
+ﬁne-tuned for the task, and (ii) without MoE, spuri-
+ous gazetteer matches cannot be discarded.
+6.2 Cross-Domain Transfer Results
+Cross-domain transfer for NER remains still chal-
+lenging, due to the lack of domain speciﬁc data,
+privacy concerns in generating such data, or exist-
+ing datasets having a narrow domain coverage.
+Figure 3 shows the cross-domain transfer re-
+sults for models trained separately on CoNLL and
+mLOWNERand tested on the mLOWNER and
+MSQ test sets. Since CoNLL has a different NER
+class taxonomy than MSQ and mLOWNER, we
+report only MD performance.
+Pre-trained CoNLL models: For MD perfor-
+mance of CoNLL pre-trained models we note two
+aspects. First, there is a high mismatch between the
+performance achieved on CoNLL and that of for
+mLOWNER and MSQ. It is evident that due to the
+narrow domain coverage of CoNLL (consisting of
+only news genre), the models have difﬁculties in de-
+tecting NE boundaries for out-of-domain datasets.
+Second, our approach consistently outperforms the
+XLMR baseline for both datasets. We obtain an
+absolute average improvement of MD=+3% and
+MD=+24% for mLOWNER and MSQ, respectively.
+This shows that when NER models are applied to a
+distant domain from their initial training data (e.g.2783
+MSQ), the ability to inject explicit NE knowledge
+provides signiﬁcant gains.
+Pre-trained mLOWNER models: On the MSQ
+dataset, our approach obtains an average of abso-
+lute improvement of MD=+21.3% over the baseline
+across all languages. This validates our hypothesis
+that gazetteer knowledge allows models to adapt
+on out-of-domain data. The gains for EN are 11%,
+whereas the highest are for TR with 35%. The
+gain ratios are highly correlated with the gazetteer
+coverage on MSQ with Pearson’s correlation of
+ρ= 0.67. The coverage for MSQ EN is at 85%,
+and thus the lowest gains, while for the remaining
+languages the coverage is at 98%.
+The results in Figure 3 validate the utility of
+the proposed dataset mLOWNER. Similar archi-
+tectures trained on mLOWNER and CoNLL have
+highly diverging performance, with models trained
+on CoNLL showing limited cross-domain trans-
+fer. For example, when assessed for cross-domain
+transfer on the MSQ dataset, the pre-trained mod-
+els on EN-CoNLL and EN-mLOWNER achieve
+MD=0.64 and MD=0.73, respectively.
+Finally, comparing cross-domain transfer in
+terms of micro F1 score for the XLMR and SubTag-
+ger baselines trained on LOWNER, our approach
+achieves an average F1=+33.2% absolute points
+improvements against XLMR across all languages,
+whereas for SubTagger for EN-MSQ, we see an
+absolute points of improvement of F1=+18.8%.Cross-Domain Transfer on WNUT: Since
+WNUT is available in EN only, we show the ze-
+roshot and ﬁne-tuning performance of mLOWNER
+pretrained models (since they use the same NER
+taxonomy). Our approach obtains a score of
+F1=0.293, contrary to the XLMR which achieves
+F1=0.220. Fine tuning the mLOWNER models on
+the WNUT train set, we achieve a new state of the
+art result (cf. (Shahzad et al., 2021)) in WNUT
+with F1=0.507 for our approach, which is 9.7%
+higher than the baseline.
+Cross-Domain Transfer on Twitter Data:
+Apart from assessing our models on cross-domain
+transfer on the WNUT dataset, we additionally
+assess the performance of the baseline and our
+approach on the 10k random Twitter sample data.
+Table 4 shows the precision per NER class of
+the competing approaches. For each model, we
+randomly sample a set of 30 tweets per NER class,
+leading to a total 180 tweets per model. This
+results into a total of 360 tweets for both models,
+which we annotate to measure the accuracy of
+models in detecting named entities. We use the
+resulting annotations to measure the precision for
+each model in Table 4.
+Our approach signiﬁcantly outperforms the base-
+line approach on the cross-domain transfer on the
+Twitter data as well, with an absolute difference of
+26.74% in terms of overall precision.2784From the results we note that both approaches
+perform fairly well for the PER class, where the
+difference between the two models is only with
+7.47%. This is intuitive given that person names
+are quite regular, and even in out of domain corpora,
+both models have little difﬁcult in identifying them.
+On the contrary, for NER classes such as GRP
+orCORP , the gap between the models is very large,
+with 53.33% and 43.70%, respectively. Contrary
+to person names, corporation and group names do
+not follow very strict pattern, hence, the low per-
+formance of the baseline model.
+Finally, for CW, we note that our approach has
+the lowest performance among all the other NER
+classes. The lower performance in this case can
+be explained by the fact that our gazetteer knowl-
+edge containing CWentries leads to false positive
+matches in the Twitter data. Given that Twitter
+contains tweets that are highly diverse and that CW
+entries can be quite complex phrases, this leads to
+spurious matches, which we do not have in more
+controlled domains like CoNLL or mLOWNER.
+6.3 Cross-Lingual Transfer
+Applying pre-trained models on a source language
+to other target languages provides several advan-
+tages in reducing annotation costs, which for some
+low-resource languages may be difﬁcult to obtain.
+Table 3 shows the NER results of our approach
+when trained on a source language (rows) and
+tested on a target language mLOWNER (columns)
+dataset. In brackets is shown the absolute improve-
+ment over the baseline in terms of micro F1 score.
+Zero-Shot Evaluation. In this setting, we con-
+sistently outperform XLMR (except /angbracketleftRU, ES/angbracketright,
+where we note a negligible difference). When ap-
+plying the EN model on low-resource languages
+our gains are highest, with an average absolute im-
+provement of F1=+17.13%. The gains over thebaseline are particularly high, when the source
+(EN) and target languages are distant, e.g., TR,
+KO or FA. This is intuitive as pre-trained textual
+knowledge is scarce for such pairs, however, the
+integrated gazetteer information through MoE pro-
+vides the missing NE token knowledge for NER.
+Finally, for similar languages like EN, NL, ES,
+the differences to the mono-lingual performance is
+within a 5–8% F1. Such cross-lingual transfer is
+very promising, considering the zero-shot setting
+and the fact that we simply swap the gazetteer data
+to the target language without any ﬁne-tuning.
+Few-Shot Evaluation. In this setting, we used
+500 instances from a target language for ﬁne-tuning.
+Similarly, here too, our approach consistently im-
+proves over the baseline. The gap between the base-
+line and our approach increases slightly from zero-
+shot to few-shot. Overall comparison to zero-shot,
+with 500 instances, the improvements across all
+language pairs are with F1=+8% absolute points.
+With few-shot learning, we close the gap to the
+monolingual models signiﬁcantly. For instance,
+the ﬁne-tuned EN model for the rest of the target
+languages has only 4.7%, 4.4%, 5.3% lower per-
+formance for ES, NL, and TR whereas for FA, RU
+and KO the difference is higher with 8.6%, 9%
+and 10.4%. The results are encouraging, consider-
+ing that for low-resource languages like FA or KO,
+obtaining annotations can be problematic.
+7 Conclusions
+We presented an approach to ﬂexibly inject
+gazetteers into multilingual transformers for NER,
+showing its utility for cross-domain and cross-
+lingual transfer. Furthermore, we propose and pub-
+lish large multi-lingual and multi-domain corpora
+for training and testing NER performance.
+Thorough evaluations show that NER knowledge
+transfer can be guided and signiﬁcantly improved
+through external gazetteers. On cross-domain trans-
+fer our approach achieves an improvement of over
+MD=+21.3% across all languages, whereas for
+cross-lingual transfer, with only 500 instances we
+reach the monolingual performance with only 6%
+difference in terms of F1 across all languages.
+Finally, we showed that training data plays a
+signiﬁcant role in NER model’s ability to transfer
+knowledge across domains and languages, where
+pre-trained models on CoNLL fail to perform well
+on out-of-domain and multi-lingual datasets.2785References278627872788A NER Datasets
+LOWNER. Table 6 shows detailed statistics about
+the LOWNER dataset. LOWNER is used as our
+main training dataset, and additionally we use it for
+cross-lingual transfer of NER models. LOWNER
+is constructed in 7 different languages from the cor-
+responding Wikipedia dumps, where we extract the
+articles, which were then parsed to remove markup
+and extract sentences with their interlinks (links to
+other articles). We then mapped the interlinks in
+each sentence to the Wikidata KB then resolved
+them to our NER taxonomy as shown in Table 6.
+We ﬁlter sentences using two strategies. Tak-
+ing advantage of Wikipedia’s well-formed text, we
+applied a Regex-based NER method to identify
+sentences containing named entities that were not
+linked, and removed them. This removes long and
+high-context sentences that contain references to
+many entities. Additionally we also removed any
+sentence where the links could not be resolved to
+Wikidata entities. This step discards over 90% of
+the sentences. This process yields short and low-
+context sentences, which represents a realistic NER
+dataset for cross-domain transfer, especially for
+cases like Web search or Q&A.
+Below are shown example sentences from the
+EN-LOWNER training set. The different entities
+are marked in colors according to their entity type.
+MSQ. This dataset aims to reﬂect NER in the
+Q&A domain, and is based on the MS-MARCO
+dataset (Nguyen et al., 2016) which contains over
+a million questions. We ﬁrst construct templates
+from the questions by applying an existing NER
+system (e.g., spaCy) to identify entities in the ques-
+tions. We then use our gazetteer to map the en-
+tities to their NER types to create slotted tem-
+plates, e.g., “when did [[iphone]] come
+out” becomes “when did <PROD> come
+out” . The templates are then aggregated by fre-
+quency. This process results in 3,445 unique ques-
+tion templates in English language, which we auto-
+matically translated into the remaining languages
+(NL, ES, RU, TR, KO, FA). While the NER systemcannot correctly identify many entities, the most
+frequent templates are reliable. Finally, we gener-
+ate MSQ-NER by slotting the templates that have
+a frequency of≥5 with random entities from the
+Wikipedia KB with the same class. Each template
+is slotted with the same number of times it appeared
+in MS-MARCO in order to maintain the same rela-
+tive distribution as the original data. This results in
+17,868 questions e.g., “when did [[xbox]]
+come out” , which we use as a test set. Table 6
+shows the stats for the MSQ dataset in the different
+languages.
+The examples below show MSQ test instances.
+The different entities are marked in different colors
+according to their entity type.
+Gazetteers. Table 5 shows the gazetteers ex-
+tracted from the entity titles in Wikidata (instances
+of Wikidata types that correspond to the NER tax-
+onomy). We use gazetteers to aid knowledge trans-
+fer for our approach.
+B NER Approaches Setup
+Here we describe technical details on how we
+trained both NER approaches in this work. Our
+approach and the baseline are implemented in Py-
+Torch (Paszke et al., 2019). We train our models on
+4 NVIDIA Tesla V100 GPUs, with approximately
+8–10 mins per epoch. The code repository will be
+released upon paper publication.
+•Baseline–XLMR: We ﬁne tune XLM-RoBERTa
+(XLMR) (Conneau et al., 2020) baseline
+for the NER task using the AdamW opti-
+mizer (Loshchilov and Hutter, 2019), with a
+learning rate of lr= 1e−5and weight de-
+cay ofw= 0.01. For XLMR we make use of2789dataset lang split instances PER LOC GRP PROD CW CORP
+LOWNEREnglish (EN)train 15200 0.229 0.203 0.152 0.124 0.159 0.132
+dev 800 0.236 0.19 0.154 0.12 0.143 0.157
+test 10000 0.225 0.206 0.155 0.126 0.155 0.133
+Dutch (NL)train 15200 0.197 0.247 0.148 0.132 0.15 0.126
+dev 800 0.183 0.258 0.141 0.119 0.157 0.141
+test 10000 0.192 0.245 0.151 0.134 0.153 0.126
+Spanish (ES)train 15200 0.209 0.219 0.144 0.135 0.164 0.129
+dev 800 0.21 0.233 0.143 0.131 0.163 0.12
+test 10000 0.209 0.216 0.144 0.132 0.169 0.131
+Russian (RU)train 15200 0.185 0.211 0.151 0.148 0.163 0.143
+dev 800 0.184 0.212 0.145 0.145 0.161 0.153
+test 10000 0.181 0.212 0.155 0.147 0.162 0.143
+Turkish (TR)train 15200 0.189 0.248 0.154 0.137 0.153 0.119
+dev 800 0.186 0.282 0.134 0.127 0.153 0.119
+test 10000 0.182 0.253 0.154 0.135 0.152 0.125
+Korean (KO)train 15200 0.184 0.254 0.144 0.125 0.158 0.135
+dev 800 0.205 0.248 0.141 0.136 0.151 0.12
+test 10000 0.183 0.26 0.144 0.126 0.153 0.134
+Farsi (FA)train 15200 0.188 0.248 0.141 0.13 0.162 0.131
+dev 800 0.166 0.267 0.135 0.129 0.171 0.132
+test 10000 0.191 0.245 0.14 0.127 0.163 0.134
+MSQEnglish (EN) test 17868 0.240 0.554 0.032 0.025 0.115 0.036
+Spanish (ES) test 17937 0.226 0.582 0.030 0.024 0.105 0.032
+Dutch (NL) test 17387 0.242 0.555 0.032 0.024 0.114 0.034
+Russian (RU) test 17551 0.232 0.561 0.033 0.024 0.114 0.036
+Turkish (TR) test 17405 0.246 0.544 0.033 0.025 0.116 0.037
+Korean (KO) test 17874 0.245 0.545 0.033 0.025 0.115 0.036
+Farsi (FA) test 16960 0.238 0.560 0.032 0.022 0.112 0.036
+the implementation provided by the Transformer
+framework (Wolf et al., 2019). We ﬁrst perform a
+linear warmup stage, which is done for a certain
+number of steps that corresponds to 10% of the
+number of batches. XLMR model converge to
+their optimal performance around 10 epochs.
+•Approach: We train our approach in two stages.
+This is mainly due to the fact that the text and
+gazetteer components having unaligned weights.
+XLMR has weights coming from a pre-trained
+model, whereas the gazetteer encoder has ran-
+domly initialized weights. We use the same op-
+timizer as for the Baseline, namely AdamW. Inthe ﬁrst sage, we freeze the XLMR weights and
+use a more aggressive learning rate to train the
+LSTM gazetteer encoder with lr= 0.01. We run
+the ﬁrst stage for 10 epochs, and then perform a
+joint optimization in the second stage with the
+same learning rate and weight decay parameters
+as for the XLMR baseline approach.2790

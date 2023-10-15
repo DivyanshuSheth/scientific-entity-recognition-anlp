@@ -1,1 +1,655 @@
-1309 Proceedings of the 61st Annual Meeting of the Association for Computational Linguistics Volume 1 : Long Papers , pages 1309–1320 July 9 - 14 , 2023 © 2023 Association for Computational Linguistics 1310 1311 1312 1313 1314 1315 1316 1317 1318 1319 1320 
+
+Shengming Yin, Chenfei Wu, Huan Yang, Jianfeng Wang, Xiaodong Wang
+Minheng Ni,Zhengyuan Yang,Linjie Li,Shuguang Liu,Fan Yang
+Jianlong Fu,Gong Ming,Lijuan Wang,Zicheng Liu,Houqiang Li,Nan DuanUniversity of Science and Technology of ChinaMicrosoft Research AsiaMicrosoft Azure AI
+{sheyin@mail., lihq@}ustc.edu.cn,
+{chewu, huan.yang, jianfw, v-xiaodwang, t-mni, zhengyang, lindsey.li,
+shuguanl, fanyang, jianf, migon, lijuanw, zliu, nanduan}@microsoft.com
+Abstract
+In this paper, we propose NUWA-XL, a novel
+Diffusion over Diffusion architecture for eX-
+tremely Long video generation. Most current
+work generates long videos segment by seg-
+ment sequentially, which normally leads to the
+gap between training on short videos and infer-
+ring long videos, and the sequential generation
+is inefﬁcient. Instead, our approach adopts a
+“coarse-to-ﬁne” process, in which the video can
+be generated in parallel at the same granularity.
+A global diffusion model is applied to generate
+the keyframes across the entire time range, and
+then local diffusion models recursively ﬁll in
+the content between nearby frames. This sim-
+ple yet effective strategy allows us to directly
+train on long videos (3376 frames) to reduce
+the training-inference gap and makes it possible
+to generate all segments in parallel. To evalu-
+ate our model, we build FlintstonesHD dataset,
+a new benchmark for long video generation.
+Experiments show that our model not only gen-
+erates high-quality long videos with both global
+and local coherence, but also decreases the av-
+erage inference time from 7.55min to 26s (by
+94.26%) at the same hardware setting when
+generating 1024 frames. The homepage link is
+https://msra-nuwa.azurewebsites.net/
+1 Introduction
+Recently, visual synthesis has attracted a great deal
+of interest in the ﬁeld of generative models. Ex-
+isting works have demonstrated the ability to gen-
+erate high-quality images ( Ramesh et al. ,2021 ;
+Saharia et al. ,2022 ;Rombach et al. ,2022 ) and
+short videos (e.g., 4 seconds ( Wu et al. ,2022b ), 5
+seconds ( Singer et al. ,2022 ), 5.3 seconds ( Ho et al. ,
+2022a )). However, videos in real applications are
+often much longer than 5 seconds. A ﬁlm typically
+lasts more than 90 minutes. A cartoon is usually 30
+minutes long. Even for “short” video applicationslike TikTok, the recommended video length is 21 to
+34 seconds. Longer video generation is becoming
+increasingly important as the demand for engaging
+visual content continues to grow.
+However, scaling to generate long videos has a
+signiﬁcant challenge as it requires a large amount
+of computation resources. To overcome this chal-
+lenge, most current approaches use the “Autore-
+gressive over X” architecture, where “X” denotes
+any generative models capable of generating short
+video clips, including Autoregressive Models like
+Phenaki ( Villegas et al. ,2022 ), TATS ( Ge et al. ,
+2022 ), NUWA-Inﬁnity ( Wu et al. ,2022a ); Dif-
+fusion Models like MCVD ( Voleti et al. ,2022 ),
+FDM ( Harvey et al. ,2022 ), LVDM ( He et al. ,2022 ).
+The main idea behind these approaches is to train
+the model on short video clips and then use it to
+generate long videos by a sliding window during
+inference. “Autoregressive over X” architecture not
+only greatly reduces the computational burden, but
+also relaxes the data requirements for long videos,
+as only short videos are needed for training.
+Unfortunately, the “Autoregressive over X” ar-
+chitecture, while being a resource-sufﬁcient solu-
+tion to generate long videos, also introduces new
+challenges: 1) Firstly, training on short videos but
+forcing it to infer long videos leads to an enor-
+mous training-inference gap. It can result in un-
+realistic shot change and long-term incoherence
+in generated long videos, since the model has no
+opportunity to learn such patterns from long videos.
+For example, Phenaki ( Villegas et al. ,2022 ) and
+TATS ( Ge et al. ,2022 ) are trained on less than 16
+frames, while generating as many as 1024 frames
+when applied to long video generation. 2) Sec-
+ondly, due to the dependency limitation of the slid-
+ing window, the inference process can not be done
+in parallel and thus takes a much longer time. For
+example, TATS ( Ge et al. ,2022 ) takes 7.5 minutes
+to generate 1024 frames, while Phenaki ( Villegas
+et al.,2022 ) takes 4.1 minutes.1309
+To address the above issues, we propose NUWA-
+XL, a “Diffusion over Diffusion” architecture to
+generate long videos in a “coarse-to-ﬁne” pro-
+cess, as shown in Fig. 1. In detail, a global dif-
+fusion model ﬁrst generates Lkeyframes based
+onLprompts which forms a “coarse” storyline
+of the video. The ﬁrst local diffusion model
+is then applied to Lprompts and the adjacent
+keyframes, treated as the ﬁrst and the last frames,
+to complete the middle L−2frames resulting in
+L+ (L−1)×(L−2)≈L“ﬁne” frames in total.
+By iteratively applying the local diffusion to ﬁll in
+the middle frames, the length of the video will in-
+crease exponentially, leading to an extremely long
+video. For example, NUWA-XL with mdepth and
+Llocal diffusion length is capable of generating a
+long video with the size of O(L). The advantages
+of such a “coarse-to-ﬁne” scheme are three-fold:
+1) Firstly, such a hierarchical architecture enables
+the model to train directly on long videos and thus
+eliminating the training-inference gap; 2) Secondly,
+it naturally supports parallel inference and thereby
+can signiﬁcantly speed up long video generation;
+3) Thirdly, as the length of the video can be ex-
+tended exponentially w.r.t. the depth m, our model
+can be easily extended to longer videos. Our key
+contributions are listed in the following:
+•We propose NUWA-XL, a “Diffusion over
+Diffusion” architecture by viewing long videogeneration as a novel “coarse-to-ﬁne” process.
+•To the best of our knowledge, NUWA-XL is
+the ﬁrst model directly trained on long videos
+(3376 frames), which closes the training-
+inference gap in long video generation.
+•NUWA-XL enables parallel inference, which
+signiﬁcantly speeds up long video generation.
+Concretely, NUWA-XL speeds up inference
+by 94.26% when generating 1024 frames.
+•We build FlintstonesHD, a new dataset to val-
+idate the effectiveness of our model and pro-
+vide a benchmark for long video generation.
+2 Related Work
+Image and Short Video Generation Image Gen-
+eration has made many progresses, auto-regressive
+methods ( Ramesh et al. ,2021 ;Ding et al. ,2021 ;
+Yu et al. ,2022 ;Ding et al. ,2022 ) leverage VQV AE
+to tokenize the images into discrete tokens and use
+Transformers ( Vaswani et al. ,2017 ) to model the
+dependency between tokens. DDPM ( Ho et al. ,
+2020 ) presents high-quality image synthesis results.
+LDM ( Rombach et al. ,2022 ) performs a diffusion
+process on latent space, showing signiﬁcant efﬁ-
+ciency and quality improvements.
+Similar advances have been witnessed in video
+generation, ( Vondrick et al. ,2016 ;Saito et al. ,13102017 ;Pan et al. ,2017 ;Li et al. ,2018 ;Tulyakov
+et al.,2018 ) extend GAN to video generation. Sync-
+draw ( Mittal et al. ,2017 ) uses a recurrent V AE
+to automatically generate videos. GODIV A ( Wu
+et al. ,2021 ) proposes a three-dimensional sparse
+attention to map text tokens to video tokens.
+VideoGPT ( Yan et al. ,2021 ) adapts Transformer-
+based image generation models to video generation
+with minimal modiﬁcations. NUWA ( Wu et al. ,
+2022b ) with 3D Nearby Attention extends GO-
+DIV A ( Wu et al. ,2021 ) to various generation tasks
+in a uniﬁed representation. Cogvideo ( Hong et al. ,
+2022 ) leverages a frozen T2I model ( Ding et al. ,
+2022 ) by adding additional temporal attention mod-
+ules. More recently, diffusion methods ( Ho et al. ,
+2022b ;Singer et al. ,2022 ;Ho et al. ,2022a ) have
+also been applied to video generation. Among
+them, VDM ( Ho et al. ,2022b ) replaces the typical
+2D U-Net for modeling images with a 3D U-Net.
+Make-a-video ( Singer et al. ,2022 ) successfully ex-
+tends a diffusion-based T2I model to T2V without
+text-video pairs. Imagen Video ( Ho et al. ,2022a )
+leverages a cascade of video diffusion models to
+text-conditional video generation.
+Different from these works, which concentrate
+on short video generation, we aim to address the
+challenges associated with long video generation.
+Long Video Generation To address the high
+computational demand in long video generation,
+most existing works leverage the “Autoregressive
+over X” architecture, where “X” denotes any gen-
+erative models capable of generating short video
+clips. With “X” being an autoregressive model,
+NUWA-Inﬁnity ( Wu et al. ,2022a ) introduces auto-
+regressive over auto-regressive model, with a local
+autoregressive to generate patches and a global
+autoregressive to model the consistency between
+different patches. TATS ( Ge et al. ,2022 ) presents
+a time-agnostic VQGAN and time-sensitive trans-
+former model, trained only on clips with tens of
+frames but can infer thousands of frames using
+a sliding window mechanism. Phenaki ( Ville-
+gas et al. ,2022 ) with C-ViViT as encoder and
+MaskGiT ( Chang et al. ,2022 ) as backbone gen-
+erates variable-length videos conditioned on a se-
+quence of open domain text prompts. With “X” be-
+ing diffusion models, MCVD ( Voleti et al. ,2022 )
+trains the model to solve multiple video genera-
+tion tasks by randomly and independently masking
+all the past or future frames. FDM ( Harvey et al. ,
+2022 ) presents a DDPMs-based framework thatproduces long-duration video completions in a va-
+riety of realistic environments.
+Different from existing “Autoregressive over X”
+models trained on short clips, we propose NUWA-
+XL, a Diffusion over Diffusion model directly
+trained on long videos to eliminate the training-
+inference gap. Besides, NUWA-XL enables paral-
+lel inference to speed up long video generation
+3 Method
+3.1 Temporal KLVAE (T-KLVAE)
+Training and sampling diffusion models directly on
+pixels are computationally costly, KLV AE ( Rom-
+bach et al. ,2022 ) compresses an original image into
+a low-dimensional latent representation where the
+diffusion process can be performed to alleviate this
+issue. To leverage external knowledge from the pre-
+trained image KLV AE and transfer it to videos, we
+propose Temporal KLV AE(T-KLV AE) by adding
+external temporal convolution and attention layers
+while keeping the original spatial modules intact.
+Given a batch of video v∈Rwith
+bbatch size, Lframes, Cchannels, Hheight, W
+width, we ﬁrst view it as Lindependent images
+and encode them with the pre-trained KLV AE spa-
+tial convolution. To further model temporal in-
+formation, we add a temporal convolution after
+each spatial convolution. To keep the original pre-
+trained knowledge intact, the temporal convolution
+is initialized as an identity function which guaran-
+tees the output to be exactly the same as the orig-
+inal KLV AE. Concretely, the convolution weight
+W∈Ris ﬁrst set to zero where
+cdenotes the out channel, cdenotes the in
+channel and is equal to c,kdenotes the tem-
+poral kernel size. Then, for each output channel
+i, the middle of the kernel size (k−1)//2of the
+corresponding input channel iis set to 1:
+W[i, i,(k−1)//2] = 1 (1)
+Similarly, we add a temporal attention after the
+original spatial attention, and initialize the weights
+Win the out projection layer into zero:
+W= 0 (2)
+For the T-KLV AE decoder D, we use the same
+initialization strategy. The training objective of T-
+KLV AE is the same as the image KLV AE. Finally ,
+we get a latent code x∈R, a compact
+representation of the original video v.1311
+3.2 Mask Temporal Diffusion (MTD)
+In this section, we introduce Mask Temporal Diffu-
+sion (MTD) as a basic diffusion model for our pro-
+posed Diffusion over Diffusion architecture. For
+global diffusion, only Lprompts are used as inputs
+which form a “coarse” storyline of the video, how-
+ever, for the local diffusion, the inputs consist of
+not only Lprompts but also the ﬁrst and last frames.
+Our proposed MTD which can accept input condi-
+tions with or without ﬁrst and last frames, supports
+both global diffusion and local diffusion. In the
+following, we ﬁrst introduce the overall pipeline of
+MTD and then dive into an UpBlock as an example
+to introduce how we fuse different input conditions.
+Input Lprompts, we ﬁrst encode them by a
+CLIP Text Encoder to get the prompt embedding
+p∈Rwhere bis batch size, lis the
+number of tokens, dis the prompt embedding di-
+mension. The randomly sampled diffusion timestep
+t∼U(1, T)is embedded to timestep embedding
+t∈R. The video v∈RwithL
+frames is encoded by T-KLV AE to get a represen-
+tation x∈R. According to the prede-ﬁned diffusion process:
+q(x|x) =N(x;√αx,(1−α)I)(3)
+xis corrupted by:
+x=√¯αx+/radicalbig
+(1−¯α)ϵ ϵ∼ N (0,I)(4)
+where ϵ∈Ris noise, x∈
+Ris the t-th intermediate state in diffu-
+sion process, α,¯αis hyperparameters in diffusion
+model.
+For the global diffusion model, the visual con-
+ditions vare all-zero. However, for the local
+diffusion models, v∈Rare ob-
+tained by masking the middle L−2frames in
+v.vis also encoded by T-KLV AE to get a
+representation x∈R. Finally, the
+x,p,t,xare fed into a Mask 3D-UNet ϵ(·).
+Then, the model is trained to minimize the dis-
+tance between the output of the Mask 3D-UNet
+ϵ(x, p, t, x)∈Randϵ.
+L=||ϵ−ϵ(x, p, t, x)|| (5)
+The Mask 3D-UNet is composed of multi-Scale
+DownBlocks and UpBlocks with skip connection,1312
+while the xis downsampled to the corresponding
+resolution with a cascade of convolution layers and
+fed to the corresponding DownBlock and UpBlock.
+To better understand how Mask 3D-UNet works,
+we dive into the last UpBlock and show the details
+in Fig. 3. The UpBlock takes hidden states h,
+skip connection s, timestep embedding t, visual
+condition xand prompts embedding pas inputs
+and output hidden state h. It is noteworthy that
+for global diffusion, xdoes not contain valid in-
+formation as there are no frames provided as con-
+ditions, however, for local diffusion, xcontains
+encoded information from the ﬁrst and last frames.
+The input skip connection s∈R
+is ﬁrst concatenated to the input hidden state h∈
+R.
+h:= [s;h] (6)
+where the hidden state h∈R
+is then convoluted to target number of channels
+h∈R. The timestep embedding t∈
+Ris then added to hin channel dimension c.
+h:=h+t (7)
+Similar to Sec. 3.1, to leverage external knowl-
+edge from the pre-trained text-to-image model, fac-
+torized convolution and attention are introduced
+with spatial layers initialized from pre-trained
+weights and temporal layers initialized as an iden-
+tity function.
+For spatial convolution, the length dimension L
+here is treated as batch-size h∈R.For temporal convolution, the hidden state is re-
+shaped to h∈Rwith spatial axis hw
+treated as batch-size.
+h:=SpatialConv (h) (8)
+h:=TemporalConv (h) (9)
+Then, his conditioned on x∈R
+andx∈Rwhere xis a binary
+mask to indicate which frames are treated as condi-
+tions. They are ﬁrst transferred to scale w, wand
+shiftb, bvia zero-initialized convolution layers
+and then injected to hvia linear projection.
+h:=w·h+b+h (10)
+h:=w·h+b+h (11)
+After that, a stack of Spatial Self-Attention (SA),
+Prompt Cross-Attention (PA), and Temporal Self-
+Attention (TA) are applied to h.
+For the Spatial Self-Attention (SA), the hid-
+den state h∈Ris reshaped to h∈
+Rwith length dimension Ltreated as
+batch-size.
+Q=hW;K=hW;V=hW
+(12)
+/tildewideQ=Selfattn (Q, K, V) (13)
+where W, W, W∈Rare parame-
+ters to be learned.
+For the Prompt Cross-Attention (PA), the prompt
+embedding p∈Ris reshaped to p∈
+Rwith length dimension Ltreated as
+batch-size.
+Q=hW;K=pW;V=pW
+(14)
+/tildewideQ=Crossattn (Q, K, V) (15)
+where Q∈R,K∈
+R,V∈Rare query,
+key and value, respectively. W∈R,
+W∈RandW∈Rare pa-
+rameters to be learned.
+The Temporal Self-Attention (TA) is exactly the
+same as Spatial Self-Attention (SA) except that
+spatial axis hwis treated as batch-size and temporal
+length Lis treated as sequence length.
+Finally, the hidden state his upsampled to target
+resolution h∈Rvia spatial
+convolution. Similarly, other blocks in Mask 3D-
+UNet leverage the same structure to deal with the
+corresponding inputs.13133.3 Diffusion over Diffusion Architecture
+In the following, we ﬁrst introduce the inference
+process of MTD, then we illustrate how to generate
+a long video via Diffusion over Diffusion Architec-
+ture in a novel “coarse-to-ﬁne” process.
+In inference phase, given the Lprompts pand
+visual condition v,xis sampled from a pure
+noise xby MTD. Concretely, for each timestep
+t=T, T−1, . . . , 1, the intermediate state xin
+diffusion process is updated by
+x=1√α/parenleftBigg
+x−1−α/radicalbig
+(1−¯α)ϵ(x, p, t, x)/parenrightBigg
++(1−¯α)β
+1−¯α·ϵ (16)
+where ϵ∼ N (0,I),pandtare embedded prompts
+and timestep, xis encoded v.α,¯α,βare
+hyperparameters in MTD.
+Finally, the sampled latent code xwill be de-
+coded to video pixels vby T-KLV AE. For sim-
+plicity, the iterative generation process of MTD is
+noted as
+v=Diffusion (p, v) (17)
+When generating long videos, given the L
+prompts pwith large intervals, the Lkeyframes
+are ﬁrst generated through a global diffusion model.
+v=GlobalDiffusion (p, v) (18)
+where vis all-zero as there are no frames pro-
+vided as visual conditions. The temporally sparse
+keyframes vform the “coarse” storyline of the
+video.
+Then, the adjacent keyframes in vare treated
+as the ﬁrst and the last frames in visual condition
+v. The middle L−2frames are generated by
+feeding p,vinto the ﬁrst local diffusion model
+where pareLprompts with smaller time intervals.
+v=LocalDiffusion (p, v) (19)
+Similarly, vis obtained from adjacent frames
+inv,pareLprompts with even smaller time
+intervals. The pandvare fed into the second
+local diffusion model.
+v=LocalDiffusion (p, v) (20)
+Compared to frames in v, the frames in vand
+vare increasingly “ﬁne” with stronger consis-
+tency and more details.By iteratively applying the local diffusion to
+complete the middle frames, our model with m
+depth is capable of generating extremely long video
+with the length of O(L). Meanwhile, such a hier-
+archical architecture enables us to directly train on
+temporally sparsely sampled frames in long videos
+(3376 frames) to eliminate the training-inference
+gap. After sampling the Lkeyframes by global
+diffusion, the local diffusions can be performed in
+parallel to accelerate the inference speed.
+4 Experiments
+4.1 FlintstonesHD Dataset
+Existing annotated video datasets have greatly pro-
+moted the development of video generation. How-
+ever, the current video datasets still pose a great
+challenge to long video generation. First, the length
+of these videos is relatively short, and there is an
+enormous distribution gap between short videos
+and long videos such as shot change and long-term
+dependency. Second, the relatively low resolution
+limits the quality of the generated video. Third,
+most of the annotations are coarse descriptions of
+the content of the video clips, and it is difﬁcult to
+illustrate the details of the movement.
+To address the above issues, we build Flint-
+stonesHD dataset, a densely annotated long video
+dataset, providing a benchmark for long video gen-
+eration. We ﬁrst obtain the original Flintstones
+cartoon which contains 166 episodes with an aver-
+age of 38000 frames of 1440×1080 resolution. To
+support long video generation based on the story
+and capture the details of the movement, we lever-
+age the image captioning model GIT2 ( Wang et al. ,
+2022 ) to generate dense captions for each frame in
+the dataset ﬁrst and manually ﬁlter some errors in
+the generated results.
+4.2 Metrics
+Avg-FID Fréchet Inception Dis-
+tance(FID) ( Heusel et al. ,2017 ), a metric
+used to evaluate image generation, is introduced to
+calculate the average quality of generated frames.
+Block-FVD Fréchet Video Distance (FVD) ( Un-
+terthiner et al. ,2018 ) is widely used to evaluate
+the quality of the generated video. In this paper,
+we propose Block FVD for long video generation,
+which splits a long video into several short clips
+to calculate the average FVD of all clips. For sim-
+plicity, we name it B-FVD-X where X denotes the
+length of the short clips.1314Method Phenaki ( Villegas
+et al.,2022 )/128FDM* ( Harvey
+et al.,2022 )/128NUWA-
+XL/128NUWA-
+XL/256
+Arch AR over AR AR over Diff Diff over Diff Diff over Diff
+16fAvg-FID ↓ 40.14 34.47 35.95 32.66
+B-FVD-16 ↓544.72 532.94 520.19 580.21
+Time ↓ 4s 7s 7s 15s
+256fAvg-FID ↓ 43.13 38.28 35.68 32.05
+B-FVD-16 ↓573.55 561.75 542.26 609.32
+Time ↓ 65s 114s 17s (85.09% ↓)32s
+1024fAvg-FID ↓ 48.56 43.24 35.79 32.07
+B-FVD-16 ↓622.06 618.42 572.86 642.87
+Time ↓ 259s 453s 26s (94.26% ↓)51s
+Model Temporal Layers FID↓FVD ↓
+KLV AE - 4.71 28.07
+T-KLV AE-R random init 5.44 12.75
+T-KLV AE identity init 4.35 11.88Model MI SI FID↓FVD ↓
+MTD w/o MS × × 39.28 548.90
+MTD w/o S ✓ × 36.04 526.36
+MTD ✓ ✓ 35.95 520.19
+Model depth 16f 256f 1024f
+NUWA-XL-D1 1 527.44 697.20 719.23
+NUWA-XL-D2 2 516.05 536.98 684.57
+NUWA-XL-D3 3 520.19 542.26 572.86Model L 16f 256f 1024f
+NUWA-XL-L8 8 569.43 673.87 727.22
+NUWA-XL-L16 16 520.19 542.26 572.86
+NUWA-XL-L32 32 OOM OOM OOM
+4.3 Quantitative Results
+4.3.1 Comparison with the state-of-the-arts
+We compare NUWA-XL on FlintstonesHD with
+the state-of-the-art models in Tab. 1. Here, we
+report FID, B-FVD-16, and inference time. For
+“Autoregressive over X (AR over X)” architecture,
+due to error accumulation, the average quality of
+generated frames (Avg-FID) declines as the video
+length increases. However, for NUWA-XL, where
+the frames are not generated sequentially, the qual-
+ity does not decline with video length. Meanwhile,
+compared to “AR over X” which is trained only
+on short videos, NUWA-XL is capable of gener-
+ating higher quality long videos. As the video
+length grows, the quality of generated segments (B-
+FVD-16) of NUWA-XL declines more slowly as
+NUWA-XL has learned the patterns of long videos.Besides, because of parallelization, NUWA-XL sig-
+niﬁcantly improves the inference speed by 85.09%
+when generating 256 frames and by 94.26% when
+generating 1024 frames.
+4.3.2 Ablation study
+KLVAE Tab. 2ashows the comparison of dif-
+ferent KLV AE settings. KLV AE means treating
+the video as independent images and reconstruct-
+ing them independently. T-KLV AE-R means the
+introduced temporal layers are randomly initial-
+ized. Compared to KLV AE, we ﬁnd the newly in-
+troduced temporal layers can signiﬁcantly increase
+the ability of video reconstruction. Compared to
+T-KLV AE-R, the slightly better FID and FVD in
+T-KLV AE illustrate the effectiveness of identity ini-
+tialization.1315
+MTD Tab. 2bshows the comparison of differ-
+ent global/local diffusion settings. MI (Multi-scale
+Injection) means whether visual conditions are in-
+jected to multi-scale DownBlocks and UpBlocks in
+Mask 3D-UNet or only injected to the Downblock
+and UpBlock with the highest scale. SI (Symmetry
+Injection) means whether the visual condition is in-
+jected into both DownBlocks and UpBlocks or it is
+only injected into UpBlocks. Comparing MTD w/o
+MS and MTD w/o S, multi-scale injection is signif-
+icant for long video generation. Compared to MTD
+w/o S, the slightly better FID and FVD in MTD
+show the effectiveness of symmetry injection.
+Depth of Diffusion over Diffusion Tab. 2c
+shows the comparison of B-FVD-16 of different
+NUWA-XL depth mwith local diffusion length L
+ﬁxed to 16. When generating 16 frames, NUWA-
+XL with different depths achieves comparable re-
+sults. However, as the depth increases, NUWA-XL
+can produce videos that are increasingly longer
+while still maintaining relatively high quality.
+Length in Diffusion over Diffusion Tab. 2d
+shows the comparison of B-FVD-16 of diffusion
+local length Lwith NUWA-XL depth mﬁxed to
+3. In comparison, when generating videos with the
+same length, as the local diffusion length increases,
+NUWA-XL can generate higher-quality videos.4.4 Qualitative results
+Fig.4provides a qualitative comparison between
+AR over Diffusion and Diffusion over Diffusion
+for long video generation on FlintstonesHD. As
+introduced in Sec. 1, when generating long videos,
+“Autoregressive over X” architecture trained only
+on short videos will lead to long-term incoherence
+(between frame 22 and frame 1688) and unrealis-
+tic shot change (from frame 17 to frame 20) since
+the model has no opportunity to learn the distribu-
+tion of long videos. However, by training directly
+on long videos, NUWA-XL successfully models
+the distribution of long videos and generates long
+videos with long-term coherence and realistic shot
+change.
+5 Conclusion
+We propose NUWA-XL, a “Diffusion over Diffu-
+sion” architecture by viewing long video genera-
+tion as a novel “coarse-to-ﬁne” process. To the best
+of our knowledge, NUWA-XL is the ﬁrst model
+directly trained on long videos (3376 frames), clos-
+ing the training-inference gap in long video gener-
+ation. Additionally, NUWA-XL allows for paral-
+lel inference, greatly increasing the speed of long
+video generation by 94.26% when generating 1024
+frames. We further build FlintstonesHD, a new
+dataset to validate the effectiveness of our model
+and provide a benchmark for long video generation.1316Limitations
+Although our proposed NUWA-XL improves the
+quality of long video generation and accelerates the
+inference speed, there are still several limitations:
+First, due to the unavailability of open-domain long
+videos (such as movies, and TV shows), we only
+validate the effectiveness of NUWA-XL on pub-
+lic available cartoon Flintstones. We are actively
+building an open-domain long video dataset and
+have achieved some phased results, we plan to ex-
+tend NUWA-XL to open-domain in future work.
+Second, direct training on long videos reduces the
+training-inference gap but poses a great challenge
+to data. Third, although NUWA-XL can accelerate
+the inference speed, this part of the gain requires
+reasonable GPU resources to support parallel infer-
+ence.
+Ethics Statement
+This research is done in alignment with Microsoft’s
+responsible AI principles.
+Acknowledgements
+We’d like to thank Yu Liu, Jieyu Xiao, and Scarlett
+Li for the discussion of the potential cartoon sce-
+narios. We’d also like to thank Yang Ou and Bella
+Guo for the design of the homepage. We’d also like
+to thank Yan Xia, Ting Song, and Tiantian Xue for
+the implementation of the homepage.
+References13171318ACL 2023 Responsible NLP Checklist
+A For every submission:
+/squareA1. Did you describe the limitations of your work?
+line 531 limitations
+/squareA2. Did you discuss any potential risks of your work?
+line 547 Ethics Statement
+/squareA3. Do the abstract and introduction summarize the paper’s main claims?
+abstract line 001; introduction line 107
+/squareA4. Have you used AI writing assistants when working on this paper?
+Left blank.
+B/squareDid you use or create scientiﬁc artifacts?
+Left blank.
+/squareB1. Did you cite the creators of artifacts you used?
+No response.
+/squareB2. Did you discuss the license or terms for use and / or distribution of any artifacts?
+No response.
+/squareB3. Did you discuss if your use of existing artifact(s) was consistent with their intended use, provided
+that it was speciﬁed? For the artifacts you create, do you specify intended use and whether that is
+compatible with the original access conditions (in particular, derivatives of data accessed for research
+purposes should not be used outside of research contexts)?
+No response.
+/squareB4. Did you discuss the steps taken to check whether the data that was collected / used contains any
+information that names or uniquely identiﬁes individual people or offensive content, and the steps
+taken to protect / anonymize it?
+No response.
+/squareB5. Did you provide documentation of the artifacts, e.g., coverage of domains, languages, and
+linguistic phenomena, demographic groups represented, etc.?
+No response.
+/squareB6. Did you report relevant statistics like the number of examples, details of train / test / dev splits,
+etc. for the data that you used / created? Even for commonly-used benchmark datasets, include the
+number of examples in train / validation / test splits, as these provide necessary context for a reader
+to understand experimental results. For example, small differences in accuracy on large test sets may
+be signiﬁcant, while on small test sets they may not be.
+No response.
+C/squareDid you run computational experiments?
+Left blank.
+/squareC1. Did you report the number of parameters in the models used, the total computational budget
+(e.g., GPU hours), and computing infrastructure used?
+No response.1319/squareC2. Did you discuss the experimental setup, including hyperparameter search and best-found
+hyperparameter values?
+No response.
+/squareC3. Did you report descriptive statistics about your results (e.g., error bars around results, summary
+statistics from sets of experiments), and is it transparent whether you are reporting the max, mean,
+etc. or just a single run?
+No response.
+/squareC4. If you used existing packages (e.g., for preprocessing, for normalization, or for evaluation), did
+you report the implementation, model, and parameter settings used (e.g., NLTK, Spacy, ROUGE,
+etc.)?
+No response.
+D/squareDid you use human annotators (e.g., crowdworkers) or research with human participants?
+Left blank.
+/squareD1. Did you report the full text of instructions given to participants, including e.g., screenshots,
+disclaimers of any risks to participants or annotators, etc.?
+No response.
+/squareD2. Did you report information about how you recruited (e.g., crowdsourcing platform, students)
+and paid participants, and discuss if such payment is adequate given the participants’ demographic
+(e.g., country of residence)?
+No response.
+/squareD3. Did you discuss whether and how consent was obtained from people whose data you’re
+using/curating? For example, if you collected data via crowdsourcing, did your instructions to
+crowdworkers explain how the data would be used?
+No response.
+/squareD4. Was the data collection protocol approved (or determined exempt) by an ethics review board?
+No response.
+/squareD5. Did you report the basic demographic and geographic characteristics of the annotator population
+that is the source of the data?
+No response.1320

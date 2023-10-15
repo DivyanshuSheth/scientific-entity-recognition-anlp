@@ -1,1 +1,808 @@
-10217 Proceedings of the 2022 Conference on Empirical Methods in Natural Language Processing , pages 10217 10235 December 7 - 11 , 2022 © 2022 Association for Computational Linguistics 10218 10219 10220 10221 10222 10223 10224 10225 10226 10227 10228 10229 10230 10231 10232 10233 10234 10235 
+
+Patrick Y. Wu, Richard Bonneau, Joshua A. Tucker,and Jonathan NaglerCenter for Social Media and Politics, New York UniversityCenter for Data Science, New York UniversityDepartment of Politics, New York UniversityDepartment of Biology, New York UniversityCourant Institute of Mathematical Sciences, New York University
+{pyw230, bonneau, joshua.tucker, jonathan.nagler}@nyu.edu
+Abstract
+Text analysis in the social sciences often in-
+volves using specialized dictionaries to rea-
+son with abstract concepts, such as perceptions
+about the economy or abuse on social media.
+These dictionaries allow researchers to impart
+domain knowledge and note subtle usages of
+words relating to a concept(s) of interest. We in-
+troduce the dictionary-assisted supervised con-
+trastive learning (DASCL) objective, allowing
+researchers to leverage specialized dictionar-
+ies when fine-tuning pretrained language mod-
+els. The text is first keyword simplified: a
+common, fixed token replaces any word in
+the corpus that appears in the dictionary(ies)
+relevant to the concept of interest. During
+fine-tuning, a supervised contrastive objective
+draws closer the embeddings of the original
+and keyword-simplified texts of the same class
+while pushing further apart the embeddings of
+different classes. The keyword-simplified texts
+of the same class are more textually similar than
+their original text counterparts, which addition-
+ally draws the embeddings of the same class
+closer together. Combining DASCL and cross-
+entropy improves classification performance
+metrics in few-shot learning settings and social
+science applications compared to using cross-
+entropy alone and alternative contrastive and
+data augmentation methods.
+1 Introduction
+We propose a supervised contrastive learning ap-
+proach that allows researchers to incorporate dic-
+tionaries of words related to a concept of interest
+when fine-tuning pretrained language models. It is
+conceptually simple, requires low computational
+resources, and is usable with most pretrained lan-
+guage models.
+Dictionaries contain words that hint at the sen-
+timent, stance, or perception of a document (see,
+e.g., Fei et al., 2012). Social science experts oftencraft these dictionaries, making them useful when
+the underlying concept of interest is abstract (see,
+e.g., Brady et al., 2017; Young and Soroka, 2012).
+Dictionaries are also useful when specific words
+that are pivotal to determining the classification of
+a document may not exist in the training data. This
+is a particularly salient issue with small corpora,
+which is often the case in the social sciences.
+However, recent supervised machine learning ap-
+proaches do not use these dictionaries. We propose
+a contrastive learning approach, dictionary-assisted
+supervised contrastive learning (DASCL), that al-
+lows researchers to leverage these expert-crafted
+dictionaries when fine-tuning pretrained language
+models. We replace all the words in the corpus that
+belong to a specific lexicon with a fixed, common
+token. When using an appropriate dictionary, key-
+word simplification increases the textual similarity
+of documents in the same class. We then use a
+supervised contrastive objective to draw together
+text embeddings of the same class and push fur-
+ther apart the text embeddings of different classes
+(Khosla et al., 2020; Gunel et al., 2021). Figure 1
+visualizes the intuition of our proposed method.
+The contributions of this project are as follows.
+•We propose keyword simplification, detailed
+in Section 3.1, to make documents of the same
+class more textually similar.
+•We outline a supervised contrastive loss func-
+tion, described in Section 3.2, that learns
+patterns within and across the original and
+keyword-simplified texts.
+•We find classification performance improve-
+ments in few-shot learning settings and social
+science applications compared to two strong
+baselines: (1) RBERT(Liu et al., 2019) /
+BERT (Devlin et al., 2019) fine-tuned with
+cross-entropy loss, and (2) the supervised con-
+trastive learning approach detailed in Gunel
+et al. (2021), the most closely related approach
+to DASCL. To be clear, although BERT and10217
+RBERTare not state-of-the-art pretrained
+language models, DASCL can augment the
+loss functions of state-of-the-art pretrained
+language models.
+2 Related Work
+Use of Pretrained Language Models in the So-
+cial Sciences . Transformers-based pretrained lan-
+guage models have become the de facto approach
+when classifying text data (see, e.g., Devlin et al.,
+2019; Liu et al., 2019; Raffel et al., 2020), and
+are seeing wider adoption in the social sciences.
+Terechshenko et al. (2021) show that RoBERTa
+and XLNet (Yang et al., 2019) outperform bag-of-
+words approaches for political science text classifi-
+cation tasks. Ballard et al. (2022) use BERTweet
+(Nguyen et al., 2020) to classify tweets expressing
+polarizing rhetoric. Lai et al. (2022) use BERT to
+classify the political ideologies of YouTube videos
+using text video metadata. DASCL can be used
+with most pretrained language models, so it can
+potentially improve results across a range of social
+science research.
+Usage of Dictionaries . Dictionaries play an im-
+portant role in understanding the meaning behind
+text in the social sciences. Brady et al. (2017) use a
+moral and emotional dictionary to predict whether
+tweets using these types of terms increase their dif-fusion within and between ideological groups. Sim-
+chon et al. (2022) create a dictionary of politically
+polarized language and analyze how trolls use this
+language on social media. Hopkins et al. (2017)
+use dictionaries of positive and negative economic
+terms to understand perceptions of the economy
+in newspaper articles. Although dictionary-based
+classification has fallen out of favor, dictionaries
+still contain valuable information about usages of
+specific or subtle language.
+Text Data Augmentation . Text data augmenta-
+tion techniques include backtranslation (Sennrich
+et al., 2016) and rule-based data augmentations
+such as random synonym replacements, random in-
+sertions, random swaps, and random deletions (Wei
+and Zou, 2019; Karimi et al., 2021). Shorten et al.
+(2021) survey text data augmentation techniques.
+Longpre et al. (2020) find that task-agnostic data
+augmentations typically do not improve the classifi-
+cation performance of pretrained language models.
+We choose dictionaries for keyword simplification
+based on the concept of interest underlying the clas-
+sification task and use the keyword-simplified text
+with a contrastive loss function.
+Contrastive Learning . Most works on con-
+trastive learning have focused on self-supervised
+contrastive learning. In computer vision, images
+and their augmentations are treated as positives and
+other images as negatives. Recent contrastive learn-
+ing approaches match or outperform their super-
+vised pretrained image model counterparts, often
+using a small fraction of available annotated data
+(see, e.g., Chen et al., 2020a; He et al., 2020; Chen
+et al., 2020b; Grill et al., 2020). Self-supervised
+contrastive learning has also been used in natural
+language processing, matching or outperforming
+pretrained language models on benchmark tasks
+(see, e.g., Fang et al., 2020; Klein and Nabi, 2020).
+Our approach is most closely related to works on
+supervised contrastive learning. Wen et al. (2016)
+propose a loss function called center loss that mini-
+mizes the intraclass distances of the convolutional
+neural network features. Khosla et al. (2020) de-
+velop a supervised loss function that generalizes
+NT-Xent (Chen et al., 2020a) to an arbitrary num-
+ber of positives. Our work is closest to that of
+Gunel et al. (2021), who also use a version of NT-
+Xent extended to an arbitrary number of positives
+with pretrained language models. Their supervised
+contrastive loss function is detailed in Section A.1.10218
+3 Method
+The approach consists of keyword simplification
+and the contrastive objective function. Figure 2
+shows an overview of the proposed framework.
+3.1 Keyword Simplification
+The first step of the DASCL framework is keyword
+simplification. We select a set of Mdictionaries D.
+For each dictionary d∈ D,i∈ {1, ..., M }, we as-
+sign a token t. Then, we iterate through the corpus
+and replace any word win dictionary dwith the
+token t. We repeat these steps for each dictionary.
+For example, if we have a dictionary of positive
+words, then applying keyword simplification to
+would yield
+There are many off-the-shelf dictionaries that
+can be used during keyword simplification. Table
+4 in Section A.2 contains a sample of dictionaries
+reflecting various potential concepts of interest.
+3.2 Dictionary-Assisted Supervised
+Contrastive Learning (DASCL) Objective
+The dictionary-assisted supervised contrastive
+learning loss function resembles the loss functions
+from Khosla et al. (2020) and Gunel et al. (2021).
+Consistent with Khosla et al. (2020), we project the
+final hidden layer of the pretrained language model
+to an embedding of a lower dimension before using
+the contrastive loss function.LetΨ(x),i∈ {1, ...N}, be the L-normalized
+projection of the output of the pretrained language
+encoder for the original text and Ψ(x)be the
+corresponding L-normalized projection of the out-
+put for the keyword-simplified text. τ >0is the
+temperature parameter that controls the separation
+of the classes, and λ∈[0,1]is the parameter that
+balances the cross-entropy and the DASCL loss
+functions. We choose λand directly optimize τ
+during training. In our experiments, we use the clas-
+sifier token as the output of the pretrained language
+encoder. Equation 1 is the DASCL loss, Equation
+2 is the multiclass cross-entropy loss, and Equation
+3 is the overall loss that is optimized when fine-
+tuning the pretrained language model. The original
+text and the keyword-simplified text are used with
+the DASCL loss (Eq. 1); only the original text is
+used with the cross-entropy loss. The keyword-
+simplified text is not used during inference.
+L=−1
+N/summationdisplay/summationdisplayy·log ˆy (2)
+L= (1−λ)L+λL (3)
+4 Experiments
+4.1 Few-Shot Learning with SST-2
+SST-2, a GLUE benchmark dataset (Wang et al.,
+2018), consists of sentences from movie reviews
+and binary labels of sentiment (positive or nega-
+tive). Similar to Gunel et al. (2021), we experiment
+with SST-2 with three training set sizes: N=20,
+100, and 1,000. Accuracy is this benchmark’s pri-
+mary metric of interest; we also report average
+precision. We use RBERT as the pretrained
+language model. For keyword simplification, we
+use the opinion lexicon (Hu and Liu, 2004), which
+contains dictionaries of positive and negative words.
+Section A.3.3 further describes these dictionaries.
+We compare DASCL to two other baselines:
+RBERT using the cross-entropy (CE) loss
+function and the combination of the cross-entropy
+and supervised contrastive learning (SCL) loss
+functions used in Gunel et al. (2021). We also
+experiment with augmenting the corpus with the10219
+keyword-simplified text (referred to as “data aug-
+mentation,” or “DA,” in results tables). In other
+words, when data augmentation is used, both the
+original text and the keyword-simplified text are
+used with the cross-entropy loss.
+We use the original validation set from the
+GLUE benchmark as the test set, and we sample
+our own validation set from the training set of equal
+size to this test set. Further details about the data
+and hyperparameter configurations can be found in
+Section A.3. Table 1 shows the results across the
+three training set configurations.
+DASCL improves results the most when there
+are only a few observations in the training set.
+When N=20, using DASCL yields a 10.2point im-
+provement in accuracy over using the cross-entropy
+loss function ( p<.001) and a 6.8point improve-
+ment in accuracy over using the SCL loss function
+(p=.023). Figure 3 in Section A.3.8 visualizes the
+learned embeddings using each of these loss func-
+tions using t-SNE plots. When the training set’s
+size increases, the benefits of using DASCL de-
+crease. DASCL only has a slightly higher accuracy
+when using 1,000 labeled observations, and the dif-
+ference between DASCL and cross-entropy alone
+is insignificant ( p=.354).
+4.2 New York Times Articles about the
+Economy
+Barberá et al. (2021) classify the tone of New York
+Times articles about the American economy as pos-
+itive or negative. 3,119 of the 8,462 labeled articles
+(3,852 unique articles) in the training set are la-
+beled positive; 162 of the 420 articles in the test
+set are labeled positive. Accuracy is the primary
+metric of interest; we also report average preci-
+sion. In addition to using the full training set, we
+also experiment with training sets of sizes 100 and
+1,000. We use the positive and negative dictionaries
+from Lexicoder (Young and Soroka, 2012) and dic-
+tionaries of positive and negative economic terms
+(Hopkins et al., 2017). Barberá et al. (2021) use
+logistic regression with Lregularization. We use
+RBERT as the pretrained language model.
+Section A.4 contains more details about the data,
+hyperparameters, and other evaluation metrics. Ta-
+ble 2 shows the results across the three training set
+configurations.
+When N=100 , DASCL outperforms cross-
+entropy only, cross-entropy with data augmenta-
+tion, and SCL on accuracy ( p<.005for all) and
+average precision ( p<.01for all). When N=1000 ,
+DASCL outperforms cross-entropy only, cross-
+entropy with data augmentation, and SCL on accu-
+racy ( p<.05for all) and average precision (but not
+statistically significantly). DASCL performs statis-
+tically equivalent to DASCL with data augmenta-
+tion across all metrics when N=100 and1000 .
+When using the full training set, RBERT
+is a general improvement over logistic regression.
+Although the DASCL losses have slightly higher
+accuracy than the other RoBERTa-based models,
+the differences are not statistically significant. Us-10220ing DASCL yields a 2.8point improvement in av-
+erage precision over cross-entropy ( p<.001) and
+a1.8improvement in average precision over SCL
+(p<.001). Figure 4 in Section A.4.9 visualizes the
+learned embeddings using each of these loss func-
+tions using t-SNE plots.
+4.3 Abusive Speech on Social Media
+The OffensEval dataset (Zampieri et al., 2020) con-
+tains 14,100 tweets annotated for offensive lan-
+guage. A tweet is considered offensive if “it con-
+tains any form of non-acceptable language (pro-
+fanity) or a targeted offense.” Caselli et al. (2020)
+used this same dataset and more narrowly identified
+tweets containing “hurtful language that a speaker
+uses to insult or offend another individual or group
+of individuals based on their personal qualities, ap-
+pearance, social status, opinions, statements, or
+actions.” We focus on this dataset, AbusEval, be-
+cause of its greater conceptual difficulty. 2,749 of
+the 13,240 tweets in the training set are labeled
+abusive, and 178 of the 860 tweets in the test set
+are labeled abusive. Caselli et al. (2021) pretrain
+aBERT model, HateBERT, using the
+Reddit Abusive Language English dataset. Macro
+F1 and F1 over the positive class are the primary
+metrics of interest; we also report average preci-
+sion. In addition to using the full training set, we
+also experiment with training sets of sizes 100 and
+1,000. Section A.5 contains more details about the
+data and hyperparameters.
+We combine DASCL with BERT
+and HateBERT. Alorainy et al. (2019) detect cyber-
+hate speech using threats-based othering language,
+focusing on the use of “us” and “them” pronouns.
+Following their strategy, we look at the conjunction
+of sentiment using Lexicoder and two dictionaries
+of “us” and “them” pronouns, which may suggest
+abusive speech. Table 3 compares the performance
+ofBERT and HateBERT with cross-
+entropy against BERT and HateBERT
+with cross-entropy and DASCL.
+When N=100 , BERT with DASCL outperforms
+BERT on macro F1 ( p=.008), F1 over the positive
+class ( p=.011), and average precision ( p=.003);
+when N=1000 , BERT with DASCL outperforms
+BERT on macro F1 ( p=.021), F1 over the positive
+class ( p=.028), and average precision ( p=.007).
+HateBERT with DASCL performs statistically on
+par with HateBERT across all metrics for N=100
+andN=1000 . BERT with DASCL performs sta-
+tistically equivalent to HateBERT when N=100
+andN=1000 on all metrics, except on F1 over the
+positive class when N=1000 (p=.030).
+When using the full training set, BERT with
+DASCL improves upon the macro F1, F1 over the
+positive class, and average precision compared with
+both BERT (macro F1: p=.010; F1:p=.010; AP:
+p<.001) and HateBERT (macro F1: p=.007; F1:
+p<.001; AP: p<.001). Figure 5 in Section A.5.8
+visualizes the learned embeddings using BERT and
+BERT with DASCL using t-SNE plots.
+5 Conclusion
+We propose a supervised contrastive learning ap-
+proach that allows researchers to leverage special-
+ized dictionaries when fine-tuning pretrained lan-
+guage models. We show that using DASCL with
+cross-entropy improves classification performance
+on SST-2 in few-shot learning settings, on classi-
+fying perceptions about the economy expressed in
+New York Times articles, and on identifying tweets
+containing abusive language when compared to us-
+ing cross-entropy alone or alternative contrastive
+and data augmentation methods. In the future, we
+aim to extend our approach to other supervised
+contrastive learning frameworks, such as using this
+method to upweight difficult texts (Suresh and Ong,
+2021). We also plan to expand this approach to
+semi-supervised and self-supervised settings to bet-
+ter understand core concepts expressed in text.10221Limitations
+We aim to address limitations to the supervised
+contrastive learning approach described in this pa-
+per in future works. We first note that there are no
+experiments in this paper involving multiclass or
+multilabel classification; all experiments involve
+only binary classification. Multiclass or multilabel
+classification may present further challenges when
+categories are more nuanced. We expect improve-
+ments in classification performance when applied
+to multiclass or multilabel classification settings,
+but we have not confirmed this.
+Second, we have not experimented with the di-
+mensionality of the projection layer or the batch
+sizes. At the moment, the projection layer is ar-
+bitrarily set to 256 dimensions, and we use batch
+sizes from previous works. Future work aims to
+study how changing the dimensionality of this pro-
+jection layer and the batch size affects classification
+outcomes.
+Third, we have used the DASCL objective with
+RBERTandBERT , but have not used it with
+the latest state-of-the-art pretrained language mod-
+els. We focused on these particular pretrained lan-
+guage models because they are commonly used in
+the social sciences and because of computational
+constraints.
+Fourth, we have not examined how the quality or
+size of the dictionary may affect classification out-
+comes. A poorly constructed dictionary may lead
+to less improvement in classification performance
+metrics or may even hurt performance. Dictionar-
+ies with too many words or too few words may also
+not lead to improvements in classification perfor-
+mance metrics. Future work aims to study how the
+quality and size of dictionaries affect the DASCL
+approach.
+Fifth, we have not explored how this method
+can be used to potentially reduce bias in text clas-
+sification. For example, we can replace gendered
+pronouns with a token (such as “ <pronoun >”), po-
+tentially reducing gender bias in analytical contexts
+such as occupation.
+Lastly, we have not explored how keyword sim-
+plification may be useful in a self-supervised or
+semi-supervised contrastive learning setting. This
+may be particularly helpful for social scientists who
+are often interested in exploring core concepts or
+perspectives in text rather than classifying text into
+specific classes.Ethics Statement
+Our paper describes a supervised contrastive learn-
+ing approach that allows researchers to lever-
+age specialized dictionaries when fine-tuning pre-
+trained language models. While we did not iden-
+tify any systematic biases in the particular set of
+dictionaries we used, any dictionary may encode
+certain biases and/or exclude certain groups. This
+can be particularly problematic when working with
+issues such as detecting hate speech and abusive
+language. For example, in the context of abusive
+language, if words that attack a particular group
+are (purposely or unintentionally) excluded from
+the dictionaries, those words would not be replaced.
+This may under-detect abusive text that attacks this
+specific group.
+This paper does not create any new datasets.
+The OffensEval/AbusEval dataset contains sensi-
+tive and harmful language. Although we did not
+annotate or re-annotate any tweets, we are cog-
+nizant that particular types of abusive language
+against certain groups or identities may not have
+been properly annotated as abusive, or certain types
+of abusive language may have been excluded from
+the corpus entirely.
+Acknowledgements
+We gratefully acknowledge that the Center for So-
+cial Media and Politics at New York University is
+supported by funding from the John S. and James
+L. Knight Foundation, the Charles Koch Founda-
+tion, Craig Newmark Philanthropies, the William
+and Flora Hewlett Foundation, the Siegel Family
+Endowment, and the Bill and Melinda Gates Foun-
+dation. This work was supported in part through the
+NYU IT High Performance Computing resources,
+services, and staff expertise. We thank the mem-
+bers of the Center for Social Media and Politics for
+their helpful comments when workshopping this
+paper. We would also like to thank the anonymous
+reviewers for their valuable feedback in improving
+this paper.
+References1022210223102241022510226
+A Appendix
+A.1 Gunel et al. (2021)’s Supervised
+Contrastive Learning Objective
+Equation 4 is the supervised contrastive learning
+objective from Gunel et al. (2021). The dictionary-
+assisted supervised contrastive learning objective in
+Equation 1 is similar to Equation 4 except Equation1 is extended to include the keyword-simplified
+text.
+A.2 Examples of Dictionaries and Lexicons
+Table 4 contains a sample of dictionaries across
+various use cases and academic fields that can be
+potentially used with DASCL. There is no partic-
+ular order to the dictionaries, with similar dictio-
+naries clustered together. We did not include any
+non-open source dictionaries.
+A.3 Additional Information for the Few-Shot
+Learning Experiments with SST-2
+A.3.1 Data Description: Few-Shot Training
+Sets, Validation Set, and Test Set
+The SST-2 dataset was downloaded using Hugging
+Face’s Datasets library (Lhoest et al., 2021). The
+test set from SST-2 does not contain any labels, so
+we use the validation set from SST-2 as our test
+set. We create our own validation set by randomly
+sampling a dataset equivalent in size to the origi-
+nal validation set. Our validation set and few-shot
+learning sets were sampled with no consideration
+to the label distributions of the original training or
+validation sets.
+When N= 20 , there are 11 positive examples
+and 9 negative examples. When N= 100 , there
+are 60 positive examples and 40 negative examples.
+When N= 1000 , there are 558 positive examples
+and 442 negative examples. Our validation set has
+486 positive examples and 386 negative examples.
+Lastly, our test set has 444 positive examples and
+428 negative examples.
+A.3.2 Text Preprocessing Steps
+The only text preprocessing step taken is that non-
+ASCII characters are removed from the dataset.
+The text is tokenized using a byte-level BPE tok-
+enizer (Liu et al., 2019).
+A.3.3 Dictionaries Used During Keyword
+Simplification
+We used the opinion lexicon from Hu and Liu
+(2004). This lexicon consists of two dictionaries:
+one with all positive unigrams and one with all
+negative unigrams. There are 2,006 positive words1022710228and 4,783 negative words. We replaced the positive
+words with the token “ <positive >”. We replaced
+the negative words with the token “ <negative >”.
+A.3.4 Number of Parameters and Runtime
+This experiment uses the RBERT pre-
+trained language model, which contains 125 mil-
+lion parameters (Liu et al., 2019). When using
+DASCL, we also had an additional temperature pa-
+rameter, τ, that was directly optimized. With the
+hyperparameters described in Section A.3.5 and us-
+ing an NVIDIA V100 GPU, it took approximately
+2.1 seconds to train over 40 batches using cross-
+entropy (CE) alone, 2.2 seconds to train over 40
+batches using CE+SCL, and 3.3 seconds to train
+over 40 batches using CE+DASCL.
+A.3.5 Hyperparameter Selection and
+Configuration Details
+We take our hyperparameter configuration directly
+from Gunel et al. (2021). For each configuration,
+we set the learning rate to 1×10and used a
+batch size of 16. When using the SCL objective,
+in line with Gunel et al. (2021), we set λ= 0.9
+andτ= 0.3. When using the DASCL objective,
+we also set λ= 0.9and initialized τ= 0.3. We
+trained for 100 epochs for all few-shot learning
+settings.
+A.3.6 Model Evaluation Details
+The model from the epoch with the highest accu-
+racy over our own validation set was chosen as the
+final model for each random seed. We report accu-
+racy, which is the main metric of interest with this
+benchmark, and average precision. Average preci-
+sion is used to summarily quantify the precision-
+recall tradeoff, and is viewed as the area under the
+precision-recall curve (Davis and Goadrich, 2006).
+Average precision is defined as
+AP=/summationdisplay(R−R)P
+where PandRare the precision and recall at the
+nth threshold.
+A.3.7 Results over the Validation Set
+Table 5 reports the accuracy and the average preci-
+sion over the validation set for the SST-2 few-shot
+setting experiments. The validation set was used
+for model selection, so the reported results over the
+validation set are from the model with the highest
+accuracy achieved on the validation set across the
+100epochs.
+A.3.8 t-SNE Plots of the Learned Classifier
+Token Embeddings for the Test Set,
+N=20
+We use t-SNE (van der Maaten and Hinton, 2008)
+plots to visualize the learned classifier token em-
+beddings, “ <s>”, over the SST-2 test set when
+using the cross-entropy objective alone, using the
+cross-entropy objective with the supervised con-
+trastive learning (SCL) objective (Gunel et al.,
+2021), and using the cross-entropy objective with
+the dictionary-assisted supervised contrastive learn-
+ing (DASCL) objective. These plots are in Fig-
+ure 3. We see that DASCL draws embeddings of
+the same class closer and pushes embeddings of
+different classes farther apart compared to using
+cross-entropy alone or using cross-entropy with
+SCL.
+A.4 Additional Information for the New York
+Times Articles about the Economy
+Experiments
+A.4.1 Data Description: Few-Shot Training
+Set, Validation Set, and Test Set
+The data for the New York Times articles was
+downloaded from https://dataverse.harvard.
+edu/dataset.xhtml?persistentId=doi:
+10.7910/DVN/MXKRDE . The test set was created us-
+ing the replication files included at the link. In the
+original code, there was an error with overlapping
+training and test sets. We removed the duplicated
+observations from the training set. Because a
+single article could be annotated multiple times by
+different annotators, our validation set was created1022910230using 15% of the unique number of articles in the
+training data. 452 of the 1,317 labeled articles
+in the validation set are labeled positive. For our
+few-shot training sets, when N= 100 , there were
+41 positive examples. When N= 1000 , there
+were 363 positive examples. Our validation set
+and few-shot learning sets were sampled with
+no consideration to the label distributions of the
+original training or validation sets.
+A.4.2 Text Preprocessing Steps
+The only preprocessing was removing HTML tags
+that occasionally appeared in the text. The text is
+tokenized using a byte-level BPE tokenizer.
+A.4.3 Dictionaries Used During Keyword
+Simplification
+We used two sets of dictionaries during key-
+word simplification. We first used Lexicoder,
+downloaded from http://www.snsoroka.com/
+data-lexicoder/ . It is a dictionary specifically
+designed to study sentiment in news coverage
+(Young and Soroka, 2012). The dictionary is split
+into four separate sub-dictionaries: positive words,
+negative words, “negative” positive words (e.g.,
+“not great”), and “negative” negative words (e.g.,
+“not bad”). There are 1,709 positive words, 2,858
+negative words, 1,721 negative positive words,
+and 2,860 negative negative words. We replaced
+positive words and negative negative words with
+the token “ <positive >”. We replaced negative
+words and negative positive words with the token
+“<negative >”.
+The second dictionary we used was the 21 eco-
+nomic terms from Hopkins et al. (2017). The
+6 positive economic terms (in stemmed form)
+are “bull*”, “grow*”, “growth*”, “inflat*”, “in-
+vest*”, and “profit*”. The 15 negative economic
+terms (in stemmed form) are “bad*”, “bear*”,
+“debt*”, “drop*”, “fall*”, “fear*”, “jobless*”, “lay-
+off*”, “loss*”, “plung*”, “problem*”, “recess*”,
+“slow*”, “slump*”, and “unemploy*”. We re-
+placed the positive economic words with the token
+“<positive_econ >”. We replaced the negative eco-
+nomic words with the token “ <negative_econ >”.
+A.4.4 Number of Parameters and Runtime
+This experiment uses the RBERT pre-
+trained language model, which contains 125 mil-
+lion parameters (Liu et al., 2019). When using
+DASCL, we also had an additional temperature pa-
+rameter, τ, that was directly optimized. With thehyperparameters described in Section A.4.5 and us-
+ing an NVIDIA V100 GPU, it took approximately
+5.7 seconds to train over 40 batches using cross-
+entropy (CE) alone, 5.7 seconds to train over 40
+batches using CE+SCL, and 10.7 seconds to train
+over 40 batches using CE+DASCL.
+A.4.5 Hyperparameter Selection and
+Configuration Details
+We selected hyperparameters using the validation
+set. We searched over the learning rate and the
+temperature initialization; we used λ= 0.9for
+all loss configurations involving contrastive learn-
+ing. We used a batch size of 8because of resource
+constraints. We fine-tuned RBERT for 5
+epochs.
+For the learning rate, we searched over {5×
+10,1×10,2×10}; for the temperature, τ,
+initialization, we searched over {0.07,0.3}. We
+fine-tuned the model and selected the model from
+the epoch with the highest accuracy. We repeated
+this with three random seeds, and selected the hy-
+perparameter configuration with the highest aver-
+age accuracy. We used accuracy as the criterion
+because Barberá et al. (2021) used accuracy as the
+primary metric of interest. The final learning rate
+across all loss configurations was 5×10. The
+finalτinitialization for both SCL and DASCL loss
+configurations was 0.07. We used these same hy-
+perparameters when we limited the training set to
+100 and 1,000 labeled examples.
+A.4.6 Model Evaluation Details
+During fine-tuning, the model from the epoch with
+the highest accuracy over the validation set was
+chosen as the final model for each random seed.
+We report accuracy, which is the main metric of
+interest with this dataset, and average precision.
+For a definition of average precision, see Section
+A.3.6.
+The results in Table 2 for logistic regression us-
+ing the full training set differ slightly from their
+paper because of an error in overlapping training
+and test sets in the original splits.
+A.4.7 Additional Classification Metrics:
+Precision and Recall
+Table 6 contains additional classification metrics—
+precision and recall—for the test set when using
+100, 1,000, and all labeled examples from the train-
+ing set for fine-tuning.10231
+A.4.8 Results over the Validation Set
+Table 7 reports the accuracy, precision, recall, and
+average precision over the validation set for the
+economic media data. The validation set was used
+for model selection, so the reported results over the
+validation set are from the model with the highest
+accuracy achieved on the validation set across the
+5epochs.
+A.4.9 t-SNE Plots of the Learned Classifier
+Token Embeddings for the Test Set
+We use t-SNE plots to visualize the learned clas-
+sifier token embeddings, “ <s>”, over the New
+York Times articles about the economy test set
+when using the cross-entropy objective alone, us-
+ing the cross-entropy objective with the supervised
+contrastive learning (SCL) objective (Gunel et al.,
+2021), and using the cross-entropy objective with
+the dictionary-assisted supervised contrastive learn-
+ing (DASCL) objective. These plots are in Fig-
+ure 4. We see that DASCL pushes embeddings of
+different classes farther apart compared to using
+cross-entropy alone or using cross-entropy with
+SCL.A.5 Additional Information for the AbusEval
+Experiments
+A.5.1 Data Description: Few-Shot Training
+Set, Validation Set, and Test Set
+The data was downloaded from https://github.
+com/tommasoc80/AbuseEval . Because there was
+no validation set, we created our own validation
+set by sampling 15% of the training set. 399 of
+the 1,986 tweets in the validation set are labeled
+abusive. For our few-shot training sets, when
+N= 100 , 17 tweets are labeled abusive. When
+N= 1000 , 210 tweets are labeled abusive. Our
+validation set and few-shot learning sets were sam-
+pled with no consideration to the label distributions
+of the original training or validation sets.
+A.5.2 Text Preprocessing Steps
+We preprocessed the text of the tweets in the fol-
+lowing manner: we removed all HTML tags, re-
+moved all URLs (even the anonymized URLs),
+removed the anonymized @ tags, removed the
+retweet (“RT”) tags, and removed all “&amp” tags.
+The text is tokenized using the WordPiece tokenizer
+(Devlin et al., 2019).
+A.5.3 Dictionaries Used During Keyword
+Simplification
+We used two sets of dictionaries during keyword
+simplification. For the first dictionary, we used
+Lexicoder. For a description of the Lexicoder dic-
+tionary, see Section A.4.3. We used the same token-
+replacements as described in Section A.4.3.
+The second dictionary used was a dictionary
+of “us” and “them” pronouns. These pronouns
+are intended to capture directed or indirected
+abuse. The “us” pronouns are “we’re”, “we’ll”,
+“we’d”, “we’ve”, “we”, “me”, “us”, “our”, “ours”,
+and “let’s”. The “them” pronouns are “you’re”,
+“you’ve”, “you’ll”, “you’d”, “yours”, “your”, “you”,
+“theirs”, “their”, “they’re”, “they”, “them”, “peo-
+ple”, “men”, “women”, “man”, “woman”, “mob”,
+“y’all”, and “rest.” This dictionary is loosely based
+on suggested words found in Alorainy et al. (2019).
+A.5.4 Number of Parameters and Runtime
+This experiment uses the BERT pre-
+trained language model, which contains 110 mil-
+lion parameters (Liu et al., 2019). When using
+DASCL, we also had an additional temperature pa-
+rameter, τ, that was directly optimized. With the
+hyperparameters described in Section A.5.5 and us-
+ing an NVIDIA V100 GPU, it took approximately10232Loss Accuracy Precision Recall Avg. Precision
+CE .723±.004 .644±.022 .438±.054 .605±.007
+CE w/ DA .726±.004 .662±.035 .423±.059 .607±.007
+CE+SCL .727±.003 .659±.037 .438±.065 .611±.006
+CE+DASCL .724±.006 .655±.020 .416±.037 .610±.007
+CE+DASCL w/ DA .724±.004 .662±.031 .406±.051 .609±.006102332.6 seconds to train over 40 batches using cross-
+entropy (CE) alone and 4.9 seconds to train over
+40 batches using CE+DASCL.
+A.5.5 Hyperparameter Selection and
+Configuration Details
+We selected hyperparameters using the validation
+set. We searched over the learning rate and the tem-
+perature initialization; again, we used λ= 0.9for
+all loss configurations involving contrastive learn-
+ing. In line with Caselli et al. (2021), we used a
+batch size of 32. We fine-tuned BERT
+and HateBERT for 5 epochs.
+For the learning rate, we searched over {1×
+10,2×10,3×10,4×10,5×10,1×
+10,2×10}; for the temperature, τ, initializa-
+tion, we searched over {0.07,0.3}. We fine-tuned
+the model and selected the model from the epoch
+with the highest F1 over the positive class. We
+repeated this with three random seeds, and selected
+the hyperparameter configuration with the highest
+average F1 over the positive class. We used the F1
+score over the positive class as the criterion because
+it is one of the metrics of interest in Caselli et al.
+(2021). The final learning rate across all loss config-
+urations was 2×10. The final τinitialization for
+both SCL and DASCL loss configurations was 0.3.
+We note that our hyperparameter search yielded a
+different set of hyperparameters from Caselli et al.
+(2021). We used these same hyperparameters when
+we limited the training set to 100 and 1,000 labeled
+examples.
+A.5.6 Model Evaluation Details
+During fine-tuning, the model from the epoch with
+the highest F1 over the validation set was chosen
+as the final model for each random seed. We report
+macro F1 and F1, the main metrics of interest with
+this dataset, and average precision. For a definition
+of average precision, see Section A.3.6.
+A.5.7 Results over the Validation Set
+Table 8 reports the macro F1, F1, and average pre-
+cision over the validation set for AbusEval. The
+validation set was used for model selection, so the
+reported results over the validation set are from the
+model with the highest F1 achieved on the valida-
+tion set across the 5epochs.
+A.5.8 t-SNE Plots of the Learned Classifier
+Token Embeddings for the Test Set
+We use t-SNE plots to visualize the learned classi-
+fier token embeddings, “ <s>”, over the AbusEval
+test set when using BERT and when using BERT
+with DASCL. These plots are in Figure 5. We see
+that using DASCL with BERT pushes embeddings
+of different classes farther apart compared to using
+BERT alone.1023410235

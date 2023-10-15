@@ -1,1 +1,655 @@
-6903 Proceedings of the 2022 Conference on Empirical Methods in Natural Language Processing , pages 6903 6917 December 7 - 11 , 2022 © 2022 Association for Computational Linguistics 6904 6905 6906 6907 6908 6909 6910 6911 6912 6913 6914 6915 6916 6917 
+
+Linyong Nan Lorenzo Jaime Yu Flores Yilun Zhao Yixin Liu
+Luke Benson Weijin Zou Dragomir Radev
+Yale University
+{linyong.nan, lj.flores, yilun.zhao}@yale.edu
+Abstract
+Unfaithful text generation is a common prob-
+lem for text generation systems. In the case of
+Data-to-Text (D2T) systems, the factuality of
+the generated text is particularly crucial for any
+real-world applications. We introduce R2D2 ,
+a training framework that addresses unfaithful
+Data-to-Text generation by training a system
+both as a generator and a faithfulness discrimi-
+nator with additional replacement detection and
+unlikelihood learning tasks. To facilitate such
+training, we propose two methods for sampling
+unfaithful sentences. We argue that the poor en-
+tity retrieval capability of D2T systems is one
+of the primary sources of unfaithfulness, so in
+addition to the existing metrics, we further pro-
+pose named entity based metrics to evaluate the
+fidelity of D2T generations. Our experimental
+results show that R2D2 systems could effec-
+tively mitigate the unfaithful text generation,
+and they achieve new state-of-the-art results
+on FeTaQA, LogicNLG, and ToTTo, all with
+significant improvements.
+1 Introduction
+Data-to-Text generation is the task of generating a
+text sequence that describes some salient informa-
+tion of a knowledge source. Unlike Text-to-Text
+generation whose input source is a text sequence
+containing knowledge that is not extracted and rep-
+resented in the canonical structured format, we
+assume that the input of a Data-to-Text system is
+represented in some structured format, e.g., RDF
+(Gardent et al., 2017), relational or entity tables
+(Lebret et al., 2016; Wiseman et al., 2017). The
+Data-to-Text task can be divided into two distinct
+components as in many other text generation tasks
+(Reiter and Dale, 2000; Gatt and Krahmer, 2018).
+The first component involves selecting salient infor-
+mation from the structured knowledge either based
+on natural language query or other indication of
+saliency, and the second component comprises or-
+ganizing and planning of the previous selectionsto allow realization of the surface text. Although
+this task has been studied comprehensively in many
+works, from task design, modeling techniques, to
+application in different domains (Gardent et al.,
+2017; Lebret et al., 2016; Wiseman et al., 2017;
+Novikova et al., 2017; Parikh et al., 2020; Nan et al.,
+2022), existing Data-to-Text (D2T) systems exhibit
+a shortcoming that cannot be neglected: they fail to
+reliably generate sentences that are faithful given
+the salient content of the input table (Chen et al.,
+2020a,b, 2021a; Uehara et al., 2020; Ji et al., 2022).
+This limitation prevents the application of D2T sys-
+tems in real world scenarios. We therefore need to
+investigate possible remedies.
+We introduce a framework that prevents unfaith-
+ful Data-to-Text generation by training a Data-to-
+Text system both as a generator as well as a faith-
+fulness discriminator. For faithfulness discrimina-
+tion, we adopt the replaced token detection objec-
+tive, which was first proposed in ELECTRA (Clark
+et al., 2020). It was applied to the pre-training
+stage of the large-scale language models for more
+sample-efficient training of contextualized repre-
+sentations of sentences. ELECTRA is tasked to dis-
+criminate between original natural sentences and
+token-replaced sentences by locating the positions
+of replacement. The replaced tokens are sampled
+from a proposal distribution using a generator such
+as a Masked Language Model to fill some masked
+tokens.
+In our work, we perturbed the entailed reference
+sentences with two different methods, a knowledge-
+based one and a model-based one, to obtain un-
+faithful sentences whose surface forms are close
+to those of original sentences (therefore having
+similar sequence likelihoods), but contradict to the
+input table. Then we investigated ways of incorpo-
+rating the discrimination task into the existing maxi-
+mum likelihood learning. Specifically, we explored
+the settings of learning the sentence-level detec-
+tion and generation in tandem, and the token-level6903detection and generation in tandem. In addition,
+we also experiment with incorporating the unlike-
+lihood training objective (Welleck et al., 2019) on
+these unfaithful sentences to test its utility.
+We conduct experiments on three Data-to-Text
+datasets to test the general applicability of our ap-
+proach: FeTaQA (Nan et al., 2022), LogicNLG
+(Chen et al., 2020a), and ToTTo (Parikh et al.,
+2020). Each dataset presents distinct challenges
+while faithful generation is a common problem.
+We find that adding the faithfulness discrimination
+task mitigates the unfaithful Data-to-Text genera-
+tion, supported by our results on multiple datasets,
+on all of which we are able to achieve new state-
+of-the-art results with evident improvements. We
+compare and analyze the performance of our sys-
+tem and existing state-of-the-art systems. To ensure
+the validity of the comparison, we also evaluate var-
+ious metrics for their aptness of faithfulness evalu-
+ation. We released our model and code at https:
+//github.com/Yale-LILY/r2d2 .
+2 Method
+2.1 Preliminaries
+The de facto Data-to-Text machine learning task
+requires conditional language modeling of the se-
+quence pair X= (x, . . . , x), Y= (y, . . . , y)
+using a neural model parameterized with θ:
+p(y, . . . , y|x, . . . , x), where (y, . . . , y)
+is a natural language sentence that faithfully de-
+scribes the salient part of the input data which is
+linearized, along with other contexts such as query
+or metadata, into the sequence X= (x, . . . , x).
+We want to sample unfaithful sentences that are
+in the vicinity of surface forms of reference sen-
+tences, therefore also likely to be generated when
+only learning with maximum likelihood loss. We
+aim to examine the effectiveness of our proposed
+discrimination objectives in guiding the D2T model
+to attain separable representations for these su-
+perficially similar but factually critical sentences,
+and more importantly, we investigate how gener-
+ation can benefit from these additional objectives
+for robustness. We call our method Robust Data-to-
+Text with Replacement Detection ( R2D2 ), because
+we assign the Data-to-Text model both a genera-
+tion task and a discrimination task (replacement
+detection). This process is illustrated in Figure 1.
+Many existing works that study the unfaith-
+ful text generation problem in summarization and
+translation have investigated the source of incon-
+sistencies between the system output and the in-
+put (Cao et al., 2017; Maynez et al., 2020; Goyal
+and Durrett, 2020, 2021; Chen et al., 2021a). The
+main source of unfaithfulness is that the outputs
+contain facts that cannot be entailed (necessary con-
+sequence) from any explicitly stated facts or infer-
+ences derived from the input table. As we represent
+facts with subject-predicate-object triples, these
+contradictions originate from wrong predictions of
+entities (subject or object), predicates, or wrong
+arrangements. This motivates our proposal of dif-
+ferent methods of obtaining unfaithful sentences in
+Section 2.2. Then we describe two learning objec-
+tives that we proposed to add to the Data-to-Text
+modeling: 1) replacement detection objective in
+Section 2.3; and 2) unlikelihood objective in Sec-
+tion 2.4. In Section 2.5, we formulate our R2D2
+fine-tuning that leverages these two objectives in
+addition to the standard negative log likelihood loss
+for robust training of a Data-to-Text model.
+2.2 Faithfulness-based Replacement
+We aim to obtain sentences that are not entailed
+from the input table by replacing entities or pred-
+icates in the original sentences. It is challenging
+to reliably extract the predicates in canonical form
+that can be compared and replaced with one an-
+other, but it is feasible to extract and compare enti-
+ties from the system generations and the input table.
+Therefore we replace a span of tokens that consti-
+tute an entity in the original sentence with another
+candidate entity comprising one or more tokens.
+We adopted a RoBERTa-large-based named entity
+recognizerto extract all the entities in a sentence.6904
+To sample one unfaithful sentence, we select one
+of these entities, with those located near the end of
+the sentence to have a higher probability of being
+selected. This way, for the token-level detection
+task, the model has more chances of obtaining a
+reasonable amount of context for performing dis-
+crimination. We propose two different methods of
+determining the candidate replacement, which are
+illustrated in Figure 2 and described next.
+Knowledge-based Method Entities of same
+types are usually the suspects of the wrong pre-
+dictions. Identifying such entities in other text
+generation tasks is nontrivial because their inputs
+are unstructured texts, while in D2T, the source
+arranges similar entities together. For example,
+similar entities can be accessed in the same column
+for a table input, or they can be obtained by check-
+ing their applicability to certain predicates when
+the input is a semantic triple set. Our knowledge-
+based replacement method exploits the structure of
+the input to retrieve similar entities to find replace-
+ments that will lead to contradiction. This process
+is illustrated in Figure 2. Note that for the datasets
+we experimented on, we assume the entity to be
+replaced is the only choice to make the sentence en-
+tailed, and replacement of any other entities shown
+in the input table will violate the faithfulness of
+sentences. This assumption does not necessarily
+hold in some examples, on which we will elaborate
+in Section 6.
+Model-based Method Another way to obtain re-
+placement candidates is by sampling from a pro-
+posal distribution as in ELECTRA. We sample re-
+placements from the baseline Data-to-Text model
+by teacher forcing partial sentence up to the en-
+tity that needs to be replaced. Next we collect the
+D2T model predictions of the continuation withnucleus sampling (Holtzman et al., 2020), followed
+by extracting altered entities shown in the predicted
+continuations to determine the replacement candi-
+dates. With this approach, we are able to expose
+and further train the D2T model with errors of its
+own predictions.
+2.3 Replacement Detection in Generation
+For each entailed sentence Y, we generate N
+contradictory sentences which we denote as Y
+forj= 1, . . . ,|N|. The number of contradic-
+tory sentences we can generate given an entailed
+sentence depends on the number of entities found
+in the original sentence, the input, and the replace-
+ment method applied.
+As shown in Figure 3, we add a sentence-level re-
+placement detection task to the existing Sequence-
+to-Sequence framework by eliciting the decoder
+to generate a probability of the teacher-forced sen-
+tence being entailed or contradictory at the end of
+the generation, similar to the sequence classifica-
+tion usage of BART (Lewis et al., 2020), except
+that in BART, the same sequence that needs to be
+classified is fed into both the encoder and decoder.
+The loss for sentence-level replacement detection
+is defined by Equation (1).
+A more challenging task is to perform a fine-
+grained, token-level discrimination, as shown in
+Figure 4. Instead of predicting a discrimination
+probability at the end of generation, we task the
+decoder to perform discrimination at every step
+of token generation. Specifically, we use the per-
+step last hidden output of the decoder, which en-
+codes the source contexts and teacher-forced partial
+generation contexts, to compute the discrimination
+probability with a linear and sigmoid layer. The
+token-level replacement detection loss is defined
+by Equation (2).6905
+(1) (2) (3) (4)(5)
+2.4 Replacement Unlikelihood Training
+Unlikelihood training is first proposed in (Welleck
+et al., 2019) to address the repetition problem of the
+neural text generation. This training objective aims
+to decrease the decoder’s probability of generating
+tokens that are already seen in the teacher-forced
+generation contexts. The applicability of this ob-
+jective to the Data-to-Text task is also argued in
+(Uehara et al., 2020).
+Instead of using the generated tokens to con-
+struct the negative candidate set defined for each
+step, we define the sentence-level negative candi-
+date span Cfor each contradictory sentence
+Y. The span contains, for each time step, one
+replaced token that should have a low probability of
+being generated. We calculate the sequence-level
+unlikelihood loss for this replaced token span and
+apply regular likelihood loss for other original to-
+kens, which we denote as Y\C. We denote
+the per step prediction as ˆy=p(y|y, X).
+The unlikelihood loss for the entire sentence is
+specified in Equation (3).
+2.5R2D2 Fine-tuning
+We propose the final R2D2 fine-tuning loss ob-
+jective as in equation (5). It combines a genera-
+tion task loss component and a discrimination task
+loss component. Each of them is calculated from
+one entailed instance and Ncontradictory in-
+stances. The generation task component consists
+of a regular negative log likelihood loss for the en-
+tailed instance, as described in Equation (4), and
+an unlikelihood loss for the contradictory instances.
+The discrimination task component contains either
+sentence-level or token-level replacement detection
+loss for both entailed and contradictory instances.
+We use λto balance the importance between the6906two loss components.
+3 Experiments
+We first introduce the datasets that we experiment
+with in Section 3.1, and the metrics we adopted
+for evaluation in Section 3.2. Then we report the
+baseline models we are comparing with, and the
+implementation and training details in Section 3.3.
+In Section 3.4 and 3.5, we report and analyze both
+the automatic evaluation results and the human
+evaluation results.
+3.1 Datasets
+FeTaQA (Nan et al., 2022) is a free-form table
+question answering dataset. It introduces a task
+that requires retrieving the correct contents from
+the table based on the question, integrating and
+inferring from the retrieved facts, and generating a
+free-form answer. Sentences that contain erroneous
+selections of facts, even if they appear in the input
+table, are still considered as unfaithful, for being
+inconsistent with the input question.
+LogicNLG (Chen et al., 2020a) is a table-to-text
+dataset that requires generation of logically entailed
+sentences, with no indication of what is considered
+as salient given a table. Since there are numerous
+entailed facts that are different from the references
+in the surface-form, they propose input-based met-
+rics that compare the facts in the generated sen-
+tence and those in the input. It is worth noting
+that faithfulness to the input is more important for
+LogicNLG then faithfulness to the references.
+ToTTo (Parikh et al., 2020) is a table-to-text
+dataset that contains annotations of salient content
+of tables (highlighted table cells). The task does
+not require any content selection (when only high-
+lighted cells constitute the input), but only text plan-
+ning and surface realization of the inputs, which
+are expected to be described with full coverage.
+3.2 Evaluation Metrics
+We report results of a variety of automatic evalu-
+ation metrics used in the past studies to provide
+a comprehensive comparison of existing meth-
+ods and our proposed method. We include fact-
+verification based metrics, NLI-Acc (Chen et al.,
+2020a,b), which specifically aims to evaluate the
+faithfulness of the sentences. We also report string-
+based metrics that evaluate the string match be-
+tween predictions and references, such as sacre-
+BLEU (Post, 2018), ROUGE-{1, 2, L} (Lin, 2004),TER (Snover et al., 2006), METEOR (Banerjee
+and Lavie, 2005), PARENT (Dhingra et al., 2019)
+(which also leverages the input data).
+NE-based Evaluation Metrics To better under-
+stand how the D2T system’s retrieval capability cor-
+relates with faithfulness, we propose information-
+extraction based metrics that compare the named
+entities contained in the generated sentences to
+those contained in the reference sentences or in-
+put data. We believe these metrics help us better
+distinguish between the unfaithfulness caused by
+wrong retrieval of entities and that caused by wrong
+prediction of predicates/relations. Specifically, we
+propose the following indicators:
+•Reference coverage (RC) : percentage of en-
+tities in the reference that are also shown in
+the prediction.
+•Ref-hit & Input-hit (RI) : percentage of enti-
+ties shown in the prediction that are shown in
+both the reference and input table.
+•Ref-hit & Input-miss (RM) : percentage of
+predicted entities that are shown in the refer-
+ence but not the input table. This case is rare
+since it indicates the existence of entities that
+are not input-grounded in the reference.
+•Ref-miss & Input-hit (MI) : percentage of
+predicted entities that are shown in the table,
+but not in the reference. This case identifies
+wrong or unnecessary retrieval of entities from
+the input (when the indication of saliency is
+evident).
+•Ref-miss & Input-miss (MM) : percentage of
+predicated entities that are neither shown in
+the table nor the reference. This case identifies
+the prediction of entities likely by hallucina-
+tion.
+Figure 5 and Figure 6 in the Appendix show the
+correlation between NE-based metrics and sacre-
+BLEU, NLI-Acc, respectively. As expected, the
+reference coverage rate positively correlates with
+both metrics. While both reference hit and input
+hit are important, the rate of predicted entities not
+shown in reference negatively correlates with sacre-
+BLEU (MI and MM) and NLI-Acc (MI). The trend
+is less clear for RM and MM since these are rare
+cases, which can also be shown in Table 4. In Sec-
+tion A.1 of the Appendix, we also test how the6907
+automatic metrics we reported could reliably detect
+the unfaithfulness of the sentences.
+3.3 Experiment Settings
+Baselines The state-of-the-art system for the
+Data-to-Text task is fine-tuned T5 model (Raffel
+et al., 2020). We fine-tune T5 ourselves and report
+evaluations on FeTaQA, LogicNLG and ToTTo, so
+that the learning objective is the key control vari-
+able in our comparison.
+Implementations We use T5-base as the pre-
+trained checkpoint from which we fine-tune either
+regularly (Reg-FT) or using our proposed method
+(R2D2 -FT). For R2D2 -FT, we initialize our model
+from a checkpoint that has been fine-tuned regu-
+larly for 15 epochs, and train the additional linear
+layer for sentence or token replacement detection
+from random initialization. We find this fine-tuning
+warmup help improve the performance in general.
+We use the Adafactor optimizer (Shazeer and Stern,
+2018) with a learning rate of 5e-5 . We use the
+batch size of 8 for FeTaQA and 32 for the others.
+Our models are trained on one NVIDIA GeForce
+RTX 3090 GPU, and each experiment takes around
+5-20 hours depending on the dataset size.
+R2D2 Configuration To assess the necessity of
+the discrimination loss and unlikelihood loss, we
+experimented fine-tuning T5 only with the dis-
+crimination loss, or only with the unlikelihood
+loss, or both (all in addition to the NLL loss).
+For discrimination loss, we also experiment with
+adding sentence-level or token-level discrimination
+to investigate the effect of discrimination granu-
+larity in assisting faithful text generation. For allthe training variants above, we also compare two
+methods of obtaining the contradictory sentences,
+knowledge-based and model-based methods. Since
+the number of contradictory sentences obtained
+(which we denote as Nin Section 2.5) varies
+depending on the method used (as shown in Table
+7 of the Appendix), we also experiment with us-
+ing different numbers of contradictory sentences
+in the R2D2 fine-tuning: N= 1 (xsmall ),
+3(small ),5(medium ),10(large ) or max
+(full ). Since the maximum size of the perturba-
+tions obtained by model-based method is small ,
+we only compared xsmall andfull for the
+model-based method setting.
+3.4 Automatic Evaluation
+We report the performance of the previous state-of-
+the-art system, T5 fine-tuned only with negative log
+likelihood (NLL) loss by ourselves, and the best T5
+fine-tuned with R2D2 loss for FeTaQA (Table 1),
+LogicNLG (Table 2) and ToTTo (Table 3), based
+on metrics used in the existing literature. In Table
+4, we also report their performances using the NE-
+based metrics that we proposed. We also report the
+full experiment results of FeTaQA that contain eval-
+uations of different R2D2 configurations in Table
+8 of the Appendix.
+We obverse that across all the datasets, most of
+the systems fine-tuned with different R2D2 config-
+urations are able to perform better than system that
+is fine-tuned only with NLL loss. As expected,
+the improvements are more evident in the fact-
+verification-based metrics that evaluate the faith-
+fulness of the sentences. As shown in Table 8, we
+find that the best R2D2 configuration requires both6908
+the discrimination and the unlikelihood learning
+objectives with λ= 0.5(finding from a parame-
+ter sweep of 0.2, 0.5 and 0.8). The contradictory
+sentences obtained by knowledge-based perturba-
+tion are more beneficial than those obtained by
+model-based perturbation. We also find that the
+granularity (sentence/token-level) of the discrimi-
+nation loss does not seem to affect the performance
+much, and that the system performance does not
+necessarily improve as we increase the number of
+unfaithful sentences used for fine-tuning, and that
+the best configuration for Nseems to be 3-5 in
+most cases.
+We examine the improvement of faithfulness
+using the NE-based metrics, and find that the cov-
+erage of the entities appeared in the reference (RC)
+improves across all datasets. For FeTaQA, we
+notice that our system is able to retrieve input-
+grounded entities more accurately (shown by in-
+creased RI and decreased MI scores). For Log-
+icNLG which has no right or wrong retrieval of
+input-grounded entities as long as the description
+of them is faithful, we obverse an evident decline of
+MM and increments of both RI and MI (with more
+evident gain in MI), indicating that our system is
+able to reduce hallucinations of irrelevant entities
+and instead retrieving input-grounded ones.
+3.5 Human Evaluation
+Since the automatic evaluations are not always reli-
+able in determining the faithful aspect of a sentence,
+which can be seen in our metrics reliability test
+shown in Table 6: around 14% faithful sentences
+are deemed to be unfaithful by the NLI-Acc metric,
+and more importantly, it fails to identify around
+36% of the unfaithful sentences. We conduct the
+human evaluation based on two criteria: a sentence
+is (1) faithful ifall facts contained are entailed by
+the input, and when a question is present in the in-
+put, the sentence only contains necessary facts ; (2)
+adequate with respect to reference if the sentence
+contains same or more facts than the reference.
+We asked three human evaluators to evaluate 200
+samples of each dataset (100 samples in each of the
+overlap/nonoverlap split for ToTTo), and each sam-
+ple is provided with all the inputs, the reference,
+and two system generated sentences. We report the
+percentage of faithful and adequate sentences gen-
+erated by the baseline system and our system on all
+datasets in Table 5, and the results validate R2D2 ’s
+effectiveness in faithful text generation. We notice
+that on LogicNLG, the R2D2 generated sentences’
+coverage with respect to the reference is lower than6909that of the baseline model’s generations, we suspect
+that this is because the R2D2 generated sentences
+may contain facts that are different from the facts
+shown in the reference.
+4 Related Work
+4.1 Unfaithfulness in Text Generation
+In the context of text generation, hallucination
+refers to the phenomenon of neural models “gen-
+erating unfaithful or nonsensical text” (Ji et al.,
+2022). Reasons for such hallucinations are poor
+data collection, training design (such as the expo-
+sure bias), or that the task expects more output
+diversity. Metrics based on information extraction,
+question answering, and natural language inference,
+have been proposed to measure such hallucination,
+which we employ to evaluate the performance and
+faithfulness of R2D2 .
+4.2 Contrastive Learning
+Contrastive learning (Hadsell et al., 2006) tasks the
+model with maximizing the representation similar-
+ity between neighboring examples while minimiz-
+ing the similarity between distant examples. Con-
+trastive learning has recently been used in various
+NLP tasks, including language modeling (Arora
+et al., 2022), machine translation (Yang et al., 2019;
+Pan et al., 2021), anomaly detection (Manolache
+et al., 2021), commonsense reasoning (Zhou et al.,
+2021), text summarization (Cao and Wang, 2021;
+Liu and Liu, 2021; Xu et al., 2021; Sun and Li,
+2021; Wang et al., 2021; Liu et al., 2022), and data-
+to-text generation (Uehara et al., 2020). Unlike
+Uehara et al. (2020), in which unfaithful sentences
+are obtained by replacing a set of keywords (such
+as replacing lowtohigh,gain todrop) that only
+apply to the finance domain, we propose domain-
+independent methods for sampling unfaithful sen-
+tences either by exploiting the structure of input
+knowledge or utilizing the D2T model’s own mis-
+takes.
+4.3 Unlikelihood Training
+To address the degeneration problems of models
+trained only with Maximum Likelihood Estimation,
+many works have proposed alternative approaches
+(Tu et al., 2016; Li et al., 2020; Holtzman et al.,
+2020; Lin et al., 2021). Among them, unlikelihood
+training was introduced as a means of decreasing
+the probability that the model generates certain to-
+kens (Welleck et al., 2019). In a D2T context, weadopt unlikelihood training to decrease the prob-
+ability that the model generates tokens which are
+not entailed by the given contexts.
+4.4 Evaluation Metrics
+Ideally, a data-to-text model should be evaluated
+based on its ability to generate logical sentences
+verified by the provided reference data. Cur-
+rent methods however, typically only compare
+the model output summary to the gold summary.
+This includes n-gram based (e.g. BLEU, ROUGE,
+and METEOR) or edit distance based metrics (e.g.
+TER) (Sai et al., 2022), or embedding-based sim-
+ilarity metrics (e.g. BERTScore) (Zhang et al.,
+2019). Another set of metrics compare the informa-
+tion present in the output and the label. This is done
+by extracting subject, object, and their relations in
+the output and label, and comparing both sets of
+elements (Wiseman et al., 2017). We evaluate our
+model using multiple metrics to understand differ-
+ent aspects of its performance. A comprehensive
+investigation of the current evaluation practices for
+NLG tasks can be found in Gehrmann et al., 2022.
+4.5 Natural Language Inference
+Natural language inference (NLI) refers to the task
+of classifying whether a hypothesis entails, con-
+tradicts, or is unrelated to a premise (Bowman
+et al., 2015). In the context of D2T, NLI can be
+used to evaluate whether a model’s generated text
+can be inferred from the input table (Chen et al.,
+2020a). In line with the work of TabFact (Chen
+et al., 2020b), LogicNLG (Chen et al., 2020a), and
+SnowBall (Shu et al., 2021), R2D2 incorporates
+this idea into data-to-text training by using NLI as
+a learning objective during the training procedure.
+5 Conclusion
+In this work, we introduced R2D2 , a training frame-
+work that mitigates the unfaithful text generation
+problem for the D2T task. Training with the regular
+maximum likelihood loss can lead to generation
+of sentences that are similar to the references but
+are unfaithful to the input. We therefore propose
+to add a discrimination task and an unlikelihood
+training to encourage the model to generate sep-
+arable representations of these critical sentences.
+We proposed two methods of sampling these un-
+faithful sentences: the knowledge-based method
+exploits the structure of the input knowledge, and
+the model-based method samples the D2T model’s6910own mistakes. We proposed NE-based metrics that
+assess the entity retrieval capability of the Data-to-
+Text systems, as we argued the incompetence of
+which is one of the leading causes of unfaithful-
+ness. We experimented on multiple Data-to-Text
+datasets of different task constructs, and achieved
+noticeable improvements over the state-of-the-art
+performance.
+6 Limitations
+There are some limitations of our knowledge-based
+method for obtaining the contradictory sentences,
+as its validity depends on the type of sentences
+observed in the data-to-text datasets. Comparing
+the effectiveness of R2D2 on different datasets and
+with different evaluations, we found that FeTaQA
+and ToTTo benefit more than LogicNLG. We spec-
+ulate this is because many sentences of LogicNLG
+describe some entailed facts of entities of a sin-
+gle table column (usually involving comparisons),
+which usually contain single and less restricted
+predicate that could be applied to many homoge-
+neous entities, and this would invalidate our per-
+turbation methods. We provide one such example
+in Figure 7 of the Appendix. We also notice that
+for ToTTo, the improvement is less evident than
+that for FeTaQA. Besides less room for improve-
+ment, we observe no evident change in the entities
+retrieved by both systems compared with those
+in the reference or input, while human evaluation
+indicates there are still around 17% unfaithful sen-
+tences. We speculate the source of unfaithfulness
+of these sentences are due to wrong predictions of
+relations/predicates, which are not captured and
+included into the R2D2 fine-tuning by our current
+perturbation method. To avoid invalidation of per-
+turbation (as in the case of LogicNLG) and also
+to capture erroneous relation predictions, a better
+perturbation method has to operate on fact triples
+instead of entities, but this requires a reliable and
+domain-independent fact extraction system, which
+we will explore in future.
+References6911691269136914A Appendix
+A.1 Evaluation Metric Reliability Test
+Since many existing automatic metrics for text gen-
+eration tasks are not proposed with an aim of re-
+flecting the faithfulness of the sentences, an exami-
+nation of all metrics reported in our work is crucial
+for interpreting the results. As we are able to reli-
+ably generate an unfaithful version of most of the
+reference texts, we contaminate the references in
+the FeTaQA test split in a controlled manner: we
+generate five variants of texts with different per-
+centage of the references being replaced with their
+unfaithful parallel ( 0%version contains only the
+references and 100% version contains only the un-
+faithful sentences). We evaluate the variants that
+are contaminated to different degrees using the eval-
+uation metrics we reported, in order to investigate
+how reliable they are in reflecting the faithfulness
+of any system generated sentences.
+As shown in Table 6, most of the metrics are able
+to reflect the degree of unfaithfulness contained in
+the prediction texts, though our test only contains
+the type of unfaithfulness that originates from erro-
+neous selection of entities. A more rigorous study
+would test other types of unfaithfulness, such as
+wrong prediction of relations or arrangement of en-
+tities. Nevertheless, we observe that some metrics,
+especially NLI-Acc, are more sensitive to the type
+of unfaithfulness that we tested, while an unfaithful
+sentence can still obtain a very high BERTScore
+(Zhang et al., 2020).691569166917

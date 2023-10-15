@@ -1,1 +1,705 @@
-6264 Proceedings of the 2022 Conference on Empirical Methods in Natural Language Processing , pages 6264 6278 December 7 - 11 , 2022 © 2022 Association for Computational Linguistics 6265 6266 6267 6268 6269 6270 6271 6272 6273 6274 6275 6276 6277 6278 
+
+Peiyi WangYifan SongTianyu LiuBinghuai Lin
+Yunbo CaoSujian LiZhifang SuiMOE Key Laboratory of Computational Linguistics, Peking University, ChinaTencent Cloud Xiaowei
+wangpeiyi9979@gmail.com; {yfsong, lisujian, szf}@pku.edu.cn
+{rogertyliu, binghuailin, yunbocao}@tencent.com;
+Abstract
+Continual relation extraction (CRE) aims to
+continually learn new relations from a class-
+incremental data stream. CRE model usually
+suffers from catastrophic forgetting problem,
+i.e., the performance of old relations seriously
+degrades when the model learns new relations.
+Most previous work attributes catastrophic for-
+getting to the corruption of the learned repre-
+sentations as new relations come, with an im-
+plicit assumption that the CRE models have
+adequately learned the old relations. In this
+paper, through empirical studies we argue that
+this assumption may not hold, and an impor-
+tant reason for catastrophic forgetting is that
+the learned representations do not have good
+robustness against the appearance of analogous
+relations in the subsequent learning process.
+To address this issue, we encourage the model
+to learn more precise and robust representa-
+tions through a simple yet effective adversarial
+class augmentation mechanism (ACA), which
+is easy to implement and model-agnostic. Ex-
+perimental results show that ACA can consis-
+tently improve the performance of state-of-the-
+art CRE models on two popular benchmarks.
+Our code is available at https://github.
+com/Wangpeiyi9979/ACA .
+1 Introduction
+Relation extraction (RE) aims to detect the relation
+of two given entities in a sentence. Traditional RE
+models are trained on a fixed dataset with a pre-
+defined relation set, which cannot handle the real-
+life situation where new relations are constantly
+emerging. To this end, continual relation extraction
+(CRE) (Wang et al., 2019; Han et al., 2020; Cui
+et al., 2021; Zhao et al., 2022; Wang et al., 2022) is
+introduced. As shown in Figure 1, CRE is formu-
+lated as a class-incremental problem, which trains
+the model on a sequence of tasks. In each task,Figure 1: A demonstration for continual relation extrac-
+tion with three tasks where each task involves two new
+relations. The learned representations from the easy
+training task can not handle the hard testing data, which
+contains analogous relations inherently hard to distin-
+guish, e.g., “child” and “father”.
+the model needs to learn some new relations and
+is evaluated on all seen relations. Like other con-
+tinual learning systems, CRE models also suffer
+from catastrophic forgetting, i.e., the performance
+of previously learned relations seriously degrades
+when learning new relations.
+The mainstream research in CRE (Han et al.,
+2020; Cui et al., 2021; Zhao et al., 2022; Wang
+et al., 2022) mainly attributes catastrophic forget-
+ting to the corruption of the learned knowledge as
+new tasks come. To this end, a variety of sophisti-
+cated rehearsal-based mechanisms are introduced
+to better retain or recover the knowledge, such as
+relation prototypes (Han et al., 2020; Cui et al.,
+2021), curriculum-meta learning (Wu et al., 2021),
+contrastive replay and knowledge distillation (Zhao
+et al., 2022). All these methods implicitly assume
+that the model has adequately learned old relations.
+However, in this paper, we find that this assumption
+may not hold.
+With a series of empirical studies, we observe
+that catastrophic forgetting mostly happens on
+some specific relations, and significant perfor-
+mance degradation tends to occur when their anal-
+ogous relations appear. Based on our observations,
+we find another reason for catastrophic forgetting,6264i.e.,CRE models do not learn sufficiently robust
+representations of relations in the first place due
+to the relatively easy training task . Taking “child”
+in Figure 1 as an example, because of the absence
+of hard negative classes in task 1, the CRE model
+tends to rely on shortcuts, such as entity types, to
+identify “child”. Although the learned imprecise
+representations can handle the testing set of task
+1 and task 2, they are not robust enough to distin-
+guish “child” from its analogous relation (“father”)
+in task 3. Therefore, the performance of “child”
+will decrease significantly when “father” appears.
+In contrast, relations such as “architecture” still
+perform well in task 3 because their analogous re-
+lations have not yet appeared.
+Recently, adversarial data augmentation emerges
+as a strong baseline to prevent models from learn-
+ing shortcuts from the easy dataset (V olpi et al.,
+2018; Zhao et al., 2020; Hendrycks et al., 2020).
+Inspired by these work, we introduce a simple yet
+effective Adversarial Class Augmentation (ACA)
+mechanism to improve the robustness of the CRE
+model. Concretely, ACA utilizes two class augmen-
+tation methods, namely hybrid-class augmentation
+and reversed-class augmentation, to build hard neg-
+ative classes for new tasks. When a task arrives,
+ACA jointly trains new relations with adversarial
+augmented classes to learn robust representations.
+Note that our method is orthogonal to all previ-
+ous work: ACA focuses on learning knowledge
+of newly emerging relations better, while previous
+methods are proposed to retain or recover learned
+knowledge of old relations. Therefore, incorpo-
+rating ACA into previous CRE models can further
+improve their performance.
+We summarize our contributions as: 1)we con-
+duct a series of empirical studies on two strong
+CRE methods and observe that catastrophic forget-
+ting is strongly related with the existence of analo-
+gous relations. 2)we find an important reason for
+catastrophic forgetting in CRE which is overlooked
+in all previous work: the CRE models suffer from
+learning shortcuts to identify new relations, which
+are not robust enough against the appearance of
+their analogous relations. 3)we propose an adver-
+sarial class augmentation mechanism to help CRE
+models learn more robust representations. Exper-imental results on two benchmarks show that our
+method can consistently improve the performance
+of two state-of-the-art methods.
+2 Related Work
+Relation Extraction Conventional Relation Ex-
+traction (RE) focuses on extracting the predefined
+relation of two given entities in a sentence. Re-
+cently, a variety of deep neural networks (DNN)
+have been proposed for RE, mainly including: 1)
+Convolutional or Recurrent neural network (CNN
+or RNN) based methods (dos Santos et al., 2015;
+Wang et al., 2016; Xiao and Liu, 2016; Liu et al.,
+2019), which can effectively extract textual fea-
+tures. 2)Graph neural network (GNN) based
+methods (Xu et al., 2015, 2016; Cai et al., 2016;
+Mandya et al., 2020), which jointly encode the sen-
+tence with lexical features. 3)Pre-trained language
+model (PLM) based methods (Baldini Soares et al.,
+2019; Peng et al., 2020), which achieve state-of-
+the-arts on RE task.
+Continual Learning Continual Learning (CL)
+aims to continually accumulate knowledge from a
+sequence of tasks (De Lange et al., 2019). A ma-
+jor challenge of CL is catastrophic forgetting, i.e.,
+the performance of previously learned tasks seri-
+ously drops when learning new tasks. To this end,
+prior CL methods can be roughly divided into three
+groups: 1)Rehearsal-based methods (Rebuffi et al.,
+2017; Wu et al., 2019) maintain a memory to save
+instances of previous tasks and replay them dur-
+ing training of new tasks. 2)Regularization-based
+methods (Kirkpatrick et al., 2017; Aljundi et al.,
+2018) add constraints on the weights important to
+old tasks. 3)Architecture-based methods (Mallya
+and Lazebnik, 2018; Qin et al., 2021) dynamically
+change model architectures to learn new tasks and
+prevent forgetting old tasks. Recently, rehearsal-
+based methods have been proven to be the most
+effective for NLP tasks, including relation extrac-
+tion. We focus on the rehearsal-based methods for
+CRE in this paper.
+Shortcuts Learning Phenomenon Shortcuts
+learning phenomenon denotes that DNN models
+tend to learn unreliable shortcuts in datasets, lead-
+ing to poor generalization ability in real-world ap-
+plications (Lai et al., 2021). Recently, researchers
+have revealed the shortcut learning phenomenon for
+different kinds of language tasks, such as natural
+language inference (He et al., 2019), information6265extraction (Wang et al., 2021), reading comprehen-
+sion (Lai et al., 2021) and question answering (Mu-
+drakarta et al., 2018). Geirhos et al. (2020) points
+out that shortcuts learning phenomenon happens
+because the “Principle of Least Effort” (Kingsley,
+1972), i.e., people (also animal and machine) will
+naturally minimize the amount of effort to solve
+tasks. Recently, data augmentation (Tu et al., 2020)
+and adversarial training (Stacey et al., 2020) are
+used to alleviate shortcuts learning phenomenon
+with synthesized data. To the best of our knowl-
+edge, we are the first work to analyze the catas-
+trophic forgetting in CRE from the perspective of
+shortcuts learning, and propose an adversarial data
+augmentation method to alleviate it.
+3 Task Formulation
+In CRE, the model is trained on a sequence of tasks
+(T, T, ..., T). Each task Tcan be represented as
+a triplet (R, D, Q), where Ris the set of new
+relations, DandQare the training and testing set,
+respectively. Every instance (x, y)∈D∪Q
+belongs to a specific relation y∈R. The goal of
+CRE is to continually train the model on new tasks
+to learn new relations, while avoiding forgetting of
+previously learned ones. More formally, in the i-th
+task, the model learns new relations Rfrom D,
+and should be able to identify all seen relations, i.e.,
+the model will be evaluated on the all seen testing
+sets/uniontextQ. To alleviate catastrophic forgetting
+in CRE, previous work (Cui et al., 2021; Han et al.,
+2020; Zhao et al., 2022; Wang et al., 2022) adopts
+a memory to store a few typical instances (e.g., 10)
+for each old relation. In the subsequent training
+process, instances in the memory will be replayed
+to alleviate the catastrophic forgetting.
+4 Catastrophic Forgetting in CRE:
+Characteristics and the Cause
+In this section, we conduct a series of empirical
+studies on two state-of-the-art CRE models, namely
+EMAR (Han et al., 2020) and RP-CRE (Cui et al.,
+2021), and two benchmarks, namely FewRel and
+TACRED, to analyze catastrophic forgetting in
+CRE. Please refer to Section 6.1 for details of these
+two benchmarks and two CRE models.
+4.1 Characteristics of Catastrophic Forgetting
+We use Forgetting Rate (FR) (Chaudhry et al.,
+2018a,b) to measure the average forgetting of a
+relation. Assuming that relation rappears in task i,
+the FR of rafter the model has finished the tasks
+sequence (T, ..., T, ..., T)is defined as:
+FR=1
+k−i/summationdisplaypd (1)
+pd= maxF1−F1, (2)
+where pdandF1are the performance degrada-
+tion and F1 score of rafter the model trains on task
+j, respectively. The sequence length kis10for
+both FewRel and TACRED.
+We divide all relations into three equal-sized
+groups based on their FR from small to large. As
+shown in Table 1, relations in G1 hardly suffer from
+forgetting as FR is just 1.3%and1.2%on EMAR
+and RP-CRE, respectively. In contrast, relations
+in G3 have catastrophic forgetting and the FR is
+close to 10% for both models. A similar tendency
+is observed on TACRED (please refer to Appendix
+A for details). To explore why FR varies widely
+among different relations, we dive into the results
+of two CRE models and ask two questions.
+Where catastrophic forgetting happens? With
+careful comparison between G1 and G3, we find
+that relations in G3 seem to have analogous rela-
+tions in the dataset. For example, “mother” belongs
+to G3, and there are its semantically analogous re-
+lations, such as “spouse”, in the dataset. To con-
+firm our finding, we first define the similarity for
+a pair of relations as the cosine distance of their
+prototypes, i.e., the mean vanilla BERT sentence
+embedding of all corresponding instances. Then,
+for a certain relation, we compute its max similarity
+(MS) to all the other relations in the dataset. As
+shown in Table 1, MS of G3 is significantly greater
+than that of G1, indicating that the catastrophic6266
+forgetting mostly happens on relations with large
+MS. Besides, as shown in the last two columns
+(F1 and F1(∆)) of Table 1, we also observe that
+the performance gap between CRE models and the
+supervised model significantly grows as MS in-
+creases, showing that CRE poses a more serious
+challenge to identify the relations with large MS.
+When catastrophic forgetting happens? We
+also observe that the performance of the relations
+with high FR always has a sudden drop in some
+tasks. To explore the characteristic of the task with
+severe performance drop, we run two CRE models
+on50different task sequences, and record all the
+bad cases where catastrophic forgetting happens
+(the F1 scores of a relation degrades greater than
+10points after the model learns a new task). Given
+a certain relation rand its corresponding bad cases,
+we mark cases where exist top- 5most similar rela-
+tions of r. As shown in Table 2, we observe that
+more than 80% bad cases on both benchmarks are
+related to the appearance of top- 5most similar rela-
+tions. Taking relation “mother” in FewRel dataset
+as an example, more than 90% bad cases contain
+relation “spouse”, which has the top- 1similarity
+with “mother”. These results show that for a rela-
+tion that suffers catastrophic forgetting, significant
+performance degradation is usually accompanied
+by the appearance of their analogous relations..
+4.2 The Cause of Catastrophic Forgetting
+All of the previous CRE works attribute the catas-
+trophic forgetting to the corruption of the learned
+knowledge during the continual learning process,
+with the assumption that the CRE models have ad-
+equately learned the previous relations. However,
+we argue that this assumption may not hold. In
+CRE, models are continually trained on a sequence
+of stand-alone easy training datasets, where each
+dataset usually only consists of very few new re-
+lations without analogous relations appearing to-
+gether. In contrast, CRE models are evaluated on
+the much harder testing dataset of all seen rela-
+tions, which usually contains analogous relations.
+He et al. (2019); Karimi Mahabadi et al. (2020);
+Minderer et al. (2020) find that the deep neural
+network tends to learn shortcuts in the simple train-
+ing dataset to make the decision, leading to poor
+generalization. Therefore, we point out another
+important reason for the performance degradation
+of learned relations: the CRE models suffer from
+learning shortcuts in the easy training dataset to
+identify relations, which are not robust enough
+against the appearance of their analogous rela-
+tions. This reason can well explain our observed
+phenomena, i.e, catastrophic forgetting mostly hap-
+pens on some specific relations with analogous
+relations in the subsequent tasks, and significant
+performance degradation nearly always happens
+when their analogous relations appear.
+To confirm our hypothesis, we propose a re-
+trieval test: after the CRE model is trained to iden-
+tify a specific relation r, we use the trained model
+to retrieve instances of rfrom the whole test set ac-
+cording to the similarity of representations. If the
+learned representations are not robust enough, the
+corresponding retrieval precision will be relatively
+low. Table 3 shows the result of the retrieval re-
+sults of two CRE models and the supervised model.
+Compared with the supervised model, two CRE
+methods retrieve much more unrelated instances,
+especially for relations suffering severe forgetting,
+showing that the CRE models indeed learn repre-
+sentations that lack robustness.
+5 Methodology
+Recently, adversarial data augmentation has shown
+promise for avoiding models from learning short-
+cuts in the easy dataset (V olpi et al., 2018; Zhao
+et al., 2020; Hendrycks et al., 2020; Zhu et al.,6267
+2021). Therefore, in this section, we propose a
+simple yet effective adversarial class augmentation
+mechanism (ACA) containing two kinds of class
+augmentation to help the CRE model learn more
+robust representations.
+5.1 Two-Stage Training
+Our ACA is model-agnostic and utilizes popu-
+lar state-of-the-art CRE models as the backbone.
+Therefore, we first briefly introduce the two-stage
+training process of these CRE models.
+CRE model aim to finish a sequence of tasks
+(T, T, ..., T). Without loss of generality, we rep-
+resent CRE model with two components: 1)an
+encoder, which maps an input instance xinto a rep-
+resentation vector; 2)a classifier, which produces a
+probability distribution over all seen relations till
+current task as the prediction for x. As shown in
+Figure 2(a), previous CRE methods (Han et al.,
+2020; Cui et al., 2021; Zhao et al., 2022; Wang
+et al., 2022) can be generally formulated as a two-
+stage training process. 1)initial training: they first
+expand the class node in the classifier for new re-
+lations, and then train the CRE model with only
+new data to learn new relations; 2)memory replay:
+they first update the memory bank with new data,
+and then replay the memory bank to restore the
+knowledge of previously learned relations. Specifi-
+cally, previous work mainly focuses on the mem-
+ory replay stage and proposes various sophisticated
+mechanisms to better retain or recover the learned
+knowledge, while improvements to the initial train-
+ing stage remain under-explored. See more details
+of these CRE methods in their original paper.5.2 Adversarial Class Augmentation
+Orthogonal to all previous CRE models, our ACA
+instead focuses on the first initial training stage to
+improve the robustness of newly learned relation
+representations. Specifically, when a new task T
+comes, ACA first augments the new relations R
+based on the new training set D, and then trains the
+original relations and synthesized classes together.
+Hybrid-class Augmentation Given Nnew rela-
+tions, we pair them randomly and get ⌊N/2⌋rela-
+tion pairs. We construct hybrid synthetic classes
+based on these relation pairs. Specifically, for a
+relation pair {r, r}with the relations randr,
+we use two instances, xfromrandxfromr, to
+generate a hybrid instance x for the extra syn-
+thetic class r. As shown in Figure 2(b), we first
+extract a span sthat contains the head entity e
+but excludes the tail entity efromx, and a span
+sthat contains the tail entity ebut excludes the
+head entity efromx, and then concatenate sand
+sto form x = [s;s]. Through the hybrid-
+class augmentation, we can construct ⌊N/2⌋extra
+classes for the current new task.
+Reversed-class Augmentation We classify all
+relations into two categories, symmetric and asym-
+metric relations. The symmetric relation means
+that the order of the head and tail entities does not
+matter, e.g, “sibling” and “spouse” (please refer to
+Appendix E for details of symmetric relations on
+two datasets). In contrast, the semantic of the asym-
+metric relations is related to the choice of head and
+tail entities, e.g., “located in” and “mother”. As
+shown in Figure 2(c), reversed-class augmentation
+reverses the head and tail entities of each asymmet-6268
+rical relation to construct the extra classes.
+Adversarial Training Given Nnew relations,
+we can generate at most N+⌊N/2⌋hard negative
+classes using the two augmentation methods. Thus,
+in the initial training stage, the model is jointly
+trained to classify (2N+⌊N/2⌋)classes to better
+learn the original new relations. At the end of initial
+training, the extended class nodes of augmented
+classes in the classifier will be removed.
+6 Experiments
+6.1 Experimental Setups
+Datasets Following previous works (Han et al.,
+2020; Wu et al., 2021; Cui et al., 2021; Zhao et al.,
+2022), our experiments are conducted upon two
+widely used datasets, FewRel (Han et al., 2018)
+andTACRED (Zhang et al., 2017). Please refer
+to Appendix D for details of these two datasets.
+We construct 5different task sequences for both
+FewRel and TACRED. For each task sequence, we
+simulate 10 tasks by randomly dividing all relations
+of the dataset into 10 sets. For a fair comparison,our5task sequences are exactly the same as that
+of Cui et al. (2021) and Zhao et al. (2022).
+Evaluation Metrics Following Cui et al. (2021)
+and Zhao et al. (2022), we use average accuracy
+on all seen tasks as our evaluation metric. For a
+stronger method, the average accuracy of each task
+should be consistently higher than that of baselines.
+Baselines We consider the following baselines:
+EA-EMR (Wang et al., 2019), which maintains a
+memory replay and embedding alignment mecha-
+nism to alleviate catastrophic forgetting; CML (Wu
+et al., 2021), which introduces curriculum learning
+and meta-learn to alleviate catastrophic forgetting
+in CRE; EMAR (Han et al., 2020), which proposes
+a memory activation and reconsolidation mecha-
+nism to retain the learned knowledge. Note that the
+original EMAR was based on a Bi-LSTM encoder,
+and we re-implement EMAR with BERT; RP-CRE
+(Cui et al., 2021), which proposes a memory net-
+work to retain the learned representations with re-
+lation prototypes; CRL (Zhao et al., 2022), which
+adopts contrastive learning replay and knowledge6269
+distillation to retain the learned knowledge.
+Implement Details Our ACA is model-agnostic,
+and we choose two state-of-the-art CRE models,
+EMAR and RP-CRE as our backbone to evaluate
+ACA. The number of stored instances of each rela-
+tion in the memory bank is 10. All hyperparameters
+of EMAR and RP-CRE are the same as that of their
+origin paper. ACA does not introduce any model
+hyperparameters. We run our code on a single
+NVIDIA A40 GPU with 48GB memory, and report
+the average result of 5different task sequences.
+6.2 Main Results
+The performances of our ACA and baselines are
+shown in Table 4. As shown, after applying ACA,
+the performances of EMAR and RP-CRE consis-
+tently improve in nearly all training stages of two
+benchmarks. Previous CRE work usually regards
+the accuracy of the last task as the most important
+metric. For the accuracy of T10, our proposed ACA
+improves RP-CRE/EMAR by 1.0/1.1and0.9/2.0
+accuracy on FewRel and TACRED, respectively.
+Furthermore, EMAR+ACA achieves new state-of-
+the-art results on both two benchmarks. These re-
+sults demonstrate the effectiveness and universality
+of our proposed method.
+7 Analysis
+7.1 Ablation Study
+To further explore the effectiveness of our pro-
+posed two class augmentation methods, we con-
+duct an ablation study. Table 5 shows the results
+of EMAR with different augmentation methods on
+two benchmarks. We find that both augmentations
+are conducive to the model performance, and they
+are complementary to each other. In addition, the
+reversed-class augmentation is more effective than
+the hybrid-class augmentation. We think the reason
+is that the reversed-class augmentation can main-
+tain the fluency of the constructed sentences, while
+the hybrid-class augmentation cannot.
+7.2 Robust Representation Learning
+Our proposed ACA aims to learn robust representa-
+tions that can better distinguish analogous relations.
+To further confirm the effectiveness of our method,
+we first reproduce the retrieval test introduced in
+our pilot experiments (see Appendix C for more
+details). Table 6 shows the results of EMAR and
+EMAR+ACA on two benchmarks. As is shown,
+ACA can significantly increase the precision of
+retrieval results, showing that our method indeed
+helps the model learn more robust representations.
+We also conduct a case study to intuitively show
+the effectiveness of our method. We consider
+two analogous relations, P25 (“mother”) and P26
+(“spouse”), and EMAR catastrophically forgets
+P25 when P26 appears. We use t-SNE to visual-
+ize the representation of all instances belonging to
+these two relations after the model learning P25
+and P26, respectively. As shown in Figure 3: 1)
+For EMAR, after the model learns the relation P25,
+it relies on shortcuts, such as entity types, to iden-
+tify instances of P25. Therefore, the representa-
+tions of the instances belonging to P25 and P26
+are mixed together, which means the learned rep-6270
+resentation of P25 can also represent instances of
+P26. When P26 appears, it is hard to learn a more
+robust representation of P25 with P26 with only
+very limited memory instances of P25, and thus
+EMAR catastrophically forgets P25 (the F1 score
+of P25 significantly degrades 14points); 2)For
+EMAR+ACA, when learning P25, the model can
+learn more robust representations of P25 with our
+augmented relations. Thus, the representation of
+instances belonging to P25 and P26 is much more
+separable than that of EMAR. When P26 appears,
+the forgetting problem of P25 is greatly alleviated
+(the F1 score of P25 only drops 4points).
+7.3 Influence of Memory Size
+Memory size is the number of memorized instances
+for each relation, which is a key factor for the
+model performance of rehearsal-based CRE meth-
+ods. Therefore, in this section, we study the influ-
+ence of memory size on our ACA.
+We compare the performance of EMAR and
+EMAR+ACA with memory sizes 5,10and20. As
+shown in Figure 4: 1)As the size of the memory
+decreases, the performances of both models drop,
+showing the importance of the memory size for
+CRE models; 2)On both FewRel and TACRED,
+EMAR+ACA outperforms EMAR under all three
+different memory sizes, further demonstrating the
+effectiveness of our ACA; 3)As memory size de-
+creases, EMAR+ACA shows a relatively stable
+performances. Specifically, EMAR+ACA outper-
+forms EMAR 2.8,1.1and0.7accuracy on FewRel
+when the memory size is 5,10,20, respectively.
+A similar tendency is also observed on TACRED.
+These results further demonstrate the effectiveness
+of robust representations learned through our ACA.
+7.4 Error Analysis
+In this section, we conduct an error analysis to show
+the effectiveness of ACA and the challenge of CRE.
+Through our analysis of catastrophic forgetting, we
+find that the performance of relations is highly re-
+lated to their max similarity . Therefore, we equally
+divide the relations into three groups according
+to their max similarity . As shown in Table 7: 1)
+ACA mainly improves the performance and re-
+duces the forgetting rate of relations with large max
+similarity ;2)although ACA is efficient, relations
+with large max similarity still suffer from catas-
+trophic forgetting and have a large performance
+gap with the supervised model. Therefore, future
+work should pay more attention to these relations.
+8 Conclusion
+In this paper, we conduct a series of empirical study
+to analyze catastrophic forgetting in CRE, and ob-
+serve that catastrophic forgetting mostly happens
+on some specific relations, and significant perfor-
+mance degradation tends to occur when their anal-
+ogous relations appear in subsequent tasks. Based
+on our observations, we find an important reason
+for catastrophic forgetting in CRE that all previous
+works overlooked, i.e., the CRE models suffer from
+learning shortcuts to identify new relations, which6271are not robust enough against the appearance of
+their analogous relations. To this end, we propose
+a simple yet effective adversarial class augmenta-
+tion mechanism to help CRE models learn more
+robust representations. Extensive experiments on
+two benchmarks show that our method can further
+improve the performance of two state-of-the-art
+CRE models.
+Limitations
+Our paper has several limitations: 1)Although we
+provide a new perspective from the shortcut learn-
+ing to explain catastrophic forgetting, and utilize
+a retrieval test to confirm our hypothesis, we do
+not explore which types of shortcuts are learned
+by CRE models; 2)Our ACA with two class aug-
+mentation methods is specially designed for CRE.
+However, our findings about catastrophic forget-
+ting in this paper may be common in the context
+of continual learning. Therefore, it would be better
+if we can propose more universal adversarial train-
+ing methods which can be adapted to all continual
+learning systems; 3)ACA conducts the class aug-
+mentation before the initial training stage, which
+introduces extra computational overhead on top of
+backbone CRE models.
+Acknowledgements
+We thank Dawei Zhu and Zhejian Zhou for proof-
+reading the paper and providing insightful com-
+ments. We thank Lei Li for some useful discussions.
+We also thank the anonymous reviewers for their
+thoughtful and constructive comments. This work
+is supported by National Key Research and De-
+velopment Project (2019YFB1704002) and NSFC
+project U19A2065.
+References627262736274A Forgetting Rate on TACRED
+We show the performance of two strong baselines
+on TACRED in Table 8. We also divide relations
+in TACRED into three groups according to their
+forgetting rate.
+B Cases for performance curves of
+different relations
+As illustrated in Figure 5, we provide cases to
+illustrate catastrophic forgetting only appears on
+some specific relations and significant performance
+degradation always occurs when analogous rela-
+tion appears. For each relation, we plot the perfor-
+mance curves corresponding to five different task
+sequences. We notice that some relations almost
+have no performance degradation during the train-
+ing process (as shown in the top row of Figure
+5), while some relations suffer from catastrophic
+forgetting (as shown in the bottom three rows of
+Figure 5). We further observe that when the perfor-
+mance curve of a specific relation rhas a sudden
+degradation, the corresponding task always con-
+tains relations very similar to r.
+C Retrieval Test
+As discussed in Section 4.2, a potential reason for
+catastrophic forgetting in CRE is the model only
+learns the spurious shortcuts in the continual learn-
+ing setting. In order to evaluate the representation
+ability of the CRE model, we propose a retrieval
+test analysis.
+Given an instance x, a CRE method utilizes an
+encoder fto encode its semantic features for learn-
+ing and classifying relations,
+h=f(x). (3)
+For a relation, if its F1 score degrades greater than
+0.1 after the model learning a new task, we consider
+it as an relation suffering severe forgetting. We
+group all relations suffering severe forgetting into a
+setR. For a relation r∈R, we additionally ran-
+domly sample 7 relations {r, ..., r}(3 relations
+for TACRED) from R\Rto build a pseudo task
+Tcontaining instances from R={r, r, ..., r},
+where Ris the relation set of the entire dataset.
+After training the CRE model on our built pseudo
+taskT, we obtain the prototype pof the rela-
+tionr, that is, the mean embedding of all instances
+belonging to r,
+p=/summationtextf(x)
+|r|, (4)
+where |r|is the number of instances of relation r.
+We also obtain embeddings of each instance in the
+entire test set,
+I={h|h=f(x), x∈/uniondisplayQ}.(5)
+Then we compute the cosine similarity between p
+andh∈I:
+Sim(p,h) =p·h
+|p| · |h|, (6)
+We consider rank-based metrics and use the
+mean precision at k ( P@k ), which is the proportion
+of instances whose label is rin the top-k similar set.
+Specifically, for FewRel, we use P@100 as metric.
+For TACRED, because this dataset has a severe im-
+balance problem and some relations only have less
+than 50 instances, we use mean P@|Q|as metric,
+where |Q|is the size of test set corresponding to
+relation r. If the retrieval precision is high, we can
+say that the model learns robust representations.
+D Datasets
+Following previous work (Han et al., 2020; Wu
+et al., 2021; Cui et al., 2021; Zhao et al., 2022), our
+experiments are conducted upon the following two
+widely datasets, and the training-test-validation
+split ratio is 3:1:1:
+FewRel (Han et al., 2018) It is a relation extrac-
+tion dataset originally proposed for few-shot learn-
+ing, which contains 80 relations, each with 700
+instances. Following Cui et al. (2021); Zhao et al.
+(2022), we use the training and validation set of
+FewRel for experimental.6275TACRED (Zhang et al., 2017) It is a large-
+scale RE dataset built on news networks and on-
+line documents, containing 42 relations (including
+no_relation ) and 106264 samples. Following Cui
+et al. (2021), no_relation was removed in our ex-
+periments, and the number of training samples for
+each relation is limited to 320 and the number of
+test samples of each relation to 40.
+E Symmetric Relations in Two Datasets
+In our reversed-class augmentation, we divide all
+relations into two categories, symmetric relation
+and asymmetric relation. The symmetric relation
+denotes the relation semantic is independent of
+which of the two given entities is the head or tail
+entity, and the relations except symmetric relations
+are asymmetric relations. (1) In FewRel, we find
+2symmetric relations, “P26 (spouse)” and “P3373
+(sibling)”. (2) In TACRED, we find 5symmet-
+ric relations, “per:siblings”, “org:alternate names”,
+“per:spouse”, “per:alternate names” and “per:other
+family”.
+F Robust Representation
+In this section, we provide more cases to intuitively
+show the effectiveness of our look-ahead learning
+for learning robust representation. Please refer to
+Figure 6 for details.
+G Relations in Different Groups
+As discussed in Section 4, we divide all relations
+into three equal-sized groups based on their FR
+from small to large. In this section, we show exam-
+ple relations in Group 1 and Group 3 of FewRel in
+Table 9. It is easy to see that relations in Group 3,
+which suffer from significant performance degrada-
+tion, have larger similarity to other relations in the
+dataset than relations in Group 1.627662776278

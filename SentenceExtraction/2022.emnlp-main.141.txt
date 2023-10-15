@@ -1,1 +1,927 @@
-2195 Proceedings of the 2022 Conference on Empirical Methods in Natural Language Processing , pages 2195 2222 December 7 - 11 , 2022 © 2022 Association for Computational Linguistics 2196 2197 2198 2199 2200 2201 2202 2203 2204 2205 2206 2207 2208 2209 2210 2211 2212 2213 2214 2215 2216 2217 2218 2219 2220 2221 2222 
+
+Mirac Suzgun
+Stanford UniversityLuke Melas-Kyriazi
+Oxford UniversityDan Jurafsky
+Stanford University
+Abstract
+We propose a method for arbitrary textual style
+transfer (TST)—the task of transforming a text
+into any given style—utilizing general-purpose
+pre-trained language models. Our method,
+Prompt-and-Rerank , is based on a mathemati-
+cal formulation of the TST task, decomposing it
+into three constituent components: textual sim-
+ilarity ,target style strength , and fluency . Our
+method uses zero-shot or few-shot prompting
+to obtain a set of candidate generations in the
+target style, and then re-ranks them according
+to the three components. Our method enables
+small pre-trained language models to perform
+on par with state-of-the-art large-scale mod-
+els while using two orders of magnitude less
+compute and memory. We also investigate the
+effect of model size and prompt design (e.g.,
+prompt paraphrasing and delimiter-pair choice)
+on style transfer quality across seven diverse
+textual style transfer datasets, finding, among
+other things, that delimiter-pair choice has a
+large impact on performance, and that models
+have biases on the direction of style transfer.
+1 Introduction
+Textual style transfer (TST) refers to the task of
+transferring one stylistic aspect of a piece of text
+(e.g., sentiment polarity, formality, politeness, etc.)
+without changing its main semantic content, struc-
+ture, or other attributes. Traditionally, the natu-
+ral language generation (NLG) community has ap-
+proached each instantiation of style transfer as a
+distinct task, designing and training specialized
+models on style-specific training corpora. For ex-
+ample, sentiment transfer has been studied exten-
+sively (Li et al. (2018); Sudhakar et al. (2019);
+Luo et al. (2019a), inter alia ). This paradigm has
+restricted TST research to a limited, simple set of
+style choices with parallel corpora, which can often
+be solved adequately by word replacement (e.g., re-
+Table 1: Qualitative examples of few-shot style transfer
+on the Y,S ,JFLEG , and GYAFC
+datasets. Coupling off-the-shelf “small” language mod-
+els with our prompt-and-reranking method enables us
+to perform arbitrary textual style transfer without any
+model training or prompt-tuning. Compared to the ex-
+tremely large language models (viz., ones with more
+than 100 billion parameters) used by Reif et al. (2022),
+our models obtain similar performance using almost
+two orders of magnitude less compute and memory.
+placing negative words with corresponding positive
+words for sentiment transfer).
+With the recent success of general-purpose lan-
+guage modeling (LM), it is, however, natural to ask
+whether one can tackle a more general formulation
+of style transfer: arbitrary TST, in which one aims
+to transform a reference text into an arbitrary style
+specified by the user at inference-time.
+Inspired by the success of natural-language
+prompting in other domains (Radford et al., 2019;
+Petroni et al., 2019; Brown et al., 2020; Gao et al.,
+2021), we consider a prompting-based zero- and
+few-shot approach to arbitrary TST. Under this
+setup, we specify the desired type of style transfer
+problem using a natural-language prompt contain-
+ing the source text (and optionally a few examples,
+in the few-shot case), and then use a pre-trained LM2195to generate the stylized target text. Thus, the source
+text may be transformed into any user-specified
+style without additional training or fine-tuning.
+Recent work (Reif et al., 2022) has found that ex-
+tremely large language models (LLMs), namely the
+175 billion-parameter GPT-3 (Brown et al., 2020)
+model and the proprietary 137 billion-parameter
+LLM model, are capable of sentiment and formality
+transfer. However, language models at this scale
+are not accessible to most researchers and practi-
+tioners, even in inference-only settings, due to their
+large memory consumption and slow generation
+times. Thus far, to the best of our knowledge, there
+has not been any research on the capabilities of
+reasonably-sized models for style transfer domain,
+nor any systematic study of how the precise con-
+struction of the prompt affects model performance.
+Here we take a first-principles approach to arbi-
+trary TST using pretrained language models. We
+first mathematically formalize the task, showing
+how it can be formulated as the combination of
+textual similarity ,target style strength , and fluency .
+This framework naturally leads us to propose a new
+method for arbitrary TST, which we call “ Prompt-
+and-Rerank .” Using this method, we demonstrate,
+for the first time, that it is possible to perform arbi-
+trary TST using reasonably-sized language models;
+prior work indicated that only enormous (i.e., GPT-
+3-scale) language models were capable of this task.
+We summarize the main contributions and in-
+sights of this paper as follows: (i) We provide the
+first mathematical formalization of the arbitrary
+TST task. (ii) We propose Prompt-and-Rerank, a
+novel prompting-based method for arbitrary TST
+which follows naturally from our mathematical for-
+mulation. (iii) Our method matches and sometimes
+even exceeds state-of-the-art performance on arbi-
+trary TST while using reasonably-sized language
+models such as GPT-2, which consume two orders
+of magnitude less memory and compute than prior
+work. (iv) We conduct a nuanced investigation of
+the influence of prompt design, such as task phras-
+ing and delimiter-pair choice, on the quality of style
+transfer generations. (v) In order to encourage and
+facilitate further research in the area, we establish
+a set of benchmarks for arbitrary TST (including
+cleaned versions of the popular sentiment transfer
+datasets A andY) along with accom-
+panying automatic evaluation metrics.2 Background and Related Work
+Background. TST is a long-standing problem in
+NLP which encompasses many popular sub-tasks,
+such as sentiment and formality transfer. Prior
+to the advent of large-scale pre-training in recent
+years, it was common practice to consider each
+of these sub-tasks separately, and to train sepa-
+rate models on different supervised datasets for
+each task. These models generally performed well
+within the limited scope of their task, but failed to
+generalize to new tasks or to texts outside of their
+training distribution. Here we show that the mod-
+ern paradigm of pre-training large models and then
+prompting (or fine-tuning) them can be applied to
+many sub-tasks of TST in a unified, zero-shot man-
+ner, even with relatively small Transformers.
+Related Work. Traditional approaches to TST
+can be broadly categorized into two families. The
+first family involves identifying and replacing dis-
+tinctive style-related phrases (Li et al. (2018); Sud-
+hakar et al. (2019); Wu et al. (2019); Madaan
+et al. (2020); Malmi et al. (2020); Reid and Zhong
+(2021), inter alia ). For example, Madaan et al.
+(2020) perform the task of politeness transfer by
+first identifying words with stylistic attributes us-
+ing TF-IDF and then training a model to replace
+or augment these stylistic words with ones asso-
+ciated with the target attribute. In general, these
+approaches perform well for very simple style edits
+(e.g., negating a sentence by adding the word not),
+but they struggle in scenarios that require more
+complex syntactic and semantic changes.
+The second family of approaches involves dis-
+entangling latent representations of style and con-
+tent, such that a text can be encoded into a style-
+invariant representation and then decoded in a de-
+sired style (Hu et al., 2017; Shen et al., 2017; Fu
+et al., 2018; Luo et al., 2019a). For example, Hu
+et al. (2017) encodes into and decodes from a style-
+agnostic latent space using a V AE alongside at-
+tribute discriminators. These approaches are often
+theoretically well-grounded, but they generally re-
+quire large quantities of labeled data and struggle
+to scale beyond a small number of styles.
+Differently from these two families, one recent
+work (Reif et al., 2022) uses enormous pre-trained
+language models to tackle TST, an idea motivated
+by the remarkable performance of pre-trained LMs
+in other areas of NLP (Radford et al., 2019; Devlin
+et al., 2019; Yang et al., 2019; Liu et al., 2019).
+Specifically, they use LLM ,LLM-Dialog , and GPT-21963, each of which has over 100 billion parameters,
+to rewrite texts in a variety of styles. However, they
+perform minimal analysis of their prompting setup,
+deferring such analysis to future work, and they
+suggest that this prompting-based approach is only
+feasible with LLMs.
+While drawing on many intuitions from Reif
+et al. (2022) and these earlier studies, this paper
+presents a novel prompt-and-rerank approach to
+the general task of TST using pre-trained language
+models. Alongside our method, we present the first
+systematic study of prompt formulation and model
+size for the task of textual style transfer. Contrary
+to expectations, using our method we find that even
+small LMs are able to effectively perform arbitrary
+style transfer. In fact, we match the performance
+of Reif et al. (2022) on multiple datasets using two
+orders of magnitude less memory and compute.
+3 Method: Prompt-Based Arbitrary TST
+This section begins with a mathematical formal-
+ization of the task of textual style transfer.Our
+formalization elucidates the three underlying com-
+ponents of the task, namely text similarity ,target
+style strength , and fluency , and naturally leads us to
+Prompt-and-Rerank , our prompt-based re-ranking
+algorithm for solving TST.
+3.1 Problem Formulation
+Letx∈Σdenote a text over a vocabulary Σ, and
+Sthe set of all possible text style choices. Let us
+further use x∈Σto denote a text xwritten
+in the style s∈ S. Informally speaking, the goal
+of TST is to transfer the style of a text x(usu-
+ally, a sentence) from stoswithout changing
+the main semantic content of the text. We can for-
+mally express this transformation via a function
+f: Σ× S × S → Σ, which takes an input text
+(sayx) and its corresponding style ( s), as well
+as a target style ( s), and outputs a modified ver-
+sion of the input written in the style of s(namely,
+˜x).Ideally, we would want the generated out-
+put˜x=f(x, s, s)to be “close” (both
+semantically and syntactically) to the ground-truth
+xas much as possible.
+The graphical models depicted in Figure 1 pro-
+vide two different ways of formulating the task of
+TST (and of machine translation for that matter).
+Both models have valid and meaningful implica-
+tions and interpretations; the main generative differ-
+ence between them is that the parents of ˜xare
+xandsin the former (left), whereas the parents
+of˜xarexandsin the latter (right).
+Due to the inherent difficulty of collecting di-
+verse supervised data for arbitrary TST, most prior
+studies considered a simplified version of the task,
+wherein the source ( s) and target ( s) style choices
+are fixed beforehand. In this work, we consider a
+broad formulation of the task, make no assump-
+tions about the source and target style choices a
+priori, and explain how one can leverage the power
+of off-the-shelf LMs to perform arbitrary TST.
+Given an input text xwritten in the style
+ofsand the target style s, we decompose the
+conditional likelihood of a generated output ˜x
+into three terms:
+p(˜x|[x, s], s) (1)
+=p(˜x,[x, s], s)
+p([x, s], s)
+∝p([x, s],[˜x, s])
+=p([˜x, s])p([x, s]|[˜x, s])
+=p(˜x)/bracehtipupleft/bracehtipdownright/bracehtipdownleft/bracehtipuprightp(s|˜x)/bracehtipupleft /bracehtipdownright/bracehtipdownleft /bracehtipuprightp([x, s]|[˜x, s])/bracehtipupleft /bracehtipdownright/bracehtipdownleft /bracehtipupright2197
+The first term, p(˜x), measures the overall flu-
+ency of the output. The second term, p(s|˜x),
+measures the transfer strength of the output (i.e.,
+determines whether the output is written in the tar-
+get style). The last term, p([x, s]|[˜x, s]),
+can be thought of as a proxy for textual similarity
+in the context of textual style transfer—it captures
+the correspondence between the input and output
+texts written in their respective styles.
+3.2 Prompt-and-Rerank for Arbitrary TST
+The problem formulation above naturally leads us
+to a method for (textual) style transfer, which we
+denote Prompt-and-Rerank (P&R).
+The foundation of our method is use of prompt
+templates to convert TST into a natural-language
+generation problem. Formally, we use a predefined
+template τ∈ T to convert an input text xand
+the desired style transformation (i.e., s→s) into
+a natural-language prefix τ(x, s, s). The tem-
+plateτserves to not only contextualize the task for
+the model but also incorporate all the necessary con-
+ditional information (that is, input sentence, source
+style, and target style) in the input context. The
+precise design and composition of the templates is
+the topic of the following section (§4.2).
+Next, we feed the prompt into a pre-trained LM
+(e.g., GPT-2) and use the model to generate kdiffer-
+ent outputs ˜xconditioned on the prompt, each
+sampled independently without updating any pa-
+rameters of the model. These outputs are taken to
+be our candidate outputs for re-ranking. We then
+re-rank our kcandidate outputs according to thedecomposition in Equation 1:
+p (˜x|[x, s], s) (2)
+∝p(˜x)p(s|˜x)p([x, s]|[˜x, s]).
+Finally, we pick the output ˜x∈˜Xwith the
+highest re-ranking score. Figure 2 provides an il-
+lustration of the method.
+All that remains is to describe how to calculate
+each term in the re-ranking pass:
+(i) To calculate the first (fluency) term, we use
+GPT-2-Large (774M) to determine the overall like-
+lihood of each candidate text.
+(ii) For the second (transfer strength) term, we
+deliberately turn a masked language model (MLM),
+in our case a pre-trained RoBERTa model, into a
+style classifier as follows: Given ˜x∈˜X
+andS={s, s}, we convert ˜xinto a “fill-in-
+the-blank” cloze statement via a pre-defined cloze
+template, that is, we rewrite it as “The following
+text is <mask> :[˜x].” We then query the MLM
+to predict the masked token,but instead of look-
+ing at the probability distribution over the original
+model vocabulary, we restrict our attention to the
+elements in Sand thus consider the likelihood of
+the missing token being sors. We then normal-
+ize these probabilities by l-normalization and get
+a proper probability distribution for p(s|˜x).
+(iii) Finally, for the third (textual similar-
+ity) term, we use BERTScore (Zhang et al.,
+2020), which utilizes pre-trained contextual
+embeddings from BERT to measure the co-2198sine similarity between two texts.Specif-
+ically, we approximate p([x, s]|[˜x, s])
+withBERTScore (x,x).
+Afterwards, we compute the score for each can-
+didate by multiplying (i), (ii), and (iii) accordingly;
+re-rank all the candidates; and pick the one with
+the highest score as the final output.
+Overall, our approach is model-agnostic, allow-
+ing pre-trained LMs to be used out-of-the-box. Fur-
+thermore, our experiments show that with well-
+designed prompts, one does notneed a massive
+language model for this approach to be successful.
+4 Prompt Construction
+In practice, we found the specific syntax and se-
+mantics of the prompt template significantly impact
+model performance. Thus, we conducted a system-
+atic investigation of the impact of different prompt
+design choices on the quality of TST generations.
+4.1 Delimiter-Pairs
+We experimented with ten different text bound-
+ary markers (delimiter pairs), which may be di-
+vided into two categories: those whose opening
+and closing markers are identical (known as indis-
+tinguishable delimiters), and those whose markers
+are different (known as complementary delimiters).
+Specifically, we considered two indistinguishable
+pairs (viz., quotes and dashes) and eight comple-
+mentary pairs: (1) curly brackets {·}, (2) square
+brackets [·], (3) angle brackets ⟨·⟩, (4) parentheses
+(·), (5) quotes "·", (6) dashes –·–, (7) triple angle
+brackets ⟨⟨⟨·⟩⟩⟩ , (8) bracket quotes ⟩"·", (9) as-
+terisk quotes * "·", and (10) double curly bracket
+{{·}} .In their experiments, Reif et al. (2022)
+use only curly brackets.4.2 Prompt Phrasing
+We considered four manually-written template for-
+matst∈ T for our discrete prompts:
+(a)Vanilla : “Here is a text: [d][x][d]Here
+is a rewrite of the text, which is [s]:[d]”,
+(b)Contrastive : “Here is a text, which is [s]:
+[d][x][d]Here is a rewrite of the text, which
+is[s]:[d]”,
+(c)Negation-v1 : “Here is a text, which is [s]:
+[d][x][d]Here is a rewrite of the text, which
+is not [s]:[d]”, and
+(d)Negation-v2 : “Here is a text, which is not
+[s]:[d][x][d]Here is a rewrite of the text,
+which is [s]:[d]”.
+Note that [d]and[d]denote the opening and
+closing elements of the chosen delimiter-pair, re-
+spectively. In their experiments, Reif et al. (2022)
+exclusively made use of the vanilla setting, which
+only specifies the target style ( s) in the second
+half of the prompt; however, we initially specu-
+lated that providing useful information about the
+source style ( s) and creating a clear contrast be-
+tween the source and target styles in the prompt
+semantics might help pre-trained LMs to have a
+better understanding of the underlying nature of
+the task and improve their performance; hence, we
+decided to look at the contrastive setting as well.
+As for the other two negation templates, we wanted
+to test how specifying the source style as the nega-
+tion of the target style (viz., s1:=“not s”) and vice
+versa might affect the model performance.
+Example. Finally, to make our prompting setup
+more concrete, let us give a concrete and brief ex-
+ample of how we formulate a prompt. We consider
+thecontrastive template with curly brackets as our
+delimiter. If we have an input sentence x=“I
+love The Sound of Music ; it is the best movie ever!!”
+withs=positive ands=negative , then the prompt
+under this template would be “Here is a text, which
+is positive: {I love The Sound of Music ; it is the
+best movie ever!!} Here is a rewrite of the text,
+which is negative: {” The language model would
+then generate an output by autoregressively decod-
+ing after the last delimiter, to produce a sentence
+such as: “I hate The Sound of Music ; it is the worst
+movie ever!!}.”2199
+4.3 Zero-Shot vs. Few-Shot Settings
+In recent years, LLMs, such as GPT-3, have proven
+themselves to be resourceful few-shot learners. In
+a few-shot learning setting, a model is presented
+with a small set of illustrative examples, oftentimes
+along with a natural-language prompt describing
+the task, and expected to understand the underlying
+task and make accurate predictions without per-
+forming any gradient updates to the weights of the
+model at inference time. We wanted to explore
+how the number of demonstrations affects the per-
+formance of our models. To that end, we also tested
+the performances of our models under the zero-shot
+and four-shot settings.
+5 Experiments and Results
+5.1 Datasets
+Differently from most previous work, which fo-
+cused on single TST subtasks or datasets, we
+present experiments on a wide range of TST sub-
+tasks (also described in Table 2):
+•Y: Sentiment transfer for Yelp reviews
+(Zhang et al., 2015).
+•A : Sentiment transfer for Amazon re-
+views (Li et al., 2018).
+•S :Elizabethan -to-modern trans-
+lation for Shakespeare (Xu et al., 2012).
+•GYAFC : Formality transfer for Yahoo An-
+swers responses (Rao and Tetreault, 2018).
+•JFLEG : Grammar error correction for student
+essays (Napoles et al., 2017).
+•S: Symbol-to-natural-language translation
+on a new custom synthetic dataset.
+In the initial stages of our research, we noticed
+that all of these datasets, with the exception of
+S(which is synthetic), contain various tokeniza-
+tion issues (e.g., sentences sometimes contain ex-tra white-space or have their punctuation marks
+separated out by spaces). We did not wish these
+tokenization artifacts to diminish the quality of our
+generations from general-purpose LMs—neither
+did we want this issue to negatively impact our
+evaluation scheme. To that end, we used a simple
+text-cleaning procedure to clean the texts.
+5.2 Evaluation Metrics
+Prior studies on style and sentiment transfer have
+typically evaluated models across three dimensions:
+content/meaning preservation (textual similarity),
+style transfer strength, and fluency (Mir et al., 2019;
+Briakou et al., 2021). We note that these dimen-
+sions correspond exactly to the criteria that appear
+in Equation 1 in §3.1 (Krishna et al., 2020).
+Content Preservation. BLEU (Papineni et al.,
+2002) is the standard metric for measuring seman-
+tic content preservation. We use the SacreBLEU
+(sBLEU) implementation (Post, 2018) to compute
+both reference -BLEU ( r-sBLEU) and self-sBLEU
+(s-sBLEU) scores. Whereas r-sBLEU helps mea-
+sure the distance of generated sentences from the
+ground-truth references, s-sBLEU indicates the de-
+gree to which the model directly copies the source.
+Transfer Strength. In order to determine
+whether outputs generated by a TST model have
+the attributes of their target styles, we follow the
+standard classifier-based approach: we train a (bi-
+nary) style classifier on the corpus of interest and
+use it to estimate the fraction of generated outputs
+whose styles match their target styles.
+Fluency. To measure the fluency of generated
+texts, we compute their average token-level per-
+plexity (PPL) using a pre-trained LM (in our case,2200
+GPT-2-Large). We note that, whilst this PPL-driven
+approach has the advantage of being automated and
+practical, it still contains considerable drawbacks,
+including biases towards shorter texts.
+5.3 Model Choices.
+We used four GPT-2 models (Radford et al., 2019)
+of varying sizes (viz., GPT-2-Small (117M params),
+GPT-2-Medium (345M), GPT-2-Large (774M),
+and GPT-2-XL (1.6B)), GPT-Neo-1.3B Black et al.
+(2021), GPT-Neo-2.7B, and GPT-J-6B (Wang and
+Komatsuzaki, 2021). We highlight that none of
+these models were fine-tuned or prompt-tuned.
+5.4 Results
+Here, we present a summary of our key findings.
+For our complete results, we encourage the reader
+to see the Appendix (especially, Tables 11-20).
+Table 3 juxtaposes our results on Y with
+those of prior studies. Despite not training or fine-
+tuning, our method is competitive with prior mod-
+els that were designed and trained specifically for
+these tasks. In fact, compared to supervised meth-
+ods, our models almost always generate more flu-
+ent outputs, as measured by perplexity. Compared
+to Reif et al. (2022), who utilize the proprietary
+137-billion-parameter LLM (LaMDA), we compare
+on-par or favorably despite using much smaller
+models; we obtain better sBLEU scores than their
+“FirstChoice” setting (which uses a single output)
+and better accuracy scores than their “BestBLEU”
+oracle setting (which takes the best of 16 outputs,
+as measured by sBLEU score).
+Table 4 presents a summary of our results across
+all seven TST datasets for GPT-2-XL and GPT-J.
+For full results including all models (GPT-2-Small
+to GPT-J), please refer to the Appendix. Broadly,
+we find that all models are capable of TST to a
+reasonable degree—with the larger models (e.g.,
+GPT-2-XL, GPT-Neo-2.7B, GPT-J) often perform-
+ing better than the smaller models. The only model
+that consistently performs poorly is GPT-2-Small:
+Its high s-sBLEU and low accuracy indicate that it
+copies long sections of the input (without changing
+its style) more often than the other models.
+Looking at individual tasks, we recognize that
+there remains substantial room for improvement on
+theJFLEG task: Most models underperformed a
+simple baseline that copied the input text without
+making any changes. The baseline achieved 37.2
+GLEU, better than all models except GPT-J (which
+obtained 40.0). Finally, on our new synthetic task
+S, we found that GPT-J performed significantly2201
+better than the rest: It achieved 74% accuracy
+whereas no other model exceeded 60% accuracy.
+5.5 Human Evaluation
+To evaluate the efficacy of our proposed Prompt-
+and-Rerank method, we also conducted a human-
+subject study. Our goals were (1) to assess how
+our proposed method fares against the previously
+proposed methods for style transfer, and (2) to un-
+derstand how correct and well-written both the gen-
+erations and ground-truth references are.
+Our human evaluation followed the procedure
+from Reif et al. (2022), in which six human-raters were to asked to rank outputs along three
+dimensions—namely target-style strength, textual
+similarity, and fluency. Our six (volunteer) raters
+were all graduate students who were all native or
+fluent English speakers. For our evaluation, we
+focused only on Y: We randomly sampled 50
+examples (25 positive-to-negative and 25 negative-
+to-positive) and selected the corresponding outputs
+from DeleteAndRetrieve (Li et al., 2018), Style
+Transformer (Dai et al., 2019), LLM (Reif et al.,
+2022), and our own method “Prompt-and-Rerank”,
+along with the ground-truth references. Each ex-
+ample (and its corresponding set of outputs) was
+rated by five raters.
+To ensure fair comparison, we presented the
+same samples to our human-raters but randomized
+the order of the outputs and references, and we
+asked our raters to rate each output on a scale of 1-
+to-5, where 5 indicates the best and 1 the worst. All
+our participants successfully completed our study,
+and it took about one hour for each rater to com-
+plete our human evaluation study.
+Results. Table 5 includes a summary of our
+human-evaluation results. “Prompt-and-Rerank”
+obtained the highest scores along both the target
+style and textual similarity dimensions, performing
+significantly better than the previously proposed
+methods. In terms of fluency, Reif et al. (2022)’s
+method (3.73) has scored slightly higher than ours
+(3.67), and both methods were close to the average
+ground-truth fluency score (3.78). We further note
+that the low textual (semantic) ranking score of the
+ground-truth references suggest that the references
+might be slightly noisy.
+5.6 Further Analysis and Discussion
+Contrastive prompting generally improves style
+transfer quality. As shown in Table 6 (and Ta-
+ble 20 in the Appendix), amongst the four prompt-2202ing protocols considered in this paper, contrastive
+prompting generally yielded the best accuracy, al-
+beit not always the best sBLEU scores.
+Delimiter-pair choice has a large impact on
+model performance. Our systematic analysis of
+ten different delimiter-pairs shows that delimiter
+choice substantially affects the quality of generated
+outputs. Although there is not a single pair which
+performs best across all setups, certain delimiters,
+such as the curly brackets {·}, square brackets [·],
+parentheses (·), and quotes "·", yielded consis-
+tently better results on both A andY
+(see Tables 10-13). We hypothesize that the strong
+performance of these markers is attributable to the
+fact that they are often used as text separators (or
+dividers) in different textual contexts, such as es-
+says, dialogues, and code snippets, which compose
+part of the pre-training data of our models.
+Re-ranking improves overall performance.
+We considered two re-ranking approaches, one in
+which we picked the generated output with the
+highest beam score and one in which we sampled
+three outputs from the model using beam search
+and then re-scored them according to three criteria
+discussed in §3.2. As shown in Tables 15 and 16,
+the re-ranking method can boost the sentiment ac-
+curacy by 10-30%. It often, but not always, leads
+to better sBLEU and fluency scores. Also, as Ta-
+ble 8 illustrates, if we have access to a classifier
+trained on paired data, it might be more convenient
+to use it in our style transfer accuracy measure-
+ments, instead of an MLM as a proxy-classifier, in
+the re-ranking process, as it empirically leads to
+higher accuracy and sBLEU scores.
+Analysis of bias and transfer performance
+in opposite directions. We find that pre-trained
+models have strong directional biases: None of
+the models performed the same when going in the
+negative →positive ( N→P) and positive →negative
+(P→N) directions on A andY. We
+offer three possible explanations for this phe-
+nomenon: (i) The inherent differences in the lin-
+guistic difficulty of the tasks, (ii) the potential bi-
+ases in pre-training dataset(s), and (iii) the poor
+quality of annotations in certain style transfer direc-
+tions. Regarding (i), a qualitative inspection of the
+sentiment transfer datasets illustrates that in some
+cases, good P→Nperformance can be achieved
+by simply adding a negation (e.g., “not”) into the
+text. Regarding (ii), it is possible that the web-
+scraped pre-training data of these models contains
+more sentences that resemble the task of changing
+the sentiment from positive to negative than the
+reverse direction during their pre-training periods.
+Qualitatively, the GPT-2 models appear adept at
+negation; therefore, it may not be surprising that
+these models yield better results in the P→Ndirec-
+tion. As for (iii), our inspection of the ground-truth
+data reveals that it contains some noisy labels and
+incorrect input-output pairs.
+Limitations. The primary limitation of our re-
+ranking method is that it involves generating mul-
+tiple outputs from an autoregressive LM, which
+requires multiple forward passes. Additionally, our
+approach relies on having access to a pre-trained
+bi-directional MLM. Compared to a simple zero-
+shot approach, these elements could potentially add
+complexity to deploying this model in practice.
+6 Conclusion
+In this paper, we propose a novel formal frame-
+work for textual style transfer. This framework nat-
+urally leads us to a new method, which we denote
+Prompt-and-Rerank , that utilizes general-purpose
+pretrained language models to transform text into
+in arbitrary styles. In our experiments, we use
+our method to demonstrate that off-the-shelf, pre-
+trained “small” language models, such as GPT-2,
+can perform arbitrary textual style transfer, without
+any additional model fine-tuning or prompt-tuning.
+Additionally, we conduct an extensive investigation
+prompt phrasing and delimiter choice on transfer
+quality. In total, we hope that our work makes fur-
+ther research in this area more accessible to a broad
+set of researchers, both by alleviating the compu-
+tational constraints of hundred-billion-parameter
+language models and by establishing a standard set
+of clean datasets for arbitrary text style transfer.22037 Ethical Considerations & Limitations
+Our work aims to advance the state of research
+on the task of arbitrary textual style transfer. As
+with many NLP applications, these methods may
+be used for negative purposes by malicious actors.
+For example, it would be possible to conceive of
+an instantiation of arbitrary textual style transfer
+which converts a non-sensationalist news headline
+into a sensationalist news headline, or one that con-
+verts a non-offensive piece of text into an offensive
+piece of text, in order to achieve a malicious goal.
+Our work also involves pretrained general-
+purpose language models, which bring up less-
+obvious ethical considerations than those discussed
+above. Since these language models are trained on
+text scraped from the web, they have acquired some
+of the biases present in web text. Such biases may
+be extracted by certain forms of prompting; recent
+work (Prabhumoye et al., 2021) suggests that few-
+shot prompts can be used to detect social biases in
+pretrained language models. A large body of work
+is dedicated to understanding and de-biasing these
+large language models, but it is not the subject of
+our present work.
+Acknowledgments
+We would like to thank Yonatan Belinkov, Fed-
+erico Bianchi, Dora Demszky, Esin Durmus, Tim
+Franzmeyer, Tayfun Gür, Tatsu Hashimoto, John
+Hewitt, Laurynas Karazija, Deniz Kele¸ s, Faisal
+Ladhak, Percy Liang, Nelson Liu, Shikhar Murty,
+Tolúl o.pé.Ògúnr è.mí, Isabel Papadimitriou, Ash-
+win Paranjape, Stuart M. Shieber, Suny Shtedrit-
+ski, Kyle Swanson, Rose Wang, Elliot Wu, Tianyi
+Zhang, and Kaitlyn Zhou for their help and sup-
+port. We especially thank Suproteem K. Sarkar for
+proofreading an earlier version of this manuscript
+and providing us with constructive comments and
+valuable suggestions. We also wish to thank the
+anonymous reviewers for providing us with helpful
+feedback, Sudha Rao for helping us with the navi-
+gation of the GYAFC dataset, and Yunli Wang for
+sharing their data splits and classifiers for GYAFC
+that were used in their paper. We gratefully ac-
+knowledge the support of Open Philanthropy, the
+NSF (via award IIS-2128145), and a Google Colab
+Research Credit Grant, as well as the support of the
+Rhodes Trust to Melas-Kyriazi.References220422052206A Appendix
+A.1 Additional Details about Datasets
+Previous TST studies have often chosen to focus on
+particular subtasks (such as changing the sentiment
+of a text from positive to negative) or particular
+datasets (such as YorA ). In contrast,
+in our experiments, we decided to focus on a va-
+riety of TST datasets, some of which are known
+and widely used datasets in the field and some of
+which are new and synthetic. In the first half of this
+section, we present and discuss these datasets.
+Yelp Sentiment Dataset. Yis a subset of the
+Yelp Review Polarity Dataset that was first used by
+Zhang et al. (2015) for a text classification task. It
+consists restaurant and other business reviews from
+Yelp, along with a label—either positive ornega-
+tive—for each review. We used the version of the
+dataset that was curated by Li et al. (2018) in our
+experiments. The test set contains 500 positive and
+500 negative samples, with one human reference
+(ground-truth) for each sample.
+Amazon Sentiment Dataset. A is sim-
+ilar to Yin its nature, but it contains product
+reviews that were obtained from Amazon. Each
+review is labeled either positive ornegative . As
+before, we used the version of the dataset that was
+used by Li et al. (2018). The test set contains 500
+positive and 500 negative sentences, with one hu-
+man reference output for each sample.
+Shakespearean English Dataset. We addition-
+ally used a small subset of the dataset that was used
+by Xu et al. (2012) originally for phrase-based ma-
+chine translation, and experimented with “trans-
+lating” sentences written in Elizabethan English
+tomodern English. This small test set, which we
+callS , contains 599 paired sentences
+from William Shakespeare’s Romeo and Juliet ,
+written in Elizabethan and modern English.
+GYAFC Formality Dataset. Grammarly’s Ya-
+hoo Answers Formality corpus ( GYAFC ; Rao andTetreault (2018)) contains paired informal andfor-
+malsentences. Following Luo et al. (2019b), we
+used the samples from the “Family & Relationship”
+(F&R) domain and restricted our focus to the infor-
+mal to formal direction. The test set contains 500
+formal and 500 informal sentences.
+JFLEG Corpus. The JHU FLuency-Extended
+GUG ( JFLEG ) Corpus was introduced by Napoles
+et al. (2017) to train and evaluate models for au-
+tomatic grammatical error correction. It contains
+paired grammatical andungrammatical sentences
+(with three error types—namely, awkward, ortho-
+graphic, and grammatical). In our experiments, we
+focused on the ungrammatical to grammatical di-
+rection and used the publicly available test set that
+contains 747 sentences.
+Symbolic Manipulation Task. We designed
+this small synthetic dataset to investigate how skill-
+ful the off-the-shelf language models are at writing
+symbolic expressions as natural English-language
+sentences. This dataset contains 1,000 example
+pairs, in which each input sample is written in a
+symbolic form (as either “ α>β” or “α<β”, where
+αandβare two different single words from the
+animal color, fruit, and number categories) and its
+corresponding output is basically the spoken utter-
+ance in English.
+Remark. We realized that the original versions of
+all the aforementioned real-world TST datasets con-
+tain various tokenization issues (for instance, sen-
+tences sometimes contain extra whitespaces or have
+their puntuation marks separated out by spaces).
+We did not wish these tokenization artifacts to di-
+minish the quality of our generations. To that end,
+we used a simple text-cleaning procedure to clean
+the texts before feeding them to our models.
+A.2 Additional Evaluation Metrics
+Here, we describe in greater detail the standard au-
+tomatic evaluation metrics used in the assessment
+of the performance of TST models.
+Content Preservation. The standard metric for
+measuring semantic content preservation (or tex-
+tual similarity, as we call it) has been BLEU (Pap-
+ineni et al., 2002): If reference (ground-truth) sen-
+tences are available, then reference -BLEU scores
+are calculated by comparing model outputs to
+human-written ground-truth outputs using n-grams.
+Some recent studies (Lample et al., 2019; Dai et al.,22072019) further look at self-BLEU scores, compar-
+ing model outputs to input sentences—this is par-
+ticularly done when reference sentences are not
+directly available. In our evaluations, we primar-
+ily used the SacreBLEU metric (Post, 2018)—as
+SacreBLEU has been shown to be a more reliable
+and accessible metric than BLEU—and considered
+both reference -SacreBLEU ( r-sBLEU) and self-
+SacreBLEU ( s-sBLEU) scores.When evaluating
+the performances of models on the JFLEG cor-
+pus, we also used the sentence-level GLEU metric
+(Napoles et al., 2015), a variant of BLEU that was
+specifically designed for evaluating grammatical
+error correction (GEC) models.
+Transfer Strength. To determine whether out-
+puts generated by a TST model have the attributes
+of their target styles, the most common approach
+has been to train a (binary) classifier on the training
+set of the corpus of focus, where the sentences are
+taken as the inputs and their corresponding styles
+as the labels, and then to use this trained classifier
+to predict the percentage of the generated outputs
+for which the styles predicted by the model match
+their target styles.In our sentiment transfer exper-
+iments, we measured transfer strength (sentiment
+accuracy) by fine-tuning pre-trained RoBERTa clas-
+sifiers (Liu et al., 2019) on the training data in each
+case. In our experiments on S , we
+used the RoBERTa-based Shakespeare classifier of
+Krishna et al. (2020). Finally, in our experiments
+onGYAFC , we fine-tuned a pre-trained RoBERTa
+classifier on a subset of F&R examples.
+Fluency. With the emergence of successful LMs
+at our disposal, most recent TST models measure
+the fluency of their generated texts by computing
+perplexity (PPL) via a pre-trained LM like GPT-
+2.Whilst this PPL-driven approach has the ad-
+vantage of being automated and practical, it still
+contains considerable drawbacks, among which bi-
+ases towards short texts and more frequent tokens
+can be listed right away. In our evaluations, we
+reported the average token-level PPL of generatedtexts using GPT-2-Large (774M).
+A.3 Full Results
+In the tables below, we include zero-shot results
+for the clean versions of A (Table 11) and
+Y(Table 13), as well as the original versions
+ofA (Table 10) and Y(Table 12). We
+also include four-shot results for the clean versions
+ofA (Table 14), Y(Table 15), S - (Table 16), JFLEG (Table 17), GYAFC
+(Table 18), and S(Table 19).
+A.4 Further Discussion
+Sentiment Transfer. Table 15 and Table 16 show
+the results for the clean versions of A and
+Y, respectively. In terms of sentiment accu-
+racy, GPT-2-XL yielded the best performance on
+both datasets, achieving 70% (87%) positive →
+negative accuracy and 56% (72%) negative →pos-
+itive on A (Y). In both cases, however,
+the sBLEU scores of GPT-2-XL were relatively
+lower than those of other models, indicating that it
+copied more from the source text. The GPT-Neo
+models had higher r-sBLEU and s-sBLEU scores
+than GPT-2-XL on both A andY, with
+only slightly worse accuracy scores. In the case
+ofY-clean especially, the GPT-Neo/J models
+achieved good balances of sentiment accuracy, tex-
+tual similarity, and fluency.
+Shakespeare-to-Modern English Translation.
+As shown in Table 14, model performance gen-
+erally improves with model size, with GPT-J-6B
+achieving almost 80% accuracy (according to the
+supervised classifier) and 21.9 r-sBLEU. Also no-
+table is the difference between GPT-2-Small’s high
+s-sBLEU score and low classifier accuracy, relative
+to the other models. Together, these indicate that
+the model copies large parts of the input text more
+often than the other GPT models.
+Formality Transfer and Grammatical Error
+Correction . For GYAFC (Table 18), most models
+achieved accuracy scores above 80%, with increas-
+ing model size correlating with BLEU score. No-
+tably, GPT-Neo-2.7B achieved an accuracy score
+of81% and and a r-sBLEU score of 50 in the infor-
+mal to formal direction. For JFLEG (Table 17), on
+the other hand, most models failed to outperform a
+simple baseline, which automatically copied the in-
+put text without making any changes. This baseline
+achieves a GLEU score of 37.2, better than all mod-
+els except GPT-J (which obtains 40.0). Broadly,2208there remains substantial room for improvement on
+JFLEG.
+Symbolic Manipulation. Our final task is de-
+signed to measure the ability of these language
+models to copy and manipulate tokens under a re-
+fined synthetic experimental setup. With the excep-
+tion of GPT-J, no model exceeded 60% accuracy on
+this synthetic dataset. GPT-J, by contrast, achieved
+74% accuracy.
+A.5 Additional Qualitative Examples
+We provide additional qualitative examples from
+our language models in Tables 22-25.
+A.6 Additional Related Work
+Here, we describe additional related work on dif-
+ferent subtasks of textual style transfer that could
+not be included in the main component of the paper
+due to space constraints.
+These works can be broadly categorized into two
+families. The first family of approaches involves
+identifying and replacing distinctive style-related
+phrases (Li et al. (2018); Sudhakar et al. (2019);
+Wu et al. (2019); Madaan et al. (2020); Malmi
+et al. (2020); Reid and Zhong (2021), inter alia ).
+For instance, Madaan et al. (2020) tackle the task
+of politeness transfer with a two-step text-editing
+approach, first identifying words with stylistic at-
+tributes using a n-gram TF-IDF method and then
+training a model to replace or augment these stylis-
+tic words with ones associated with the target at-
+tribute. Similarly, Li et al. (2018) propose a simple
+approach to sentiment and style transfer based on
+the idea that these attributes can often be identified
+by certain distinctive phrases. They identify these
+phrases, replace them with phrases associated with
+the target attribute, and combine them with an RNN
+to improve the fluency of the output text. Recently,
+Reid and Zhong (2021) propose to minimize the
+Levenshtein edit-distance between source and tar-
+get texts, using a fine-tuned LM to make targeted
+edits. In general, these approaches perform well
+for very simple types of style transfer (e.g., nega-
+tion by adding the word notto a sentence), but they
+struggle in scenarios that require more complex
+syntactic and semantic changes.
+The second family of approaches involves disen-
+tangling latent representations of style and content
+Hu et al. (2017); Shen et al. (2017); Fu et al. (2018);
+Luo et al. (2019a); Wang et al. (2020) seek to learn
+a style-invariant representation for a piece of text,
+such that it can then be decoded in an arbitrary style.For example, Hu et al. (2017) encoded sentences
+into a style-agnostic space and then decode them
+in a style-specific manner using a variational au-
+toencoder alongside attribute discriminators. Shen
+et al. (2017); Fu et al. (2018); Dai et al. (2019);
+Wang et al. (2019) improved upon this method-
+ology through the use of cross-alignment, style
+embeddings, rule-based systems, and new architec-
+tures. While these approaches are often theoreti-
+cally well-grounded, they generally require large
+quantities of labeled data and struggle with scaling
+beyond a small number of styles.
+A.7 Computational Details
+The computational cost of our experiments were
+quite low, as they only involve running inference
+on pre-trained models. All experiments were con-
+ducted on a single GPU. We usde an NVidia V100
+for all experiments except those with GPT-J-6B,
+for which we used an RTX 8000 due to memory
+requirements. We estimate that all experiments for
+this paper consumed fewer than 30 GPU-days.
+A.8 License Details
+We will release all code for this experiment under
+an open-source license (MIT License).
+A.9 Language Details
+All datasets used for this paper are in English.22092210221122122213221422152216221722182219222022212222

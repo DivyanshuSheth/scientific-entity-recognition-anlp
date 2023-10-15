@@ -1,1 +1,897 @@
-3863 Proceedings of the 2022 Conference on Empirical Methods in Natural Language Processing , pages 3863 3875 December 7 - 11 , 2022 © 2022 Association for Computational Linguistics 3864 3865 3866 3867 3868 3869 3870 3871 3872 3873 3874 3875 
+
+Prithviraj Sen
+AmazonBreno W. S. R. de Carvalho
+IBM ResearchIbrahim Abdelaziz
+IBM Research
+Pavan Kapanipathi
+IBM ResearchSalim Roukos
+IBM ResearchAlexander Gray
+IBM Research
+Abstract
+Knowledge base completion (KBC) has bene-
+fitted greatly by learning explainable rules in an
+human-interpretable dialect such as first-order
+logic. Rule-based KBC has so far, mainly fo-
+cussed on learning one of two types of rules:
+conjunction-of-disjunctions anddisjunction-of-
+conjunctions . We qualitatively show, via exam-
+ples, that one of these has an advantage over
+the other when it comes to achieving high qual-
+ity KBC. To the best of our knowledge, we
+are the first to propose learning both kinds of
+rules within a common framework. To this end,
+we propose to utilize logical neural networks
+(LNN) (Riegel et al., 2020), a powerful neuro-
+symbolic AI framework that can express both
+kinds of rules and learn these end-to-end using
+gradient-based optimization. Our in-depth ex-
+periments show that our LNN-based approach
+to learning rules for KBC leads to roughly 10%
+relative improvements, if not more, over SotA
+rule-based KBC methods. Moreover, by show-
+ing how to combine our proposed methods
+with knowledge graph embeddings we further
+achieve additional 7.5%relative improvement.
+1 Introduction
+Knowledge bases (KB), e.g. Freebase (Bollacker
+et al., 2008), are inherently incomplete thus tech-
+niques have been proposed to identify facts missing
+from a KB. Knowledge base completion (KBC)
+can be broadly classified into knowledge graph em-
+beddings (KGE) and rule-based knowledge base
+completion (rule-based KBC). While KGE has
+achieved highly accurate KBC by learning a low
+dimensional hyperspace, rule-based KBC offers su-
+perior explainability by learning rules in a human-
+interpretable dialect such as first-order logic (FOL).
+In this work, we take a closer look at rule-
+based KBC. A knowledge base consists of facts
+denoted by triples of the form ⟨h, r, t⟩where
+Figure 1: An FOL rule that infers a missing fact.
+tailtand head hdenote entities while rde-
+notes a relation . Figure 1 shows a KB contain-
+ing two facts ⟨Al Pacino ,bornIn ,New York City ⟩,
+⟨New York City ,partOf ,U. S.⟩denoted by (solid)
+directed edges. The goal of rule-based KBC is to
+infer missing facts using FOL rules such as the
+one shown on top of Figure 1 that combines a per-
+sonP’s birth city Cand the country in which Cis
+present in to ascertain P’s citizenship. By substitut-
+ingP/Al Pacino ,C/New York City , and N/U. S.
+into the rule we can infer that Al Pacino is a U. S.
+citizen which is a fact missing from the KB (de-
+noted by a dashed edge in Figure 1).
+Most approaches that learn FOL rules for KBC
+fall into one of two categories: edge-based (EB)
+andpath-based (PB). We compare their relative
+strengths via an example. NeuralLP (Yang et al.,
+2017) is perhaps the oldest example of an EB
+KBC model. Intuitively, EB approaches learn
+rules by breaking paths connecting the tail and
+head of an existing fact into their constituent edges.
+For instance, to predict missing facts for Rin
+G(Figure 2 (a)), EB learns that in the two
+paths connecting head and tail of ⟨v, R, u⟩, viz.
+u−→w−→vandu−→w−→v, the
+first edge is annotated with either relation Ror
+R, and the second edge is annotated with either
+RorR. In FOL syntax, this is expressed as:
+∀U, V∃W:R(U, V)←{R(U, W )∨R(U, W )}
+∧ {R(W, V )∨R(W, V )}
+This kind of rule is called conjunction-of-
+disjunctions since the conjunction operator ( ∧)3863
+with andsemantics is outside and the disjunction
+operators ( ∨) with orsemantics are inside. In con-
+trast to EB, recently rule-based KBC has opted for
+apath-based approach (PB) where paths are kept
+intact. Given the paths connecting uandv, PB
+learns that in a missing Rfact the tail and head
+must either be connected by a path with an Redge
+followed by an Redge, or an Redge followed
+by an Redge which is expressed in FOL as:
+∀U, V∃W:R(U, V)←{R(U, W )∧R(W, V )}
+∨ {R(U, W )∧R(W, V )}
+In contrast to the previous rule, this kind of
+rule is called disjunction-of-conjunctions since the
+disjunction operator ( ∨) is outside while the con-
+junction operators ( ∧) are inside. Both EB and
+PB’s learned rules correctly predict the missing
+fact⟨u, R, v⟩(Figure 2 (b)) which is connected
+viau−→w−→v(Figure 2 (c)). However,
+EB’s rule also claims ⟨u, R, v⟩(Figure 2 (b)),
+connected by u−→w−→v, is a missing
+fact while PB’s rule predicts False in this case cor-
+rectly indicating that it is a non-fact (indicated by a
+dashed edge). EB’s claim is especially disconcert-
+ing given that uandv’s connecting path contains
+anRedge followed by an Redge which is a
+relation sequence that was never observed in G!
+Previous rule-based KBC approaches have more
+often than not restricted themselves to learning only
+one kind of rule, e.g., Yang et al. (2017) learns
+conjunction-of-disjunctions while MINERV A (Das
+et al., 2018) and RNNLogic (Qu et al., 2021) learn
+disjunction-of-conjunctions. In this paper, we pro-
+pose to utilize Logical Neural Networks (LNN)
+(Riegel et al., 2020), a recently proposed frame-
+work for Neuro-symbolic AI (NeSy) that extends
+Boolean logic to the continuous domain while
+harboring close ties to FOL semantics thus en-
+abling learning fully explainable rules for KBC
+via gradient-based optimization. More impor-
+tantly, LNN’s representation power surpasses thatof simpler NeSy variants used in EB rule-based
+KBC approaches such as NeuralLP (Yang et al.,
+2017) and DRUM (Sadeghian et al., 2019) allow-
+ing learning of both conjunction-of-disjunctions
+and disjunction-of-conjunctions. We propose an
+enhanced LNN framework that improves its appli-
+cability to KBC and propose LNN extensions of
+EB and PB rule-based KBC within the same NeSy
+framework that can then be compared on KBC
+benchmarks fairly to determine whether the kind of
+rule has any effect on KBC quality (as implied by
+our example). Lastly, since LNNs extend logic to
+the continuous-valued domain, it is relatively sim-
+ple to combine our proposals with KGE to achieve
+further improvements in KBC quality.
+•We propose rule-based KBC with logical neural
+networks to learn explainable rules end-to-end.
+•We propose new LNN extensions, EB-LNN and
+PB-LNN that learn conjunction-of-disjunctions
+and disjunction-of-conjunctions, respectively.
+•We also show how to combine our LNN exten-
+sions with KGE to further improve KBC quality.
+•Comprehensive experiments against 6baselines
+on4benchmarks show that:
+•EB-LNN leads to ∼10% relative improve-
+ment over EB-KBC baselines on average.
+•PB-LNN leads to >10% relative improve-
+ment over PB-KBC baselines on average.
+•PB-LNN leads to ∼40% relative improve-
+ment over EB-LNN on avg., illustrating the
+advantage of disjunction-of-conjunctions.
+•By combining with KGE CP-N3 (Lacroix
+et al., 2018), PB-LNN achieves further rel-
+ative improvement of 7.5%on avg.
+In the next section, we introduce notation and
+define the KBC task. Section 3 proposes our LNN
+extensions highlighting its advantages over other
+NeSy frameworks. In Section 4, we apply LNN to
+KBC. In Section 5, we present experiments compar-
+ing our models against rule-based KBC baselines
+before concluding with Section 6.
+2 Notation and Problem Formulation
+2.1 Notation
+LetG=⟨V,R,E⟩denote a knowledge graph
+(KG) comprising entities V, relations Rand edges
+E ⊆ V × R × V . Each edge denotes a factand
+is given by a triple ⟨h, r, t⟩where h, t∈ V and
+r∈ R. Most KGs are incomplete, in other words,
+there exist facts ⟨h, r, t⟩/∈ E but hold true in the3864real world. In such a case, we would like to predict
+facts missing from the KG before using it for down-
+stream applications. Two forms of knowledge base
+completion (KBC) are popular: tail entity predic-
+tion⟨h, r,?⟩, and relation prediction ⟨h,?, t⟩where
+‘?’ indicates what needs to be predicted, with the
+former being relatively more natural. For instance,
+the task in Figure 1 ⟨Al Pacino ,citizenOf ,?⟩can
+be equivalently stated in natural language as "What
+is Al Pachino’s citizenship?". Following previous
+work (Yang et al., 2017; Sadeghian et al., 2019;
+Das et al., 2018; Lin et al., 2018; Qu et al., 2021),
+we focus on predicting tails.
+2.2 Problem Formulation
+Given scoring function f, one way to answer query
+⟨h, r,?⟩is to return the top-ranked entity from V:
+argmaxf(h, r, t )
+In this work, we focus on learning rules in first-
+order logic to score triples with, which has the ad-
+ditional advantage of of being human-interpretable.
+First-order logic consists of the three propositional
+operators ∧(conjunction), ∨(disjunction) and ¬
+(negation), besides ∃(existential) and ∀(for every)
+operators. In particular, rule-based KBC has a rich
+history of utilizing chain rules (also called open
+path rules) of the form:
+∀X, X∃X, . . . X:
+r(X, X)←r(X, X)∧. . . r(X, X)
+where r∈ R,∀i= 0, . . . m , and X, . . . Xde-
+note logical constants that can take values from V.
+Essentially, the above rule states that r(X, X)
+is a missing fact if r(X, X), or equivalently
+⟨X, r, X⟩, holds true ∀i= 1, . . . m , which in
+turn holds true if the path X−→X. . .−→
+. . .−→Xexists in the KG. Given such a rule, it
+is straightforward to devise a scoring function that
+can be used for tail prediction, i.e., f(h, r, t) =
+/braceleftbigg
+1ifh−→. . .−→. . .−→texists
+0otherwise
+However, since logical operators are not differen-
+tiable, learning such a rule is fraught with chal-
+lenges . While inductive logic programming has
+for long, attempted to learn rules from data, they
+have trouble handling noisy nature of real-world
+data and may not scale to real-world problem sizes.To overcome these issues, we propose to utilize log-
+ical neural networks (Riegel et al., 2020), a frame-
+work that extends Boolean logic to the continuous
+domain and is thus differentiable, which in turn, im-
+plies that it can utilize gradient-based optimization
+to learn rules from real-world data.
+3 Enhanced Logical Neural Networks
+While previous work has utilized neuro-symbolic
+AI to learn rules for KBC, these have relied on
+simplistic, parameter-free alternatives to logical op-
+erators and harbor tenuous connections to Boolean
+logic’s semantics. LNNs improve upon both as-
+pects. Let us take the specific example of logi-
+cal conjunction ∧, a core operator in propositional
+logic. Since ∧is not differentiable and thus cannot
+be used to learn rules via gradient-based optimiza-
+tion, NeuralLP (Yang et al., 2017) replaces it with
+product t-norm:
+Prod(x, y) =xy,∀x, y∈[0,1]
+Prod(x, y)is depicted in Figure 3 (left) whose out-
+put smoothly interpolates from 0to1as the inputs
+xandyincrease. This is distinct from ∧whose
+truth table is defined to return true (1)only when
+both its inputs are true (1), and false (0) other-
+wise. In contrast, LNN conjunction is defined as:
+⊗(x) = relu(1, β−w(1−x))
+subject to: β1−αw≤(1−α)1
+β−(1−α)1w≥α
+w≥0 (1)
+where x∈ [0,1]denotes n-ary input
+vector, relu(·)(Krizhevsky, 2010) denotes
+max(0 ,min(1 ,·))(clamped version of relu (Nair
+and Hinton, 2010)), wandβdenote parameters,
+0(1) denote a vector of 0s (1s), and αdenotes
+a hyperparameter. A major advantage of ⊗over
+t-norms is the inclusion of parameters w, βthat
+can be learned thus improving fit to data. The
+other advantage of ⊗is its close connections to ∧’s
+semantics which is achieved via constraints. In-
+tuitively, the constraints in Equation 1 ensure that
+⊗(x)∈[0,1−α]ifanyof its inputs are ≤1−α
+(guaranteed by the first constraint in Equation 1),
+and⊗(x)∈[α,1]ifallof its inputs are ≥α(guar-
+anteed by the second constraint in Equation 1). The
+first and second properties are direct translations
+into continuous space of ∧returning 0if any of its
+inputs are 0and1if all inputs are 1. Figure 3 (right)3865
+shows a binary ⊗learned from ∧’s truth table with
+α= 0.7whose output remains ≤1−0.7 = 0 .3
+(in purple) before transitioning to ≥0.7(in red) as
+inputs increase.
+Intuitively, ⊗divides [0,1]into three regions:
+[0,1−α]representing false ,(1−α, α)denoting
+a transitionary state, and [α,1]representing true
+(see Figure 4). From the interpretability perspec-
+tive, we would like the transitionary state to be as
+small as possible since it is unclear whether ⊗is
+true orfalse when its output is in this range. One
+way to affect the size of the transitionary state is
+by adjusting αwhich acts as a tunable knob. A
+higher (lower) αcorresponds to a larger (smaller)
+transitionary state with α= 1/2representing the
+ideal case where the size reduces to 0and every
+output of ⊗can be interpreted either as true or
+false . Unfortunately, the following proposition
+shows that this may not be possible for KBC:
+Proposition 3.1. ⊗is infeasible if α <
+where ndenotes the number of inputs.
+A system of equations is said to be feasible if there
+exists at least one solution for it, otherwise it is
+infeasible . The proof of Proposition 3.1 appears
+in Appendix A and involves manipulating the con-
+straints in Equation 1. It implies that unless we set
+αabove a certain lower bound, we cannot learn
+w, βsince no such parameter setting exists. On the
+other hand, even if we set α≥n/(n+ 1) to satisfy
+the lower bound, then the size of the transition state
+cannot be reduced below (1−,). This has
+stark implications for KBC since some of the mod-
+els we introduce in the next Section entail feeding
+all relations appearing in the KG to an LNN oper-
+ator, such as ⊗, to learn which relations from R
+are useful for predicting missing facts. In this case
+however, as |R|increasesso will the arity of the
+LNN operator which in turn means n/(n+ 1)→1
+(where n=|R|) thus resulting in a transition state
+covering the whole range (0,1)and the learned
+LNN operator being rendered uninterpretable since
+it would (almost) never return true orfalse .
+Our main enhancement to the LNN framework
+is to enable it to handle high-arity inputs. To this
+end, we propose to exploit the fact that LNNs being
+neural networks, allows composition of different
+operators. Instead of burdening operators such as ⊗
+to learn from high arity inputs, we use the following
+operator:
+ϕ(x) =wxsubject to w≥0,w1= 1
+where xdenotes (a vector of) inputs and wde-
+notes learnable parameters. Since the constraints
+involved in ϕare much simpler, it can handle any
+number of inputs. Instead of feeding a high-arity x
+directly to ⊗, we can first feed it to ϕand then feed
+its output to ⊗which being a single number allows
+us to set αso that the ⊗can have a much smaller
+transition state. Figure 5 pictorially depicts the
+composition where ⊕denotes LNN’s disjunction
+operator which is an extension of classical Boolean
+logic’s disjunction operator ∨to continuous space:
+⊕(x) = 1− ⊗(1−x)
+where the same constraints from Equation 1 apply
+since⊕is defined in terms of ⊗.
+4 KBC with Logical Neural Networks
+In this section, we introduce scoring functions that
+can perform tail prediction using LNN operators
+developed so far. All our scoring functions rely
+on path counts. Let p=h−→. . .−→. . .−→t
+connecting h, t∈ V. We refer to the sequence of re-
+lations r, . . . ras its relation path . Furthermore,
+given an m-length relation path r=r, . . . r,3866P(u, v)denotes the setof all paths connecting h
+totinGvia relation path r.
+4.1 Edge-based Logical Neural Networks
+Our first scoring function is a translation of the
+conjunction-of-disjunction approach from Sec-
+tion 1 where we replace the logical operators
+with LNN operators. Score for triple ⟨h, r, t⟩,
+EB-LNN (h, r, t )is defined as:
+/summationdisplay/summationdisplay⊗(ϕ(e), . . . ϕ(e))
+where e∈ {0,1}is a one-hot encoding whose
+rentry is 1with0s everywhere else. The above
+scoring function exhaustively enumerates all rela-
+tion paths rupto length mand assigns ⟨h, r, t⟩a
+score by counting the number of paths in P(h, t)
+Essentially, we have replaced the logical conjunc-
+tion with ⊗and disjunctions with m ϕ operators
+into the conjunction-of-disjunctions rule. Each ϕ
+operator has its own set of weights, and combined
+with the ⊗operator’s weights and bias, this means
+we have a total of 1+m+m|R|parameters that can
+all be learned via gradient-based optimization. By
+learning a relation-specific scoring function such
+as the above, we can learn to predict missing facts
+for relation r∈ R.
+4.2 Path-based Logical Neural Networks
+Our second scoring function maintains integrity of
+paths and considers the disjunction-of-conjunctions
+rule introduced in Section 1. However, here we
+make a simplification. Note that, unlike EB-LNN,
+we do not need to learn the conjunctions in the
+disjunction-of-conjunctions since these are already
+given to us by the KG G. Each relation path ris a
+conjunction and the count |P(h, t)|is essentially
+all the information we need to compute ⟨h, r, t⟩’s
+score. However, since each relation path is an input
+to the outer disjunction, using ⊕may compromise
+its interpretability as there are |R|of these where
+mdenotes the maximum path length. Instead, we
+express PB-LNN (h, r, t )using a ϕoperator:
+/summationdisplay|P(h, t)|ϕ(e)
+where e∈ {0,1}is a one-hot encoding with
+1in its rposition and 0everywhere else. The
+total number of parameters is given by |R|whichcan be learned end-to-end using gradient-based op-
+timization. By learning a relation-specific scoring
+function such as the above, we can learn to predict
+missing facts for relation r∈ R.
+4.3 Combining with Graph Embeddings
+One of the drawbacks of EB or PB-LNN is that
+they treat all paths in P(h, t)equally. This is
+where utilizing KGE, which embed VandRinto
+a low-dimensional hyperspace, may help. KGEs
+score more prevalent relation paths higher than
+less frequent ones. Since LNNs already extend
+Boolean logic to continuous-valued domain, it is
+particularly simple for us to incorportate KGE. Our
+goal is to bias the learning process so that relation
+paths with larger KGE scores are assigned larger
+weights. Let σ(p)denote the KGE score for path
+p,PB−LNN (h, r, t )is then given by:
+/summationdisplayϕ(e)/summationdisplayσ(p)
+EB-LNN can also be modified similarly. Note that,
+there are at least 2kinds of KGEs available in the
+literature: 1) that rely on a similarity measure of the
+triple⟨h, r, t⟩, e.g., CP-N3 (Lacroix et al., 2018),
+and 2) distance measure used to contrast t’s embed-
+ding with some function of handr’s embeddings,
+e.g., RotatE (Sun et al., 2019). For brevity, we only
+describe the use of similarity based KGE here. Ap-
+pendix D describes utilizing distance-based KGE.
+4.4 Training Logical Neural Networks
+While LNN operators are amenable to gradient-
+based learning, we still need to address how to
+achieve constrained optimization to learn LNN pa-
+rameters. Fortunately, there exist approaches that
+can convert any system of linear constraints (in-
+cluding equalities and inequalities) into a sequence
+of differentiable operations such that we can sam-
+ple parameters directly from the feasible set (Frerix
+et al., 2020) which is what we use to train all our
+LNNs. We also refer the interested reader to Sen
+et al. (2022) and Riegel et al. (2020) which describe
+additional LNN training algorithms.
+Among various possible training algorithms,
+based on extensive experimentation, we have found
+the following scheme to perform reliably. In each
+iteration, we sample uniformly at random a mini-
+batch of positive triples Bfrom⟨h, r, t⟩ ∈ E
+and corrupted, negative triples Bfrom⟨h, r, t⟩/∈
+E,∀h, t∈ V, such that |B|=|B|to minimize3867
+the following margin ranking loss:
+/summationdisplay/summationdisplaymax{0, s(h, t)−s(h, t)+γ}
+where γdenotes the margin hyperparameter and
+s()denotes one of EB-LNN or PB-LNN.
+5 Experimental Results
+In this section, we compare the proposed methods
+with other rule-based KBC approaches. Recall
+that, in Section 2.2 we pose KBC as a ranking
+task. Thus, we adopt ranking metrics to compare
+the quality of the learned rules (Section 5.1). To
+illustrate interpretability, we also list rule examples
+in Section 5.2. For brevity, we next describe the
+salient points of our experimental setup next, while
+Appendix C provides a full details.
+Datasets, Metrics and Baselines: Popular KBC
+benchmarks include Kinship & UMLS (Kok and
+Domingos, 2007), WN18RR (Dettmers et al.,
+2018), and FB15K-237 (Toutanova and Chen,
+2015). In addition to their standard splits, Qu
+et al. (2021) define their own splits for Kinship
+and UMLS which we also report results on. Table 1
+provides dataset statistics. To evaluate the efficacy
+of learned rules, we compute filtered ranks (Bor-
+des et al., 2013) and report mean reciprocal rank
+(MRR) and Hits@K (H@K) for K={3,10}. To
+address the case where distinct tails are ranked the
+same, which may mislead the evaluation (Sun et al.,
+2020), we average across assignable ranks:
+g(t) =1
+m+ 1/summationdisplay˜g(r)
+where tail tis ranked at rank nalong with mother
+tails, ˜g(r)is1/rif metric is MRR and δ(r≤K)if
+metric is Hits@K ( δdenotes Dirac delta function).
+Baselines: We include a variety of methods:
+•EB baselines include NeuralLP (Yang et al.,
+2017) and DRUM (Sadeghian et al., 2019). Bothof these rely on recurrent neural networks (RNN)
+and variations thereof, to learn conjunction-of-
+disjunctions.
+•PB baselines include RNNLogic (rules only) (Qu
+et al., 2021), MINERV A (Das et al., 2018) and
+MultiHopKG (Lin et al., 2018) all of which learn
+disjunction-of-conjunctions. While RNNLogic
+relies on RNNs, the latter two utilize reinforce-
+ment learning.
+•Conditional theorem provers (CTP) (Minervini
+et al., 2020), a scalable version of neural theorem
+provers (Rocktäschel and Riedel, 2017).
+•KGE combined with rule-based KBC which in-
+cludes RNNLogic with RotatE (Sun et al., 2019)
+denoted RNNLogic (w/ embd.).
+Please see Appendix B for more details underly-
+ing all of these approaches for KBC, including an
+extended discussion on other closely related works.
+Implementation: Following previous work (Yang
+et al., 2017), we introduce inverse triples, i.e., for
+each⟨h, r, t⟩ ∈ E we add a new triple ⟨t, r, h⟩
+where rdenotes a new, inverse relation. We
+use Adagrad (Duchi et al., 2011) to train our
+LNNs and tune hyperparameters on the valida-
+tion set with step size ∈ {0.1,1.0}, margin γ∈
+{0.1,0.5,1.0,2.0},α∈[5/6,1)and batch size 8.
+We learn rules up to length 4for FB15K-237, 5for
+WN18RR, and 3for Kinship and UMLS. We com-
+bine our rule-learning approach with pre-trained
+CP-N3 embeddings (Lacroix et al., 2018) of dimen-
+sion4Kfor FB15K-237, 3Kfor WN18RR, and
+8Kfor Kinship and UMLS.
+5.1 Quantitative Results and Discussion
+Tables 2, 3 and 5 list results for all methods. We
+first compare rule-based KBC methods ( R ),
+followed by combinations with KGE (/ E .).
+EB-LNN vs. EB baselines : On 3out of 4bench-
+marks, EB-LNN outperforms NeuralLP with re-
+spect to MRR (Table 2). A possible reason for this
+is due to NeuralLP’s reliance on simpler operators
+(e.g., product t-norm) whereas EB-LNN utilizes
+LNN’s parameterized operators that achieve an im-
+proved fit and have similar semantics as Boolean
+logic’s (Section 3). Also note that, NeuralLP re-
+lies on a recurrent neural network (RNN) to learn
+its rules whereas EB-LNN uses a handful of LNN
+operators, one ⊗and few ϕ, resulting in a much
+simpler architecture. EB-LNN also leads to better
+MRR in 3out of 4datasets compared to DRUM,
+which replaces the RNN with a bidirectional LSTM3868
+(Hochreiter and Schmidhuber, 1997). In relative
+terms, EB-LNN’s improvement over NeuralLP’s
+(DRUM’s) MRR on Kinship, UMLS, WN18RR
+and FB15K-237 are −19% (−2%),42% (27%),
+8%(5%) and 8%(8%) resulting in 10% (10%) av-
+erage relative improvement, respectively.
+PB-LNN vs. PB baselines : Table 2 compares
+PB-LNN with RNNLogic ( R ), while Table 3
+reports their results only on direct triples including
+MINERV A’s (Das et al., 2018) and MultiHopKG’s
+(Lin et al., 2018) as well. We exclude inverse triples
+in Table 3 since Das et al. and Lin et al. also ex-
+clude these from their evaluation. PB-LNN out-
+performs all PB baselines in most cases. This is
+clear indication that the LNN framework, along
+with our enhancements, is up to the task of learning
+rules for KBC. These results are even more impres-
+sive considering that RNNLogic, MINERV A and
+MultiHopKG rely on fairly sophisticated architec-
+tures such as RNNs and neural reinforcement learn-ing with reward shaping. Across all datasets, PB-
+LNN leads to 11%,25% and4%average relative
+improvements in MRR over RNNLogic’s, MIN-
+ERV A’s and MultiHopKG’s, respectively.
+PB vs. EB rule-based KBC : This is one of the
+main questions we aim to answer. We note that, PB-
+LNN outperforms EB-LNN ( R ) in all cases
+(Table 2). A possible reason is the confusion EB
+methods suffer from as illustrated in the example
+from Section 1. Having said that, the margin of
+difference separating PB-LNN and EB-LNN varies
+with the dataset. For instance, on FB15K-237 EB-
+LNN’s MRR comes close to PB-LNN’s. PB-LNN
+leads to 40% average relative improvement in MRR
+over EB-LNN’s across datasets, and is the best
+performing among all rule-based KBC methods.
+Only on FB15K-237, PB-LNN is outperformed
+by NeuralLP and DRUM with respect to Hits@10.
+However note that, since Hits@10 is a "lenient"
+metric (one only needs to rank the correct tail entity
+within the top 10) this is unlikely to matter in a
+practical setting where PB-LNN’s superior MRR
+and Hits@3 should hold it in good stead.
+KGE with Rule-based KBC : We combine PB-
+LNN (our best LNN-based approach) with CP-N3
+embeddings (Lacroix et al., 2018) (Table 2 E .
+lists results of various KGEs for reference). Across
+datasets, PB-LNN w/ CP-N3 leads to average rela-
+tive improvements of 7%over PB-LNN’s ( R )
+MRR. In comparison to RNNLogic w/ RotatE, PB-
+LNN w/ CP-N3 shows small but consistent im-
+provements in both Table 2 (/ E .) and in3869
+Table 3 (results on direct triples only). Qu et al.
+(2021) do not evaluate RNNLogic on Kinship and
+UMLS’s standard splits, so we cannot report these
+in Table 2. Table 5 reports results on Qu et al.’s Kin-
+ship and UMLS splits which contain significantly
+fewer triples in the training set (Table 1). PB-LNN
+w/ CP-N3 shows significant improvements over
+RNNLogic w/ RotatE illustrating that PB-LNN can
+learn effective rules even if training data is scarce.
+Besides the above experiments, we also compare
+against conditional theorem provers (CTP) (Min-
+ervini et al., 2020) which falls outside the EB vs.
+PB nomenclature adopted in this work, relying on
+theorem proving and soft unification instead. On
+the smaller datasets Kinship and UMLS, PB-LNN
+outperforms CTP by a wide margin (Table 2) and
+despite being an improvement over neural theorem
+provers (Rocktäschel and Riedel, 2017) in terms
+of scalability, we were unable to scale CTP to the
+larger WN18RR and FB15K-237 benchmarks.
+5.2 Qualitative Analysis and Discusssion
+Learned rules can be extracted from EB-LNN by
+combining the various ϕoperators using Algorithm
+1 proposed in Yang et al. (2017). Extracting learned
+rules from PB-LNN is even simpler and can be
+achieved by sorting the relation paths in descend-
+ing order of w. Table 4 presents some of the top
+ranked rules learned by PB-LNN.
+Rules for FB15K-237 : Rule 1 in Table 4 describes
+a learned rule that infers the language a person
+speaks by exploiting knowledge of the language
+spoken in her/his country of nationality. Shown
+in terms of relation paths: P(person )−→
+N(nation )←− L(language ). Similarly, Rule 2
+(3) uses the country of a film (TV program) to ascer-
+tain its language. Rules 5, 6 and 7 are longer ruleswith 3relations each in their body. Rule 5 infers
+a TV program’s country by first exploiting knowl-
+edge of one of its actor’s birth place and then deter-
+mining which country the birth place belongs to. In
+terms of relation path: P(program )−→
+A(actor)−→ L(birth place )−→ N(nation ).
+Rule 6 uses a film crew member’s marriage loca-
+tion instead to ascertain the same. Rule 7 infers
+the marriage location of a celebrity by exploiting
+knowledge of where their friend got married.
+Recursive Rules for WN18RR : WN18RR, being
+a hierarchical KG, is quite sparse which calls for
+learning longer rules. Notably, rules shown in Ta-
+ble 4 include the same relation on both sides of
+←denoting recursion. Learning recursive rules is
+considered a relatively difficult task with only a
+handful of previous works having tackled it, e.g.,
+(Evans and Grefenstette, 2018), so it is interesting
+to find that these are useful for predicting missing
+facts from sparse KGs such as WN18RR.
+5.3 Running Time
+Table 6 reports training times for WN18RR and
+FB15K-237. PB-LNN is more efficient than Neu-
+ralLP and slower than RNNLogic. The bottleneck,
+shared by all methods in Table 6, is due to exhaus-
+tive enumeration of all possible paths.
+6 Conclusion
+Our goal is to lend structure to the area of KBC.
+An ideal approach 1) should be interpretable, 2)
+can accurately identify missing facts, and 3) can be
+further improved using successful KBC techniques
+(e.g., KGE). We categorized previous works into
+edge-based orpath-based rule-based KBC, and il-
+lustrating via carefully constructed examples how
+one of these may lead to rules better suited for KBC.3870
+While previous rule-based KBC has utilized neuro-
+symbolic AI (NeSy), we proposed the use of logi-
+cal neural networks, a particularly powerful NeSy
+framework, that is not only differentiable but also
+harbors strong connections to Boolean logic’s se-
+mantics resulting in improved interpretability. We
+further enhanced the LNN framework to improve
+its handling of high-arity inputs that is useful for
+learning KBC rules. Our exhaustive experiments
+confirm that 1) EB-LNN and PB-LNN outperform
+their respective counterparts available in the litera-
+ture, 2) PB-LNN is the more accurate of the two,
+3) Combining with KGE leads to further improve-
+ments in KBC quality, and 4) Learned rules can be
+easily interpreted.
+Riegel et al. (2020)’s original proposal of LNNs
+mostly evaluated the framework on synthetic tasks
+with limited size datasets. Besides our work in
+this paper, Jiang et al. (2021) and Chaudhury et al.
+(2021) have recently applied LNNs to learning
+rules for short-text entity linking and helping an
+agent solve text-world games (Adolphs and Hof-
+mann, 2020). Since knowledge bases may benefit
+diverse downstream applications including but not
+limited to question-answering (Kapanipathi et al.,
+2021), semantic search (Berant et al., 2013), and di-
+alogue generation (He et al., 2017), we expect that
+in future more efforts will be devoted to adapting
+and utilizing expressive NeSy frameworks, such
+as LNNs, to solve real-world applications. Other
+avenues of future work include learning KBC rules
+more efficiently and combining EB and PB into
+one unified, approach for improved KBC.
+7 Limitations
+This is an instance of an NLP application with close
+ties to Machine Learning, in that, we are less depen-
+dent on the language employed in the Knowledge
+Graph (KG). But we acknowledge that all of the
+benchmark KGs employed in our experiments are
+in English. Another concern would be the scala-
+bility of rule-based KBC. As indicated in Table 6,
+while our approach suffices for the KGs used in
+these experiments, deploying our solution to larger
+KGs would invariably require more GPU resources
+and also benefit from further improvements to the
+scalability of the learning technique.
+8 Ethics Statement
+All co-authors and contributors to this work commit
+to EMNLP and ACL’s code of ethics. Knowledge
+graphs are related to social networks, and while
+techniques proposed here might, in theory, be used
+to discover missing facts from a social network
+which could in turn, lead to invasion of privacy, we
+explicitly acknowledge that it is neither our goal
+nor our intent to violate anyone’s right to privacy.
+9 Acknowledgements
+This work was completed prior to the first author’s
+joining of Amazon, and while he was employed at
+IBM Research. We gratefully acknowledge feed-
+back from anonymous reviewers that undoubtedly
+resulted in improvements to this work.
+References38713872
+A Proof for Proposition 3.1
+Proof. A simple lower for αis given by observing
+that⊗’s output when it is false , i.e., [0,1−
+α], should lie to the left of [α,1], which is its output
+when⊗istrue , on the number line:
+1−α≤α⇒1≤2α⇒1
+2≤α
+Deriving a tighter bound that depends on input x
+requires analyzing the constraints in Equation 1
+(in the main body). Beginning with the second
+constraint:
+β−(1−α)1w≥α
+(rearranging) ⇒β≥α+ (1−α)1w (2)We next consider implications from Equation 1’s
+first constraint (main body):
+β1−αw≤(1−α)1
+(multiply by 1)⇒nβ−α1w≤n(1−α)
+(rearranging) ⇒β≤1−α+α
+n1w
+The last equation combined with Equation 2 im-
+plies that:
+α+ (1−α)1w≤β≤1−α+α
+n1w
+⇒α+ (1−α)1w≤1−α+α
+n1w
+⇒2α−1≤(α+α
+n−1)1w
+We have already shown that α≥which implies
+that the above LHS in the above equation is ≥0.
+Moreover, Equation 1 (main body) also enforces
+thatw≥0. These observations imply that the first
+term on RHS is also ≥0:
+α+α
+n−1≥0
+(rearranging) ⇒α≥n
+n+ 1
+Thus, if α <then⊗will not have any
+solution which proves the Proposition.
+B Related Work
+Our work lies at the intersection of Knowledge
+Base Completion and Rule-learning approaches.
+Within KBC, knowledge graph embeddings is an-
+other prevalent technique.
+KBC has gained a lot of interest due to their
+ability to handle the incompleteness of knowledge
+bases. KGEs map entities and relations to a low-
+dimensional vector space to infer new facts. These
+techniques use neighborhood structure of an entity
+or relation to learn their corresponding embedding.
+Beginning with TransE (Bordes et al., 2013), KGEs
+can now use complex vector spaces such as Com-
+plEx (Trouillon et al., 2016), RotatE (Sun et al.,
+2019), and QuatE (Zhang et al., 2019).
+While KGE performance has improved signifi-
+cantly over time, rule-based KBC has gained atten-
+tion due to its inherent ability to be generate inter-
+pretable rules (Yang et al., 2017; Sadeghian et al.,
+2019; Rocktäschel and Riedel, 2017; Qu et al.,
+2021). The core ideas in rule learning can be cate-
+gorized into two groups based on their mechanism
+to select relations for rules. While Edge-based (EB)3873methods break paths into its constituent edges, e.g.
+NeuralLP (Yang et al., 2017), DRUM (Sadeghian
+et al., 2019), Path-based (PB) maintains integrity
+of paths; e.g., MINERV A (Das et al., 2018), RNN-
+Logic (Qu et al., 2021). Recent trends in both these
+types of rule learning approaches has shown signif-
+icant increase in complexity for performance gains
+over their simpler precursors. Among the first to
+learn rules for KBC, NeuralLP (Yang et al., 2017)
+uses a long short-term memory (LSTM) (Hochre-
+iter and Schmidhuber, 1997) as its rule generator.
+DRUM (Sadeghian et al., 2019) improves upon
+NeuralLP by learning multiple such rules obtained
+using a bi-directional LSTM for more steps. MIN-
+ERV A (Das et al., 2018) on the other hand, pro-
+poses to learn the relation sequences appearing in
+paths connecting source to destination vertices us-
+ing neural reinforcement learning. RNNLogic (Qu
+et al., 2021) is the latest to adopt a path-based ap-
+proach for KBC that consists of two modules, a
+rule-generator for suggesting high quality paths
+and a reasoning predictor that uses said paths to
+predict missing information. RNNLogic employs
+expectation-maximization for training where the E-
+step identifies useful paths per data instance (edge
+in the KG) by sampling from an intractable pos-
+terior while the M-step uses the per-instance use-
+ful paths to update the overall set of paths. Both
+DRUM and RNNLogic represent a significant in-
+crease in complexity of their respective approaches
+compared to NeuralLP and MINERV A.
+Unlike these approaches, we propose to utilize
+Logical Neural Networks (LNN) (Riegel et al.,
+2020); a simple yet powerful neuro-symbolic ap-
+proach (NeSy) which guarantees interpretability
+by extending Boolean logic to the real-valued do-
+main. Rules learned with LNNs are eminently inter-
+pretable and furthermore, we achieve state-of-the-
+art KBC quality across multiple datasets by com-
+bining with KGE while preserving interpretability.
+While NeSy enables us to learn rules end-to-end
+via gradient-based optimization, it is not the only
+technique available for learning rules. Inductive
+logic programming (Muggleton, 1996) has for long
+attempted to learn rules from real-world data but
+neither scales to real-world problem sizes nor can
+it handle noise inherent in real-world data. An-
+other area of work is statistical relational learning
+(Getoor and Taskar, 2007) that include Markov
+logic networks (Richardson and Domingos, 2006)
+however, previous work (Qu et al., 2021) has shownthat these neither lead to accurate KBC rules nor
+do they scale to large KBC benchmarks we exper-
+iment with in the main body. Interestingly, our
+proposed addition to the LNN framework, the ϕ
+operator, is identical to the gating node in sum-
+product networks (Shao et al., 2020) where it func-
+tions similar to a disjunction operator. While LNN
+has a disjunction operator, its interpretability can
+be compromised when faced with high-arity inputs
+in applications such as KBC thus its addition en-
+hances the LNN framework.
+C Experimental Setup
+C.1 Datasets
+To evaluate our approach, we experiment on stan-
+dard KBC benchmarks, viz. Unified Medical Lan-
+guage System (UMLS) (Kok and Domingos, 2007),
+Kinship (Kok and Domingos, 2007), WN18RR
+(Dettmers et al., 2018), and FB15K-237 (Toutanova
+and Chen, 2015).
+•Unified Medical Language System (UMLS)
+(Kok and Domingos, 2007): models relations
+among biological concepts including drugs, dis-
+eases, and treatments.
+•Kinship (Kok and Domingos, 2007): comprises
+relations among members of Central Australian
+native tribe.
+•WN18RR (Dettmers et al., 2018): a dataset de-
+rived from WordNet (Miller, 1995) which is a
+popular linguistic knowledge base comprising
+on relations such as synonyms, hypernyms, and
+hyponyms between words.
+•FB15K-237 (Toutanova and Chen, 2015): is de-
+rived from Freebase (Bollacker et al., 2008), a
+knowledge graph with encyclopedic informa-
+tion.
+Table 1 (in the main body) provides dataset statis-
+tics. We use standard train/validation/test splits for
+all datasets. Note that, RNNLogic defined its own
+splits for Kinship and UMLS, we report results on
+these too for a fair comparison.
+C.2 Coherent Metrics and Fair KBC
+Evaluation
+In the recent past, there has been intense criti-
+cism on the metrics that are used to evaluate KBC
+techniques. Specifically, for the KBC task where
+answering ⟨h, r,?⟩requires the method to assign
+probability to answers t, techniques, mostly in the
+rule-learning category, assigned same probability3874scores across multiple answers. The evaluation in
+most cases considered the minimum rank of the cor-
+rect answer leading to overly optimistic and unfair
+evaluation (Sun et al., 2020). This has resulted in
+more accurate definition of KBC metrics proposed
+by (Sun et al., 2020) which is used by RNNLogic
+(Qu et al., 2021); the current state-of-the-art KBC
+approach. Specifically, Sun et al. (2020) proposed
+to compute the expectation over all candidate enti-
+ties with the same score as the correct answer.
+Given an unseen query ⟨h, r,?⟩we compute fil-
+tered ranks (Bordes et al., 2013) for destination
+vertices after removing the destinations that form
+edges with handrpresent in the train, test and
+validation sets. Based on Sun et al. (2020)’s sug-
+gestions, our definitions of mean reciprocal rank
+(MRR) and Hits@K (H@K) satisfy two properties:
+1) They assign a larger value to destinations ranked
+lower, and 2) If destinations t, . . . , tshare the
+same rank nthen each of them is assigned an aver-
+age of ranks n, . . . , n +m−1:
+MRR (t) =1
+m/summationdisplay1
+r
+H@K (t) =1
+m/summationdisplayδ(r≤K)
+where δ()denotes the Dirac delta function. We
+include inverse triples and report averages across
+the test set.
+D Similarity-based and Distance-based
+Knowledge Graph Embeddings
+Letσ(p)denote the score of a path passigned using
+a KGE. We describe σ(p)for both similarity-based
+(e.g., CP-N3 Lacroix et al. 2018) and distance-
+based (e.g., RotatE Sun et al. 2019) KGE:
+similarity-based: σ(p) =
+/summationdisplay1
+1 + exp {−sim(h, r, t )}
+distance-based: σ(p) =
+/summationdisplayexp{2(δ−d(h, r, t ))} −1
+exp{2(δ−d(h, r, t ))}+ 1
+where δdenotes the margin parameter used by
+the underlying distance-based KGE to convert dis-
+tances into similarities. For both of these, we break
+the path into a series of edges, use the underlying
+KGE to compute similarity sim()or distance d()for each triple (as the case may be) and aggregate
+across all triples in the path. Based on extensive ex-
+perimentation, we recommend sigmoid andtanh
+as the non-linear activation for similarity-based and
+distance-based KGE, respectively. See main body
+as to how one may incorporate σ(p)into proposed
+LNN scoring functions for KBC (e.g. PB-LNN).3875

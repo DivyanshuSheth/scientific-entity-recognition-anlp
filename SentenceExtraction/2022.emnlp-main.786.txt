@@ -1,1 +1,673 @@
-11430 Proceedings of the 2022 Conference on Empirical Methods in Natural Language Processing , pages 11430 11443 December 7 - 11 , 2022 © 2022 Association for Computational Linguistics 11431 11432 11433 11434 11435 11436 11437 11438 11439 11440 11441 11442 11443 
+
+Edward Gow-Smith, Harish Tayyar Madabushi,
+Carolina Scartonand Aline VillavicencioDepartment of Computer Science, University of SheffieldDepartment of Computer Science, University of Bath
+Abstract
+Tokenisation is the first step in almost all NLP
+tasks, and state-of-the-art transformer-based
+language models all use subword tokenisation
+algorithms to process input text. Existing al-
+gorithms have problems, often producing to-
+kenisations of limited linguistic validity and
+representing equivalent strings differently de-
+pending on their position within a word. We
+hypothesise that these problems hinder the
+ability of transformer-based models to handle
+complex words, and suggest that these prob-
+lems are a result of allowing tokens to include
+spaces. We thus experiment with an alternative
+tokenisation approach where spaces are always
+treated as individual tokens. Specifically, we
+apply this modification to the BPE and Uni-
+gram algorithms. We find that our modified
+algorithms lead to improved performance on
+downstream NLP tasks that involve handling
+complex words, whilst having no detrimental
+effect on performance in general natural lan-
+guage understanding tasks. Intrinsically, we
+find that our modified algorithms give more
+morphologically correct tokenisations, in par-
+ticular when handling prefixes. Given the re-
+sults of our experiments, we advocate for al-
+ways treating spaces as individual tokens as an
+improved tokenisation method.
+1 Introduction
+Tokenisation is a key initial step in processing nat-
+ural language, as it identifies the linguistic units
+to be processed, converting them to numerical IDs
+which can then be vectorised and manipulated by
+mathematical operations.
+Earlier NLP approaches used simple string-
+searching techniques with regular expressions to
+tokenise text; however, these pattern-matching to-
+kenisation methods have drawbacks: they require
+large vocabulary sizes to cover the training data,
+they cannot handle out-of-vocabulary words, and
+they do not work for languages without spaces as
+word boundaries. To address these issues, subwordtokenisation was introduced. The first explicit men-
+tion (and popularisation) of this approach was by
+Sennrich et al. (2015), though it was indirectly in-
+troduced earlier by Schuster and Nakajima (2012).
+This method works by learning from training data
+to build a vocabulary (of a fixed size) and then
+tokenising text at inference time using this vocabu-
+lary (and possibly other learnt parameters). More
+frequent words are represented as single tokens,
+with rare words being broken down into multiple
+subword tokens, possibly down to the character
+level.
+State-of-the art transformer-based language mod-
+els all use subword tokenisation algorithms based
+on either byte-pair encoding (BPE) (Sennrich et al.,
+2015) or Unigram (Kudo, 2018). The original trans-
+former model (Vaswani et al., 2017) uses BPE,
+whilst BERT (Devlin et al., 2018), which consists
+of a transformer encoder pretrained with a masked
+language modelling objective, uses WordPiece to-
+kenisation (Schuster and Nakajima, 2012), which
+is a variant of BPE with a language model loss func-
+tion. WordPiece is also used by ERNIE (Sun et al.,
+2019), DistilBERT (Sanh et al., 2019), ELEC-
+TRA (Clark et al., 2020), StructBERT (Wang
+et al., 2019) and NEZHA (Wei et al., 2019). GPT-
+2 (Radford et al., 2019) introduced byte-level BPE,
+operating on byte sequences rather than Unicode
+code points, which allows all sequences to be en-
+coded using a base vocabulary of 256, avoiding the
+issue of unknown characters. The same approach
+is used in RoBERTa (Liu et al., 2019), DeBERTa
+(He et al., 2020a), and BART (Lewis et al., 2020).
+The BPE and Unigram algorithms are imple-
+mented in the SentencePiece library (Kudo and
+Richardson, 2018). There is a lack of clarity regard-
+ing SentencePiece in the literature, with it being
+erroneously considered as its own algorithm rather
+than an implementation of other algorithms. For
+example, in the paper introducing T5 (Raffel et al.,
+2019) they state that they "use SentencePiece to en-11430code text as WordPiece tokens", which is not in fact
+implemented in SentencePiece. Looking at their
+code, we find that they use the default Sentence-
+Piece implementation, which is Unigram. XLNET
+(Yang et al., 2019) say they tokenise with Senten-
+cePiece, but do not say which algorithm they use
+- again, looking at their code, we find they use the
+default of Unigram. Equivalently, ALBERT (Lan
+et al., 2019) say that they tokenise with Senten-
+cePiece as for XLNET, meaning they again use
+Unigram.
+Despite their ubiquity, existing tokenisation al-
+gorithms have problems, which we hypothesise
+hinders the ability of language models to handle
+complex words (Section 2). We suggest that these
+problems are pervasive across all existing subword
+tokenisation algorithms due to a shared fundamen-
+tal design choice of allowing tokens to include
+spaces, and thus experiment with an alternative
+treatment of spaces where they are always taken as
+individual tokens. We implement this approach by
+making simple modifications to the existing Word-
+Piece, BPE, and Unigram algorithms (Section 3).
+We first evaluate our modified algorithms intrinsi-
+cally (Section 4), quantitatively finding that they
+improve morphological correctness, in particular
+when handling prefixes. Qualitatively, we take ex-
+amples from previous papers critiquing existing to-
+kenisation algorithms, and show how our modified
+algorithms are able to alleviate the discussed issues.
+We then evaluate our modified algorithms extrin-
+sically by pretraining and finetuning transformer-
+based models (Section 5), showing that they give
+improved performance on NLP tasks that require
+handling complex words with no detrimental effect
+on performance in the general domain.
+2 Problems with Existing Tokenisation
+Algorithms
+Existing tokenisation algorithms often produce un-
+intuitive tokenisations for complex words, incor-
+rectly splitting prefixes, and producing unmeaning-
+ful subword tokens, which are problems that have
+been discussed in previous works. Church (2020)
+looks at the BERT (WordPiece) tokenisations for
+complex words, highlighting the many unnatural to-
+kenisations that arise, with tokens often splitting up
+morphemes and digraphs. Nayak et al. (2020) also
+discuss the issues with BERT’s tokeniser, specif-
+ically highlighting problems with the splitting of
+prefixes, and they show that poor tokenisation leadsto weak semantic representations. Hofmann et al.
+(2021) find that BERT performs poorly on classify-
+ing complex words containing prefixes, performing
+much better on suffixes. They suggest that a rea-
+son is that BERT’s tokeniser is seldom accurate for
+splitting prefixes, but is much more often correct
+for splitting suffixes. Schick and Schütze (2020)
+argue that a reason BERT struggles to understand
+rare words is due to suboptimal tokenisation of
+these words. Here we give a few of our own ex-
+amples of BERT tokenisations that illustrate the
+problems:
+We see here that the prefixed words are tokenised
+poorly: the prefix is either incorrectly split, as in
+“disjointed” and “unisex”, or the prefix is correctly
+split, but the rest of the word is tokenised differ-
+ently from the standalone case, as in “untrue” and
+“overestimate”. We note that suffixes are handled
+better than prefixes, which is due to spaces being
+prepended rather than appended to words (see Sec-
+tion 3).
+For these latter examples, there is a second prob-
+lem: even if the base were tokenised as a single
+token, the addition of the space symbol means that
+there would be no explicit link between the prefixed
+word and the standalone base. As an example, we
+cherry-pick a rare example of a morphologically
+correct tokenisation by BERT of a word containing
+a prefix, showing both strings and token IDs:
+We can see that, even though these tokenisations
+are reasonable, the subword “beat” is assigned dif-
+ferent IDs in the two cases due to the prepending
+of the special space symbol.
+We hypothesise that both of these problems hin-
+der the ability of existing language models (such
+as BERT) to deal with complex words. Regarding
+the first problem, we argue that the morphological11431correctness of a tokeniser is a metric which will
+correlate with the ability of language models to
+deal with complex words: correctly splitting af-
+fixes means morphologically related words (those
+sharing a common base) are given related tokenisa-
+tions. The splitting of prefixes is particularly impor-
+tant, as prefixes always have a semantic function,
+unlike suffixes which can have both syntactic and
+semantic functions (Giraudo and Grainger, 2003).
+Also, tokenisations made up of meaningful sub-
+word tokens (morphemes or groups of morphemes)
+will allow language models to build stronger rep-
+resentations with less data, since the representa-
+tions of complex words can be computed from the
+representations of the subwords. Regarding the
+second problem, the fact that base forms are rep-
+resented differently depending on their position
+within a word means a reduction in relevant train-
+ing instances and hence a further weakening of
+representations for complex words.
+3 Our Modified Algorithms
+We suggest that the problems discussed in Sec-
+tion 2 arise as a result of how spaces are handled by
+existing algorithms: All subword tokenisation al-
+gorithms currently used by transformer-based mod-
+els allow tokens to include space symbols as the
+first character. This means equivalent strings are
+treated differently depending on whether they ap-
+pear at the start of a word or not. This difference oc-
+curs when training these tokenisers, which leads to
+suboptimal tokenisations of prefixed words. It also
+occurs when using these tokenisers in NLP models,
+leading to equivalent strings being assigned differ-
+ent tokens depending on whether they occur at the
+start of a word or not.
+Thus, to attempt to alleviate these issues, and
+hence improve the handling of complex words by
+language models, we propose an alternative treat-
+ment of spaces where they are always assigned
+individual tokens. This simple modification can
+be made to any existing subword tokenisation al-
+gorithm, though for brevity we focus our attention
+on BPE and Unigram; this modification can also
+be made to the WordPiece algorithm, and we see
+similar (intrinsic) performance improvements from
+doing so. In Section 4, we perform a qualitative
+analysis of our modified WordPiece algorithm andalso include the default WordPiece algorithm in
+our quantitative evaluation for comparison. Our
+modified algorithms and the defaults are shown
+in Figure 1 and Figure 2 for BPE and Unigram,
+respectively.
+In the following sections, we compare our modi-
+fied tokenisation algorithms to the defaults by eval-
+uating them intrinsically (Section 4) and extrinsi-
+cally (Section 5).
+4 Intrinsic Evaluation: Morphological
+Correctness
+Given our hypothesis that the morphological cor-
+rectness of a tokeniser, especially when handling
+prefixes, correlates with the performance of lan-
+guage models in dealing with complex words (Sec-
+tion 2), we perform a controlled intrinsic evaluation
+of our tokenisers using this metric. We train our
+modified algorithms and the defaults on 1 million
+sentences from English Wikipedia for BPE and Un-
+igram, with a fixed vocabulary size of 16,000, and
+then run evaluation on four morphological datasets:
+LADEC, MorphoLex, MorphyNet and DagoBERT.
+The LADEC dataset (Gagné et al., 2019) con-
+sists of 7,804 noun compounds with a unique mor-
+phological parse (we exclude those with multiple
+parses). MorphoLex (Sánchez-Gutiérrez et al.,
+2018) provides derivational morphology for 68,624
+entries from the English Lexicon Project (Balota
+et al., 2007). Here we only consider those with a
+concatenative parse (i.e. no overlapping tokens),
+resulting in 12,028 entries. MorphyNet (Batsuren
+et al., 2021) provides derivational and inflectional
+morphology for words across 15 languages, ex-
+panding the UniMorph dataset (McCarthy et al.,
+2020). Taking only those derivational morphology
+entries in English with a concatenative parse gives
+193,945 entries. The DagoBERT dataset (Hof-
+mann et al., 2020) comprises 279,443 words con-
+taining low-frequency derivatives, taken from Red-
+dit posts. Again, we take those with a concatenative
+parse, giving 268,513 entries.
+We evaluate a tokeniser on these datasets using
+the evaluation method introduced by Creutz et al.
+(2004), which produces metrics by comparing the
+boundaries of a generated tokenisation with a gold
+standard reference: false negatives are boundaries
+appearing in the reference but not in the generated11432
+tokenisation, whilst false positives are boundaries
+appearing in the generated tokenisation but not in
+the reference. Because it makes sense to store com-
+mon words as single tokens in the vocabulary, even
+if they can be decomposed into morphemes, we re-
+port precision along with F1 as a potentially more
+meaningful metric, since this allows undersegmen-
+tation whilst penalising oversegmentation. We also
+compute the mean sequence length (number of to-kens) for each tokeniser across each dataset. Re-
+sults are shown in Table 1. Here, and throughout,
+the prime symbol () denotes the given algorithm
+modified to always treat spaces as individual to-
+kens.
+The general trend is that Unigram outperforms
+BPE (consistent with findings by Bostrom and Dur-
+rett 2020, Hofmann et al. 2022), with the mod-
+ified algorithms performing better than their de-
+fault counterparts — the average F1 scores across
+the four datasets are 43.0, 50.9, 59.7, and 62.4
+for the four algorithms BPE, BPE, Unigram, and
+Unigram, respectively. On the MorphoLex dataset,
+however, the default Unigram algorithm performs11433the best. This is also the only dataset where default
+Unigram gives a shorter mean sequence length than
+Unigram. To further investigate this, we evaluate
+on the subsets of the data containing only prefixed
+and only suffixed entries, shown in Table 2. We
+can see that Unigramperforms best on prefixed
+entries, but worse than default Unigram on suffixed
+entries. Since the dataset consists of many more
+entries containing suffixes than those containing
+prefixes (7,422 vs 2,692), this could explain the
+performance difference. Because the correct to-
+kenisation of prefixed words is particularly impor-
+tant (Section 2), we believe that this performance
+trade-off is beneficial. In Section 5, we confirm
+this through evaluation on downstream tasks.
+Interestingly, BPEgives the shortest sequence
+length on three of the four datasets, but not the
+most morphologically correct tokenisations. Since
+BPE was developed as a compression algorithm,
+the short sequence lengths are perhaps expected,
+but here we only see a weak correlation between
+sequence length and morphological correctness.
+For a qualitative analysis, we take examples from
+papers that highlight problems with existing to-
+kenisers (Section 2) and generate the output from
+the default and modified algorithms for BPE and
+Unigram, shown in Table 3. These examples illus-
+trate how our modified algorithms are able to gen-
+erate improved tokenisations for complex words.
+For example, whereas the default Unigram algo-
+rithm tokenises “unicycle” into “_un” “i” “cycle”,
+which is misleading as the string “un” does not
+have its typical semantic role, our modified Uni-
+gram algorithm tokenises it more meaningfully into
+“uni” “cycle”. Also, the modified algorithms explic-
+itly create links between words containing prefixes
+and their bases. For the words “accessible” and
+“unaccessible”, the modified algorithms tokenise
+the subword “accessible” identically in both cases.
+The default Unigram and BPE algorithms do cor-
+rectly split the prefix “un”, but the rest of the word
+is tokenised differently, which is problematic, and
+even if the tokenisation was equivalent, the inclu-
+sion of the space symbol means there would be
+no link between these forms (Section 2). We note
+that our modified algorithms are not immune to
+oversegmentation, with Unigramtokenising “re-
+sponsiveness” into seven tokens, although this is
+arguably inevitable with a limited vocabulary size.In Table 4, we show the same qualitative analysis
+between the default and modified WordPiece algo-
+rithms, finding parallels with default and modified
+BPE.
+We investigate the vocabularies of the default
+and modified algorithms, shown in Table 5. We
+remove the tokens “[CLS]”, “[SEP]”, and “[UNK]”
+from the vocabularies. For the default algorithms,
+we also remove tokens that are duplicates apart
+from prepended space symbols, and we find that
+there is significant vocabulary degeneracy (8.7%
+and 9.1% for BPE and Unigram, respectively). We
+also find that a large percentage of the vocabulary
+is transferred over from the default to the modified
+algorithm (90.0% and 90.1% for BPE and Unigram,
+respectively). Additionally, we see that all of the
+algorithms have a similar number of prefixes in
+their vocabularies, which suggests the tokenisation
+algorithm plays an important role, as performance
+differences on handling prefixes are large (Table 2)
+despite similar vocabularies. This is supported by
+work by Hofmann et al. (2021), who find that em-
+ploying a fixed vocabulary in a morphologically
+correct way leads to performance improvements.
+We also see, however, that Unigramhas fewer suf-
+fixes in its vocabulary than default Unigram, which
+reflects the performance difference seen in Table 2.
+We note that an interesting result of our modifica-
+tions is an improvement at word segmentation. As
+an example, the outputs of the default and modified
+Unigram algorithms when passed the concatenated
+sentence “thisisasentencethatneedstobesegmented”
+are:
+5 Extrinsic Evaluation:
+Pretrain-Finetune
+Given the improved intrinsic performance of our
+algorithms, we wish to evaluate how this impacts
+the extrinsic performance of NLP models, both in
+general, and in particular on tasks involving com-
+plex words. As in Section 4, we train the default
+and modified BPE and Unigram algorithms on 1
+million sentences from English Wikipedia, with a
+fixed vocabulary size of 16,000, but we also im-
+plement a variant of our modified algorithm that
+removes spaces as a post-processing step. The rea-
+soning behind this is that it reduces the sequence11434
+length significantly with minimal information loss,
+and more closely mirrors existing models which
+have no explicit space information. Example to-
+kenisations for the Unigram algorithms given the
+input “This is an input sentence.” are:
+For each of the tokenisers, we pretrain RoBERTa
+(base) on the full text of English Wikipedia, and
+then finetune on downstream tasks, keeping all hy-
+perparameters fixed, changing only the tokenisa-
+tion algorithm used. For evaluation of the models
+in a general domain, we use the GLUE benchmark
+(Wang et al., 2018), excluding WNLI. For evalu-
+ation in specifically handling complex words, we
+use the two Superbizarre topicality tasks (Hofmann
+et al., 2021), which require the binary classification
+of derivationally complex English words.
+Over the whole of the English Wikipedia data,
+the sequence lengths for each of the tokenisation
+approaches are:As in the evaluation in Table 1, the modified
+models without spaces give shorter sequences
+than their default counterparts, with BPEwithout
+spaces giving the shortest mean sequence length.
+The difference in sequence lengths of the models
+means a difference in number of updates per epoch
+during pretraining. Hence, fixing the number of
+updates (and thus training time) will advantage
+models with shorter sequence lengths, especially
+disadvantaging the models that include spaces. Be-
+cause of this, we perform two evaluations: one
+fixing the number of pretraining updates, and one
+fixing the number of pretraining epochs.
+Due to computational constraints, we only ran
+pretraining once for each model. For finetuning,
+we ran each experiment with 10 different seeds,
+reporting the mean development result and standard
+deviation. Results are shown in Table 6 and Table 7
+for fixed updates and fixed epochs, respectively.
+Full training procedure is given in Appendix A.
+On the Superbizarre datasets, we can see that Un-
+igram outperforms BPE, with Unigramno spaces
+performing significantly better than all other mod-
+els using a Welch’s t-test ( p < 0.05), see Ap-
+pendix C. Note that DelBERT (Hofmann et al.,
+2021), a model which is passed the input segmented
+by a morphological algorithm, achieves 73.1 on the
+Arxiv dev set and 72.3 on the Arxiv test set, both
+worse than our (unsupervised) model, although Del-
+BERT outperforms our best models on the Reddit
+task, achieving 69.6 and 70.1 on the dev and test
+sets, respectively.
+On the mean GLUE benchmark, the modified
+models without spaces perform as well or better
+than their default counterparts, with Unigramper-
+forming the best when both updates and epochs
+are fixed. However, this result is not statistically11435
+significant (see Appendix C), and over the individ-
+ual GLUE tasks the best performing models vary,
+with high variances across seeds on some tasks
+due to the small dataset sizes (see Appendix B).
+Since the GLUE tasks do not rely on handling com-
+plex words, a significant performance difference
+is probably not expected, but we see no drop in
+performance with the modified algorithms.The modified models that include spaces per-
+form poorly on the GLUE benchmark, even when
+the number of epochs is fixed rather than updates,
+meaning they are trained for ∼65% more updates
+than the modified models without spaces. This
+suggests that this method of including spaces as ad-
+ditional tokens is suboptimal for general language
+tasks, though interestingly Unigramwith spaces
+is the second best performing model across all Su-
+perbizarre datasets. The tokenisers themselves per-
+form splitting on spaces as a first step, so addition-
+ally including spaces may be simply passing noise
+to the model for the masked language modelling
+task, especially due to the high frequency of spaces.
+This means the pretraining loss decreases rapidly
+due to space prediction, but plateaus earlier (see
+Appendix A). Due to the much greater sequence
+lengths, the models that include spaces also discard
+examples that are too long during finetuning, which
+could lead to worse results.
+6 Related Work
+There are previous works that have performed con-
+trolled extrinsic comparisons of existing subword
+tokenisation algorithms (BPE, Unigram, and Word-
+Piece), and have provided results which we relate
+here to our own findings. Gallé (2019) investi-
+gates various compression algorithms for tokeni-
+sation, including BPE, and finds an inverse link
+between mean tokens per sentence and transla-
+tion quality, hypothesising that the compression
+capability of BPE leads to its effectiveness in NLP
+tasks. In our experiments we find that Unigram
+outperforms BPEon the complex words tasks, and11436Epochs GLUE Superbizarre Reddit Superbizarre Arxiv
+Dev Test Dev Test
+DelBERT (supervised) - - 69.6 70.1 73.1 72.3
+BPE 27 81.6 66.8 66.6 71.1 70.2
+BPE16 79.2 66.6 66.2 70.3 69.3
+BPEno spaces 28 81.7 67.2 66.9 70.9 70.0
+Unigram 27 81.5 68.0 67.8 72.2 71.4
+Unigram16 78.4 68.2 68.2 72.5 71.6
+Unigramno spaces 27 81.9 68.8 68.8 73.0 72.3
+Updates GLUE Superbizarre Reddit Superbizarre Arxiv
+Dev Test Dev Test
+DelBERT (supervised) - - 69.6 70.1 73.1 72.3
+BPE 109,761 81.5 67.1 66.8 71.0 70.1
+BPE177,845 79.5 66.8 66.5 70.5 69.8
+BPEno spaces 106,485 81.5 67.1 67.1 70.8 70.1
+Unigram 108,606 81.6 67.9 67.9 72.2 71.6
+Unigram179,909 79.1 68.3 68.3 72.5 71.8
+Unigramno spaces 108,441 81.8 68.8 69.0 73.2 72.5
+there to be no significant difference between them
+on the general language understanding (GLUE)
+tasks. This is despite Unigramhaving a longer se-
+quence length, suggesting this factor is not wholly
+indicative of model performance. However, if we
+look at the results for fixed pretraining updates,
+we do see a slight negative correlation between
+sequence length and performance on the Super-
+bizarre datasets, and a very strong negative corre-
+lation on the GLUE benchmark, though this is
+skewed by the models including spaces perform-
+ing very poorly. Intrinsically, we see a correlation
+(albeit weak) between sequence length and mor-
+phological correctness (Section 4). Bostrom and
+Durrett (2020) compare Unigram and BPE, finding
+that Unigram generates more morphologically cor-rect tokenisations and gives improved downstream
+task performance. Whilst we saw similar improve-
+ments in intrinsic performance, we were unable
+to replicate the performance difference on MNLI
+that they found, finding no significant difference
+in performance (see Appendix B). We did not per-
+form evaluation on the other two English datasets
+they used. Hofmann et al. (2022) corroborate these
+intrinsic results, additionally finding the morpho-
+logical quality of WordPiece to lie in between that
+of BPE and Unigram, reflecting our own findings
+(Section 4). Wei et al. (2021) perform comparison
+between byte-level BPE and byte-level Unigram,
+finding BPE to perform better than Unigram across
+seven languages on the XNLI dataset, which is
+contrary to our findings and those of Bostrom and
+Durrett (2020) and Hofmann et al. (2022).
+There have also been some recent attempts to11437develop improved subword tokenisation methods.
+Hofmann et al. (2021) introduce DelBERT, which
+takes input words tokenised according to gold stan-
+dard morphological references, with an unchanged
+vocabulary. They find that this improves perfor-
+mance on their Superbizarre datasets (Section 5).
+Hofmann et al. (2022) also introduce FLOTA (Few
+Longest Token Approximation), which improves
+the performance of BERT, GPT-2, and XLNET at
+classifying ArXiv papers into their subareas from
+the title. Yehezkel and Pinter (2022) introduce a
+context-aware tokeniser, SaGe, which they find im-
+proves performance over BPE on GLUE tasks, the
+Turkish subset of XLNI, and NER in both Turkish
+and English. There are also alternative subword
+tokenisation algorithms which have a history of use
+in machine translation tasks, including Morfessor
+(Creutz and Lagus, 2002) and its successors (Virpi-
+oja et al. 2013, Grönroos et al. 2020), and Dynamic
+Programming Encoding (DPE) (He et al., 2020b).
+(See Mielke et al. 2021 for a more extensive re-
+view.)
+For all of these approaches, spaces still occur
+as the first character of start-of-word tokens, and
+we believe this hinders performance: our alterna-
+tive treatment of spaces could be combined with
+these algorithms, and the impact on performance
+investigated.
+Finally, we note that Wei et al. (2021) experi-
+ment with different methods of handling spaces
+within their byte-level BPE algorithm which ap-
+pear similar to those implemented here, although
+they find these alternatives perform worse than the
+default on XNLI. They do not release code for
+their experiments so unfortunately we are unable
+to make a controlled comparison.
+7 Conclusion and Future Work
+We hypothesise that problems with current tokeni-
+sation algorithms arise from allowing tokens to
+include spaces, and thus experiment with an al-
+ternative tokenisation approach where spaces are
+always treated as individual tokens. We find that
+this leads to improved performance on NLP tasks
+involving complex words, whilst having no detri-
+mental effect on performance in general natural
+language understanding tasks. Whilst our work
+focuses on BPE and Unigram, our modifications
+can be applied to any existing subword tokenisa-
+tion algorithm, including WordPiece, and hence
+to any transformer-based model. Also, althoughour experiments have only been in English, the
+algorithms used are unsupervised and language-
+independent and our results should extend to other
+languages.
+Our best-performing models use lossy tokeni-
+sation (removing the space tokens as a post-
+processing step), which may not be ideal for all
+tasks. We did not perform evaluation on sequence-
+to-sequence tasks, and indeed the subword tokeni-
+sation algorithms discussed here were introduced
+in the field of NMT, where space information needs
+to be generated in the output. Future work could
+thus look at alternative methods for including space
+information that maintain the performance gains
+seen here whilst keeping tokenisation lossless.
+Acknowledgements
+This work was partially supported by the CDT
+in Speech and Language Technologies and
+their Applications funded by UKRI (grant num-
+ber EP/S023062/1) and the UK EPSRC grant
+EP/T02450X/1. We thank the reviewers for their
+helpful feedback.
+Limitations
+The finetuning tasks investigated in this paper are
+all sequence classification, which is a significant
+limitation of the evaluation. In order to defini-
+tively compare our modified tokenisation algo-
+rithms with the defaults, a more thorough evalu-
+ation across many types of encoder-architecture
+NLP tasks would be required (e.g. token classi-
+fication, question answering, multiple-choice). It
+is also worth noting that the Superbizarre dataset
+consists of entries constructed using elements from
+BERT’s WordPiece vocabulary. For their purposes,
+this is a benefit as it does not unfairly disadvantage
+BERT, but for our purposes it limits the general-
+ity of the results obtained. In this paper, we have
+chosen a single vocabulary size for all of our evalua-
+tion, which limits the robustness of our results. For
+the intrinsic evaluation, a range of vocabulary sizes
+could be chosen and evaluated. For extrinsic evalu-
+ation, we are limited by the computational expense
+of pretraining language models, but it is important
+to note that we don’t know how our results will
+change if the vocabulary size is altered. It would
+also be beneficial to look at how our modified to-
+kenisers work on morphologically rich languages,
+and in a multilingual setting, which would further
+increase the robustness of the results.11438References1143911440A Training Details
+Hyperparameters for tokenisation, pretraining, fine-
+tuning are shown in Table 8, Table 9 and Table 10,
+respectively. We did not use stochastic tokenisation
+(BPE-dropout or subword regularisation).
+A.1 Pretraining
+Pretraining was run on 8 NVIDIA Tesla V100s. We
+ran pretraining on the text of English Wikipedia.
+A Wikipedia dump was processed with the Python
+package WikiExtractor, and then split into sen-
+tences using BlingFire. In order to perform a
+fair comparison across models, we removed all
+sentences with sequence lengths longer than 510
+when tokenised with the modified models includ-
+ing spaces. However, this was a very small amountof the data ( ∼0.002%) and would therefore have a
+negligible effect on performance.
+Loss curves are shown in Figure 3.
+A.2 Finetuning
+Finetuning was run on a single NVIDIA Tesla
+V100. All finetuning experiments were ran with a
+batch size of 32, and a peak learning rate of 2e-3
+with linear warm-up for 6% of updates, then lin-
+ear decay to 0. All other parameters were kept
+the same as for pretraining. Experiments were ran
+for 20 epochs, and the best performing epoch was
+taken, with 10 random seeds per model. For the
+Superbizarre datasets, we took the best performing
+epoch for each seed on the dev set and evaluated it
+on the test set.
+B Detailed Results
+Detailed results are shown in Table 11 and Table 12
+for fixed pretraining updates and fixed pretraining
+epochs, respectively. The standard deviations on
+the mean GLUE score are calculated assuming zero
+covariance between tasks.
+C Significance Tests
+Here we give full Welch’s t-test results comparing
+the best performing model to all the others for each
+dataset, shown in Table 13 and Table 14 for fixed
+pretraining updates and fixed pretraining epochs,
+respectively.1144111442GLUE Superbizarre Reddit Superbizarre Arxiv
+Dev Test Dev Test
+BPE 0.61 2.15e-05 1.34e-05 5.70e-15 5.26e-13
+BPE2.7e-05 1.50e-16 5.26e-14 3.82e-17 8.61e-15
+BPEno spaces 0.58 7.22e-14 9.04e-12 1.75e-15 5.54e-14
+Unigram 0.36 2.27e-08 1.69e-06 5.15e-07 1.11e-07
+Unigram6.0e-02 6.22e-04 7.83e-05 1.74e-05 6.05e-06
+GLUE Superbizarre Reddit Superbizarre Arxiv
+Dev Test Dev Test
+BPE 0.41 1.47e-13 2.25e-13 2.77e-15 1.48e-13
+BPE8.72e-05 1.19e-12 7.84e-16 3.46e-16 4.53e-14
+BPEno spaces 0.41 1.28e-12 2.01e-15 1.21e-15 2.35E-12
+Unigram 0.66 2.92e-08 1.19e-09 3.96e-09 8.78e-08
+Unigram2.8e-06 1.45e-02 1.69e-06 1.55e-06 3.90e-0411443

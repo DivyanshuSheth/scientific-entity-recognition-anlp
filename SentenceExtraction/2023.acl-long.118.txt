@@ -1,1 +1,1006 @@
-2116 Proceedings of the 61st Annual Meeting of the Association for Computational Linguistics Volume 1 : Long Papers , pages 2116–2138 July 9 - 14 , 2023 © 2023 Association for Computational Linguistics 2117 2118 2119 2120 2121 2122 2123 2124 2125 2126 2127 2128 2129 2130 2131 2132 2133 2134 2135 2136 2137 2138 
+
+Shangbin FengZhaoxuan TanWenqian ZhangZhenyu LeiYulia TsvetkovUniversity of WashingtonXi’an Jiaotong University
+Abstract
+With the advent of pretrained language mod-
+els (LMs), increasing research efforts have
+been focusing on infusing commonsense and
+domain-speciﬁc knowledge to prepare LMs
+for downstream tasks. These works attempt
+to leverage knowledge graphs, the de facto
+standard of symbolic knowledge representation,
+along with pretrained LMs. While existing ap-
+proaches have leveraged external knowledge,
+it remains an open question how to jointly in-
+corporate knowledge graphs representing vary-
+ing contexts—from local (e.g., sentence), to
+document-level, to global knowledge—to en-
+able knowledge-rich exchange across these con-
+texts. Such rich contextualization can be es-
+pecially beneﬁcial for long document under-
+standing tasks since standard pretrained LMs
+are typically bounded by the input sequence
+length. In light of these challenges, we pro-
+pose KALM , aKnowledge- Aware Language
+Model that jointly leverages knowledge in lo-
+cal, document-level, and global contexts for
+long document understanding. KALM ﬁrst en-
+codes long documents and knowledge graphs
+into the three knowledge-aware context repre-
+sentations. It then processes each context with
+context-speciﬁc layers, followed by a “con-
+text fusion” layer that facilitates knowledge
+exchange to derive an overarching document
+representation. Extensive experiments demon-
+strate that KALM achieves state-of-the-art per-
+formance on six long document understanding
+tasks and datasets. Further analyses reveal that
+the three knowledge-aware contexts are com-
+plementary and they all contribute to model
+performance, while the importance and infor-
+mation exchange patterns of different contexts
+vary with respect to different tasks and datasets.1 Introduction
+Large language models (LMs) have become the
+dominant paradigm in NLP research, while knowl-
+edge graphs (KGs) are the de facto standard of
+symbolic knowledge representation. Recent ad-
+vances in knowledge-aware NLP focus on combin-
+ing the two paradigms ( Wang et al. ,2021b ;Zhang
+et al.,2021 ;He et al. ,2021 ), infusing encyclopedic
+(Vrande ˇci´c and Krötzsch ,2014 ;Pellissier Tanon
+et al. ,2020 ), commonsense ( Speer et al. ,2017 ),
+and domain-speciﬁc ( Feng et al. ,2021 ;Chang
+et al. ,2020 ) knowledge with LMs. Knowledge-
+grounded models achieved state-of-the-art perfor-
+mance in tasks including question answering ( Sun
+et al. ,2022 ), commonsense reasoning ( Kim et al. ,
+2022 ;Liu et al. ,2021 ), and social text analysis
+(Zhang et al. ,2022 ;Hu et al. ,2021 ).
+Prior approaches to infusing LMs with knowl-
+edge typically focused on three hitherto orthogonal
+directions: incorporating knowledge related to lo-
+cal (e.g., sentence-level), document-level, or global
+context. Local context approaches argue that sen-
+tences mention entities, and the external knowledge
+of entities, such as textual descriptions ( Balachan-
+dran et al. ,2021 ;Wang et al. ,2021b ) and metadata
+(Ostapenko et al. ,2022 ), help LMs realize they are
+more than tokens. Document-level approaches ar-
+gue that core idea entities are repeatedly mentioned
+throughout the document, while related concepts
+might be discussed in different paragraphs. These
+methods attempt to leverage entities and knowledge
+across paragraphs with document graphs ( Feng
+et al. ,2021 ;Zhang et al. ,2022 ;Hu et al. ,2021 ).
+Global context approaches argue that unmentioned
+yet connecting entities help connect the dots for
+knowledge-based reasoning, thus knowledge graph
+subgraphs are encoded with graph neural networks
+alongside textual content ( Zhang et al. ,2021 ;Ya-
+sunaga et al. ,2021 ). However, despite their indi-
+vidual pros and cons, how to integrate the three2116document contexts in a knowledge-aware way re-
+mains an open problem.
+Controlling for varying scopes of knowledge and
+context representations could beneﬁt numerous lan-
+guage understanding tasks, especially those cen-
+tered around long documents. Bounded by the
+inherent limitation of input sequence length, exist-
+ing knowledge-aware LMs are mostly designed to
+handle short texts ( Wang et al. ,2021b ;Zhang et al. ,
+2021 ). However, processing long documents con-
+taining thousands of tokens ( Beltagy et al. ,2021 )
+requires attending to varying document contexts,
+disambiguating long-distance co-referring entities
+and events, and more.
+In light of these challenges, we propose KALM ,
+aKnowledge- Aware Language Model for long
+document understanding. Speciﬁcally, KALM ﬁrst
+derives three context- and knowledge-aware rep-
+resentations from the long input document and
+an external knowledge graph: the local context
+represented as raw text, the document-level con-
+text represented as a document graph, and the
+global context represented as a knowledge graph
+subgraph. KALM layers then encode each con-
+text with context-speciﬁc layers, followed by our
+proposed novel ContextFusion layers to enable
+knowledge-rich information exchange across the
+three knowledge-aware contexts. A uniﬁed docu-
+ment representation is then derived from context-
+speciﬁc representations that also interact with other
+contexts. An illustration of the proposed KALM is
+presented in Figure 1.
+While KALM is a general method for long doc-
+ument understanding, we evaluate the model on
+six tasks and datasets that are particularly sensi-
+tive to broader contexts and external knowledge:
+political perspective detection, misinformation de-
+tection, and roll call vote prediction. Extensive
+experiments demonstrate that KALM outperforms
+pretrained LMs, task-agnostic knowledge-aware
+baselines, and strong task-speciﬁc baselines on all
+six datasets. In ablation experiments, we further
+establish KALM’s ability to enable information
+exchange, better handle long documents, and im-
+prove data efﬁciency. In addition, KALM and the
+proposed ContextFusion layers reveal and help in-
+terpret the roles and information exchange patterns
+of different contexts.2 KALM Methodology
+2.1 Problem Deﬁnition
+Letd={d, . . . ,d}denote a document with
+nparagraphs, where each paragraph contains a
+sequence of ntokens d={w, . . . , w}.
+Knowledge-aware long document understanding
+assumes the access to an external knowledge graph
+KG= (E,R,A, ϵ, φ), where E={e, . . . , e}
+denotes the entity set, R={r, . . . , r}de-
+notes the relation set, Ais the adjacency ma-
+trix where a=kindicates (e, r, e)∈KG,
+ϵ(·) :E → strandφ(·) :R → strmap the entities
+and relations to their textual descriptions.
+Given pre-deﬁned document labels, knowledge-
+aware natural language understanding aims to learn
+document representations and classify dinto its
+corresponding label with the help of KG.
+2.2 Knowledge-Aware Contexts
+We hypothesize that a holistic representation of
+long documents should incorporate contexts and
+relevant knowledge at three levels: the local context
+(e.g., a sentence with descriptions of mentioned en-
+tities), the broader document context (e.g., a long
+document with cross-paragraph entity reference
+structure), and the global/external context repre-
+sented as external knowledge (e.g., relevant knowl-
+edge base subgraphs). Each of the three contexts
+uses different granularities of external knowledge,
+while existing works fall short of jointly integrat-
+ing the three types of representations. To this end,
+KALM ﬁrstly employs different ways to introduce
+knowledge in different levels of contexts.
+Local context. Represented as the raw text of
+sentences and paragraphs, the local context models
+the smallest unit in long document understanding.
+Prior works attempted to add sentence metadata
+(e.g., tense, sentiment, topic) ( Zhang et al. ,2022 ),
+adopt sentence-level pretraining tasks based on KG
+triples ( Wang et al. ,2021b ), or leverage knowledge
+graph embeddings along with textual representa-
+tions ( Hu et al. ,2021 ). While these methods were
+effective, in the face of LM-centered NLP research,
+they are ad-hoc add-ons and not fully compatible
+with existing pretrained LMs. As a result, KALM
+proposes to directly concatenate the textual descrip-
+tions of entities ϵ(e)to the paragraph if eis men-
+tioned. In this way, the original text is directly
+augmented with the entity descriptions, informing
+the LM that entities such as "Kepler" are more than2117
+mere tokens and help to combat the spurious corre-
+lations of pretrained LMs ( McMilin ). For each aug-
+mented paragraph d, we adopt LM(·)and mean
+pooling to extract a paragraph representation. We
+use pretrained BART encoder ( Lewis et al. ,2020 )
+asLM(·)without further notice. We also add a
+fusion token at the beginning of the paragraph se-
+quence for information exchange across contexts.
+After processing all nparagraphs, we obtain the
+local context representation Tas follows:
+T={t, . . . ,t}
+={θ,LM(d), . . . , LM(d)}
+where θdenotes a randomly initialized vector
+of the fusion token in the local context and the
+superscript (0)indicates the 0-th layer.
+Document-level context. Represented as the
+structure of the full document, the document-
+level context is responsible for modeling cross-
+paragraph entities and knowledge on a document
+level. While existing works attempted to incorpo-
+rate external knowledge in documents via docu-
+ment graphs ( Feng et al. ,2021 ;Hu et al. ,2021 ),
+they fall short of leveraging the overlapping entities
+and concepts between paragraphs that underpin the
+reasoning of long documents. To this end, we pro-
+pose knowledge coreference , a simple and effective
+mechanism for modeling text-knowledge interac-
+tion on the document level. Speciﬁcally, a docu-
+ment graph with n+ 1nodes is constructed, con-
+sisting of one fusion node and nparagraph nodes.
+If paragraph iandjboth mention entity ein the
+external KB, node iandjin the document graph
+are connected with relation type k. In addition, thefusion node is connected to every paragraph node
+with a super-relation. As a result, we obtain the ad-
+jacency matrix of the document graph A. Paired
+with the knowledge-guided GNN to be introduced
+in Section 2.3, knowledge coreference enables the
+information ﬂow across paragraphs guided by ex-
+ternal knowledge. Node feature initialization of the
+document graph is as follows:
+G={g, . . . ,g}
+={θ,LM(d), . . . , LM(d)}
+Global context. Represented as external knowl-
+edge graphs, the global context is responsible for
+leveraging unseen entities and facilitating KG-
+based reasoning. Existing works mainly focused on
+extracting knowledge graph subgraphs ( Yasunaga
+et al.,2021 ;Zhang et al. ,2021 ) and encoding them
+alongside document content. Though many tricks
+are proposed to extract and prune KG subgraphs,
+in KALM, we employ a straightforward approach:
+for all mentioned entities in the long document,
+KALM merges their k-hop neighborhood to obtain
+a knowledge graph subgraph. We use k= 2follow-
+ing previous works ( Zhang et al. ,2021 ;Vashishth
+et al. ,2019 ), striking a balance between KB struc-
+ture and computational efﬁciency while KALM
+could support any ksettings. A fusion entity is
+then introduced and connected with every other
+entity, resulting in a connected graph. In this way,
+KALM cuts back on the preprocessing for model-
+ing global knowledge and better preserve the infor-
+mation in the KG. Knowledge graph embedding
+methods ( Bordes et al. ,2013 ) are then adopted to
+initialize node features of the KG subgraph:2118K={k, . . . ,k}
+={θ,KGE( e), . . . , KGE( e)}
+where KGE( ·)denotes the knowledge graph em-
+beddings trained on the original KG, |ρ(d)|indi-
+cates the number of mentioned entities identiﬁed in
+document d. We use TransE ( Bordes et al. ,2013 )
+to learn KB embeddings and use them for KGE( ·),
+while the knowledge base embeddings are kept
+frozen in the KALM training process.
+2.3 KALM Layers
+After obtaining the local, document-level, and
+global context representations of long documents,
+we employ KALM layers to learn document repre-
+sentations. Speciﬁcally, each KALM layer consists
+of three context-speciﬁc layers to process each con-
+text. A ContextFusion layer is then adopted to
+enable the knowledge-rich information exchange
+across the three contexts.
+2.3.1 Context-Speciﬁc Layers
+Local context layer. The local context is rep-
+resented as a sequence of vectors extracted from
+the knowledge-enriched text with the help of pre-
+trained LMs. We adopt transformer encoder layers
+(Vaswani et al. ,2017 ) to encode the local context:
+˜T={˜t, . . . , ˜t}
+=ϕ/parenleftBig
+TrmEnc( {t, . . . ,t})/parenrightBig
+where ϕ(·)denotes non-linearity, TrmEnc denotes
+the transformer encoder layer, and ˜tdenotes the
+transformed representation of the fusion token. We
+omit the layer subscript (ℓ)for brevity.
+Document-level context layer. The document-
+level context is represented as a document graph
+based on knowledge coreference. To better exploit
+the entity-based relations in the document graph,
+we propose a knowledge-aware GNN architecture
+to enable knowledge-guided message passing on
+the document graph:
+˜G={˜g, . . . , ˜g= GNN/parenleftBig
+{g, . . . ,g}/parenrightBig
+where GNN( ·)denotes the proposed knowledge-
+guided graph neural networks as follows:˜g=ϕ/parenleftBig
+αΘg+/summationdisplayΘg/parenrightBig
+where αdenotes the knowledge-guided attention
+weight and is deﬁned as follows:
+where ˜gdenotes the transformed representation of
+the fusion node, aandΘare learnable parameters,
+ais the i-th row and j-th column value of adja-
+cency matrix Aof the document graph, ELU de-
+notes the exponential linear unit activation function
+(Clevert et al. ,2015 ), and f(·)is a learnable linear
+layer. Θf(KGE( a))is responsible for enabling
+the knowledge-guided message passing on the doc-
+ument graph, enabling KALM to incorporate the
+entity and concept patterns in different paragraphs
+and their document-level interactions.
+Global context layer. The global context is repre-
+sented as a relevant knowledge graph subgraph. We
+follow previous works and adopt GATs ( Veliˇckovi ´c
+et al.,2018 ) to encode the global context:
+˜K={˜k, . . . , ˜k}
+= GAT/parenleftBig
+{k, . . . ,k}/parenrightBig
+where ˜kdenotes the transformed representation
+of the fusion entity.
+2.3.2 ContextFusion Layer
+The local, document, and global contexts model
+external knowledge within sentences, across the
+document, and beyond the document. These con-
+texts are closely connected and a robust long doc-
+ument understanding method should reﬂect their
+interactions. Existing approaches mostly leverage
+only one or two of the contexts ( Wang et al. ,2021b ;
+Feng et al. ,2021 ;Zhang et al. ,2022 ), falling short
+of jointly leveraging the three knowledge-aware
+contexts. In addition, they mostly adopted direct
+concatenation or MLP layers ( Zhang et al. ,2022 ,
+2021 ;Hu et al. ,2021 ), falling short of enabling
+context-speciﬁc information to ﬂow across con-
+texts in a knowledge-rich manner. As a result, we
+propose the ContextFusion layer to tackle these
+challenges. We ﬁrstly take a local perspective and2119extract the representations of the fusion tokens,
+nodes, and entities in each context:
+/bracketleftBig
+t,g,k/bracketrightBig
+=/bracketleftBig
+˜t,˜g,˜k/bracketrightBig
+We then take a global perspective and use
+the fusion token/node/entity as the query to con-
+duct attentive pooling ap(·,·)across all other to-
+kens/nodes/entities in each context:
+/bracketleftBig
+t,g,k/bracketrightBig
+=/bracketleftBig
+ap/parenleftbig˜t,{˜t}/parenrightbig
+,
+ap/parenleftbig˜g,{˜g}/parenrightbig
+,ap/parenleftbig˜k,{˜k}/parenrightbig/bracketrightBig
+where attentive pooling ap(·,·)is deﬁned as:
+ap/parenleftbig
+q,{k}/parenrightbig
+=/summationdisplayexp/parenleftbig
+q·k/parenrightbig
+/summationtextexp/parenleftbig
+q·k/parenrightbigk
+In this way, the fusion token/node/entity in each
+context serves as the information exchange portal.
+We then use a transformer encoder layer to enable
+information exchange across the contexts:
+/bracketleftBig
+˜t,˜g,˜k,˜t,˜g,˜k/bracketrightBig
+=ϕ/parenleftBig
+TrmEnc/parenleftBig/bracketleftBig
+t,g,k,t,g,k/bracketrightBig/parenrightBig/parenrightBig
+As a result, ˜t,˜g, and ˜kare the representa-
+tions of the fusion token/node/entity that incorpo-
+rates information from other contexts. We formu-
+late the output of the l-th layer as follows:
+T={˜t,˜t, . . . , ˜t},
+G={˜g,˜g, . . . , ˜g},
+K={˜k,˜k, . . . , ˜k}
+Our proposed ContextFusion layer is interactive
+since it enables the information to ﬂow across dif-
+ferent document contexts, instead of direct concate-
+nation or hierarchical processing. The attention
+weights in TrmEnc( ·)of the ContextFusion layer
+could also provide insights into the roles and im-
+portance of each document context, which will be
+further explored in Section 3.3. To the best of
+our knowledge, KALM is the ﬁrst work to jointly
+consider the three levels of document context and
+enable information exchange across document con-
+texts.2.4 Learning and Inference
+After a total of PKALM layers, we obtain the ﬁ-
+nal document representation as/bracketleftBig
+˜t,˜g,˜k/bracketrightBig
+.
+Given the document label a∈ A , the la-
+bel probability is formulated as p(a|d)∝
+exp/parenleftbig
+MLP([˜t,˜g,˜k])/parenrightbig
+. We then opti-
+mize KALM with the cross entropy loss func-
+tion. At inference time, the predicted label is
+argmaxp(a|d).
+3 Experiment
+3.1 Experiment Settings
+Tasks and Datasets. We propose KALM, a gen-
+eral method for knowledge-aware long document
+understanding. We evaluate KALM on three tasks
+that especially beneﬁt from external knowledge
+and broader context: political perspective detec-
+tion, misinformation detection, and roll call vote
+prediction. We follow previous works to adopt Se-
+mEval ( Kiesel et al. ,2019 ) and Allsides ( Li and
+Goldwasser ,2019 ) for political perspective detec-
+tion, LUN ( Rashkin et al. ,2017 ) and SLN ( Rubin
+et al. ,2016 ) for misinformation detection, and the
+2 datasets proposed in Mou et al. (2021 ) for roll
+call vote prediction. For external KGs, we follow
+existing works to adopt the KGs in KGAP ( Feng
+et al. ,2021 ), CompareNet ( Hu et al. ,2021 ), and
+ConceptNet ( Speer et al. ,2017 ) for the three tasks.
+Baseline methods. We compare KALM with
+three types of baseline methods for holistic evalu-
+ation: pretrained LMs, task-agnostic knowledge-
+aware methods, and task-speciﬁc models. For pre-
+trained LMs, we evaluate RoBERTa ( Liu et al. ,
+2019b ), Electra ( Clark et al. ,2019 ), DeBERTa ( He
+et al.,2020 ), BART ( Lewis et al. ,2020 ), and Long-
+Former ( Beltagy et al. ,2020 ) on the three tasks.
+For task-agnostic baselines, we evaluate KGAP
+(Feng et al. ,2021 ), GreaseLM ( Zhang et al. ,2021 ),
+and GreaseLM+ on the three tasks. Task-speciﬁc
+models are introduced in the following sections.
+For pretrained LMs, task-agnostic methods, and
+KALM, we run each method ﬁve times and report
+the average performance and standard deviation.
+For task-speciﬁc models, we compare with the re-
+sults originally reported since we follow the exact
+same experiment settings and data splits.
+3.2 Model Performance
+We present the performance of task-speciﬁc meth-
+ods, pretrained LMs, task-agnostic knowledge-2120
+aware baselines, and KALM in Table 1. We select
+the best-performing task-speciﬁc baseline (Task
+SOTA) and pretrained language model (BestLM),
+while the full results are available in Tables 4,5,
+and6in the appendix. Table 1demonstrates that:
+•KALM consistently outperforms all task-speciﬁc
+models, pretrained language models, and
+knowledge-aware methods on all three tasks and
+six datasets/settings. Statistical signiﬁcance tests
+in Section A.4further demonstrates KALM’s su-
+periority over existing models.
+•Knowledge-aware LMs generally outperform
+pretrained LMs, which did not incorporate exter-
+nal knowledge bases in the pretraining process.
+This suggests that incorporating external knowl-
+edge bases could enrich document representa-
+tions and boost downstream task performance.
+•GreaseLM+ outperforms GreaseLM by adding
+the global context, which suggests the impor-
+tance of jointly leveraging the three document
+contexts. KALM further introduces informationexchange across contexts through the Context-
+Fuion layer and achieves state-of-the-art perfor-
+mance. We further investigate the importance of
+three document contexts and the ContextFusion
+layer in Section 2.3.2 .
+3.3 Context Exchange Study
+By jointly modeling three document contexts and
+employing the ContextFusion layer, KALM facil-
+itates information exchange across the three doc-
+ument contexts. We conduct an ablation study to
+examine whether the contexts and the ContextFu-
+sion layer are essential in the KALM architecture.
+Speciﬁcally, we remove the three contexts one at a
+time and change the ContextFusion layer into MInt
+(Zhang et al. ,2021 ), concatenation, and sum. Table
+2demonstrates that:
+•All three levels of document contexts, local, doc-
+ument, and global, contribute to model perfor-
+mance. These results substantiate the necessity
+of jointly leveraging the three document contexts
+for long document understanding.
+•When substituting our proposed ContextFusion2121
+layers with three existing combination strate-
+gies, MInt ( Zhang et al. ,2021 ), direct concate-
+nation, and summation, performance drops are
+observed across multiple datasets. This suggests
+that the proposed ContextFusionn layer success-
+fully boost model performance by enabling infor-
+mation exchange across contexts.
+In addition to boosting model performance, the
+ContextFusion layer probes how different contexts
+contribute to document understanding. We calcu-
+late the average of attention weights’ absolute val-
+ues of the multi-head attention in the TrmEnc( ·)
+layer of ContextFusion and illustrate in Figure 2,
+which shows that the three contexts’ contribution
+and information exchange patterns vary with re-
+spect to datasets and KALM layers. Speciﬁcally,
+local and global contexts are important for the LUN
+dataset, document and global contexts are impor-
+tant for the task of roll call vote prediction, and the
+SLN dataset equally leverages the three contexts.
+However, for the task of political perspective de-
+tection, the importance of the three aspects varies
+with the depth of KALM layers. This is especially
+salient on SemEval, where KALM ﬁrstly takes a
+view of the whole document, then draws from both
+local and document-level contexts, and closes by
+leveraging global knowledge to derive an overall
+document representation.
+In summary, the ContextFusion layer in KALM
+successfully identiﬁes the relative importance and
+information exchange patterns of the three contexts,
+providing insights into how KALM arrives at the
+conclusion and which context should be the focusof future research. We further demonstrate that
+the role and importance of each context change as
+training progresses in Section A.1in the appendix.
+3.4 Long Document Study
+KALM complements the scarce literature in
+knowledge-aware long document understanding.
+In addition to more input tokens, it often relies on
+more knowledge reference and knowledge reason-
+ing. To examine whether KALM indeed improved
+in the face of longer documents and more exter-
+nal knowledge, we illustrate the performance of
+KALM and competitive baselines with respect to
+document length and knowledge intensity in Figure
+3. Speciﬁcally, we use the number of mentioned
+entities to represent knowledge intensity and the
+number of sentences to represent document length,
+mapping each data point onto a two-dimensional
+space. It is illustrated that while baseline methods
+are prone to mistakes when the document is long
+and knowledge is rich, KALM alleviates this issue
+and performs better in the top-right corner. We
+further analyze KALM and more baseline meth-
+ods’ performance on long documents with great
+knowledge intensity in Figure 6in the appendix.
+3.5 Data Efﬁciency Study
+Existing works argue that introducing knowledge
+graphs to NLP tasks could improve data efﬁciency
+and help alleviate the need for extensive train-
+ing data ( Zhang et al. ,2022 ). By introducing
+knowledge to all three document contexts and
+enabling knowledge-rich context information ex-
+change, KALM might be in a better position to2122
+tackle this issue. To examine whether KALM has
+indeed improved data efﬁciency, we compare the
+performance of KALM with competitive baselines
+when trained on partial training sets and illustrate
+the results in Figure 4. It is demonstrated that while
+performance did not change greatly with 30% to
+100% training data, baseline methods witness sig-
+niﬁcant performance drops when only 10% to 20%
+of data are available. In contrast, KALM maintains
+steady performance with as little as 10% of training
+data.
+4 Related Work
+Knowledge graphs are playing an increasingly im-
+portant role in language models and NLP research.
+Commonsense ( Speer et al. ,2017 ;Ilievski et al. ,
+2021 ;Bosselut et al. ,2019 ;West et al. ,2022 ;Li
+et al.,2022a ) and domain-speciﬁc KGs ( Feng et al. ,
+2021 ;Li et al. ,2022b ;Gyori et al. ,2017 ) serve as
+external knowledge to augment pretrained LMs,
+which achieves state-of-the-art performance on
+question answering ( Zhang et al. ,2021 ;Yasunaga
+et al.,2021 ;Mitra et al. ,2022 ;Bosselut et al. ,2021 ;
+Oguz et al. ,2022 ;Feng et al. ,2022b ;Heo et al. ,
+2022 ;Ma et al. ,2022 ;Li and Moens ,2022 ;Zhou
+and Small ,2019 ), social text analysis ( Hu et al. ,
+2021 ;Zhang et al. ,2022 ;Reddy et al. ,2022 ), com-
+monsense reasoning ( Kim et al. ,2022 ;Jung et al. ,
+2022 ;Amayuelas et al. ,2021 ;Liu et al. ,2022 ),
+and text generation ( Rony et al. ,2022 ). These ap-
+proaches ( Lu et al. ,2022 ;Zhang et al. ,2019 ;Yu
+et al.,2022b ;Sun et al. ,2020 ;Yamada et al. ,2020 ;
+Qiu et al. ,2019a ;Xie et al. ,2022 ) could be mainly
+categorized by the three levels of the context where
+knowledge injection happens.
+Local context approaches focus on entity men-tions and external knowledge in individual sen-
+tences to enable ﬁne-grained knowledge inclusion.
+A straightforward way is to encode KG entities
+with KG embeddings ( Bordes et al. ,2013 ;Lin et al. ,
+2015 ;Cucala et al. ,2021 ;Sun et al. ,2018 ) and in-
+fuse the embeddings with language representations
+(Hu et al. ,2021 ;Feng et al. ,2021 ;Kang et al. ,
+2022 ). Later approaches focus on augmenting pre-
+trained LMs with KGs by introducing knowledge-
+aware training tasks and LM architectures ( Wang
+et al. ,2021b ,a;Sridhar and Yang ,2022 ;Moiseev
+et al.,2022 ;Kaur et al. ,2022 ;Hu et al. ,2022 ;Arora
+et al.,2022 ;de Jong et al. ,2021 ;Meng et al. ,2021 ;
+He et al. ,2021 ). Topic models were also introduced
+to enrich document representation learning ( Gupta
+et al. ,2018 ;Chaudhary et al. ,2020 ;Wang et al. ,
+2018 ). However, local context approaches fall short
+of leveraging inter-sentence and inter-entity knowl-
+edge, resulting in models that could not grasp the
+full picture of the text-knowledge interactions.
+Document-level models analyze documents by
+jointly considering external knowledge across sen-
+tences and paragraphs. The predominant way of
+achieving document-level knowledge infusion is
+through "document graphs" ( Zhang et al. ,2022 ),
+where textual content, external knowledge bases,
+and other sources of information are encoded and
+represented as different components in graphs, of-
+ten heterogeneous information networks ( Hu et al. ,
+2021 ;Feng et al. ,2021 ;Zhang et al. ,2022 ;Yu
+et al.,2022a ). Graph neural networks are then em-
+ployed to learn representations, which fuse both
+textual information and external KGs. However,
+document-level approaches fall short of preserving
+the original KG structure, resulting in models with
+reduced knowledge reasoning abilities.2123
+Global context approaches focus on the KG, ex-
+tracting relevant KG subgraphs based on entity
+mentions. Pruned with certain mechanisms ( Ya-
+sunaga et al. ,2021 ) or not ( Qiu et al. ,2019b ), these
+KG subgraphs are encoded with GNNs, and such
+representations are fused with LMs from simple
+concatenation ( Hu et al. ,2021 ) to deeper interac-
+tions ( Zhang et al. ,2021 ). However, global context
+approaches leverage external KGs in a stand-alone
+manner, falling short of enabling the dynamic inte-
+gration of textual content and external KGs.
+While existing approaches successfully intro-
+duced external KG to LMs, long document un-
+derstanding poses new challenges to knowledge-
+aware NLP. Long documents possess greater knowl-
+edge intensity where more entities are mentioned,
+more relations are leveraged, and more reason-
+ing is required to fully understand the nuances,
+while existing approaches are mostly designed for
+sparse knowledge scenarios. In addition, long doc-
+uments also exhibit the phenomenon of knowledge
+co-reference, where central ideas and entities are
+reiterated throughout the document and co-exist
+in different levels of document contexts. In light
+of these challenges, we propose KALM to jointly
+leverage the local, document, and global contexts
+of long documents for knowledge incorporation.
+5 Conclusion
+In this paper, we propose KALM, a knowledge-
+aware long document understanding approach that
+introduces external knowledge to three levels of
+document contexts and enables interactive ex-
+change across them. Extensive experiments demon-strate that KALM achieves state-of-the-art perfor-
+mance on three tasks across six datasets. Our anal-
+ysis shows that KALM provides insights into the
+roles and patterns of individual contexts, improves
+the handling of long documents with greater knowl-
+edge intensity, and has better data efﬁciency than
+existing works.
+Limitations
+Our proposed KALM has two limitations:
+•KALM relies on existing knowledge graphs to
+facilitate knowledge-aware long document under-
+standing. While knowledge graphs are effective
+and prevalent tools for modeling real-world sym-
+bolic knowledge, they are often sparse and hardly
+exhaustive ( Tan et al. ,2022 ;Pujara et al. ,2017 ).
+In addition, external knowledge is not only lim-
+ited to knowledge graphs but also exists in tex-
+tual, visual, and other symbolic forms. We leave
+it to future work on how to jointly leverage mul-
+tiple forms and sources of external knowledge in
+document understanding.
+•KALM leverages TagMe ( Ferragina and Scaiella ,
+2011 ) to identify entity mentions and build the
+three knowledge-aware contexts. While TagMe
+and other entity identiﬁcation tools are effective,
+they are not 100% correct, resulting in poten-
+tially omitted entities and external knowledge. In
+addition, running TagMe on hundreds of thou-
+sands of long documents is time-consuming and
+resource-consuming even if processed in parallel.
+We leave it to future work on how to leverage2124knowledge graphs for long document understand-
+ing without using entity linking tools.
+Ethics Statement
+KALM is a knowledge-aware long document un-
+derstanding approach that jointly leverages pre-
+trained LMs and knowledge graphs on three levels
+of contexts. Consequently, KALM might exhibit
+many of the biases of the adopted language models
+(Liang et al. ,2021 ;Nadeem et al. ,2021 ) and knowl-
+edge graphs ( Fisher et al. ,2020 ,2019 ;Mehrabi
+et al. ,2021 ;Du et al. ,2022 ;Keidar et al. ,2021 ).
+As a result, KALM might leverage the biased and
+unethical correlations in LMs and KGs to arrive
+at conclusions. We encourage KALM users to au-
+dit its output before using it beyond the standard
+benchmarks. We leave it to future work on how to
+leverage knowledge graphs in pretrained LMs with
+a focus on fairness and equity.
+Acknowledgements
+We would like to thank the reviewers, the area chair,
+Vidhisha Balachandran, Melanie Sclar, and mem-
+bers of the Tsvetshop for their feedback. This ma-
+terial is funded by the DARPA Grant under Con-
+tract No. HR001120C0124. We also gratefully
+acknowledge support from NSF CAREER Grant
+No. IIS2142739, and NSF grants No. IIS2125201
+and IIS2203097. Any opinions, ﬁndings and con-
+clusions or recommendations expressed in this ma-
+terial are those of the authors and do not necessarily
+state or reﬂect those of the United States Govern-
+ment or any agency thereof.
+References21252126212721282129
+A Additional Experiments
+A.1 Context Exchange Study (cont.)
+In Section 3.3, we conducted an ablation study of
+the three knowledge-aware contexts and explored
+how the ContextFusion layer enables the interpre-
+tation of context contribution and information ex-
+change patterns. It is demonstrated that the three
+contexts play different roles with respect to datasets
+and KALM layers. In addition, we explore whether
+the role and information exchange patterns of con-
+texts change when the training progresses. Fig-
+ure5illustrates the results with respect to training
+epochs, which shows that the attention matrices
+started out dense and ended sparse, indicating that
+the role of different contexts is gradually developed
+through time.
+A.2 Long Document Study (cont.)
+We present error analysis with respect to docu-
+ment length and knowledge intensity on more
+baseline methods, including language models
+(RoBERTa, BART, LongFormer), knowledge-
+aware LMs (KGAP, GreaseLM, GreaseLM+), and
+our proposed KALM in Figure 6. Our conclusion
+still holds true: KALM successfully improves per-
+formance on documents that are longer and contain
+more external knowledge, which are positioned in
+the top-right corner of the ﬁgure.
+A.3 Manual Error Analysis
+We manually examined 20 news articles from
+the LUN misinformation detection dataset where
+KALM made a mistake. Several news articles fo-
+cused on the same topic of marijuana legalization,
+and some others focused on international affairs
+such as the conﬂict in Iraq. These articles feature
+entities and knowledge that are much more recent2130
+such as "pot-infused products" and "ISIS jihadists",
+which are emerging concepts and generally not cov-
+ered by existing knowledge graphs. We present the
+relevant sentences in Table 3. This indicates the
+need for more comprehensive, up-to-date, and tem-
+poral knowledge graphs that grow with the world.
+A.4 Signiﬁcance Testing
+To examine whether KALM signiﬁcantly outper-
+forms baselines on the three tasks, we conduct one-
+way repeated measures ANOV A test for the results
+in Table 4, Table 5, and Table 6. It is demon-
+strated that the performance gain is signiﬁcant
+on ﬁve of the six datasets, speciﬁcally SemEval
+(against the second-best KCD on Acc and MaF),
+SLN (against the second-best KGAP on MiF and
+MaRecall), LUN (against the second-best Com-
+pareNet on MiF, MaF and MaRecall), Random
+(against the second-best GreasesLM+ on BAcc and
+MaF), and Time-Based (against the second-best
+GreaseLM+ on BAcc and MaF).A.5 Task-Speciﬁc Model Performance
+We present the full results for task-speciﬁc meth-
+ods, pretrained language models, knowledge-aware
+task-agnostic models, and KALM on the three tasks
+and six datasets/settings in Tables 4,5, and 6.
+A.6 Is local context enough?
+Though long document understanding requires at-
+tending to a long sequence of tokens, it is possible
+that sometimes only one or two sentences would
+give away the label of the document. We examine
+this by removing the document-level and global
+contexts in KALM, leaving only the local context
+to simulate this scenario. Comparing the local-
+only variant with the full KALM, there are 14.78%,
+10.53%, 8.21%, 4.85%, 1.4%, and 3.18% perfor-
+mance drops across the six datasets in terms of
+macro-averaged F1-score. As a result, it is neces-
+sary to go beyond local context windows in long
+document understanding.2131
+B Experiment Details
+B.1 Dataset Details
+We present important dataset details in Table 7. We
+follow the exact same dataset settings and splits in
+previous works ( Zhang et al. ,2022 ;Hu et al. ,2021 ;
+Feng et al. ,2022a ) for fair comparison.
+B.2 Baseline Details
+We compare KALM with pretrained language
+models, task-speciﬁc baselines, and task-agnostic
+knowledge-aware methods to ensure a holistic eval-
+uation. In the following, we provide a brief de-
+scription of each of the baseline methods. We also
+highlight whether one approach leverages knowl-
+edge graphs and the three document contexts in
+Table 9.
+•HLSTM (Yang et al. ,2016 ) is short for hier-
+archical long short-term memory networks. It
+was used in previous works ( Li and Goldwasser ,
+2019 ,2021 ) for political perspective detection.
+•MAN (Li and Goldwasser ,2021 ) proposes toleverage social and linguistic information to de-
+sign pretraining tasks and ﬁne-tune on the task
+of political perspective detection.
+•KCD (Zhang et al. ,2022 ) proposes to leverage
+multi-hop knowledge reasoning with knowledge
+walks and textual cues with document graphs for
+political perspective detection.
+•Rubin et al. (2016 ) proposes the SLN dataset
+and leverages satirical cues for misinformation
+detection.
+•Rashkin et al. (2017 ) proposes the LUN dataset
+and argues that misinformation detection should
+have more ﬁne-grained labels than true or false.
+•GCN (Welling and Kipf ,2016 ) and GAT
+(Veliˇckovi ´c et al. ,2018 ) are leveraged along with
+the attention mechanism by Hu et al. (2021 ) for
+misinformation detection on graphs.
+•CompareNet (Hu et al. ,2021 ) proposes to lever-
+age knowledge graphs and compare the textual2132
+content to external knowledge for misinforma-
+tion detection.
+•Ideal-point (Gerrish and Blei ,2011 ) and ideal-
+vector (Kraft et al. ,2016 ) propose to use 1d and
+2d representations of political actors for roll call
+vote prediction.
+•Vote (Mou et al. ,2021 ) proposes to jointly lever-
+age legislation text and the social network infor-
+mation for roll call vote prediction.
+•PAR (Feng et al. ,2022a ) proposes to learn leg-
+islator representations with social context and
+expert knowledge for roll call vote prediction.
+•RoBERTa (Liu et al. ,2019b ),Electra (Clarket al.,2019 ),DeBERTa (He et al. ,2020 ),BART
+(Lewis et al. ,2020 ), and LongFormer (Beltagy
+et al. ,2020 ) are pretrained language models.
+We use the pretrained weights roberta-base ,
+electra-small-discriminator ,deberta-v3-base ,
+bart-base , and longformer-base-4096 in Hug-
+gingface Transformers ( Wolf et al. ,2020 ) to
+extract sentence representations, average across
+the whole document, and classify with softmax
+layers.
+•KELM (Agarwal et al. ,2021 ) proposes to gener-
+ate synthetic pretraining corpora based on struc-
+tured knowledge bases. In this paper, we further
+pretrained the roberta-base checkpoint on the
+KELM synthetic corpus and report performance2133
+on downstream tasks.
+•KnowBERT (Peters et al. ,2019 ) is one of the
+ﬁrst works to leverage external knowledge bases
+to enrich language representations. We used the
+three pretrained models, KnowBERT-Wordnet,
+KnowBERT-Wikidata, and KnowBERT-W+W
+for document representation extraction and report
+performance on downstream tasks.
+•Joshi et al. (2020 ) proposes to learn contex-
+tualized language representations by adding
+Wikipedia text to the input sequences and jointly
+learning text representations. This is similar
+to KALM’s setting with only the local context,
+where Wikipedia descriptions of entities are con-
+catenated to input texts.
+•KGAP (Feng et al. ,2021 ) proposes to construct
+document graphs to jointly encode textual con-
+tent and external knowledge. Gated relational
+graph convolutional networks are then adopted
+for document representation learning.
+•GreaseLM (Zhang et al. ,2021 ) proposes to en-
+code textual content with language model layers,encode knowledge graph subgraphs with graph
+neural networks and KG embeddings, and adopt
+MInt layers to fuse the two for question answer-
+ing. In this paper, we implement GreaseLM by
+using MInt layers to fuse the local and global
+contexts.
+•GreaseLM+ is our extended version of
+GreaseLM, which adds the document-level con-
+text while keeping the original MInt layer instead
+of our proposed ContextFusion layer.
+•KALM is our proposed approach for knowledge-
+aware long document understanding. It jointly
+infuses the local, document-level, and global con-
+texts with external knowledge graphs and adopts
+ContextFusion layers to derive an overarching
+document representation.
+B.3 Evaluation Metrics Details
+We adopted these evaluation metrics throughout
+the paper: Acc (accuracy), MaF (macro-averaged
+F1-score), MiF (micro-averaged F1-score), Ma-
+Precision (macro-averaged precision), MaRecall2134
+(macro-averaged recall), and BAcc (balanced ac-
+curacy). These metrics are chosen based on which
+metrics are used in previous works regarding the
+three tasks.
+B.4 Hyperparameter Details
+We present KALM’s hyperparameter settings in
+Table 8. We conduct hyperparameter searches for
+different datasets and report the best setups.
+B.5 Where did the numbers come from?
+For task-speciﬁc baselines, we directly use the re-
+sults reported in previous works ( Zhang et al. ,2022 ;
+Hu et al. ,2021 ;Feng et al. ,2022a ) since we follow
+the same experiment settings and the comparison
+is thus fair. For pretrained LMs and task-agnostic
+baselines, we run each method ﬁve times with dif-
+ferent random seeds and report the average perfor-
+mance as well as standard deviation. Figure 4is
+an exception, where we only run each method one
+time due to computing constraints.
+B.6 More experiment details
+We provide more details about the experiments that
+are worth further explaining.•Table 6: We implement pretrained LMs and task-
+agnostic baselines for roll call vote prediction by
+using them to learn representations of legislation
+texts, concatenate them with the legislator repre-
+sentations learned with PAR ( Feng et al. ,2022a ),
+and adopt softmax layers for classiﬁcation.
+• Table 2: We remove each context by only apply-
+ing ContextFusion layers to the other two context
+representations. We follow the implementation
+of MInt described in Zhang et al. (2021 ). We im-
+plement concat and sum by using the concatena-
+tion and summation of the three context represen-
+tations as the overall document representation.
+•Figure 2: The multi-head attention in the Context-
+Fusion layer provides a 6 ×6 attention weight
+matrix indicating how information ﬂowed across
+different contexts. The six rows (columns) stand
+for the local view of the local context, the global
+view of the local context, the local view of the
+document-level context, the global view of the
+document-level context, the local view of the
+global context, and the global view of the global
+context, which are described in detail in Section21352.3.2 . The values in each square are the average
+of the absolute values of the attention weights
+across all data samples in the validation set.
+B.7 Computational Resources Details
+We used a GPU cluster with 16 NVIDIA A40
+GPUs, 1,988G memory, and 104 CPU cores for
+the experiments. Running KALM with the best pa-
+rameters takes approximately 1.5, 16, 3, 4, 1, and
+1 hour(s) for the six datasets (SemEval, Allsides,
+SLN, LUN, random, time-based).
+B.8 Scientiﬁc Artifact Details
+KALM is built with the help of many existing sci-
+entiﬁc artifacts, including TagMe ( Ferragina and
+Scaiella ,2011 ), pytorch ( Paszke et al. ,2019 ), py-
+torch lightning ( Falcon and The PyTorch Lightning
+team ,2019 ), transformers ( Wolf et al. ,2020 ), py-
+torch geometric ( Fey and Lenssen ,2019 ), sklearn
+(Pedregosa et al. ,2011 ), numpy ( Harris et al. ,
+2020 ), nltk ( Bird et al. ,2009 ), OpenKE ( Han et al. ,
+2018 ), and the three adopted knowledge graphs
+(Feng et al. ,2021 ;Hu et al. ,2021 ;Speer et al. ,
+2017 ). We commit to make our code and data
+publicly available upon acceptance to facilitate re-
+production and further research.2136ACL 2023 Responsible NLP Checklist
+A For every submission:
+/squareA1. Did you describe the limitations of your work?
+right after the main paper on page 9
+/squareA2. Did you discuss any potential risks of your work?
+right after the main paper on page 9
+/squareA3. Do the abstract and introduction summarize the paper’s main claims?
+introduction is in Section 1
+/squareA4. Have you used AI writing assistants when working on this paper?
+Left blank.
+B/squareDid you use or create scientiﬁc artifacts?
+throughout the paper
+/squareB1. Did you cite the creators of artifacts you used?
+throughout the paper, wherever the adopted artifact is mentioned
+/squareB2. Did you discuss the license or terms for use and / or distribution of any artifacts?
+Not applicable. Left blank.
+/squareB3. Did you discuss if your use of existing artifact(s) was consistent with their intended use, provided
+that it was speciﬁed? For the artifacts you create, do you specify intended use and whether that is
+compatible with the original access conditions (in particular, derivatives of data accessed for research
+purposes should not be used outside of research contexts)?
+Not applicable. Left blank.
+/squareB4. Did you discuss the steps taken to check whether the data that was collected / used contains any
+information that names or uniquely identiﬁes individual people or offensive content, and the steps
+taken to protect / anonymize it?
+Not applicable. Left blank.
+/squareB5. Did you provide documentation of the artifacts, e.g., coverage of domains, languages, and
+linguistic phenomena, demographic groups represented, etc.?
+Not applicable. Left blank.
+/squareB6. Did you report relevant statistics like the number of examples, details of train / test / dev splits,
+etc. for the data that you used / created? Even for commonly-used benchmark datasets, include the
+number of examples in train / validation / test splits, as these provide necessary context for a reader
+to understand experimental results. For example, small differences in accuracy on large test sets may
+be signiﬁcant, while on small test sets they may not be.
+Table 7 in the appendix
+C/squareDid you run computational experiments?
+Section 3
+/squareC1. Did you report the number of parameters in the models used, the total computational budget
+(e.g., GPU hours), and computing infrastructure used?
+Section B.72137/squareC2. Did you discuss the experimental setup, including hyperparameter search and best-found
+hyperparameter values?
+Section B.4
+/squareC3. Did you report descriptive statistics about your results (e.g., error bars around results, summary
+statistics from sets of experiments), and is it transparent whether you are reporting the max, mean,
+etc. or just a single run?
+Section 3 and Section A
+/squareC4. If you used existing packages (e.g., for preprocessing, for normalization, or for evaluation), did
+you report the implementation, model, and parameter settings used (e.g., NLTK, Spacy, ROUGE,
+etc.)?
+Section B.8
+D/squareDid you use human annotators (e.g., crowdworkers) or research with human participants?
+Left blank.
+/squareD1. Did you report the full text of instructions given to participants, including e.g., screenshots,
+disclaimers of any risks to participants or annotators, etc.?
+No response.
+/squareD2. Did you report information about how you recruited (e.g., crowdsourcing platform, students)
+and paid participants, and discuss if such payment is adequate given the participants’ demographic
+(e.g., country of residence)?
+No response.
+/squareD3. Did you discuss whether and how consent was obtained from people whose data you’re
+using/curating? For example, if you collected data via crowdsourcing, did your instructions to
+crowdworkers explain how the data would be used?
+No response.
+/squareD4. Was the data collection protocol approved (or determined exempt) by an ethics review board?
+No response.
+/squareD5. Did you report the basic demographic and geographic characteristics of the annotator population
+that is the source of the data?
+No response.2138

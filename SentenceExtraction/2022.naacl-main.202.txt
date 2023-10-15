@@ -1,1 +1,640 @@
-2810 Proceedings of the 2022 Conference of the North American Chapter of the Association for Computational Linguistics : Human Language Technologies , pages 2810 2823 July 10 - 15 , 2022 © 2022 Association for Computational Linguistics 2811 2812 2813 2814 2815 2816 2817 2818 2819 2820 2821 2822 2823 
+
+Sha Li, Madhi Namazifar, Di Jin, Mohit Bansal, Heng Ji,
+Yang Liu,Dilek Hakkani-TurUniversity of Illinois at Urbana-Champaign,Amazon Alexa AI
+shal2@illinois.edu
+{madhinam, djinamzn, mobansal, jihj,
+yangliud, hakkanit}@amazon.com
+Abstract
+Providing conversation models with back-
+ground knowledge has been shown to make
+open-domain dialogues more informative and
+engaging. Existing models treat knowledge se-
+lection as a sentence ranking or classiﬁcation
+problem where each sentence is handled indi-
+vidually, ignoring the internal semantic con-
+nection among sentences in background doc-
+ument. In this work, we propose to automati-
+cally convert the background knowledge doc-
+uments into document semantic graphs and
+then perform knowledge selection over such
+graphs. Our document semantic graphs pre-
+serve sentence-level information through the
+use of sentence nodes and provide concept con-
+nections between sentences. We apply multi-
+task learning for sentence-level knowledge se-
+lection and concept-level knowledge selection
+jointly, and show that it improves sentence-
+level selection. Our experiments show that
+our semantic graph based knowledge selec-
+tion improves over sentence selection base-
+lines for both the knowledge selection task
+and the end-to-end response generation task on
+HollE (Moghe et al., 2018) and improves gen-
+eralization on unseen topics in WoW (Dinan
+et al., 2019).
+1 Introduction
+Natural language generation models have seen
+great success in their ability to hold open-domain
+dialogues without the need for manual injection
+of domain knowledge. However, such models of-
+ten degenerate to uninteresting and repetitive re-
+sponses (Holtzman et al., 2020), or hallucinate
+false knowledge (Roller et al., 2021; Shuster et al.,
+2021). To avoid such phenomena, one solutionis to provide the conversation model with rel-
+evant knowledge to guide the response genera-
+tion (Parthasarathi and Pineau, 2018; Ghazvinine-
+jad et al., 2018; Dinan et al., 2019). Figure 1 illus-
+trates such knowledge grounded generation.
+Relevant knowledge is often presented in the
+form of documents (Moghe et al., 2018; Zhou et al.,
+2018b; Ghazvininejad et al., 2018; Dinan et al.,
+2019; Gopalakrishnan et al., 2019) and the task of
+identifying the appropriate knowledge snippet for
+each turn is formulated as a sentence classiﬁcation
+or ranking task (Dinan et al., 2019). Although more
+advanced methods have been proposed by model-
+ing knowledge as a latent variable (Kim et al., 2020;
+Chen et al., 2020), or tracking topic shift (Meng
+et al., 2021), they abide by the setting of sentence-
+level selection. This setting has two inherent draw-
+backs: (1) it ignores the semantic connections be-
+tween sentences and (2) it imposes an artiﬁcial
+constraint over the knowledge boundary .
+A document is not simply a bag of sentences,
+in fact, it is the underlying semantic connections
+and structures that make the composition of sen-
+tences meaningful. Two examples of such connec-
+tions are coreference links and predicate-argument
+structures.These connections are vital to the un-
+derstanding of the document and also beneﬁcial to
+knowledge selection. In many cases, we can draw
+information from multiple sentences to create the
+response, breaking the knowledge boundary . For
+instance, in Figure 2, the connections among the
+character “Rango”, the plot point “water shortage"
+and the name “Django" help us generate a response
+with a smooth topic transition.
+A related line of work (Liu et al., 2018; Moon
+et al., 2019; Xu et al., 2020; Young et al., 2018;
+Zhou et al., 2018a) that seemingly overcomes
+the aforementioned issues is knowledge selection
+from existing knowledge graphs (KGs) such as2810
+Wikidata (Vrandeci ´c and Krötzsch, 2014), DBpe-
+dia (Lehmann et al., 2015), and ConceptNet (Speer
+et al., 2017). If the character “Rango” were in the
+KG, it would have been represented as an entity
+node and be connected to respective events. On
+the KG, we are also free to select as many con-
+cepts as needed, without being restricted to a single
+sentence as the source. However, KGs are known
+to have limited coverage of real world entities, let
+alone emerging entities in works of ﬁction such as
+books and movies (Razniewski et al., 2016).
+Hence, to bridge these two worlds of sentence-
+based knowledge selection and KG-based knowl-
+edge selection, we introduce knowledge selection
+using document semantic graphs . These graphs are
+automatically constructed from documents, aiming
+to preserve the document content while enhancing
+the document representation with semantic connec-
+tions. To create such a document semantic graph,
+we ﬁrst obtain the Abstract Meaning Representa-
+tion (AMR) (Banarescu et al., 2013) for each sen-
+tence. AMR detects entities, captures predicate-
+argument structures, and provides a layer of ab-
+straction from words to concepts.Compared to ex-
+isting knowledge base construction methods, AMR
+covers a wide range of relations and ﬁne-grained se-mantic roles, and can fully reﬂect the semantics of
+the source text. Since AMR graphs only represent
+single sentences, we utilize coreference resolution
+tools to detect coreferential entity nodes and merge
+them to build graphs for documents. On top of
+this content representation, we also add sentence
+nodes and passage nodes to reﬂect the structure of
+the document. This allows for traversal across the
+graph by narrative order or concept association.
+Given the document semantic graph, knowledge
+selection can be seen as identifying relevant nodes
+on the graph, sentence nodes or concept nodes.
+As knowledge selection in dialog models is condi-
+tioned on the dialog context, for each dialog turn,
+we create a dialog-aware graph derived from the
+document graph. It contains context nodes repre-
+senting contextualized versions of the sentence and
+concept nodes. We design an edge-aware graph
+neural network model to propagate information
+along the dialog-aware graph and ﬁnally score the
+context nodes (or concept nodes) on their relevance
+to the dialog turn (as shown in Figure 4).
+We validate our model on two widely used
+datasets HollE (Moghe et al., 2018) and Wizard
+of Wikipedia (Dinan et al., 2019) by constructing
+a semantic graph from relevant background doc-
+umentsfor each dialog. The use of document
+graphs improves both knowledge selection and re-
+sponse generation quality on HollE and boosts gen-
+eralization to unseen topics for WoW. From our
+ablation tests we ﬁnd that in terms of the graph
+structure, the key component is the use of corefer-
+ence edges that stitches sentences together.
+Our contributions include: (1) We propose to
+perform knowledge selection from document se-
+mantic graphs that are automatically constructed
+from source documents and can reﬂect the implicit
+semantic connections between sentences without
+being limited to a pre-deﬁned set of entities and
+relations as KGs do. Our approach bridges the
+gap between sentence-based knowledge selection
+and KG-based knowledge selection. (2) We show
+that joint selection over sentences and concepts can
+model more complex relations between sentences
+and boost sentence selection performance. (3) We
+build a pipeline for converting documents (docu-
+ment collections) into semantic graphs through the
+use of AMR parsing and coreference. We hope that2811
+our tool can facilitate future work on graph-based
+representations of documents.
+2 Method
+We show an overview of our knowledge-grounded
+dialog system in Figure 2. The system consists of
+three modules, namely semantic graph construc-
+tion, knowledge selection and response generation.
+2.1 Document Semantic Graph Construction
+We ﬁrst process the sentences in the background
+knowledge documents using the Stack Transformer
+AMR parser (Fernandez Astudillo et al., 2020) to
+obtain sentence-level AMR graphs. Based on the
+AMR output, we consider all of the concepts that
+serve as the core roles (agent, recipient, instrument
+etc.) for a predicate as mention candidates. Then,
+we run a document-level entity coreference reso-
+lution system (Wen et al., 2021) to resolve coref-
+erence links between such mentions. When join-
+ing sentence-level AMR graphs to form the docu-
+ment graph, entity mentions that are predicted to
+be coreferential are merged into one node, and we
+keep the longest mention as the node’s canonical
+name. We show an example of our constructed
+document semantic graph in Figure 3.
+On top of this content representation, we also
+add additional nodes to represent documents (or
+passages) and sentences. A document (or passage)
+node is linked to sentence nodes that are from this
+document (or passage). Each sentence node is di-
+rectly connected to all the concept nodes that origi-
+nate from that sentence. In addition, we add edges
+between neighboring sentences following the nar-
+rative order in the document.
+Since each node is grounded in text, in order
+to create embeddings for the document semantic
+graph, we initialize the embedding of each node
+with their contextual embeddings from a frozen
+pretrained language model RoBERTa (Liu et al.,
+2019a). For sentence nodes, we use the embed-
+ding of the [CLS] token. For concept nodes, we
+average the embeddings of the tokens in the span.
+Note that the document semantic graphs can be
+created ofﬂine and indexed by topics to be used at
+knowledge selection inference time.
+2.2 Knowledge Selection
+The task of knowledge selection is to identify rel-
+evant knowledge snippets that can be used to pro-
+duce an appropriate and informative response for
+each turn. Since our document semantic graph is
+based on the background knowledge source alone,
+we ﬁrst create a dialog-aware graph that is condi-
+tioned on the given dialog turn. We then encode
+the dialog-aware graph by an edge-aware graph
+attention network and predict relevance scores for
+sentences and concepts as shown in Figure 4.
+Dialog-Aware Graph. The dialog-aware graph
+is a copy of the document semantic graph with addi-
+tional context nodes ( c), each representing a dialog-
+contextualized knowledge sentence. For each can-
+didate knowledge sentence s, to obtain the em-2812
+beddinghof the context node c, we encode the
+dialog context xand the candidate knowledge sen-
+tencesthrough a pretrained language model f.
+We deﬁne the dialog context as the most recent two
+turns in the dialog history.
+h=Pooling (f([s;x])) (1)
+For the pooling operation, we simply take the ﬁrst
+token (namely the [CLS] token) as the represen-
+tation for the sequence. Since we want to enable
+message passing between the context node and the
+rest of the graph, we add an edge between the con-
+text nodecand the sentence node s.
+Edge-Aware Graph Attention Network. At
+this point, although our dialog-aware graph cap-
+tures both the dialog context and the knowledge
+source, there is no interaction between the two. To
+this end, we apply an edge-aware graph attention
+network (EGAT) model to allow information to be
+propagated along the graph. Note that our dialog-
+aware graph is a heterogeneous network with mul-
+tiple node types and edge types. To capture the
+semantics of the node and edge types, we use an ex-
+tension of the graph attention network (Velickovic
+et al., 2018) that includes edge type embeddings
+hand node type embeddings h(Yasunaga
+et al., 2021). These embeddings are learnt along
+with the model parameters and are used to compute
+the vector “message” that is passed along edges.
+In general, a graph neural network consists of
+Llayers with shared parameters. We denote the
+initial embeddings for each node as h. Each layer
+linvolves a round of nodes sending out “messages”
+to their neighbors and then aggregating the received
+“messages” to update their own embeddings fromhtoh. Consider a pair of nodes sandtwith
+embeddings handhrespectively, the message
+mthat is passed from stotthrough edge eis
+computed as the sum of the edge-aware message
+and the node-aware message, where WandW
+are projection matrices.
+m=W([h;h]) +Wh(2)
+Then we compute the attention weight αfrom
+nodesto nodetas:
+HereWandWare learnt projection matrices and
+Dis the embedding dimension of h.Nis the
+neighbor node set of node t. Finally, the messages
+from the surrounding neighbors are aggregated to
+compute the updated node embedding h.
+h=GELU
+MLP (/summationdisplayαm) +h
+
+AfterLlayers, we obtain embeddings for our con-
+text nodesh, sentence nodes hand concept
+nodesh.
+Knowledge Selection Training. For each con-
+text nodecthat represents a pair of the knowledge
+sentence and dialog context, we compute their rele-
+vance score as
+score (c) =MLP ([h;h]) (4)
+For each concept node n, we compute its relevance
+score as2813score (n) =σ/parenleftbig
+MLP (h)/parenrightbig
+(5)
+whereσis the sigmoid function.
+Each context node cneeds to be encoded with
+the language model f, but we are unable to ﬁt
+all context nodes into memory.Hence, during
+training, we randomly sample knegatives for each
+positive knowledge sentence and compute cross-
+entropy loss over the samples.
+L=−logexp ( score (c))
+exp(score (c))(6)
+For concept nodes, we treat knowledge selection
+as a binary classiﬁcation problem and compute the
+binary cross entropy loss.
+L=−1
+N/summationdisplayrlogscore (n) (7)
+Herer∈ {0,1}is the relevance label for the
+vertexn, andNis the total number of concept
+nodes. When the dataset does not directly provide
+concept-level labels for training, we derive them
+from the ground truth knowledge snippet by assign-
+ing any concept that is mentioned in the snippet
+with a relevant label r= 1. The overall loss is the
+weighted sum of the above sentence-level and the
+concept-level loss:
+L=L+βL (8)
+During inference, we compute score (c)for all
+knowledge sentence candidates and take the highest
+scored sentence for knowledge grounded response
+generation.
+2.3 Response Generation
+We ﬁne-tune a left-to-right language model
+GPT2 (Radford et al., 2019) to perform response
+generation given the dialog context xand the cho-
+sen knowledge snippet ˆs.
+y=GPT2 ([ˆs;x]) (9)
+During training we use teacher-forcing and use the
+ground truth knowledge snippet. This response
+generation model is independent from the knowl-
+edge selection model and trained with negative
+log-likelihood loss.
+3 Experiments
+3.1 Datasets
+We evaluate our model on two publicly available
+datasets: Wizard of Wikipedia (Dinan et al., 2019)
+and Holl-E (Moghe et al., 2018). Both datasets are
+in English.
+Wizard of Wikipedia (WoW) is an open-domain
+dialog dataset, spanning multiple topics including
+famous people, works of art, hobbies, etc. The test
+set in WoW consists of two splits that are named
+“Test Seen” and “Test Unseen” based on the over-
+lap of topics with the training set. In order to build
+our document graph, we use the selected topic pas-
+sage and the passages retrieved in the ﬁrst turn as
+background knowledge.
+Holl-E is a movie domain dialog dataset. Each
+dialog discusses one movie, and the background
+knowledge includes the plot, reviews, comments
+and a fact table. Holl-E additionally provides mul-
+tiple references for the test set so we report perfor-
+mance for both single and multiple references.
+3.2 Implementation Details
+Knowledge Selection. We only use the turns that
+utilize knowledge for training and prediction. To
+map the ground truth knowledge to a set of concept
+nodes, we choose all nodes with mention offsets
+contained within the span. We acquire the sentence-
+level labels following (Kim et al., 2020).
+We use Roberta-base (Liu et al., 2019a) as the
+language model f. We setk= 5for negative
+sampling. The EGAT model is trained with 200
+hidden dimensions and 2 layers. Edge features and
+node features are represented with 20 dimensional
+vectors. We train our model with a batch size of 16
+and learning rate 3efor 3 epochs.
+Response Generation. Our response generation
+model is based on GPT2 (Radford et al., 2019)
+and is further ﬁne-tuned with a batch size of 16
+and learning rate of 3e5. We truncate the dialog
+context to 128 tokens. During inference, we adopt
+top-k and top-p sampling with k= 20 andp=
+0.95. The maximum generation length is limited
+to 286 tokens, including the input tokens.28143.3 Baselines
+For knowledge selection, we also implemented the
+following two baseline methods:
+•Roberta Ranking. We use a cross-encoder based
+on Roberta to represent the dialog context and the
+knowledge candidate, and a classiﬁcation layer
+on top of it.
+•Graph Paths. This model is built on top of the pre-
+vious model. The graph paths are from the doc-
+ument semantic graph and obtained by breadth-
+ﬁrst traversal starting at the candidate context
+node. In order to utilize the graph paths, we
+linearize it into tuples of (subject, predicate, ob-
+ject) or (modiﬁer, subject) according to the AMR
+edge label and concatenate it with the candidate
+sentence.
+For the end-to-end pipeline, we use the GPT2
+response generation with our knowledge selection
+module and the two methods above. In addition, we
+compare against the following previous methods:
+•Transformer MemNet (Dinan et al., 2019) is the
+combination of a Transformer memory network
+for knowledge selection and another Transformer
+decoder for generation.
+•E2E BERT is a variant of the previous model
+using BERT (Devlin et al., 2019).
+•Sequential Knowledge Transformer (SKT) (Kim
+et al., 2020) models knowledge as a latent vari-
+able and considers the posterior distribution of
+knowledge given the response.
+•SKT+PIPM+KDBTS (Chen et al., 2020) is an
+improvement upon SKT with an additional Poste-
+rior Information Prediction Module (PIPM) and
+trained with knowledge distillation.
+•Mixed Initiative Knowledge Selection
+(MIKe) (Meng et al., 2021) uses two knowledge
+selection modules to capture user-driven turns
+and system-driven turns respectively.
+3.4 Evaluation Metrics
+Knowledge Selection. To compare with previ-
+ous methods, we use Accuracy, or Precision@1 as
+the main metric for evaluating knowledge selec-
+tion. Additionally, we compute sentence ranking
+metrics, namely the mean average precision (MAP)
+and mean reciprocal rank (MRR)for more ﬁne-
+grained analysis of knowledge selection quality.
+Response Generation. For automatic evaluation
+of responses, we use ROUGE-1, ROUGE-2 and
+ROUGE-L metrics (Lin, 2004).As our response
+generation model is trained with gold-standard
+knowledge, we only report perplexity scores when
+using gold-standard knowledge, as a measure for
+the quality of the response generator alone.
+For our human evaluation, we randomly sam-
+ple 200 turns from the output of MIKe (Meng
+et al., 2021), our ranking model and our graph-
+based model. Annotators are asked to select which
+system’s response is the best among the three (al-
+lowing for ties), and which system’s knowledge
+is the most relevant. In addition, annotators score
+each response based on whether it is appropriate,
+knowledgeable and engaging on a scale of 1-4. Our
+annotators agreed with each other 54.2% on a sin-
+gle system and 91.7% when accounting for ties.
+The Krippendorff’s alpha score for the normal-
+ized appropriate/knowledgeable/engaging scores
+is 0.537/0.634/0.470.
+3.5 Main Results
+We show our knowledge selection results in Table 2
+and 3, and end-to-end results in Table 4 and 6.
+From Table 2 we can see that our document
+semantic graph is helpful for the knowledge se-2815
+lection task and our edge-aware graph attention
+network is more effective in utilizing the graph
+structure compared to simply enumerating graph
+paths. In particular, when the graph is used, there is
+a large improvement in MRR when multiple gold-
+standard references are provided, showing that in
+cases where the top 1 result does not match the
+reference, we are able to rank the gold-standard
+knowledge at a high position.
+For the end-to-end evaluation in Table 4, our
+model stands favorably among previous published
+results, with improvements in both knowledge se-
+lection accuracy and response quality.
+We report human evaluation results in Table 5.
+Our system scores the best in all aspects and is
+voted by annotators as the most preferred response
+in the majority of the cases.
+On the WoW dataset (Table 3 and Table 6), the
+basic ranking model performs slightly better on the
+seen split and our graph-based knowledge selection
+method shows beneﬁts for generalizing to unseen
+topics.
+3.6 Analysis
+Model Ablations. We investigate whether our
+design of the document semantic graph is effec-
+tive by exploring different variants of the docu-
+ment graph, including: (1) sentence graph with
+only sentence nodes and source nodes, (2) corefer-
+ence graph that removes all AMR role edges, and
+(3)homogeneous graph that treats all edges and
+nodes as the same type. The results are presented in
+Table 7. In particular, the sentence graph does not
+make use of AMR parsing nor coreference resolu-
+tion, so it only reﬂects the document structure. This
+makes it the least effective in knowledge selection
+and unable to perform concept selection at all. The
+coreference graph does not perform as well as the
+full graph, but largely closes the gap. This suggests
+that entity recognition and coreference resolution
+are essential to the effectiveness of the document
+graph. When using the homogeneous graph , our2816edge-aware graph attention network falls back to
+a regular graph attention network. We can see that
+without edge and node semantics, both sentence
+and concept selection are negatively impacted.
+An important characteristic of our model is that
+it is trained to perform joint sentence selection and
+concept selection through a multi-task objective.
+We compare our full model with a variant, which is
+only trained with sentence-level supervision signal.
+Our results show that adding the concept selec-
+tion loss not only enables concept-level knowledge
+selection, but also improves sentence-level knowl-
+edge selection.
+Case Studies. We present some examples of the
+generated responses on HollE in Table 8. In the
+ﬁrst example, the system started out with a com-
+ment on the character “Morpheus”, the user agreed,
+and then shifted the topic towards a general com-
+ment on the movie. Both our model and the ranking
+model are able to follow the user’s topic and make
+comments on the movie while the MIKe model con-
+tinues the previously initiated topic. In the second
+example, we see that our model and the ranking
+model both capture the “viral fame” keyword in the
+user’s response, but our model is able to produce a
+more appropriate response instead of directly copy-
+ing the plot. In the last example, the ranking model
+repeats what the user said while our model and
+MIKe pick knowledge that is relevant to the rating
+of the movie. In this case, our model produces a
+more engaging response.
+Figure 5 visualizes an example from the WoW
+dataset about the topic “Football”. In this conversa-
+tion, although the knowledge selected by our model
+is not the same as the ground truth, it is relevant
+to the user’s question of “where and how the game
+(of football) got started”. The ground truth, on
+the other hand, follows up on the wizard’s own
+initiated topic of “college football”.
+Discussions on Limitations. (1)Concept selec-
+tion. Current datasets were annotated with sentence
+selection in mind and only provided sentence level
+references. This makes it hard to directly demon-
+strate the utility of concept selection. (2) Better
+utilization of history. We have used the dialog his-
+tory in a primitive way by concatenating the latest
+turns with the candidate knowledge. This ignores
+earlier turns, and leads to cases of repetition of his-
+tory, or contradiction of persona. (3) Limitation
+of preprocessing tools. Our document semanticgraphs rely on AMR parsing, which might not be
+available for other languages, or not be of high
+quality.
+4 Related Work
+Knowledge Selection for Dialog. Knowledge
+selection can be tightly coupled with the response
+generator (Ghazvininejad et al., 2018) or per-
+formed separately prior to response generation.
+Some approaches adapted question answering mod-
+els (Moghe et al., 2018; Qin et al., 2019; Wu
+et al., 2021) or summarization models (Meng et al.,
+2020a) for knowledge selection. With a pool of
+knowledge candidates, knowledge selection has
+been commonly set up as a sentence classiﬁcation
+or ranking problem (Dinan et al., 2019; Lian et al.,
+2019; Kim et al., 2020; Chen et al., 2020; Meng
+et al., 2020b; Zhao et al., 2020). Some work has
+modeled the underlying knowledge as a latent vari-
+able (Lian et al., 2019; Kim et al., 2020; Chen et al.,
+2020). Others have explored modeling the knowl-
+edge transition over dialog turns to improve selec-
+tion accuracy (Kim et al., 2020; Meng et al., 2020b;
+Zheng et al., 2020; Zhan et al., 2021). In com-
+parison, we model knowledge selection as a node
+selection task on the document semantic graph.
+Graph-based Knowledge Sources. Knowledge
+graphs are popular choices for integrating knowl-
+edge into dialog systems (Liu et al., 2018; Moon
+et al., 2019; Xu et al., 2020; Jung et al., 2020;
+Zhou et al., 2020). However, their applicability
+is limited by the coverage of both entities and re-
+lations. For example in (Moon et al., 2019), for
+books and movies, the knowledge base only con-
+tains metadata such as title and genre, making it
+impossible to conduct conversation about the actual
+content. The closest work to ours is AKGCM (Liu
+et al., 2019b), which starts from an existing general
+knowledge graph and then augments the knowl-
+edge graph with unstructured text by performing
+entity linking on the sentences. In comparison, our
+document semantic graph is created from knowl-
+edge documents and during knowledge selection
+we select both sentences and concept nodes.
+Application of Document Graphs. Document-
+level AMR graphs have been used for summariza-
+tion (Liu et al., 2015; Dohare et al., 2018; Hardy
+and Vlachos, 2018; Lee et al., 2021) and document
+generation (Fung et al., 2021). Graphs constructed
+using OpenIE (Banko et al., 2008) have been ap-2817
+plied to long-form question answering and multi-
+document summarization (Fan et al., 2019).
+5 Conclusion and Future Work
+In this paper, we introduce document semantic
+graphs for knowledge selection. Compared to ex-
+isting document-based knowledge selection meth-
+ods that typically treat sentences independently,
+our automatically-constructed document semantic
+graphs explicitly represent the semantic connec-
+tions between sentences while preserving sentence-
+level information. Our experiments demonstrate
+that our semantic graph-based approach shows ad-
+vantages over various sentence selection baselines
+in both the knowledge selection task and the end-
+to-end response generation task.6 Ethical Considerations
+The paper focuses on improving the knowledge
+selection component for dialog systems.
+Intended use. The intended use of this grounded
+dialog system is to perform chit-chat with the user
+on topics such as books and movies. We also hope
+that our released system can help research in knowl-
+edge selection.
+Bias. Our model is developed with the use
+of large pretrained language models such as
+RoBERTa (Liu et al., 2019a) and GPT2 (Radford
+et al., 2019), both of which are trained on large
+scale web data that is known to contain biased or
+discriminatory content. The datasets that we train
+on also include subjective knowledge (comments
+on movies) that may express the bias of the writers.2818Misuse potential. Although our system is
+knowledge-grounded, the output from our system
+should not be treated as factual knowledge. It
+should also not be considered as advice for any
+critical decision-making.
+References28192820
+A Experiment Details
+Our experiments were run on a single V100 or
+RTX2080 GPU. We use gradient accumulation to
+reach an effective batch size of 16.On average, the semantic graph construction
+takes 40s per document for the AMR parsing and
+30s per document for coreference resolution. All
+documents were constructed before running knowl-
+edge selection experiments. Our knowledge selec-
+tion model requires 10G of GPU memory and 6
+hours to ﬁnish training. Our response generation
+model takes 1.5 hours to ﬁnish training.
+We tuned our learning rate in the range of
+[3e−6,1e−5,3e−5,5e−5]and our batch
+size in the range of [4,8,16]. For the EGAT
+model, we experimented with hidden dimensions
+of[50,100,200] and layers from [2,3,4].
+B Extra Case Studies
+In Figure 6 we present an instance where the ques-
+tion from the user is quite open-ended and while
+our model’s selection does not match the ground
+truth, it is still relevant to the dialog and can serve
+as the basis for an appropriate response.
+In Figure 7 we show an example where knowl-
+edge selection performance does not directly trans-
+late to better dialog due to response generation
+errors. The selected knowledge from our model fol-
+lows up on the “set routines” mentioned by the user
+but the response’s stance is wrong. The baseline
+model selects a general statement about cheerlead-
+ing as the relevant knowledge but the response is
+logically incorrect as the difﬁculty of cheerleading
+is not due to its geographical origin, but due to the
+moves.
+C Human Eval Details
+We show an example of the information provided
+to annotators in Figure 8. Annotators have access
+to the dialog history and the ground truth responses.
+System outputs are anonymized.282128222823

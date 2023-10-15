@@ -1,1 +1,663 @@
-4863 Proceedings of the 2022 Conference of the North American Chapter of the Association for Computational Linguistics : Human Language Technologies , pages 4863 4874 July 10 - 15 , 2022 © 2022 Association for Computational Linguistics 4864 4865 4866 4867 4868 4869 4870 4871 4872 4873 4874 
+
+Rimvydas Rubavicius andAlex Lascarides
+School of Informatics, University of Edinburgh
+10 Crichton Street, Edinburgh EH8 9AB, UK
+rimvydas.rubavicius@ed.ac.uk ,alex@inf.ed.ac.uk
+Abstract
+We present a procedure for learning to ground
+symbols from a sequence of stimuli consisting
+of an arbitrarily complex noun phrase (e.g. “all
+but one green square above both red circles.”)
+and its designation in the visual scene. Our
+distinctive approach combines: a) lazy few-
+shot learning to relate open-class words like
+green andabove to their visual percepts;
+and b) symbolic reasoning with closed-class
+word categories like quantiﬁers and negation.
+We use this combination to estimate new train-
+ing examples for grounding symbols that oc-
+curwithin a noun phrase but aren’t designated
+by that noun phase (e.g, red in the above ex-
+ample), thereby potentially gaining data efﬁ-
+ciency. We evaluate the approach in a visual
+reference resolution task, in which the learner
+starts out unaware of concepts that are part of
+the domain model and how they relate to visual
+percepts.
+1 Introduction
+The subﬁeld of robotics known as Interactive Task
+Learning (, see Laird et al. (2017) for a survey)
+addresses scenarios where a robot must learn to
+adapt its behaviour to novel and unforeseen ob-
+jects, relations, and attributes that are introduced
+into the environment after deployment. The
+agent learns its novel task via evidence from its
+own actions and reactive guidance from a teacher.
+This paper focuses on symbol grounding (Harnad,
+1999) in the context of(Matuszek, 2018): the
+learner must use the teacher’s embodied natural
+language utterance and its context to learn a map-
+ping from natural language expressions to their
+denotations, given the visual percepts.
+There are two challenges in learning symbol
+grounding models (grounders) in. Firstly, in
+contrast to many grounders (Ye et al., 2019; Datta
+et al., 2019),requires incremental learning:
+knowledge is acquired piecemeal via an extended
+interaction, and it must inﬂuence planning as andwhen it occurs. Secondly, previous work limits the
+teacher’s language to bare nouns (e.g., square) or
+very short phrases (e.g., blue square, square above
+circle) (Hristov et al., 2018, 2019). But there’s
+evidence from Dale and Reiter (1995) that speak-
+ers use complex referring expressions even when
+simpler ones would successfully refer. Such lan-
+guage creates the possibility that novel symbols—
+neologisms—are introduced in a context where
+their denotation is not designated by the teacher. In
+this work we study the natural language of complex
+referential expressions (s) like “a blue square be-
+hind both red circles” which teachers can use when
+designating an object.
+Our aim is for the learner to extract knowledge
+that improves their domain representation and state
+estimates—a necessary condition for successful
+planning. Contemporary grounders miss learning
+opportunities that complexs afford: theex-
+ample above not only entails that its referents are
+blue andsquare , but also that there exists two
+objects that are both red andcircle and that
+they are above the designated objects, and every-
+thing else in the domain is either not red or not a
+circle (thanks to the meaning of both ). Thus,
+a complexand its designation can be used to
+gather multiple (noisy) training exemplars (both
+positive and negative) for several symbols at once,
+even if they have not been designated.
+In this work, we develop a method to integrate
+knowledge from interactively gathered evidence in
+the form of complex-designation pairs to aid
+data acquisition for a (neural) few-shot grounder.
+We explore the effect of such a method on data
+efﬁciency and the overall grounder’s performance.
+A major novel component to our procedure is that
+we exploit the formal semantics of closed class
+word categories (e.g., quantiﬁers and negation) to
+boost the data efﬁciency of few-shot neural ground-
+ing models. Our experiments show these symbolic
+inductive biases are successful.48632 Related Work
+Symbol Grounding. Contemporary grounders
+extensively utilize batch learning (e.g. Shridhar and
+Hsu (2018)). Yet,requires incremental learn-
+ing because without it the teacher guidance can-
+not inﬂuence the learner’s inferences about plans
+as and when the advice is given. Further, many
+grounders assume that the learner starts out with a
+complete and accurate conceptualisation of the do-
+main using pre-deﬁned visual features and a known
+vocabulary (Kennington et al., 2015; Kennington
+and Schlangen, 2017; Wang et al., 2017). In,
+both of these assumptions are unrealistic; therefore
+in this paper we explore models for which these
+assumptions don’t apply. Finally, in contrast to all
+prior grounders, we support incremental learning
+when the training exemplars features that are
+linguistically complex: e.g., “two red circles that
+aren’t to the right of both green squares".
+Representation Learning. Models for jointly
+learning a representation for vision and language
+utilize either explicit alignment via bounding boxes
+or instance segmentation (Lu et al., 2019; Chen
+et al., 2020; Tan and Bansal, 2019; Kamath et al.,
+2021; Yu et al., 2021), or a large-volume of weakly
+labeled data in the form of image-caption pairs
+(Radford et al., 2021). These models rely on of-
+ﬂine learning with large datasets. This work, on the
+other hand, explores how to incrementally extract
+knowledge from few-shot learning, using sequen-
+tially observed evidence that includes neologisms.
+Visual Questions Answering ().This is a
+task of answering free-form questions about an im-
+age (Antol et al., 2015). has reached impres-
+sive performance in recent years (Fukui et al., 2016;
+Li et al., 2020), yet models struggle with out-
+of distribution generalization for new types of ques-
+tions, requiring multi-step reasoning, with analysis
+revealing that they often rely on shortcuts (Jiang
+and Bansal, 2019; Subramanian et al., 2019, 2020).
+Grounded models like (Yi et al., 2018) and
+Bogin et al. (2021) tackle these shortcomings by
+grounding parts of the question and then learning
+to compose those parts via the question’s syntax
+to compute the answer. They thus estimate deno-
+tations of linguistic parts that are not denoted by
+the answer to the question. These ‘compositional’
+models help to achieve out-of-distribution general-
+ization for novel questions. But they lack’s re-
+quirement for incremental learning: model trainingrelies on batch learning. Furthermore, while their
+performance is impressive, error analysis shows
+that it makes mistakes when language includes log-
+ical concepts like quantiﬁers and negation (e.g. Bo-
+gin et al. (2021) Figure 9 shows that the determiner
+most incorrectly denotes an arbitrary subset of
+entities). Our view is that there is little beneﬁt in
+trying to learn to ground logic concepts as they
+are domain independent and can be interpreted us-
+ing formal semantics. In our experiments, we are
+testing the extent to which knowing and reasoning
+with the logical meanings of these symbols helps
+incremental grounding, and in particular estimating
+denotations of symbols within anthat are not
+designated.
+Grounded Language Acquisition. This task is
+often realized as grounded grammar induction
+from image-caption pairs (Shi et al., 2019; Zhao
+and Titov, 2020), or as learning (neural) semantic
+parsers from a reward signal (Williams, 1992) in
+VQA (Mao et al., 2019; Yi et al., 2018) or in plan-
+ning (Azaria et al., 2016; Wang et al., 2016, 2017;
+Karamcheti et al., 2020). There, the main objective
+is to learn to map natural language to logical forms,
+which in turn get associated with visual percepts
+during the learning process. This paper does not
+aim to learn a semantic parser. Instead, we ob-
+tain logical forms from an existing broad-coverage
+grammar which is hard to engineer, but is robust on
+lexical variation (Curran et al., 2007). Our focus
+instead is on exploiting the logical consequences of
+those logical forms during symbol grounding—i.e.,
+our focus is to utilise the interpretation of logi-
+cal forms, and in particular the truth functional
+meanings of close-class words like quantiﬁers and
+negation, to inform the learning of mappings from
+(open-class) symbols like red to their denotations,
+given the visual percepts.
+Visual Reference Resolution. In previous exper-
+iments, it is often assumed that there is a unique
+referent in the visual scene for the givenin the
+test phase (Kazemzadeh et al., 2014; Whitney et al.,
+2016). We aim to cope with situations where thehas multiple referents: identifying all the refer-
+ents that satisfy anenables efﬁcient planning,
+because it affords free choice when executing cer-
+tain commands—e.g., “move a square above both
+red circles” when there is more than one square
+affords choosing a control policy so that resources
+are optimized.48643 Background
+3.1 Formal Semantics of Natural Language
+Predicate logic with generalized quantiﬁers L(Bar-
+wise and Cooper, 1981; van Benthem, 1984) is a
+canonical meaning representation for natural lan-
+guages. L-sentencesφare constructed recursively
+from predicates P, termsT(i.e., variables Vand
+constantsC), logical connectives O={¬,∧,∨,→
+}and quantiﬁers Q(see Table 1 column 1):
+φ::=p(t,..., t)≡p(t)
+|(¬φ)|(φ∧φ)|(φ∨φ)|(φ→φ)
+|(Qx(φ,φ))
+where pis ann-place predicate, t∈Tare terms,
+Q∈Qis a quantiﬁer, and x∈Vis a variable (in
+Qx(φ,φ),φis the restrictor and φthe body).
+We also introduce λ-expressions of the form λx.φ,
+where x∈Vis free or absent in φ.
+3.2 Model-theoretic Interpretation
+L-sentences are interpreted using a domain model
+M= (E,I)consisting of a set of entities E(uni-
+verse of discourse), and an extension function Ithat
+maps non-logical symbols P∪Cto denotations
+(tuples of entities). For convenience, we assume
+I:C/mapsto→Eis one-to-one. Variables are interpreted
+via an assignment function g:V/mapsto→E.
+The interpretation function /llbracket·/rrbracketspeciﬁes the
+semantic value of well-formed expressions of L:
+/llbracketa/rrbracket=/braceleftBigg
+I(a)ifa∈P∪C
+g(a)ifa∈V
+/llbracketp(t)/rrbracket= 1iff
+(/llbrackett/rrbracket,..., /llbrackett/rrbracket)∈/llbracketp/rrbracket
+/llbracket¬φ/rrbracket= 1iff/llbracketφ/rrbracket= 0
+/llbracketφ∧ψ/rrbracket= 1iff/llbracketφ/rrbracket= 1and /llbracketψ/rrbracket= 1
+/llbracketφ∨ψ/rrbracket= 1iff/llbracketφ/rrbracket= 1or/llbracketψ/rrbracket= 1
+/llbracketφ→ψ/rrbracket= 1iff/llbracketφ/rrbracket= 0or/llbracketψ/rrbracket= 1
+/llbracketλx.φ/rrbracket={e∈E:/llbracketφ/rrbracket= 1}
+/llbracketQx(φ,φ)/rrbracket= Q( /llbracketλ.xφ/rrbracket,/llbracketλ.xφ/rrbracket)
+whereg[x/e]is just likeg, exceptg[x/e](x) =e
+andQis a speciﬁc relation between the restrictor
+/llbracketλx.φ/rrbracketand body /llbracketλx.φ/rrbracket, as deﬁned in
+Table 1 column 3. /llbracket·/rrbracketis directly related to
+satisﬁability for L-sentences:
+M,g|=φiff/llbracketφ/rrbracket= 1
+M|=φiff/llbracketφ/rrbracket= 1where /llbracketφ/rrbracket= 1 iff/llbracketφ/rrbracket= 1 for allg.
+Further, if xis the only free variable in φ, then
+/llbracketλx.φ/rrbracket=/llbracketλx.φ/rrbracketfor allg,g; so without
+a loss of generality, this is expressed as /llbracketλx.φ/rrbracket.
+If all variables in Qx(φ,ψ)are bound by quantiﬁers,
+then this L-sentence is true iff Qis true for all g.
+Some quantiﬁers, like “both”,are presuppo-
+sition triggers: “exactly two blocks are blue” is
+different from “both blocks are blue” in that the
+latter is true only if there are exactly two individ-
+uals that are blocks. We’ve adopted a Russellian
+interpretation (Russell, 1917) of these in Table 1.
+3.3 Logical Forms of Referential Expressions
+We now deﬁne the logical forms ofs and their
+interpretations with respect to a domain model M.
+Noun phrases like “a block” are represented as
+/angbracketleft_a_qx.block (x)/angbracketright. More generally, let /angbracketleftQx.φ/angbracketrightbe
+the logical form of an, where Q∈Qandφis an
+L-sentence with x∈Vbeing the only free variable
+inφ. The referents/angbracketleftQx.φ/angbracketrightof this logical form
+with respect toMare computed as follows:
+/angbracketleftQx.φ/angbracketright=/angbracketleftQ/angbracketright(1)
+whereπ(M,φ,x)is anM-projection, giving a
+new domain model Mwith entities E=E∩
+/llbracketλ.xφ/rrbracketand/angbracketleftQ/angbracketrightis a quantiﬁer referent—a
+quantiﬁer-speciﬁc subset of the power set of E.
+Table 1 column 4 gives the list of quantiﬁer refer-
+ents.
+To illustrate, consider the domain model where:
+E={a,b,c,d,f}
+I(cat) ={a,b}I(dog) ={c,d,f}
+I(bit) ={(c,a),(c,b),(d,b),(f,a),(f,b)}
+The“a dog that bit both cats” has logical form
+/angbracketleft_a_q x._both _q y(cat(y),dog(x)∧bit(x,y))/angbracketright.
+By Equation 1, its referent is:
+/angbracketleft_a_q/angbracketright
+The semantic value of the λ-expression formed
+from thisis a set of entities e∈Efor
+which the following quantiﬁer condition is true:
+both _q(R,B)whereR=/llbracketλy.cat(y)/rrbracket
+andB=/llbracketλy.dog(x)∧bit(x,y))/rrbracket. Only
+c,f∈Esatisfy this condition, deﬁning a new
+modelMwithE={c,f}; this leads to the
+set of possible referents as {{c},{f}}, given the
+quantiﬁer referent/angbracketleft_a_q/angbracketright.4865quantiﬁersQ surface form condition Q(R,B) referent/angbracketleftQ/angbracketright
+_exactly _n_q exactlyn|R∩B|=n{A⊆E:|A|=n}
+_at_most _n_q at mostn|R∩B|≤n{A⊆E:|A|≤n}
+_at_least _n_qat leastn|R∩B|≥n{A⊆E:|A|≥n}
+_a_q a/an|R∩B|/negationslash=n{A⊆E:|A|≤1}
+_every _q all/every|R∩B|=|R| { A⊆E:|A|=|E|}
+_the_n_q then|R∩B|=n)∧|R|=n{A⊆E:|A|=|E|∧(|E|=n)}
+_both _q both|R∩B|= 2)∧|R|= 2{A⊆E:|A|=|E|∧|E|= 2}
+_all_but_n_q all butn|R∩B|=|R|−n{A⊆E:|A|=|E|−n∧|E|≥n}
+_n_of_the_m_qnof them|R∩B|=n∧|R|=m{A⊆E:|A|=n∧|E|=m}
+4 Methodology
+Below we present the procedure of interactive
+grounding with referential expressions ( ). The
+overall framework is given in Figure 1.
+4.1 Grounder
+Matching networks (Vinyals et al., 2016) are an ex-
+tension of the knearest-neighbour algorithm (Fix
+and Hodges, 1989) and has been used as a fast few-
+shot grounder in thesetting (Cano Santín et al.,
+2020). For predicates P⊆Pof the same arity
+n, a grounder Θis parameterized by a support
+setS={(x,y)}, consisting of Kpairs of
+feature vectors x∈Rfor denotations e∈Eand concept vectors y∈[0,1]. Iny, the di-
+mensionzcorresponds the predicate p∈Pand
+its value is the probability that /llbracketp(e)/rrbracket= 1.
+Concept vectors have a one-to-one correspondence
+with the domain model M.
+Given a feature vector xfor a denotation e∈
+E,Θpredicts the concept vector ˆy, using the
+following inference rule:
+Θ(x,S) =/summationdisplayα(x,x;S)y4866whereαis an attention kernel:
+α(x,x;S) =exp (f(x)·h(x))/summationtextexp (f(x)·h(x))
+f(x) =ReLU (w·x+b)
+||ReLU (w·x+b)||
+h(x) =ReLU (v·x+c)
+||ReLU (v·x+c)||
+ReLU (a) = max (0,a)
+with learnable parameters θ={w,v,b,c},
+andSisk= 3nearest exemplars to xfromS:
+S={(x,y)∈S:x∈V(k,x,S)}
+whereV(k,x,S)is a set ofknearest feature
+vectors.
+4.2 Batch Learning
+GivenS, one can estimate Θeither via batch
+learning performed ofﬂine, or—when Sis small—
+in real time, as outlined by Cano Santín et al.
+(2020). In our scenario, we learn in real time
+by minimizing binary cross-entropy between the
+ground-truth yand predicted ˆyconcept vectors:
+L(y,ˆy) =−/summationdisplayl(y,ˆy)
+l(y,ˆy) =ylog(ˆy) + (1−y) log(1−ˆy)
+4.3 Incremental Learning
+Sgets augmented whenever the teacher provides
+an–designation pair. This speech act provides
+two types of information: certain information C
+in the form of denotation-symbol-semantic value
+triples (e,p,y), corresponding to symbols and
+entities designated by the; and noisy infor-
+mationN, corresponding to denotation-symbol-
+semantic value estimate triples (e,p,˜y), which
+are acquired from the symbols that are part of theand its referent inferred via (uncertain) reason-
+ing. E.g., the“a circle below a square.”, entails
+that its designation e∈Eis acircle and so
+(e,circle,1)is added toC. But it also entails
+there exists an entity which is a square that is
+not designated by the, but rather this entity is
+in the below relation with the designated entity.
+If the grounder is sufﬁciently conﬁdent about the
+referent for square , then the corresponding triple
+is added toN.4.3.1 Acquiring Observations and Symbols
+When the learner ﬁrst observes its visual scene—
+and so the teacher has not expressed any con-
+cepts, and so the learner is currently unaware of
+all concepts—the noisy support set Nis popu-
+lated with (e,p,0.5)(0.5is a default semantic
+value) for all ein the scene and for all known
+n-place predicates. Whenever the teacher’s-
+designation pair features a neologism p, then
+this expansion to the learner’s vocabulary prompts
+adding (e,p,0.5)toNfor alle. During in-
+teraction, each-designation pair uttered by the
+teacher adds elements to C(for designated sym-
+bols) and triggers updates to the Nelements for
+all entities in the current visual scene, as we’ll now
+describe.
+4.3.2 Integrating the Teacher’s Feedback
+Nelements are interactively updated using an in-
+crementally built domain-level theory ∆, which is
+the conjunction of L-sentences that are built from
+the logical forms of thes that the teacher has
+uttered so far and their designations. To compute
+the beliefs about semantic values, given ∆, we
+model the semantic value of L-sentences of the
+form p(t), in whichtare all constants (ground
+atom), as a random variable with Bernoulli’s dis-
+tributionB. Thus a distribution over the possible
+domain models can be estimated using (proposi-
+tional) model counting MC(Valiant, 1979), which
+maps each L-sentence to the number of domain
+models satisfying it. In this way, the semantic value
+of any proposition can be estimated as follows:
+˜y=/braceleftBiggifMC(∆)/negationslash= 0
+0.5 otherwise
+MCcan be computed exactly or approximately
+(Samer and Szeider, 2010). In our experiments
+we use the (Dudek et al., 2020) weighted
+model counter, with weights set to 0.5.
+4.3.3 Building the Support Set
+Concept vectors for Sare built using information
+inCandN: namely each denotation egets
+associated with its feature vector x, and thez-
+dimension of ycorresponding to predicate p∈
+Pis computed as follows:
+y=
+
+yif(e,p,y)∈C
+˜yif(e,p,˜y)∈N∧H[B(˜y)]≤τ
+0.5otherwise4867where H[P]is the entropy of the probability dis-
+tributionP, andτis the conﬁdence threshold for
+adding noisy exemplars: in our case, it’s set to 0.6
+for predicates of all arities.
+5 Experiments
+5.1 Task: Visual Reference Resolution
+To evaluate , we use a task of visual reference
+resolution: given a visual scene (an image) with
+localized entities (bounding boxes) and an, the
+grounder must estimate all its referents, as deﬁned
+in §3.3. The model learns its task by observing
+an image accompanied by a sequence ofs, with
+eachpaired with its designation in the image.
+We measure the performance of on the task
+after each observedand its designation. Perfor-
+mance is measured using the precision P, recall
+R, and F1 score F1on the test set between: 1) es-
+timated vs. ground-truth domain models, formed
+from the concept vectors (intrinsic evaluation) and
+2) estimated vs. ground-truth referents for the
+(extrinsic evaluation). These metrics are calculated
+only for those symbols/concepts that the teacher
+has mentioned so far (since the system is unaware
+that the remaining concepts exist). To obtain reli-
+able results, we repeat the experiment 10 times: i.e.,
+10 different visual scenes, with a sequence of 5 dif-
+ferent teacher utterances in each scene. We record
+in §6 the average precision, recall and f-scores over
+those 10 trials.
+Perhaps unusually, this training and testing
+regime uses very small data sets: that’s because
+init is the initial portions of the learning curve
+that matters. The learner must achieve decent per-
+formance on its task via only a few teacher utter-
+ances: human teachers won’t tolerate repeating the
+sames many times and so the learner lacks the
+luxury of learning (and testing) symbol grounding
+on large data sets.
+5.2 Data: ShapeWorld
+To generate training and test sets, we construct
+ShapeWorld domain models (Kuhnle and Copes-
+take, 2017), each consisting of 3-12 entities, syn-
+thesized visual scenes X(64x64 pixels), and 5s.
+Each domain model is describable using 7 shape
+symbols S1(square ,circle ,triangle ,
+pentagon ,cross ,ellipse ,semicircle ),
+6 colour symbols C1(red,green ,blue ,yellow ,magenta ,cyan ) and 4 spatial rela-
+tionships symbols R2(left ,right ,above ,
+below ).In scene synthesis, the image is cre-
+ated from the domain model, with variation on the
+hue of the colour category, variation on the size,
+position, rotation, and distortion of the shapes, and
+variation on the spatial positions of the entities re-
+lated by each spatial term. Note that the colour cat-
+egories are not mutually exclusive—e.g., there are
+RGB values that count as both red andmagenta .
+To generates, we sample Dependency Min-
+imal Recursion Semantics ( ) (Copestake,
+2009) graph templates, processed using (gen-
+eration mode)and the English Resource Grammar
+() (Flickinger, 2000). Generateds are evalu-
+ated with respect to the domain model to guarantee
+an existing referent. In total we generated 30 such
+domain models for training and 10 for testing. The
+data statistics for the training set is given in Table
+2 for the general categories of symbols, where cer-
+tain(C) means that the designation is denoted by
+the symbol in the, and noisy (N) means that
+the symbol is a part of thebut is not designated
+by it. Note that the ﬁrst argument to the spatial
+relations R2is always denoted by the designation
+while its second argument is not. Note also there
+is high variance in the frequencies among the in-
+dividual symbols. For instance, blue occurs 27
+and 28 times in certain vs. noisy positions respec-
+tively, while triangle occurs 7 and 12 times
+respectively.
+CategoryCcandidatesNcandidates
+C1 18.67±5.39 19.83±5.04
+S1 14.67±3.98 16.50±5.32
+R2 0 37.75±6.75
+5.3 Implementation Details
+5.3.1 Feature Extraction
+To extract visual features for individuals in
+the scene, we utilize bounding boxes b=
+[x,x,y,y ]for each entity e∈
+Ein the visual scene by localizing them (crop-
+ping) and extracting the visual features using a
+pre-trained visual feature encoder (in our case,4868DenseNet161 (Huang et al., 2017)). Additionally,
+for the feature vector, we add each entity’s bound-
+ing box coordinates for spatial information, lost in
+the localization process:
+x=Concat ({[DenseNet161 (X[b]],b)})
+5.3.2 Grammar-based Semantic Parsing
+To parses to their logical forms, we use the En-
+glish Resource Grammar () and (parsing
+mode) to produce a representation in minimal re-
+cursion semantics () (Copestake et al., 1997),
+which we then simplify via hand-written rules (e.g.,
+removing event arguments from predicate symbols
+corresponding to adjectives and prepositions). Un-
+derspeciﬁcation of the was resolved using (Koller and Thater, 2005) and the ﬁnal log-
+ical form was selected based on the linear order
+of scope-bearing elements (quantiﬁers and nega-
+tion): e.g. for the“every circle above a square”,
+_every _qoutscopes _ a_q.
+5.3.3 Axioms for R2
+For|E|entities, there are|E|denotations to con-
+sider for each 2-place predicate—a larger search
+space compared to|E|denotations for 1-place pred-
+icates. Moreover, these predicates can only be ac-
+quired from the noisy component Nbecause the
+referent of the second argument to the relation is
+always latent.
+To aid the learning process for R2, whenever
+a new symbol R∈R2 is observed, domain-
+level axioms are added to ∆for it, making it ir-
+rreﬂexive:∀x.¬R(x,x)(an entity cannot be in
+a spatial relationship to itself) and asymmetric:
+∀x,y.R (x,y)→ ¬R(y,x)(reﬂecting the fact
+that entities in spatial relations take different roles
+(Miller and Johnson-Laird, 1976)). These axioms
+reduce the number of possible denotations for R2
+symbols from|E|to−|E|.
+5.4 Baselines
+To test the beneﬁt of using noisy training exemplars
+Nfrom the oblique symbols in thes—in other
+words, those symbols that are a part of thebut
+not designated by it—we implemented a
+grounder baseline, which uses information only
+fromC. That uses only symbol-designation
+pairs that are acquired when the symbol denotes
+the referent (in our case, that’s the head noun in theand its pre-head modiﬁer, if it exists).To test the the beneﬁt of using the precise formal
+semantic meanings of logical symbols (i.e., quan-
+tiﬁers and negation), we implemented an
+grounder baseline. This utilizes the information
+from the symbols in the oblique positions, but it
+does notutilize the precise symbolic interpreta-
+tion of the logical symbols, instead simplifying the
+logical form of theby replacing all quantiﬁers
+with the existential _a_qand removing negation
+(e.g., “every cross on the left of the one circle” is
+equivalent to “a cross on the left of a circle”). This
+baseline preserves the basic linguistic structure of
+the formal semantic representation of the, but
+not its truth-functional interpretation.
+6 Results and Discussion
+Figure 2 shows the evolution of the performance
+of the grounder and the two baselines on the
+test set, as it gets exposed to more information (i.e.,-designation pairs) over time. In the intrinsic
+evaluation (domain model prediction), there is no
+signiﬁcant difference between the three grounders
+considered. Yet, for extrinsic evaluation (refer-
+ence resolution), we observe that outperforms
+the and baselines over time (both a
+steeper and a smoother curve). By the end of the
+interaction, a t-test shows signiﬁcant differences in ’s performance compared with both baselines
+(p-value of 0.01).
+Table 3 shows the best performance that each
+grounder achieved over time. When analysing
+their performance on particular categories, we ob-
+serve that C1andS1are equally hard to learn for
+grounders while R2is easier.
+We suspect that the reason why the three models
+performed differently in extrinsic evaluation even
+though they don’t with intrinsic evaluation is down
+to the fact that uses its complete and accurate
+knowledge of the meanings of closed class words
+like quantiﬁers and negation at test time as well as
+training time in the extrinsic evaluation, but not in
+the intrinsic evaluation. The model can use
+these meanings to constrain and correct error-prone
+estimates of referents for open class words at test
+time in the reference task (as well as using their
+meanings to boost the training sets). For example,
+the“both squares” implies there exist exactly
+two squares; if the symbol grounding model has
+an uncertain belief that there are more (or fewer)
+squares than this, it will select the two most proba-
+bly candidates (and infer that all other entities are4869
+C1 S1 R2 Reference
+P R F1 P R F1 P R F1 P R F1 0.17 0.54 0.25 0.16 0.52 0.23 0.16 0.50 0.25 0.14 0.04 0.06 0.15 0.49 0.21 0.16 0.48 0.220.33 1.00 0.49 0.21 0.06 0.10 0.17 0.51 0.23 0.170.56 0.25 0.33 1.00 0.50 0.42 0.10 0.16
+non-squares). These experiments suggest that this
+sort of correction to conﬁdent but wrong estimates
+of the denotations of open-class symbols happens
+sufﬁciently often at test time in the reference task
+to make a difference in this low-data regime we are
+interested in, for addressingtasks.
+6.1 Error Analysis
+The and baselines never acquire neg-
+ative exemplars: e.g., information that a particular
+individual is not red. Figure 2 shows that this
+severely impacts their performance, and error anal-
+ysis showed that in some experiment runs it leads to
+model-collapse, with all denotations predicted to be
+in the extensions of all symbols. On the other hand, is able to acquire and use negative examples
+from the truth functional meanings of the logical
+symbols, speciﬁcally from: (a) negation (“not”);
+(b) the presupposition triggers“the N", “Nof the
+M”, and “all but N" whereN, andMare num-
+bers and “both"; and (c) the use of “every” when it
+modiﬁes the head noun.
+7 Conclusions
+In this work, we presented —a grounder that
+supports incremental learning of the mapping from
+symbols to visual features whenever the teacher
+presents a linguistically complexand its desig-nation(s) in the visual scene. The grounder starts
+the learning process with no conceptualisation of
+the domain model, and so the learner must revise
+its hypothesis space of possible domain models as
+and when the teacher introduces new and unfore-
+seen concepts via neologisms. We showed how
+exploiting the model-theoretic interpretation of the
+formal semantic representations ofs, and in par-
+ticular the truth conditions of ‘logical’ words like
+quantiﬁers and negation, can inform the acquisi-
+tion of noisy training exemplars that in turn guide
+learning— reasons about the likely denota-
+tions of symbols within anthat aren’t desig-
+nated by that, and when sufﬁciently conﬁdent it
+exploits them to update its grounding model. We
+showed that: 1) this grounding approach is more
+data efﬁcient then a model that omits such obser-
+vations and reasoning, using only the designated
+symbols; and 2) it is beneﬁcial to exploit the log-
+ical consequences of the logical symbols, to gain
+even more data efﬁciency and training stability. In
+both cases, there was much to be gained from such
+reasoning because in contrast to the baselines, it
+contributes to acquiring negative exemplars: in
+other words, objects that get associated with not
+being red, for example.48707.1 Future Work uses a single source of data augmentation by
+acquiring noisy exemplars from symbols in oblique
+positions. Further and parallel data gains may be
+obtained by exploring semi-supervised learning
+methods (Yarowsky, 1995; Delalleau et al., 2005).
+In this work, converting L-sentences to conjunc-
+tive normal form, which is an NP-hard problem,
+was a computational bottleneck. Future work needs
+to address this by either considering lifted inference
+methods (e.g., den Broeck et al. (2011)) or deﬁning
+model counters that use L-sentences directly.
+Finally, the purpose of is to aid: i.e.,
+the (incremental) updates to beliefs about sym-
+bol grounding should enhance learning to solve
+domain-level planning problems. Future work
+needs to address this by using to learn plan-
+ning tasks where the learner has the physical ability
+to execute certain actions but starts out unaware of
+domain concepts that deﬁne the goal and are criti-
+cal to task success. The learner must not only use to interpret the teacher’s feedback, but also
+learn decision making strategies, both on what to
+say (or ask) the teacher in their extended dialogue
+and what actions to perform in the environment.
+Furthermore, the static formal semantics that we
+used here should be replaced with a dynamic se-
+mantics (e.g., Groenendijk and Stokhof (1991); van
+der Sandt (1992); Asher and Lascarides (2003)),
+to account for how contextual salience inﬂuences
+truth and reference in dialogue. Following Batra
+et al. (2020), we plan to test the beneﬁts of
+within a system that learns to solve planning prob-
+lems that focus on rearrangement tasks.
+Acknowledgments
+This work was supported in part by the UKRI
+Centre for Doctoral Training in Natural Lan-
+guage Processing, funded by the UKRI (grant
+EP/S022481/1), UKRI Strategic Priorities Fund
+to the UKRI Research Node on Trustworthy Au-
+tonomous Systems Governance and Regulation
+(grant EP/V026607/1, 2020-2024), and the Tur-
+ing 2.0 ‘Enabling Advanced Autonomy through
+Human-AI Collaboration’ project funded by EP-
+SRC and the University of Edinburgh through the
+Alan Turing Institute.References4871487248734874

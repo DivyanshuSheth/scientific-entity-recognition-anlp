@@ -1,1 +1,785 @@
-5507 Proceedings of the 2022 Conference of the North American Chapter of the Association for Computational Linguistics : Human Language Technologies , pages 5507 5521 July 10 - 15 , 2022 © 2022 Association for Computational Linguistics 5508 5509 5510 5511 5512 5513 5514 5515 5516 5517 5518 5519 5520 5521 
+
+Zhuofeng WuSinong WangJiatao GuRui Hou
+Yuxiao DongV .G.Vinod VydiswaranHao MaSchool of Information, University of MichiganMeta AITsinghua UniversityDepartment of Learning Health Sciences, University of Michigan
+{zhuofeng, vgvinodv}@umich.edu
+{sinongwang, jgu, rayhou, haom}@fb.com
+yuxiaod@tsinghua.edu.cn
+Abstract
+Prompt tuning is a new, efficient NLP trans-
+fer learning paradigm that adds a task-specific
+prompt in each input instance during the model
+training stage. It freezes the pre-trained lan-
+guage model and only optimizes a few task-
+specific prompts. In this paper, we propose a
+conditional prompt generation method to gen-
+erate prompts for each input instance, referred
+to as the Instance-Dependent Prompt Genera-
+tion (IDPG). Unlike traditional prompt tuning
+methods that use a fixed prompt, IDPG intro-
+duces a lightweight and trainable component to
+generate prompts based on each input sentence.
+Extensive experiments on ten natural language
+understanding (NLU) tasks show that the pro-
+posed strategy consistently outperforms vari-
+ous prompt tuning baselines and is on par with
+other efficient transfer learning methods such
+as Compacter while tuning far fewer model pa-
+rameters.
+1 Introduction
+In recent years, pre-training a transformer model
+on a large corpus with language modeling tasks and
+fine-tuning it on different downstream tasks has be-
+come the primary transfer learning paradigm in nat-
+ural language processing (Devlin et al., 2019). No-
+tably, this paradigm requires updating and storing
+all the model parameters for each downstream task.
+As the model size proliferates (e.g., 330M param-
+eters for BERT (Devlin et al., 2019) and 175B for
+GPT-3 (Brown et al., 2020)), it becomes computa-
+tionally expensive and challenging to fine-tune the
+entire pre-trained language model (LM). Thus, it is
+natural to ask whether we can transfer the knowl-
+edge of a pre-trained LM to downstream tasks by
+keeping most of the parameters fixed and tuning
+only a small fraction of them.
+Figure 1: Overall evaluation of competing approaches
+on ten NLU tasks, with parameters from classification
+heads excluded. Our method approaches RoBERTa-
+FT’s performance and uses fewer parameters than
+Adapter-based methods.
+Previous studies have attempted to address this
+question from different perspectives. One line
+of research (Li and Liang, 2021) suggests aug-
+menting the model with smaller, trainable mod-
+ules and freezing the original transformer weights.
+Adapters (Houlsby et al., 2019; Pfeiffer et al., 2021,
+2020), for example, insert a small set of addi-
+tional modules between each transformer layer.
+Only these additional and task-specific modules
+are trained during fine-tuning, reducing the number
+of trainable parameters to ∼1–3% of the original
+transformer model per task. Compacter (Mahabadi
+et al., 2021) optimizes the training parameters fur-
+ther by designing a lightweight module to replace
+the bottleneck architecture in Adapters.
+Another line of work focuses on prompting.
+The GPT-3 models (Brown et al., 2020; Schick
+and Schütze, 2021) find that, with proper manual
+prompts, a pre-trained LM can successfully match
+the fine-tuning performance of BERT models. LM-
+BFF (Gao et al., 2021a), EFL (Wang et al., 2021),
+and AutoPrompt (Shin et al., 2020) extend this di-
+rection by inserting prompts in the input embedding5507layer. However, these methods rely on grid-search
+for a natural language-based prompt from an ample
+search space, leading to optimization challenges.
+To tackle this issue, prompt tuning (Lester et al.,
+2021), prefix tuning (Li and Liang, 2021), and P-
+tuning (Liu et al., 2021a,b) approaches propose to
+prepend trainable prefix tokens to the input layer
+and train these soft prompts only during the fine-
+tuning stage. In doing so, the problem of searching
+discrete prompts is converted to a continuous op-
+timization task, which can be solved by a variety
+of optimization techniques such as SGD. This sig-
+nificantly reduced the number of trainable parame-
+ters to just a few thousand. However, all existing
+prompt-tuning methods have thus far focused on
+task-specific prompts, which are inadequate to ad-
+dress the gap between pre-training and fine-tuning
+objectives. Specifically, it is unlikely to see many
+different sentences with the same prefix in the pre-
+training corpus. Thus, a unified prompt may disturb
+the prediction and lead to a performance drop. In
+light of these limitations, we instead ask the fol-
+lowing question: Can we generate input-dependent
+prompts to smooth the domain difference?
+This paper presents the instance-dependent
+prompt generation (IDPG) strategy for efficiently
+tuning large-scale LMs. Unlike traditional prompt-
+tuning methods that rely on a fixed prompt for
+each task, IDPG instead develops a conditional
+prompt generation model to generate prompts for
+each instance. Formally, the IDPG generator can
+be denoted as f(x;W), where xis the instance rep-
+resentation and Wrepresents the trainable param-
+eters. Note that by setting Wto a zero matrix
+and only training the bias, IDPG would degenerate
+into the traditional prompt tuning process (Lester
+et al., 2021). To further reduce the number of pa-
+rameters in the generator f(x;W), we propose to
+apply a lightweight bottleneck architecture (i.e., a
+two-layer perceptron) and then decompose it by a
+parameterized hypercomplex multiplication (PHM)
+layer (Zhang et al., 2021). To summarize, this work
+makes the following contributions:
+•We introduce an input-dependent prompt gen-
+eration method—IDPG—that only requires
+training 134K parameters per task, corre-
+sponding to ∼0.04% of a pre-trained LM such
+as RoBERTa-Large (Liu et al., 2019).
+•Extensive evaluations on ten natural language
+understanding (NLU) tasks show that IDPGconsistently outperforms task-specific prompt
+tuning methods by 1.6–3.1 points. Addi-
+tionally, it offers comparable performance to
+Adapter-based methods while using fewer pa-
+rameters.
+•We conduct substantial intrinsic studies, re-
+vealing how and why each component of the
+proposed model and the generated prompts
+could help the downstream tasks.
+2 Preliminary
+2.1 Manual Prompt
+Manual prompt learning (Brown et al., 2020;
+Schick and Schütze, 2021) inserts a pre-defined
+label words in each input sentence. For example,
+it reformulates a sentence sentiment classification
+task with an input sentence Sas
+x=[CLS] P[SEP] S[EOS] ,
+where Pis the prompt such as “indicating the pos-
+itive user sentiment”. Using the pre-trained lan-
+guage model M, we can obtain the sentence repre-
+sentation h =M(x), and train a task-specific
+head softmax (Wh )to maximize the log-
+probability of the correct label. LM-BFF (Gao
+et al., 2021a) shows that adding a specifically de-
+signed prompt during fine-tuning can benefit the
+few-shot scenario. EFL (Wang et al., 2021) further
+suggests that reformulating the task as entailment
+can further improve the performance in both low-
+resource and high-resource scenarios.
+2.2 Prompt Tuning
+Prompt tuning (Lester et al., 2021), prefix tun-
+ing (Li and Liang, 2021), and P-tuning (Liu et al.,
+2021a,b) methods propose to insert a trainable pre-
+fix in front of the input sequence. Specifically, they
+reformulate the input for single sentence tasks as
+x=concat [W,E([SEP] S[EOS] )]
+and for sentence pair tasks as
+where Wis the embedding table of the inserted
+prompt, SandSare input sentences, and Ede-
+notes the operation of tokenization and extraction
+of embeddings. Apart from LM-BFF and EFL,
+there is no corresponding real text for the prompt
+asWis a set of random-initialized tensors to rep-
+resent the soft prompt.5508
+3 Instance-Dependent Prompt
+Generation (IDPG)
+We now introduce our proposed method, IDPG,
+along with various model optimizations. The main
+procedure is illustrated in Figure 2.
+3.1 Instance-Dependent Generation
+Let us assume a task Twith training data D=
+{(x,y)}. Following prompt tuning, we define
+the input x=E([SEP] S[SEP] S[EOS] )for
+sentence-pair task or x=E([SEP] S[EOS] )for
+single-sentence task, where E(·)is the token em-
+bedding for input sentences. Different from all pre-
+vious works that only define a task-specific prompt
+W(T)∈R, where tis the number of tokens
+in prompt representation and dis the hidden di-
+mension, we propose a instance-dependent prompt
+generation method. Specifically, we suppose that
+the generation of prompt should not only depend on
+the task T, but also be affected by input sequence
+x. IfM(x)∈Ris a representation of the input se-quence xfrom same pre-trained LM M, we design
+a lightweight model Gto generate the prompt,
+W(T,x) =G(M(x),T),x∈D (1)
+Then, we insert a prompt W(T)together with
+input sequence xto infer yduring fine-tuning. In
+this way, we have a unified template
+softmax (Wh ) (2)
+h =M(concat [x,W(T,x)]) (3)
+where Wis the trainable LM classification head.
+To reduce the number of trainable parameters
+inG, we apply a lightweight bottleneck architec-
+ture (i.e., a two-layer perceptron) for generation.
+As illustrated in Figure 2 (c), the generator Gfirst
+projects the original d-dimensional sentence rep-
+resentation hinto mdimensions. After passing
+through a nonlinear function, generator Gprojects
+the hidden representation back to a ddimensions5509with ttimestamps. The total number of parame-
+ters for generator Gism(d+1)+td(m+1)(bias
+term included). This model can be regarded as
+the general version of prompt tuning: in the sec-
+ond layer of G, the bias term tdis a task-specific
+prompt, with preceding parts td×mgenerating
+an instance-dependent prompt. The final prompt
+our method generated is a combination of both.
+In short, what we discussed here is to generate a
+t-length prompt for one Transformer layer. An op-
+timization of multi-layer prompt generation will be
+introduced in Section 3.2.2.
+We can control the added number of trainable pa-
+rameters by setting m≪d, but it is still expensive
+since hidden dimension dis usually large (1024
+in BERT/RoBERTa-Large). In the sequel, we will
+introduce a parameter squeezing method to further
+reduce trainable parameters without sacrificing per-
+formance.
+Note that our proposed method relies on the
+input sentence representation M(x)to generate
+prompts. One caveat is that this method will have
+two forward passes of the pre-trained LM during
+inference time – first to generate M(x)and then to
+generate classification results. However, the sen-
+tence representation M(x)used in our method is
+task-agnostic. In practice, we can cache the pre-
+diction M(x)and use it in various downstream
+tasks or rely on a lightweight sentence representa-
+tion such as GloVe (Pennington et al., 2014) (Cf.
+Section 4.5.1).
+3.2 Optimization
+We propose two optimization techniques to further
+improve our proposed method.
+3.2.1 Parameterized Hypercomplex
+Multiplication (PHM) Layers
+Inspired by the recent application of parameterized
+hypercomplex multiplication (PHM) layers (Zhang
+et al., 2021) in Compacter (Mahabadi et al., 2021),
+we leverage PHM layers to optimize our prompt
+generator, G. Generally, the PHM layer is a fully-
+connected layer with form y=Wx+b, where
+x∈Ris the input feature, y∈Ris the output
+feature, and W∈Randb∈Rare the train-
+able parameters. When manddare large, the cost
+of learning Wbecomes the main bottleneck. PHM
+replaces the matrix Wby a sum of Kronecker prod-
+ucts of several small matrices. Given a user-defined
+hyperparameter n∈Zthat divides mandd,Wcan be calculated as follows:
+W=A
+B (4)
+where A∈R,B∈R, andis Kronecker
+product. In this way, the number of trainable param-
+eters is reduced to n×(n×n+×) =n+.
+Asnis usually much smaller than mandd, PHM
+reduces the amount of parameters by a factor of n.
+Suppose that we have a two layer perceptron
+with down-sample projection W∈Rand up-
+sample projection W∈R, where dis the
+input embedding dimension, mis the hidden layer
+dimension, and tis the number of tokens we gener-
+ate. For example, we use RoBERTa-Large with hid-
+den size d=1024 , generator hidden size m=256,
+n=16, prompt length t=5. By substituting the
+WandWby two PHM layers and letting A
+shared by both layers, we can reduce the number
+of parameters from 1.5M to 105K.
+3.2.2 Multi-layer Prompt Tuning
+Prompt tuning (Lester et al., 2021) and P-
+tuning (Liu et al., 2021b) both insert continuous
+prompts into the first transformer layer (cf. Fig-
+ure 2(b)). While proven efficient in some specific
+settings, single layer prompt tuning has two main
+limitations: (i) Capturing deep contextual informa-
+tion: the impact of the first-layer prompts on final
+prediction is low when transformer goes deeper.
+(ii) Generalizing to long sequence tasks: it is un-
+clear that prompt tuning can perform well in tasks
+with long input when only a limited number of
+parameters can be inserted in single layer.
+Following Prefix tuning (Li and Liang, 2021)
+and P-tuning v2 (Liu et al., 2021a), we prepend
+our generated prompts at each transformer layer to
+address the above issues. However, simply gener-
+alizing our model (IDPG) to a multi-layer version
+(M-IDPG), will significantly increase the number
+of training parameters, since each layer requires an
+independent generator G. Instead, we explore dif-
+ferent architectures in Section 4.5.3 to balance the
+number of tuned parameters against model perfor-
+mance. In short, assuming each layer generator G
+has form y=Wx+b, we share the weight matrix
+Wacross generators and set the bias term b∈R
+to be layer-specific, where i=1,..., Nis the layer
+index and Nis the number of transformer layers.5510
+4 Experiment Results
+4.1 Experimental Setup
+We evaluate on ten standard natural language un-
+derstanding (NLU) datasets – MPQA (Wiebe et al.,
+2005), Subj (Pang and Lee, 2004), CR (Hu and
+Liu, 2004), MR (Pang and Lee, 2005), and six
+tasks from GLUE (Wang et al., 2019), viz. SST-2,
+QNLI, RTE, MRPC, STS-B (Cer et al., 2017) and
+QQP. We compare our proposed method with a
+wide range of methods, as follows:
+Transformer fine-tuning: We instantiated two
+versions – a vanilla transformer fine-tuning (Liu
+et al., 2019) and the entailment-based fine-
+tuning (Wang et al., 2021).
+Prompt tuning: We implemented two versions
+– standard prompt tuning (Lester et al., 2021) and
+multi-layer prompt tuning (Li and Liang, 2021; Liu
+et al., 2021a).
+Adapter-based fine-tuning: This efficient
+transfer learning method inserts an adaptation
+module inside each transformer layer includ-
+ing Compactor (Mahabadi et al., 2021) and
+Adapter (Houlsby et al., 2019).
+We compare these against two versions of single-
+layer instance-dependent generation methods: S-
+IDPG-DNN and S-IDPG-PHM. The first version
+is based on a 2-layer perceptron generator, which
+contains 1.5M parameters. The second one uses
+the PHM layer and only contains 105K parameters.
+We also explore three versions of multi-
+layer instance-dependent generation methods:
+M-IDPG-DNN, M-IDPG-PHM, M-IDPG-PHM-GloVe. Again, the difference between the first two
+is in the prompt generator, while M-IDPG-PHM-
+GloVe uses GloVe to encode input sequences.
+For a fair comparison, all the pre-trained LMs
+are 24-layer 16-head RoBERTa-Large models (Liu
+et al., 2019). Additional training details can be
+found in Appendix A.1. Notably, Prompt-tuning-
+134 uses 134 prompt lengths in Table 1, and it is set
+so to match the training parameters of the proposed
+method, M-IDPG-PHM.
+4.2 Performance in high-resource scenario
+Table 1 shows the results of all the methods on full
+datasets across 10 NLU tasks. We observe that:
+(i) Our proposed method M-IDPG-PHM consis-
+tently outperforms the prompt tuning method and
+Ptuning v2 by average 3.1pt and 1.6pt, respectively
+(except on the RTE dataset). (ii) Compared with
+other efficient transfer learning methods, IDPG
+performs slightly worse than the Compacter (Ma-
+habadi et al., 2021) and Adapter (Houlsby et al.,
+2019), across the ten tasks. However, the gap
+is mostly from RTE and QQP. Note that IDPG
+uses 15K fewer parameters than the Compacter.
+M-IDPG-PHM is better than Compacter on four
+tasks and has the same performance on three tasks.
+(iii) The improvement of our method is more promi-
+nent in the single-sentence classification task. The
+four best results (MPQA, Subj, CR, MR) among all
+competing methods in single-sentence classifica-
+tion tasks are made by IDPG models. Specifically,
+M-IDPG-PHM performs 0.84pt and 0.36pt better
+than RoBERTa and EFL, respectively. (iv) PHM-5511based generator performs on par with the DNN-
+based generator while having a significantly lower
+number of trainable parameters. (v) GloVe-based
+sentence encoder also performs similar to LM-
+based sentence encoder, indicating the advance-
+ment of instance-dependent prompt generation
+does not rely on a robust contextual sentence en-
+coder. (vi) When we fix the training parameters
+to be the same, the comparison between Prompt-
+tuning-134 and M-IDPG-PHM illustrates that our
+approach works better than prompt tuning not just
+because of using more parameters.
+4.3 Efficiency
+Table 2 lists the number of trainable parameters for
+different methods excluding the classification head.
+The general goal for efficient transfer learning is to
+train models with fewer parameters while achiev-
+ing better performance. Traditional prompt-tuning
+method only requires training a token embedding
+table with a few thousand parameters. However,
+its performance is worse than a lightweight adapter
+model (e.g., Compacter with 149K parameters).
+Our proposed method, especially the M-IDPG-
+PHM, falls in the gap between prompt-tuning and
+adapter model, since it only requires training 134K
+parameters and performs on par with Compacter.
+4.4 Performance in low-resource scenario
+We further evaluate our proposed method in the
+low-resource scenario. Following the existing eval-
+uation protocols in the few-shot setting (He et al.,
+2021), we sample a subset of the training data for
+each task with size K∈ {100,500,1000}as our
+training data and another subset with size 1000
+as a development set. We compare our proposed
+methods with all prompt tuning methods, one fine-tuning model (EFL), and one adapter tuning model
+(Compacter).
+In the extreme low-resource case when K=100,
+M-IDPG-PHM performs 2.5pt better than the tra-
+ditional prompt tuning method and 0.5pt better
+than the multi-layer P-Tuning v2 method. This
+improvement illustrates that our method has bet-
+ter generalization in few-shot settings. When K
+becomes larger, IDPG-PHM still maintains good
+results with 1.9pt and 0.2pt improvement ( K=500);
+and 2.0pt and 0.2pt improvement ( K=1000) in ac-
+curacy with traditional prompt tuning and P-tuning
+v2 approaches, respectively. We also observe that
+sometimes when Kis small, our method results
+have high variance (e.g., 4.6 on MPQA, when
+K=100). We suspect that this may be due to poor
+initialization leading the model to non-optimal pa-
+rameters.
+We also note that other state-of-the-art models,
+such as LM-BFF (Gao et al., 2021a), attempt to
+address the few-shot learning problem from a dif-
+ferent perspective. We want to highlight that we are
+exploring a solution by training as few parameters
+as possible while maintaining good performance.
+Testing the limitation of our model without freezing
+any parameters would be an interesting investiga-
+tion, but is not the main focus of this paper.
+4.5 Intrinsic Study
+We conduct several ablation studies including ex-
+ploration of different generator architectures and
+impact of selecting different prompt positions.
+4.5.1 Sentence Encoder: GloVe or LMs?
+The proposed IDPG method relies on pre-trained
+LM to extract sentence representation, i.e., [CLS]
+token embedding. Obtaining contextualized trans-
+former sentence embedding is often expensive if
+it is not pre-computed. One open question is to
+explore reliability on lightweight sentence repre-
+sentations such as GloVe embedding (Pennington
+et al., 2014) or token embedding of pre-trained
+language models.
+To answer this question, we apply the pre-trained
+GloVe word vectorsto extract the sentence repre-
+sentation. Specifically, we take the average of word
+vectors as the sentence embeddings:
+M(x) =1
+kGloVe (t),x∈D (5)5512
+where xis the input sequence with ktokens
+t,..., t. According to Table 1, using GloVe as
+sentence encoder to generate prompts doesn’t sac-
+rifice much performance over the ten tasks and
+outperforms prompt tuning and P-tuning v2. It in-
+dicates that our model does not benefit a lot from a
+strong contextual pre-trained LM. Instead, a light
+sentence encoder such as GloVe can also help the
+tasks. Also, instance-dependent prompt tuning
+shows promising improvement over non-instance-
+dependent prompt tuning models. One of the draw-
+backs of our method is that it is twice as expensive
+to run compared to Compacter, even though it uses
+slightly fewer parameters. Adopting GloVe as sen-
+tence encoder would avoid going through the LM
+twice, thus effectively reducing IDPG’s run-time
+complexity by half.
+4.5.2 Prompt Generator: PHM or DNN?
+To reduce the tuning parameters, we substitute the
+DNN layers with PHM layers. An open question
+we seek to answer is what is the best generation
+model for prompt regardless of training parameters.
+Hence, we compare the PHM-based prompt gen-
+erator with the DNN-based prompt generator, as
+shown in Table 1. We observe that including DNN
+as a generator doesn’t improve performance signif-
+icantly, with +0.1pt gain on average, while adding
+87K parameters (with hidden size m=16). On the
+other hand, this ablation study further verifies PHM
+layers’ efficiency in the generation model.
+4.5.3 Multi-layer Architecture Exploration
+When applying the instance-dependent generation
+model Ginto a multi-layer case, the first challenge
+we face is the considerable increase in training pa-
+rameters. If each transformer layer requires an
+independent generator G, the number of training5513parameters increases Ntimes, where Nis the num-
+ber of transformer layers (24 in RoBERTa-Large).
+Assuming Ghas the form y=Wx+b, there are
+three alternatives: (i) Smallest version (S version):
+sharing both Wandb; (ii) Middle version (M ver-
+sion): sharing Wand making blayer-specific; and
+(iii) Largest version (L version): making both W
+andblayer-specific.
+Another way to reduce the training parameters
+is by adjusting the hidden size mof the generator.
+We compare two models with m=16andm=256.
+Surprisingly, we find that generator with a hidden
+size 16is not far from the large model (92.0 vs.
+92.1, respectively, in M version). We hypothesize
+that the smaller hidden size of 16is already enough
+to store useful instance information, and setting m
+too large may be less efficient.
+Besides, in single-layer prompt generation
+model, the input to GisM(x)- the representation
+of input sequence x. In a multi-layer case, the in-
+put to each layer generator has another option, i.e.,
+the previous layer’s output. However, as shown in
+Figure 3, the experiment results suggest no signifi-
+cant difference between the two input ways. As for
+the generator selection, the three models perform
+as expected (S version < M version < L version). In
+Table 1, M-IDPG-PHM uses the previous layer’s
+output as input, M version as the generator, and 16
+as the generator hidden size. Detailed information
+for all models’ performance on each task can be
+found in Appendix A.3.
+4.5.4 Prompt Insertion: Single-layer or
+Multi-layer?
+P-tuning v2 (Liu et al., 2021a) conducted sub-
+stantial ablation studies on the influence of insert-
+ing prompt into different transformer layers. To
+boost single-layer IDPG performance, we add sup-
+plementary training (cf. Appendix A.4) and con-
+duct ablation studies in Appendix A.5. We come
+to a similar conclusion that multi-layer instance-
+dependent prompt tuning model (M-IDPG) is sig-
+nificantly better than the single-layer method (S-
+IDPG) in both evaluation settings. An interesting
+finding is that the impact of supplementary training
+on S-IDPG is high while it is limited for M-IDPG.
+4.5.5 How Prompts Help?
+Given two sentences, we encode each of them by
+one of the comparison models and compute the
+cosine similarity. We sort all sentence pairs in
+STS-B dev set in descending order by the cosine
+similarity scores and get a distribution for number
+of pairs in each group that is included in Top-k
+ranking. We compare a vanilla model without any
+prompts with M-IDPG-PHM. Both models are fine-
+tuned on STS-B training set. As shown in Figure 4,
+prompts bring the similar sentences closer while
+pushing the dissimilar ones apart.
+4.5.6 IDPG Scalability
+We study our proposed model’s scalability in this
+section. In general, the performance of IDPG in
+downstream tasks improves gradually when using
+a larger prompt length (Cf. Appendix A.7).
+5 Related Work
+Supplementary Training: Existing works (Phang
+et al., 2018; Liu et al., 2019) have observed that
+starting from the fine-tuned MNLI model results in
+a better performance than directly from the vanilla
+pre-trained models for RTE, STS, and MRPC tasks.
+A series of work (SentenceBERT (Reimers and
+Gurevych, 2019), BERT-flow (Li et al., 2020), Sim-
+CSE (Gao et al., 2021b)) explored intermediate
+training to improve STS tasks. All of them applied
+pre-fine tuning on NLI datasets. More recently,
+EFL (Wang et al., 2021) proposed a task transfor-
+mation paradigm, improving single sentence tasks
+with less labels using rich sentence-pair datasets.
+Adapter Tuning: Adapter tuning has emerged
+as a novel parameter-efficient transfer learning
+paradigm (Houlsby et al., 2019; Pfeiffer et al.,
+2020), in which adapter layers – small bottleneck
+layers – are inserted and trained between frozen
+pre-trained transformer layers. On the GLUE
+benchmark, adapters attain within 0.4%of the
+performance of full fine-tuning by only training
+3.6%parameters per task. Compactor (Mahabadi5514et al., 2021) substitutes the down-projector and up-
+projector matrices by a sum of Kronecker products,
+reducing the parameters by a large margin while
+maintaining the overall performance.
+Prompting: Hand-crafted prompts were shown to
+be helpful to adapt generation in GPT-3 (Brown
+et al., 2020). Existing works including LM-
+BFF (Gao et al., 2021a; Wang et al., 2021) explored
+the prompt searching in a few-shot setting.
+Recently, several researchers have proposed con-
+tinuous prompts training to overcome the chal-
+lenges in discrete prompt searching. Prefix tun-
+ing (Li and Liang, 2021) and P-tuningv2 (Liu
+et al., 2021a) prepend a sequence of trainable em-
+beddings at each transformer layer and optimizes
+them. Two contemporaneous works – prompt tun-
+ing (Lester et al., 2021) and P-tuning (Liu et al.,
+2021b), interleave the training parameters in the
+input embedding layer instead of each transformer
+layer. All these methods focus on task-specific
+prompt optimization. Our proposed method, IDPG,
+is the first prompt generator that is not only task-
+specific but also instance-specific.
+6 Conclusion and Discussion
+We have introduced IDPG, an instance-dependent
+prompt generation model that generalizes better
+than the existing prompt tuning methods. Our
+method first factors in an instance-dependent
+prompt, which is robust to data variance. Param-
+eterized Hypercomplex Multiplication (PHM) is
+applied to shrink the training parameters in our
+prompt generator, which helps us build an extreme
+lightweight generation model. Despite adding
+fewer parameters than prompt tuning, IDPG shows
+consistent improvement. It is also on par with the
+lightweight adapter tuning methods such as Com-
+pacter while using a similar amount of trainable
+parameters. This work provided a new research
+angle for prompt-tuning of a pre-trained language
+model.
+Acknowledgment
+We thank Brian Lester, Jonas Pfeiffer, Tianyu Gao,
+Qinyuan Ye, Zhenhao Zhang, Fei Sun, members of
+the University of Michigan’s NLP4Health research
+group, and all anonymous reviewers for helpful
+discussion and valuable feedback.References551555165517A Appendix
+A.1 Experimental Settings
+A.1.1 Training hyperparameters
+We use RoBERTa-Large (Liu et al., 2019) model
+implemented by Fairseq (Ott et al., 2019) as our
+basic model. The detailed model hyperparameters
+are listed in Table 4.
+Note that for both transformer fine-tuning meth-
+ods, including RoBERTa (Liu et al., 2019) and
+EFL (Wang et al., 2021), we follow their official
+training instructions, i.e., using a polynomial learn-
+ing rate scheduler with 6% steps to warm up and
+tuning for ten epochs. For all adapter-based and
+prompt-based methods, we train them more suffi-
+ciently (with fifty epochs) on small datasets (i.e.,
+MPQA, Subj, CR, MR, RTE, MRPC, STS-B).
+A.1.2 Model hyperparameters
+We report the detailed model hyperparameters for
+each method in Table 1 and illustrate how numbers
+in Table 2 are computed.
+Compacter: hidden size d=1024 , adapter hid-
+den size m=16, user defined n=4, each trans-
+former layer inserts 2 compacters. Down-project
+smatrix takes 1024 /4×4×24×2=48K, down-
+project tmatrix takes 16/4×4×24×2=0.75K,
+hidden bias takes 16×24×2=0.75K, up-project
+sand tmatrix takes the same number of pa-
+rameters as down-projector, the output bias takes
+1024×24×2=48K, the shared matrix Atakes
+4×24×2=3K.Total parameters :48+0.75+
+0.75+48+0.75+48+3=149.25K.
+Adapter: hidden size d=1024 , adapter hidden
+sizem=16.Total parameters :(1024×16+16+
+16×1024+1024)×24×2=1.55M.
+Prompt-tuning: prompt length t=5.Total
+parameters : 5×1024 =5K.
+Prompt-tuning-134: prompt length t=134.To-
+tal parameters : 134×1024 =134K.
+P-tuning v2: prompt length t=5, inserted lay-
+ers 24. Total parameters : 5×24×1024 =120K.
+S-IDPG-PHM: hidden size d=1024 , generator
+hidden size m=256, prompt length t=5, user
+defined n=16(Cf. Equation 4). First PHM layer
+Wtakes 1024 /16×256/16×16+256=16.25K
+parameters, second PHM layer Wtakes 256/16×
+5×1024 /16×16+5×1024 =85Kparameters,
+the shared matrix Atakes 16=4K(Note we use
+one shared matrix in single version IDPG). Total
+parameters : 105 K.S-IDPG-DNN: hidden size d=1024 , generator
+hidden size m=256, prompt length t=5.Total
+parameters :1024×256+256+256×5×1024+
+5×1024 =1.5M.
+M-IDPG-PHM-GloVe: input vector size 300,
+generator hidden size m=16, prompt length t=5,
+user defined n=4(Cf. Equation 4). First PHM
+layer Wtakes 300/4×16/4×4+16=1216 pa-
+rameters, second PHM layer Wtakes 16/4×5×
+1024 /4×4+5×1024×24=140Kparameters,
+the shared matrix Atakes 4×2=128.Total
+parameters : 141 K.
+M-IDPG-PHM: hidden size d=1024 , genera-
+tor hidden size m=16, prompt length t=5, user
+defined n=16(Cf. Equation 4). First PHM layer
+Wtakes 1024 /16×16/16×16+16=1Kparam-
+eters, second PHM layer Wtakes 16/16×5×
+1024 /16×16+5×1024×24=125Kparameters,
+the shared matrix Atakes 1616×2=8K.Total
+parameters : 134 K.
+M-IDPG-DNN: hidden size d=1024 , genera-
+tor hidden size m=16, prompt length t=5.Total
+parameters :1024×16+16+16×5×1024+5×
+1024×24=216K.
+A.2 Datasets
+We provide a detailed information in Table 5 for 10
+NLU datasets we used.
+A.3 Detailed results for Multi-layer
+Architecture Exploration
+We provide a detailed result table for all compared
+methods in Section 4.5.3. Note that the M version
+model with m=16and previous layer as input
+one is slightly higher than the results shown in Ta-
+ble 1(Cf. M-IDPG-PHM), this is because we tune
+the learning rate more carefully in Table 6 ( lr∈
+{1e,7e,5e,3e,1e,7e,5e,3e,
+1e}) to seek the best performance each model
+can reach. While in Table 1, we tune the learning
+rate from {5e,1e,5e,1e}to make the
+fair comparison with other models.
+A.4 Supplementary Training for Single-layer
+IDPG
+According to previous works (Phang et al., 2018;
+Wang et al., 2021), supplementing pre-trained LMs
+with rich data helps tasks with limited labels and
+stabilizes downstream fine-tuning. Following this
+idea, we also conduct intermediate training for
+single-layer IDPG.5518However, a drawback of supplementary training
+is that if the data distribution of the downstream
+tasks is quite different from the supplementary
+training task, i.e., MRPC vs. MNLI (Wang et al.,
+2019), it may harm the downstream performance.
+Figure 5 provides a comprehensive statistic among
+all sentence pair tasks in GLUE benchmark. For
+example, the length of the first sentence in MNLI
+is9.8longer than the second sentence on average,
+while this length difference in MRPC is only 0.6.
+One natural solution to smooth the length distribu-
+tion difference between tasks is to insert prompt in
+both supplementary training and downstream fine-
+tuning stage. For example, assuming that we are
+adding a prompt with a length t=5after the sec-
+ond sentence in the supplementary training stage on
+MNLI. Then, when fine-tuning downstream tasks5519
+such as MRPC, we concatenate the prompt after
+the first sentence. In this way, the length differ-
+ence in MNLI and MRPC becomes more balanced:
+4.8vs.0.6+5=5.6. As shown in Figure 6, we
+test five different insertion positions (Pos 0–4) for
+sentence pair tasks and three different positions
+(Pos 0, 1, 4) for single sentence tasks. We further
+reduce the distribution difference by reconstruct-
+ing the supplementary training data. We double
+the MNLI dataset by reordering the two sentences
+on one shard, and use the doubled dataset during
+intermediate training.
+A.5 Ablation study for single-layer IDPG
+A.5.1 Generator Architecture Exploration
+We explore three different architectures for the
+proposed PHM-based generator: (i) Residual: a
+residual structure (He et al., 2016) is applied to
+add the sentence representation to each generated
+tokens; (ii) LayerNorm: layer normalization (Baet al., 2016) is also added to normalize the gener-
+ated token embedding; (iii) residual + layerNorm:
+a mixed model that uses both the residual compo-
+nent and LayerNorm. Note that, to balance the to-
+ken embedding and sentence embedding, we apply
+LayerNorm to each embedding first, then after the
+add-up, use LayerNorm again to control the gener-
+ated tokens. We observe that adding LayerNorm
+slightly improves the voting results, while residual
+performs slightly worse. One surprising result is
+that the mixed model of Residual and LayerNorm
+has significantly poorer performance.
+A.5.2 Prompt Position
+As we discussed in Section A.4, the prompt posi-
+tion has a direct impact on the prediction results.
+We conduct a comprehensive study of the prompt
+position for our proposed method in both sup-
+plementary training and downstream fine-tuning
+phases.
+Looking at the prompt position in downstream
+tasks first, Figure 7(a) shows that for both stan-
+dard prompt tuning and our proposed method, the
+best position is 0 for single-sentence tasks and 1
+for sentence-pair tasks. This result is intuitive for
+single-sentence tasks since prompt in position 0
+can be regarded as the premise and original input
+sentence as the hypothesis. For sentence-pair tasks,
+we hypothesize that inserting prompt into position
+1 can better align the two input sentences. Fig-
+ure 7(b) illustrates the effect of prompt position
+on the supplementary training phase. It is interest-
+ing that IDPG achieves best results in position 0
+while the standard prompt-tuning achieves the best
+results in position 4 for both single-sentence and
+sentence-pair tasks.5520
+A.6 Cosine Similarity Distributions in STS-B
+We present the cosine similarity distributions when
+k=100andk=300in Figure 8a and in Figure 8b,
+respectively.
+A.7 Ablation Study on Prompt Length
+We present the impact of prompt length among
+several prompt tuning methods in Figure 9. IDPG
+shows its stability when scaling to larger models
+with longer prompts.
+A.8 Potential Risks
+Our proposed model IDPG is a novel efficient trans-
+fer learning method. It tunes small portion param-
+eters while directly employs backbone model pa-
+rameters without any changing. However, if the
+backbone model stored online is attacked, whether
+IDPG could still work well remains unknown. One
+should be careful to apply our proposed model and
+all other prompt tuning methods in high-stakes ar-
+eas without a comprehensive test.5521

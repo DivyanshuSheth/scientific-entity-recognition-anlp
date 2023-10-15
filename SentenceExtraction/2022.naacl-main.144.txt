@@ -1,1 +1,661 @@
-1975 Proceedings of the 2022 Conference of the North American Chapter of the Association for Computational Linguistics : Human Language Technologies , pages 1975 1986 July 10 - 15 , 2022 © 2022 Association for Computational Linguistics 1976 1977 1978 1979 1980 1981 1982 1983 1984 1985 1986 
+
+Wenhan Xiong, Barlas O ˘guz, Anchit Gupta, Xilun Chen, Diana Liskovich,
+Omer Levy ,Wen-tau Yih ,Yashar Mehdad
+Meta AI
+Abstract
+Many NLP tasks require processing long con-
+texts beyond the length limit of existing pre-
+trained models. To scale these models to
+longer text sequences, many efﬁcient long-
+range attention variants have been recently pro-
+posed. Despite the abundance of research in
+this direction, it is difﬁcult to gauge the rel-
+ative effectiveness of these models in practi-
+cal use cases, e.g., if we apply these models
+following the pretrain-and-ﬁnetune paradigm.
+In this work, we aim to conduct a thorough
+analysis of these emerging models with large-
+scale and controlled experiments. For each at-
+tention variant, we pretrain large-size models
+using the same long-doc corpus and then ﬁne-
+tune these models for real-world long-context
+tasks. Our ﬁndings reveal pitfalls of a widely-
+used long-range benchmark and show that the
+other efﬁcient attentions fail to outperform
+the simple local-window attention after stan-
+dard pretraining. Further analysis of local-
+attention variants suggests that even the com-
+monly used attention-window overlap is not
+necessary to achieve good downstream results
+— using disjoint local attentions, we are able
+to build a simpler and more efﬁcient long-doc
+QA model that matches the performance of
+Longformer (Beltagy et al., 2020) with half of
+its pretraining compute.
+1 Introduction
+The quadratic complexity of Transformer archi-
+tectures makes it prohibitive to apply large state-
+of-the-art pretrained models to full-length docu-
+ments. To efﬁciently handle longer text while
+still maintaining the capacity of attention-based
+models, a long list of efﬁcient attention variants
+have been proposed and many claim to effec-
+tively capture long-range dependencies. Typical
+paradigms of these architecture innovations involvelearnable sparse attention patterns (Kitaev et al.,
+2020; Tay et al., 2020; Roy et al., 2021), ﬁxed lo-
+cal patterns (Beltagy et al., 2020; Ainslie et al.,
+2020; Zaheer et al., 2020) and attention matrix
+approximation methods (Wang et al., 2020; Choro-
+manski et al., 2021; Xiong et al., 2021). While
+most of these studies have reported numbers on
+long sequence inputs, they tend to adopt quite dif-
+ferent benchmarks. For instance, Reformer (Ki-
+taev et al., 2020) is tested on the 64k-chunk en-
+wik8 dataset for unidirectional language model-
+ing; Performer (Choromanski et al., 2021) reports
+masked language modeling (MLM) perplexity on
+the PG-19 book corpus and protein sequences; Lin-
+former (Wang et al., 2020) reports MLP perplex-
+ity with various input length, while most of the
+documents in their pretrain corpus are short doc-
+uments.The divergence of evaluation protocols
+makes it hard to compare the relative performance
+of each attention variant and it is also unknown
+how they perform well in more practical use cases,
+which typically involve large-scale pretraining and
+downstream ﬁnetuning.
+Other lines of work such as Longformer (Belt-
+agy et al., 2020) and ETC (Ainslie et al., 2020)
+conduct experiments on real-world long-context
+tasks such as long document QA and summariza-
+tion. These methods only test ﬁxed local atten-
+tion patterns, i.e., each token can only attend to a
+small set of nearby tokens. To reduce the pretrain-
+ing cost, these models are all initialized from the
+RoBERTa (Liu et al., 2019) checkpointbefore fur-
+ther long-doc pretraining. While this paradigm is
+useful to achieve strong downstream performance,
+it is not ideal for a fair comparison of all available
+attention mechanisms, since some of the models
+use different parametrization that is incompatible1975with the vanilla transformer attention.
+A recently proposed benchmark (Tay et al.,
+2021), named long-range arena (LRA), aims to
+address the lack of uniﬁed evaluation with a bun-
+dle of long-sequence tasks. However, the text-
+related tasks in this benchmark are either automat-
+ically generated or artiﬁcially lengthened by en-
+forcing byte-level inputs, making them rather syn-
+thetic. With a ﬁxed byte-level vocabulary and pre-
+speciﬁed model size, all models are trained from
+scratch with the same epoch limit on each dataset.
+While the evaluation protocol is consistent across
+architectures, this setup still deviates from the com-
+mon paradigm of applying Transformer models,
+i.e., standard tokenization like BPE or wordpiece,
+large-scale pretraining followed and task-speciﬁc
+ﬁnetuning (Devlin et al., 2019). Thus, an impor-
+tant question yet to be addressed is whether the
+results on these artiﬁcial datasets are indicative of
+real-world long-context tasks.
+In this work, our goal is to better under-
+stand the effectiveness of various attention mech-
+anisms through a systematic study on practical
+long-context tasks. Instead of only relying on
+language modeling or synthetic tasks, we test
+each model under the standard pretraining-and-
+ﬁnetuning paradigm. For a fair comparison, we
+implement these attentions under a uniﬁed frame-
+work and test them using the same Transformer
+architectureused by RoBERTa-large. We pre-
+train all models using a large corpus that contains
+mostly long documents and then ﬁnetune them on
+tasks like long-document question answering, full
+document retrieval, and text classiﬁcation. Our
+experiments show the discrepancies between the
+commonly used LRA benchmark and downstream
+results (after pretraining). Additionally, our analy-
+sis on the best local attention models allows us to
+further simplify these models and results in a more
+efﬁcient long-context encoder. More speciﬁcally,
+the key ﬁndings of this paper include:
+•With proper tuning, we ﬁnd that all the tested
+models can achieve similar level of perfor-
+mance on the LRA benchmark while their per-
+formance diverges signiﬁcantly on large-scale
+pretraining and downstream tasks;
+•In our experiments, the other attention
+paradigms barely outperform the class of sim-
+ple local attentions on downstream tasks when
+using similar pretraining compute;
+•As a result of our further analysis of the best
+performing attention variants, we are able to
+build a long-doc QA model that is on-par with
+Longformer while being 2x more efﬁcient.
+2 Preliminaries of Tested Attention
+Variants
+We study three classes of efﬁcient attentions:
+Fixed local patterns. These methods restrict
+each token to only attend a local window of to-
+kens. The long-range interactions are achieved by
+the depth of the model. We consider two variants
+of these models, the token-wise local window at-
+tention ( Local Window ) proposed in Beltagy et al.
+(2020) where each token attends to the same num-
+ber of tokens on each side, and a simpliﬁed and
+easy-to-implement blockwise version ( Blockwise
+LW) (Zaheer et al., 2020) where each token attends
+to tokens in the same block and half of the tokens
+in the left/right blocks. A visualization comparing
+these two models is shown in Figure 1.
+Learnable sparse attention patterns. Instead of
+relying on the inductive bias of locality, methods
+likeReformer (Kitaev et al., 2020) and Sinkhorn
+Attention (Tay et al., 2020) allow the model to adap-
+tively select tokens to attend to. Brieﬂy, Reformer
+uses a learnable hashing function to bucket the se-
+quence and each token only attends to tokens in
+the same bucket; Sinkhorn uses a learnable sorting
+function to learn a permutation of the segments and
+each token will attend to tokens in its segment, and
+the corresponding segment after permutation.1976Kernel-based/Low-rank methods. This class of
+methods use matrix approximation methods to ap-
+proximate the full attention function. For sequence
+length Land the hidden dimension d,Linformer
+(Wang et al., 2020) simply uses a projection ma-
+trix (L×k) to reduce the length of key and value
+feature matrix, i.e., from L×dtok×d(k/lessmuchL).
+Nyström (Xiong et al., 2021) attention adopts a
+classic matrix approximation method which recon-
+structs the full attention matrix using a sampled
+sub-matrix. Performer (Choromanski et al., 2021)
+eliminates the need of explicitly calculating the
+L×Lattention matrix by using a random feature
+method that can approximate the softmax kernel
+with only dot-product operations.
+Hybrid attention. In addition to these representa-
+tive methods in each class, our study also includes
+the more recent Long-Short attention (Zhu et al.,
+2021) which has a similar compression compo-
+nent as in Linformer and combines it with local at-
+tentions. Unlike Linformer’s compression compo-
+nent which is simply implemented as a standalone
+projection matrix, Long-Short proposes an input-
+dependent compression layer, which can adaptively
+reduce the sequence length.
+A note on global tokens. For many practical
+NLP tasks, e.g., classiﬁcation or entailment, the
+ﬁnal layer of the model usually requires a single
+sequence-level representation as input. For local
+attention models, it is common practice (Beltagy
+et al., 2020; Zaheer et al., 2020) to mark a single
+or a small number of tokens as global tokens and
+allow these tokens to attend to and be attended
+by all other tokens. Without incurring much com-
+putational cost, these global tokens are important
+to get better sequence representations and achieve
+good downstream results. While the mechanism
+of global tokens has not been used in models with
+learnable attention patterns, it is straightforward
+to augment Reformer andSinkhorn with global
+tokens using gather operations in standard neu-
+ral network packages, as their attention scores are
+still calculated by dot product and softmax oper-
+ations. Thus, in our experiments, except for the
+kernel-based/low-rank methods, we augment all
+other models with global tokens to offset the poten-
+tial performance gap resulting from this trick.3 Experiment Setup
+We restrict our studies to encoder-only models
+and leave the analysis of generative models to fu-
+ture work. We begin by implementing a collec-
+tion of efﬁcient attentions with a uniﬁed frame-
+work (Lefaudeux et al., 2021), which allows us
+to plug these models into our pretraining-and-
+ﬁnetuning pipeline in a consistent fashion.
+3.1 LRA Experiments
+Following recent work on efﬁcient long-range at-
+tentions, we take the LRA benchmark as our ﬁrst
+set of experiments. As our focus here is on NLP
+tasks, we consider a subset of LRA tasks with text
+inputs, i.e., the ListOps, IMDB sentiment analysis,
+and text matching tasks. All tasks are formulated as
+classiﬁcation problems: ListOps requires the model
+to predict the correct output of an expression (10-
+way classiﬁcation), sentiment analysis is to predict
+the positive/negative labels of IMDB reviews and
+text matching aims to predict citation links between
+papers. We follow the hyperparameter settings of
+recent work (Xiong et al., 2021; Zhu et al., 2021).
+Two-layer Transformer encoders are used across all
+tasks and enough training updates are allowed to en-
+sure convergence. Note that this is different from
+the setup proposed in the original LRA benchmark,
+where different tasks adopt different model sizes. It
+is observed from recent work that two-layer models
+with smaller dimensions are sufﬁcient to achieve
+similar or better results than previously reported
+results. The ﬁnal classiﬁcation layer is added on
+top of the representations of [CLS] tokens which
+are prepended to each sequence.
+3.2 Pretraining and Downstream Tasks
+For practical NLP application, large-scale self-
+supervised training has become an indispensable
+ingredient to fully unlock the power of Transformer
+models. In terms of the experiment scale and test-
+ing settings, there is a clear gap between LRA’s
+setup and how we apply state-of-the-art Trans-
+former models in practice. For the second set of
+experiments, we aim to test these models at scale
+and investigate whether the results on the LRA
+benchmark are accurate indicators for real-world
+long-context tasks after standard large-scale pre-
+training and ﬁnetuning.1977Pretraining Resource. Following Beltagy et al.
+(2020), we compile a corpus that contains mostly
+long documents, including Stories (Trinh and Le,
+2018), RealNews (Zellers et al., 2019), Books cor-
+pus (Zhu et al., 2015) and English Wikipedia. To
+make the experiments manageable and relevant for
+standard GPU hardware, we restrict each model’s
+memory usage close to the 16GB threshold when
+taking 4,096 tokens in each training batch. We
+control the batch size and training update across
+all models: we use a batch size of 256 sequences
+(2tokens) and pretrain each model using the
+standard masked language modeling objective for
+100k updates. We ﬁnd that all models’ training
+curves almost stabilize after this amount of training
+steps. We use 32 A100 GPUs for pretraining and
+all model runs are ﬁnished within around 2 days.
+Pretraining Architecture In contrast to Long-
+former (Beltagy et al., 2020) and Bigbird (Zaheer
+et al., 2020) where the models are initialized from
+RoBERTa before pretraining on long documents,
+we pretrain these models from scratch, as our goal
+here is to ensure fair comparison and not all archi-
+tectures can reuse weights from a standard trans-
+former model. In particular, Nyström and Per-
+former do not use the standard dot-product and
+softmax to compute attention probabilities, mak-
+ing their parameters not compatible with common
+models like RoBERTa or BERT. Furthermore, other
+models like Linformer or LongShort introduce ad-
+ditional parameters inside the attention module.
+In our initial experiments, we observe initializing
+from the RoBERTa put these models at a signiﬁcant
+disadvantage compared to other models (e.g., local
+window attention) that are more compatible with
+vanilla transformers. Apart from the expanded posi-
+tion embedding matrix and the attention blocks, the
+architecture hyperparameters are consistent with
+RoBERTa-large. For both LRA and the large-scale
+experiments, we adopt the pre layer-normalization
+trick (Xiong et al., 2020) for feedforward and at-
+tention blocks. This usually results in better per-
+formance in LRA and turns out to be essential for
+several models in the pretraining experiments.See
+additional model-speciﬁc architecture settings and
+models’ average memory usage in the Appendix.
+Downstream Datasets and Metrics. We con-
+sider practical tasks that naturally involve longdocuments. We test extractive QA over long docu-
+ments, long document classiﬁcation, and document
+retrieval. For the ﬁrst two tasks, we use TriviaQA
+and Hyperpartisan classiﬁcation respectively, both
+of which have been used in existing long Trans-
+former work (Beltagy et al., 2020). For full docu-
+ment retrieval, we construct the dataset based on
+recent open-domain QA work (Lee et al., 2019)
+that uses passage-level retrievers. We take an ex-
+isting passage corpus from Karpukhin et al. (2020)
+and reconstruct the document-level corpus. We
+consider a document to be positive if it includes
+the answer passage. We reported token-level an-
+swer exact match and F1 for extractive QA and
+the classiﬁcation accuracy for Hyperpartisan. For
+the retrieval task, for the ease of experiments, we
+reported the mean reciprocal rank on the dev set,
+which has been shown to correlate well with ﬁ-
+nal retrieval metric like answer recall (Oguz et al.,
+2021). We conduct grid search for all tasks and
+report the best dev results. Given the small size
+of the Hyperpartisan dataset, we reported averaged
+results from 4 random seeds.
+Task-speciﬁc Architectures for Finetuning.
+We use standard architectures for the ﬁnetuning
+tasks: for extractive QA, a single-layer MLP span
+predictor is added on top of the output token
+representations; the classiﬁcation task uses a
+binary MLP classiﬁer that takes the [CLS] vector
+as input. For retrieval, we share the query and
+document encoder using our pretrained models
+and use dot-product of the [CLS] vectors as the
+similarity score. For models that are compatible
+with global tokens, we use all the question tokens
+as global tokens in the QA task and use a single
+global token at the start of the sequences for
+both classiﬁcation and retrieval. Except for the
+Hyperpartisan dataset, the document lengths of the
+other two datasets usually exceed 4,096 tokens
+after tokenization. In these cases, we drop the
+tokens outside the models’ position range. We
+put further implementation details and each task’s
+length statistics in the Appendix.
+4 Results and Analysis
+4.1 Models Perform Similarly in LRA
+We report our reimplemented LRA results in Ta-
+ble 1. While previous work (Tay et al., 2021) has1978Model ListOps Text Matching Avg Acc GFlops
+Learnable attention pattern
+Sinkhorn 37.6 63.8 80.4 60.6 0.289
+LSH 37.9 62.5 80.5 60.3 0.273
+Low-rank/kernel-based approximation
+Linformer 37.7 61.9 78.4 59.3 0.271
+Nystrom 37.9 66.1 81.0 61.7 0.256
+Performer 37.1 66.1 79.8 61.0 0.205
+Hybrid attention
+Long-Short 37.7 65.7 81.6 61.7 0.199
+Fixed attention pattern
+Local Window 37.4 65.7 81.6 61.6 0.153
+Blockwise LW 37.4 65.6 81.3 61.4 0.146
+shown a clear performance gap between different
+models, we ﬁnd that with proper tuning, the results
+of several models could be signiﬁcantly improved,
+(e.g., Sinkhorn, Linformer, Reformer, Performer)
+andthere is no signiﬁcant performance gap be-
+tween any of the models when using a similar level
+of compute (measure by FLOPS). It is worth not-
+ing that these improved results are not obtained
+by increasing the complexity of models ( e.g., by
+using larger bucket size in Sinkhorn), as our im-
+plementation either uses similar or smaller size
+models compared to existing work. Also note that
+while the single global token we added to Sinkhorn
+and LSH might be essential for some performance
+gains, it only brings trivial computation overhead.
+4.2 Pretraining and Downstream Tasks
+We now evaluate these models on practical bench-
+marks that involve real-world long documents. As
+shown in Table 2, after we scale up the experi-
+ments and control the memory consumption of
+each model, we see more clear differences be-
+tween these models than what we observe in LRA.
+Clearly, ﬁxed local attentions remain to be strong
+baselines. However, in contrast to LRA, we ob-
+serve local attentions are signiﬁcantly better than
+the other attention variants, for both pretraining
+perplexity and downstream task results. The only
+exception in terms of the pretraining perplexity is
+the hybrid Long-Short attention, which already in-
+tegrates a local attention component: it achievesbetter perplexity than ﬁxed local attentions, but the
+downstream results are at most on par with much
+simpler models like Blockwise LW. It is worth not-
+ing that while we only control the training updates
+and memory usage in Table 2, the conclusion still
+holds if we control the training time of each model:
+We compare the training perplexity of Blockwise
+LW attention and other faster models with ﬁxed
+training time in Table 3.
+Even though our LRA experiments also study
+tasks with text inputs, we see clear discrepancies
+between the two sets of experiments. Apart from
+models with ﬁxed local attention patterns, improve-
+ments on these text LRA tasks often do not trans-
+fer to the standard scaled pretraining-ﬁnetuning
+experiments. For instance, while Performer can
+outperform most of the non-local attention meth-
+ods on LRA, it performs poorly on both large-scale
+MLM and downstream long-context tasks. Sim-
+ilarly, while Nyström is signiﬁcantly better than
+LSH in LRA on average, we observe the oppo-
+site trend in Table 2. Among the three tasks, only
+ListOps is loosely aligned with the MLM perplex-
+ity. However, the gaps between each model on this
+task are still too narrow to be indicative.
+Given that large-scale pretraining has become
+the gold-standard paradigm to build state-of-the-art
+NLP models. Our ﬁndings here call for a more
+careful and reliable evaluation of lots of existing
+and emerging long-range attentions. On the other
+hand, our results also reveal that the local context1979ModelsMLM Pretraining Downstream Tasks
+PPL↓k word/sec↑TriviaQA Doc Retrieval Hyperpartisan
+Learnable attention pattern
+Sinkhorn 4.03 11.8 63.3/68.5 80.9 95.0
+LSH 3.63 10.0 62.9/67.5 83.6 92.2
+Low-rank/kernel-based approximation
+Linformer 4.14 24.6 59.8/65.2 80.3 88.7
+Nystrom 3.79 9.5 51.5/57.3 83.1 89.5
+Performer 5.58 17.2 24.5/31.9 66.8 94.9
+Hybrid attention
+Long-Short 3.36 8.4 66.5/71.4 84.5 91.5
+Fixed local attention pattern
+Sliding Window 3.47 9.2 65.6/70.7 83.2 95.3
+Blockwise LW 3.39 13.5 68.1/72.9 85.0 95.0
+might still be highly essential even in long context
+tasks. In the following section, we conduct further
+analysis on local attention models and attempt to
+identify the key ingredients of building strong NLP
+models for downstream long-context tasks.
+4.3 Analysis on Local Attentions
+As we have seen in §4.2, models that compute ex-
+act attention for local contexts around each token
+achieve better results. Moreover, the Blockwise
+LW variant performs the best even it does not guar-
+antee a balanced left and right context window for
+each token. Given these intriguing ﬁndings, we
+aim to investigate the following questions: How
+effective are the long-range mechanism in local
+attention models? andWhether the studied long-
+context tasks still mostly rely on locality bias?
+Ablation Study. In the Blockwise LW model,
+there are two mechanisms that enable long-range
+connections: the global tokens and the attention
+window overlap, i.e., each token will additionally
+attend to half the tokens in the neighboring blocks,
+and the receptive ﬁeld increases with model depth.While both are adopted as common practice in ex-
+isting work (Zaheer et al., 2020; Beltagy et al.,
+2020), we study the isolated effect of each compo-
+nent in both pretraining and ﬁnetuning experiments.
+For the non-overlap variant, we increase the block
+size by a factor of 2 such that the amount of to-
+kens each token attends to remains the same. We
+show the results in Table 4. Surprisingly, we see
+different stories in terms of MLM pretraining and
+downstream tasks. While both mechanisms are
+useful for achieving lower MLM perplexity, only
+the global-token mechanism seems important for
+downstream tasks. Note that in the document re-
+trieval tasks, removing both mechanisms results in
+slightly better performance. Now the model is only
+able to use the ﬁrst block of the whole document
+for retrieval. While this seems to suggest that this
+task is highly local and involves strong positional
+bias, the gap might be too trivial to be conclu-
+sive. Additionally, we only use a single global
+token for this task, it is likely that assigning more
+global tokens, e.g., at passage boundaries, could
+bring additional improvements. Investigating the
+particular task further is beyond scope of this work.
+In terms of the effect of attention-window overlap,
+it is expected that this scheme is crucial for lower
+perplexity: it not only enables more distant depen-
+dencies but also reduces the number of "boundary
+tokens" which can only attend to one side of the
+context. However, it is counter-intuitive that the1980
+overlapping attention links between neighboring
+blocks, which adds more long-range information,
+result in worse downstream performance. Also,
+note that this observation is consistent for all the
+tasks we studied. There are two possible implica-
+tions of this ﬁnding: 1) the tested tasks still highly
+depend on locality bias, i.e., most of the impor-
+tant information can be captured solely from the
+local bias, or 2) the overlapping scheme is not ef-
+fective at capturing the long-range dependency in
+downstream tasks. To conﬁrm either hypothesis,
+we conduct another set of experiments with models
+that have access to different sizes of context.
+On Locality Bias. We take the non-overlapping
+variant and experiment with various block sizes to
+see whether longer context is important to studied
+tasks. We show the results in Table 5 and the pre-
+training curves in Figure 2. While the long-range
+connections brought by the attention overlap is not
+helpful for downstream results, we see that increas-
+ing the local block sizes does consistently improve
+both pretraining and downstream performance al-
+though the improvement becomes modest beyond
+block size 256. It is also interesting that the mod-
+els with smaller block sizes converge faster at the
+early stage of pretraining. This suggests a staged
+pretraining process might be more efﬁcient than
+directly training from long sequences, which aligns
+with Press et al. (2021)’s ﬁnding on unidirectional
+LMs. Overall, this set of experiments suggests that
+increasing model’s capabilities to capture a longer
+context is generally helpful for both pretraining and
+downstream tasks. However, using overlapping at-
+tention windows is not an effective way to make use
+of more context. Thus, we hypothesize the MLM
+perplexity improvements of overlapping local atten-
+tions might mainly come from the reduction of the
+“boundary" tokens instead of the ability to capture
+long-range dependencies. For downstream tasks,
+the issue of “boundary" tokens is not that essential
+and the introduction of the overlapping attention
+windows might disrupt the effective modeling of
+local context, as the attention module needs to ex-
+tract both local and distant information from the
+same set of tokens.
+Initializing from Existing Short Models.
+While we train all models from scratch for the sake
+of fair comparison, existing state-of-the-art long
+context models like Longformer (Beltagy et al.,
+2020) or BigBird (Zaheer et al., 2020) usually
+initialize their longer models from an extensively
+pretrained short model like RoBERTa (Liu et al.,
+2019). With simple techniques like positional
+embedding copying, a strong long-context encoder
+can be initialized without the need of pretraining
+from scratch. To test our ﬁndings from the above
+analysis in this setting, we follow the same scheme1981but use the non-overlapping block attention
+as discussed in §4.3. We compare this model
+with Longformer (based on Sliding Window
+attention) as it uses the same long-doc corpus and
+pretrain-and-ﬁnetune pipeline ( e.g., packages and
+downstream data processing) as our experiments.
+Same as our setting in §4.2, here we control the
+batch size and number of training updates: we
+use a batch size of 64 and train the model for
+64k steps. Note that as we drop the attention
+window overlaps, the model is 2x more efﬁcient
+than Longformer: Given the same window/block
+sizeBand sequence length L, the complexity
+of the non-overlapping block attention is L×B
+compared to Longformer’s 2L×B. We show the
+TriviaQA results in Table 6, where the speed is
+measured by words per second during pretraining.
+With only half of the pretraining compute, our
+model with disjoint attention blocks achieves
+slightly better performance than Longformer. This
+conﬁrms that our ﬁndings of the attention overlap
+from the above section are still valid when the
+models are not trained from scratch.
+5 Related Work
+Long-Range Context in Language Models.
+Various studies have investigated the effective us-
+age of distant context in unidirectional language
+models. Khandelwal et al. (2018) look into the con-
+text usage of LSTM LMs and ﬁnd that these models
+are only capable to make full use of the nearby 50
+tokens and the longer range context is only roughly
+captured, i.e., excluding detailed information such
+as word orders. Similarly, O’Connor and Andreas
+(2021) studies the mid- and long-range context us-
+age in transformer LMs, by manipulating the order-
+ing and lexical information in the text. Their experi-
+ments show that while long-range context is usually
+helpful, most of the usable information is carried
+by local ordering statistics and non-function words
+instead of detailed content like sentence orders.
+These observations provide a possible explanation
+of our ablation experiments in §4.3 that adding
+overlaps to attention windows does not yield better
+downstream results, despite allowing the capture
+of more long-range interaction. Press et al. (2021)
+observe diminishing returns as they increase the
+context length when using sliding windows at infer-ence time. They propose a staged training paradigm
+that train LMs from smaller context to longer ones.
+This paradigm can more efﬁciently use the training
+compute and achieves lower perplexity compared
+to directly training with long sequences. Given that
+models with smaller attention windows converge
+faster at early training steps (Figure 2), the staged
+training might also beneﬁt MLM pretraining but
+further investigation is required to validate whether
+it can also bring downstream improvements.
+Other Long-Range Architectures. Instead of
+modifying the attention calculation, other work
+proposes to augment transformers with parametric
+long-term memories. Transformer-XL (Dai et al.,
+2019) maintains frozen activations of previous to-
+kens in memory and uses them as additional inputs.
+To handle the shift of positional information of
+these activations, it also requires a relative position
+encoding mechanism which brings additional com-
+putation cost. The Compressive Transformer (Rae
+et al., 2020) takes a similar scheme but proposes
+to use compression modules to account for even
+further memories. Both methods cannot be directly
+applied to long-context understanding tasks. Under
+the scheme of kernel-based methods, Katharopou-
+los et al. (2020); Peng et al. (2021); Schlag et al.
+(2021) also attempt to linearize the softmax with
+kernel methods. The core ideas of these methods
+are similar to Performer and they only differ in the
+choice of kernel functions. Outside of the trans-
+former families, a recent work (Lei, 2021) proposes
+to augment recurrent LMs with minimal attention
+blocks. It is more efﬁcient while achieving stronger
+LM perplexity compared to Transformer-XL. How-
+ever, it is still unknown whether this model scales
+as well as transformer architectures.
+6 Conclusion
+We present a systematic study of recent proposed ef-
+ﬁcient attention variants on real-world long-context
+NLP tasks. In contrast to existing work, we are
+the ﬁrst to test these models with a set of uniﬁed
+and large-scale experiments. Our results reveal
+the gap between a widely used benchmark and
+practical downstream tasks after conducting large-
+scale pretraining. Among all the studied attention
+methods, we ﬁnd that the simplest local attentions
+outperform other complex attention paradigms on
+downstream tasks. We also show that existing local-
+attention models can be further simpliﬁed by re-
+moving the attention-window overlap, resulting in1982a faster model that achieves similar or better re-
+sults. Importantly, our work calls for more careful
+and practical evaluation protocols while developing
+long-context NLP models.
+References19831984A Appendix
+Downstream Task Details. On TriviaQA, there
+are usually multiple matched spans in the docu-
+ment, we train the model to maximize the marginal-
+ized probability of all matched spans. The predic-
+tion head in the classiﬁcation task is deﬁned as a
+2-layer MLP with tanh activations. For the retrieval
+task, we follow existing passage retrieval methods
+and use in-batch documents as negative retrieval
+targets. The loss is simply a cross-entropy loss de-
+ﬁned over the scores of all documents in the batch.
+All the models are ﬁnetuned using the Adam opti-
+mizer with linear decays. We conduct grid search
+for all the tested models. The hyperparameters for
+all the three tasks are shown in Table 7. In Table 8,
+we show the average and the 95% percentile of the
+document lengths in each dataset. As mentioned in
+the main text, we drop the tokens exceeding 4,096
+tokens.
+Pretraining Details. Our pretraining pipeline is
+implemented with fairseq. We control the mem-
+ory usage of each model by adjusting model-
+specifc hyperparameters. The details in shown in
+Table 9. Due to different model designs, we are not
+able to exactly control the memory consumption.However, the tested local attentions typical requires
+less GPU memory than all the other models.19851986

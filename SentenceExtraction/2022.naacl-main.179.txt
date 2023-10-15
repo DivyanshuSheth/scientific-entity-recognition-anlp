@@ -1,1 +1,1129 @@
-2487 Proceedings of the 2022 Conference of the North American Chapter of the Association for Computational Linguistics : Human Language Technologies , pages 2487 2507 July 10 - 15 , 2022 © 2022 Association for Computational Linguistics 2488 2489 2490 2491 2492 2493 2494 2495 2496 2497 2498 2499 2500 2501 2502 2503 2504 2505 2506 2507 
+
+Ayush Kaushal
+ayushk4@utexas.edu
+The University of Texas at AustinKyle Mahowald
+mahowald@utexas.edu
+The University of Texas at Austin
+Abstract
+Pre-trained language models (PLMs) that use
+subword tokenization schemes can succeed at a
+variety of language tasks that require character-
+level information, despite lacking explicit ac-
+cess to the character composition of tokens.
+Here, studying a range of models (e.g., GPT-
+J, BERT, RoBERTa, GloVe), we probe what
+word pieces encode about character-level in-
+formation by training classifiers to predict the
+presence or absence of a particular alphabetical
+character in a token, based on its embedding
+(e.g., probing whether the model embedding
+for "cat" encodes that it contains the charac-
+ter "a"). We find that these models robustly
+encode character-level information and, in gen-
+eral, larger models perform better at the task.
+We show that these results generalize to char-
+acters from non-Latin alphabets (Arabic, De-
+vanagari, and Cyrillic). Then, through a series
+of experiments and analyses, we investigate
+the mechanisms through which PLMs acquire
+English-language character information during
+training and argue that this knowledge is ac-
+quired through multiple phenomena, including
+a systematic relationship between particular
+characters and particular parts of speech, as
+well as natural variability in the tokenization of
+related strings.
+1 Introduction and Motivation
+The dominant class of models in NLP (pre-trained
+transformer models; Brown et al., 2020; Devlin
+et al., 2019; Bommasani et al., 2021) use tokeniza-
+tion schemes, like BPE or WordPiece tokeniza-
+tion (Sennrich et al., 2016; Schuster and Nakajima,
+2012; Kudo and Richardson, 2018), that break text
+into word pieces. These models face an apparent
+limitation in that they do not have access to infor-
+mation below the level of the word piece, such as
+information about characters. But character-level
+information has been claimed to be useful for a
+variety of tasks, including adapting text to novel
+domains like biomedicine, texts with misspellings,Figure 1: Overview of our probing setup. In Experiment
+1, the input is a model embedding and we train MLPs to
+classify whether a particular character (e.g., "a") occurs
+in a particular token (e.g, "employee"). In Experiment
+2, we use syntactic features as input, rather than model
+embeddings, to train our probe.
+and wordplay-based tasks that require attention to
+character-level manipulations (Riabi et al., 2021;
+El Boukkouri, 2020; Clark et al., 2021).
+There are drawbacks, however, to using
+character-level models: character-based sequences
+are long and therefore can slow down training
+(Mielke et al., 2021). And including character-
+level information does not necessarily improve per-
+formance on tasks where one might expect it to
+(Libovick `y et al., 2021; Rosales Núñez et al., 2021;
+Itzhak and Levy, 2021). Therefore, the vast ma-
+jority of top-performing models in languages with
+alphabetic scripts use models with various kinds of2487subword tokenization schemes (e.g., Devlin et al.,
+2019; Brown et al., 2020), but rarely with character-
+level schemes.
+One possible explanation for this state of affairs
+is that models trained on word pieces implicitly
+learn something about characters, making the ex-
+plicit inclusion of character-level information un-
+necessary. Indeed, recent work has shown that
+even models based on subword tokens might be
+able to use and manipulate character-level informa-
+tion. Rozner et al. (2021) and Efrat et al. (2021)
+both study cryptic crosswords and find that PLMs
+(specifically, T5) can take advantage of character-
+level information in order to solve wordplay tasks
+like unscrambling scrambled words. Itzhak and
+Levy (2021) show that RoBERTa can access sub-
+word information by testing it on a spelling task
+that requires it to map from words to characters
+(e.g., from catto the characters c+a+t).
+The fact that models can do tasks like this is curi-
+ous: word pieces have no explicit access to charac-
+ter information during training, and the mechanism
+by which they acquire such information is not ob-
+vious. The goal of this paper is to understand the
+nature of this information, and how it is learned.
+Thus, we make several contributions. First, we
+provide a thorough characterization of what charac-
+ter information is accessible to subword-tokenized
+PLMs by designing a binary probing task (§3) to
+probe subword tokens for the presence or absence
+of a particular character: e.g., does the sequence
+starcontain the letter t? This task lets us not just
+assess whether this information is available, but
+lets us characterize, in a fine-grained way, the na-
+ture of character-level knowledge in subword to-
+kens. Performance on the task far exceeds a ran-
+dom control as well as a baseline using fixed GloVe
+word embeddings (an F1 score of 93.7 for the best-
+performing model, GPT-J), suggesting that sub-
+words learn meaningful information about their
+characters. This result holds across several alpha-
+bets (Latin, Devanagari, Cyrillic, Arabic).
+To explore how this information is acquired, we
+introduce several possible explanations and con-
+duct detailed analyses of the probing task on the
+monolingual English models, with a particular fo-
+cus on the best-performing model GPT-J (§3.3).
+Specifically, we consider how character knowledge
+varies as a function of the character being probed
+for (it’s easier to classify rare letters than common
+ones), the position in the token of the character inquestion (performance is somewhat better early in
+tokens), and the frequency of the token (frequent
+tokens aren’t necessarily easier to probe). We then
+turn to the possibility that systematic correspon-
+dences between characters and syntactic features
+(e.g., adverbs tend to end in "y"), play a role in how
+models acquire character-level information. To that
+end, we devise syntactic baselines, whereby we use
+features like part of speech as input to the classifer
+for detecting the presence or absence of tokens (§4).
+The syntactic probe performs much better than con-
+trols, which suggests syntactic features contribute
+to the tokenizer’s performance. However, this cor-
+relation does not suffice to explain the totality of
+character information learned by PLMs.
+Finally, we consider another possible mecha-
+nism, based on the variability of tokenization, by
+which character-level information might be learned
+(§5). We conduct an experiment using simple fixed
+embeddings, as proof of concept that increasing
+variability in tokenization (Cao and Rimell, 2021)
+affects the character information learned. Overall,
+given the importance of tokenization schemes for
+downstream performance (Bostrom et al., 2021;
+Mielke et al., 2021), we believe richer knowledge
+as to how tokens acquire character-level informa-
+tion could inform the development of tokenization
+schemes that improve model performance.
+2 Prior work
+All language models must choose what to use as
+the basic linguistic unit, and, as a result, there is a
+long history of work in NLP, evaluating the trade-
+offs between models that tokenize words based on
+characters, words, or something in between, like
+bytes or word pieces (see Mielke et al., 2021; Pin-
+ter, 2021, for recent surveys).
+While words are a seemingly natural kind and
+are often used as basic units for modeling language,
+there is considerable debate in the linguistics litera-
+ture as to how to even define a word, due to differ-
+ences across languages (Haspelmath, 2017). More-
+over, word-level models have a major weakness
+in that they do not naturally handle out of vocab-
+ulary items (see Jurafsky, 2003, for an overview)
+and can have very different behaviors in languages
+with different morphological systems (Mielke et al.,
+2019; Cotterell et al., 2018). Character-level mod-
+els have their own weaknesses: they are typically
+slower to train at the scale required for massive lan-
+guage modeling. Many recent efforts have centered2488around trying to use meaningful sub-word units in
+language modeling, such as BPE (Gage, 1994; Sen-
+nrich et al., 2016), WordPiece tokenization (Schus-
+ter and Nakajima, 2012), and UnigramLM (Kudo,
+2018).
+While subword tokenization schemes often end
+up with reasonable linguistic units, they still lack
+access to character-level information. So there have
+been a number of efforts to imbue word or sub-
+word tokenization schemes with character-level in-
+formation (Mielke and Eisner, 2019; Kim et al.,
+2016; Dos Santos and Zadrozny, 2014; Bojanowski
+et al., 2017; Li et al., 2018; Ma and Hovy, 2016;
+Aguilar et al., 2021; El Boukkouri, 2020; Clark
+et al., 2021).
+Here, rather than asking how to augment sub-
+word tokenization schemes with additional infor-
+mation, we ask what they already learn about char-
+acters naturally. To do so, we use probing, which is
+widely used to assess what information is contained
+in PLM embeddings (Belinkov, 2022; Belinkov
+and Glass, 2019; Hewitt and Manning, 2019; Hup-
+kes et al., 2018). Because probing has limitations
+(Elazar et al., 2021; Pimentel et al., 2020; V oita
+et al., 2021), we include a number of control tasks
+(Hewitt and Liang, 2019) and baselines in order
+to ask what can be recovered from embeddings,
+relative to a control of equal expressive power.
+3 Experiment 1: Probing for character
+information
+The main goal of our first experiment is to quan-
+tify the extent to which tokens in PLMs capture
+character-level information and characterize that
+knowledge across a variety of dimensions. We train
+a binary classifier probe that takes as input a token’s
+frozen embeddings from PLMs to predict whether
+a particular character of the alphabet is contained
+in that token. That is, if successful, the probe will
+predict that cool contains an "o" but "cat" does not.
+We also consider a task in which the probe must
+say whether one token (e.g., "coo") is a substring
+of another token (e.g., "cool"). We examine the
+probe’s success as a function of the character being
+probed for, length of the token being probed, posi-
+tion of the character in the token, and frequency of
+the token.
+3.1 Method
+We consider the static non-contextualized embed-
+dings of the following English PLMs: GPT-J(Wang and Komatsuzaki, 2021), GPT-2 (Radford
+et al., 2019), RoBERTa (Liu et al., 2019), BERT
+(cased and uncased; Devlin et al., 2019), as well
+as GloVe embeddings (Pennington et al., 2014)
+and Language-only embeddings of the multimodal
+LXMERT (Tan and Bansal, 2019). To test the
+generalizability of our results to other languages,
+we also considered embeddings from Multilingual
+BART (Liu et al., 2020) and used them to test to-
+kens consisting of only English characters, as well
+as characters from three other alphabetic scripts:
+Devanagari, Arabic, and Cyrillic. See Appendix B
+for model details.
+Each language model has its own vocabulary,
+consisting of tokens. For our English experiments,
+We consider only the tokens consisting entirely
+of characters in the standard English alphabet (a-
+z), along with the special characters that accom-
+pany these tokens, such as preceding whitespace
+(denoted by ˙G in the RoBERTa and GPT-family)
+or symbols denoting continuations of preceding
+word (‘##’ in BERT family). Because Multilin-
+gual BART consists of characters from different
+scripts and because its tokens are not explicitly sep-
+arated by languages, for our Multilingual BART
+experiments we consider all tokens that consist ex-
+clusively of characters from the target alphabet.
+We define the target alphabet for each script as
+the alphabetic characters in each script that occur
+across at least 250 different tokens.
+Our main probing task trains classifiers to de-
+tect the presence or absence of each of the target
+characters αin each token wfrom the filtered-
+vocabulary V. Thus, a separate dataset for each
+character αis constructed over VasD=
+{(w, y),(w, y), . . .(w, y)}where the binary
+label ydenotes whether αoccurs at least once in
+w∈V. From these data-points in Dwe create
+a balanced dataset Dwith an equal number of
+positive and negative labels by undersampling the
+(w, y)points with yas the negative label (i.e.,
+when probing for the presence of the character "z",
+half the tokens will contain "z" even though most
+tokens in general do not). We then split Dinto
+training and test splits in a roughly 80-20 ratio,
+while (for the English experiments) ensuring that2489tokens with the same lemma appear in the same
+split. This is the most challenging split, as it pre-
+vents the probe from leveraging wordform simi-
+larity across words with the same lemma in both
+training and test (Itzhak and Levy, 2021). Because
+of technical issues defining lemmas in Multilingual
+BART, we do not enforce this constraint for the
+Multilingual BART experiments.
+We train our probe on the static non-trainable
+embeddings Eof these PLMs. For a data-point
+(w, y), the probe receives as input a token wwith
+one-hot encoding x. The probe predicts logits
+ˆyby an MLP: ˆy=σ(MLP(Ex)). In the
+control task, we consider randomly-initialized non-
+trainable embeddings instead of the trained embed-
+dings from the PLMs.
+Substring Sub-experiment As an additional sub-
+experiment for assessing the generalizability of
+the task, for the best-performing English-language
+model (GPT-J), we consider a related substring
+classification task. Specifically, we probe GPT-J’s
+embedding to detect whether a token uis a sub-
+string of the token v. That is, can it detect that
+the token "ome" is a substring of "some"? For this
+condition, we set up the experiment as before but,
+rather than attempt to detect the presence or ab-
+sence of a character, we seek to classify whether a
+particular token uis a substring of another token
+v. To create positive examples, we consider all
+substrings of vthat are in the overall vocabulary
+V. For each positive example, we sample a token
+from Vof equal character length as uwhich is
+nota substring of vin order to create negative ex-
+amples. This creates a balanced set, from which
+we sample an 80-20 train-test split, ensuring that
+the superstring token valways occurs in the same
+split. We train the probe as before, with the input
+as the concatenated embeddings of the two tokens.
+3.2 Results
+English-Language Character Probing Results
+Table 1 shows the results averaged across 5 train-
+test splits and different seeds, reporting on the
+Macro-F1 metric averaged across all 26 charac-
+ters. We also observe very low variance for the
+best-performing models, as shown in the Appendix
+(Table 7).
+For our main character probing experiment,
+all models perform substantially better than their
+matched controls (which hover around the chance
+F! level of 50), suggesting that word piece tokens
+from PLMs contain information about their con-
+stituent characters in their embeddings. GPT-J is
+the best-performing model (with F1 of 93.70 and
+94.35), followed by RoBERTa and GPT-2, then the
+BERT models. All the transformer models outper-
+form the GloVe fixed embedding model. Clearly,
+the performance of the models on this probing
+task correlates with performance on other language
+tasks, such that larger models trained on larger cor-
+pora do better.
+There are also other factors that may contribute
+to difference in performance, such as the nature of
+the pre-training task and the tokenizer. The latter is
+evident from the considerable performance gap be-
+tween RoBERTa and BERT, which may be partially
+attributed to RoBERTa using GPT’s reversible to-
+kenizer, leading to more variability depending on
+preceding whitespace. (See §5 for the potential
+effect of tokenizer variability on performance.)
+Multilingual Results Table 2 shows the results
+for the Multilingual BART experiments, averaged
+across 5 train-test splits with different seeds. Per-
+formance is consistently high and above chance
+across languages with different scripts. It is high-
+est for Cyrillic with an F1 of 81.37, and lowest
+for Arabic with an F1 of 76.37. While we focus
+mostly on English in the remainder of our exper-
+iments because of the large number of different2490
+models available and because of the easy access to
+other sources of linguistic information, we believe
+these results suggest that our findings would be
+generalizable to non-Latin scripts.
+English Substring Experiment Performance on
+the English Substring Experiment is also far above
+chance, with an average F1 of 86.56, compared to a
+control F1 (on random embeddings) of 70.03 (bot-
+tom row in Table 1). Control performance is well
+above 50 in this case since the data set is created to
+be balanced such that the superstrings have equal
+numbers of positive and negative examples. But
+there are still baseline differences in how often a
+token occurs as a substring, so the model can learn
+that certain substrings like "en" are more common
+than substrings like "emies". We take the perfor-
+mance on the Substring Experiment as evidence
+that the model can make use of character informa-
+tion to do more complicated substring tasks than
+just character identification.
+3.3 Breakdown of results
+Next, we consider a number of possibilities for how
+character-level information gets into these embed-
+dings and conduct analyses intended to understand
+the nature of the information learned and how it
+gets there. We focus on our best-performing model
+(GPT-J) for these analyses.
+Is the first letter learned best because of alpha-
+betization? One possibility is that, because thetraining data likely contains many alphabetical lists
+and other kinds of word lists (e.g., lists of words
+starting with "z"), the model learns a co-occurrence
+relationship between words that start with the same
+character. We would predict that this would cause
+stronger performance when the probed character
+occurs at the beginning of the word. To that end,
+we examine how the model’s performance varies as
+a function of where in the token the target character
+is (top panel in Figure 3). While there is indeed
+a significant negative relationship between word
+position and recall as measured by a linear regres-
+sion ( β=−.01,p < .001), the slope is relatively
+small. While recall on the first letter in a token
+is high (95.2), it is not an outlier: performance is
+only somewhat higher than recall for the second
+character (94.5). Moreover, performance is above
+chance even when the target character appears 10
+or more characters deep in a token. Therefore, we
+do not believe the effect is driven only by word
+beginnings, although they likely play a role.
+Is it only frequent words that the probe gets
+right? Next, we consider whether performance
+varies as a function of the frequency of the token
+(middle panel in Figure 3). One possibility could
+be that character information is memorized only in
+high-frequency tokens like “the", which occur often
+enough that at least sometimes very frequent tokens
+are broken into characters (e.g., "the" appearing in
+the context of "t h e"), and that low-frequency to-
+kens will perform worse. This does not appear to
+be the case and, in fact, there is, if anything, a neg-
+ative relationship ( β=−.013,p=.05) between
+binned log frequency and performance, such that
+less frequent tokens are easier to extract character
+information from.
+Is it easier to get long or short words right?
+The bottom panel of Figure 2 shows F1-score as
+a function of the length of the token. Using the
+GPT-J embeddings, it is easier to classify charac-
+ters in short tokens, as compared to longer tokens.
+This may be a function of the nature of the task
+since there is, in some sense, less information to be
+represented for a short token like "be" for the pur-
+poses of the task (just that it contains a "b" and it
+contains an "e"), whereas a long token would have
+to represent information about more characters.
+Which characters are learned best? Part of
+what makes the success of the probe is that word
+embeddings represent word co-occurrence informa-2491
+tion, which is typically conceived of as semantic
+in nature (Erk, 2016) and so should, because of the
+arbitrariness of the relationship between forms and
+meanings (Saussure, 1916; Hockett, 1960), mean
+there is no relationship between individual charac-
+ters and information learned by embeddings. But
+this arbitrariness breaks down, in that there are
+statistically detectable non-arbitrary form-meaning
+relationships in language (Blasi et al., 2016; Mon-
+aghan et al., 2014; Tamariz, 2008; Dautriche et al.,
+2017; Pimentel et al., 2019), such as the fact that fl-
+words in English tend to be about movement (e.g.,
+flap,fly,flutter ,flicker ; Marchand, 1959; Bergen,
+2004) and that different parts of speech have differ-
+ent phonological patterns (Dautriche et al., 2015;
+Kelly, 1992; Monaghan et al., 2005).
+An even larger source of shared information be-
+tween characters and syntactic/semantic informa-
+tion is that morphological forms can be cues to
+word categories: for instance, most plural nouns
+end with "s" and many adverbs end in "ly". This
+leads to changes in character-level distributions:
+while roughly 12% of words in American English
+contain "y", 85% of adverbs do (as estimated using
+data from Brysbaert et al., 2012). Thus, a model
+with access to part of speech information could do
+well by guessing that all adverbs contain "y".So one possibility is that the probe’s perfor-
+mance is largely driven by characters that corre-
+late with syntactic and semantic features. If this
+were the case, we might expect some characters to
+show much better performance than others. Figure
+2 shows the F1-Macro as a function of character.
+For GPT-J, the best-performing model, there are
+some clear trends. For instance, it is easiest to clas-
+sify rare letters: J, W, X, Q, Z all have F1-scores
+over 93. And it is hardest for the probe to classify
+vowels: U, A, O, and E are the lowest-performing
+characters, with F1-scores between 83 and 86. But
+even those lower-performing characters do far bet-
+ter than the chance baseline (at about 50 F1 score)
+To further explore this, we conducted a quali-
+tative analysis of the probe’s successes and fail-
+ures. Consider the probe for classifying the pres-
+ence/absence of "y": the model assigns highest
+confidence to the following 4 tokens: "lly", " selec-
+tively", " subtly", " mechanically". These all have
+"ly" endings, which in English are typically asso-
+ciated with adverbs. Similarly, the top performing
+tokens for the "s" classifier all end with a morpho-
+logically meaningful "-s" suffix: " socialists", "
+stocks"," suggestions". They also happen to all
+start with "s", perhaps suggesting an effect of the
+first character as discussed above.
+This analysis suggests that the strong classifier
+performance could be explained by the model learn-
+ing systematic relationships between certain char-
+acters and syntactically or semantically meaningful
+morphology. Is syntactic information the window
+through which character-level information enters
+PLMs? To address that question, our next exper-
+iment focuses on a syntactic baseline, to see how
+well character-level information can be predicted
+based on syntactic features.
+4 Experiment 2: The effect of syntactic
+information
+In this experiment, we focus on building probes
+for the same task as in Experiment 1 (identifying
+whether a particular character occurs in a particular
+token). But, rather than using the token embed-
+dings from a large language model as input, we
+attempt to classify the presence/absence of charac-
+ters in a token based on syntactic information.
+Our first model (the SpaCy model) uses the
+SpaCy library (Honnibal and Montani, 2017) to
+obtain distributions over features for each token
+in the vocabulary: Fine-Grained Part of Speech2492
+tag (PoS; e.g., for "Jane", NNP for a proper noun),
+Coarse-Grained Part of Speech tag (Coarse-grained
+PoS; e.g., for "Jane", PROPN for proper noun), and
+a Named Entity Recognition tag (NER; e.g., for
+"Jane", PERSON for a personal name). We use
+these features to construct a syntactic vector for
+each token.
+Because SpaCy is built to operate over words,
+not tokens, we also construct custom syntactic base-
+lines that can tag subwords, as opposed to tokens.
+The performance of these probes will serve as
+a baseline for ascertaining how much character-
+level information can be learned by these features
+alone, without a full language model. If they can
+perform just as well as the full GPT-J embeddings,
+that would suggest that morphosyntactic informa-
+tion (of the sort that we already know is learned
+by PLMs during pretraining) is sufficient for the
+performance on the probing task.
+The method is the same as in Experiment 1,
+where the goal is to predict the presence or absence
+of a character αin a token, except that instead of
+using the token’s model embeddings as input, we
+instead use syntactic feature vectors (obtained ei-
+ther from SpaCy or a custom tagger) as input. We
+describe these syntactic vectors below.
+Syntactic baselines The SpaCy model has 3
+features for each token: NER, PoS, and Coarse-
+Grained PoS tags. The resultant features are dis-
+crete one-hot feature vectors over labels.
+The custom syntactic tagger, which is intended
+to solve the problem that SpaCy tags words and not
+subword tokens, takes a (subword) token’s model
+embedding as input and outputs a vector of prob-
+abilities over part of speech and named entity cat-
+egories. Here, we describe results for our custom
+GPT-J Tagger, trained using GPT-J model embed-dings, since GPT-J is the best-performing of our
+models for our main task. See Appendix D for
+descriptions and the results for 2 additional BERT-
+based custom taggers that we built.
+To build our custom GPT-J-Tagger, we train an
+MLP model to predict PoS and NER labels based
+on GPT-J’s static embedding layer for each token.
+The tagger is trained on the CoNLL 2003 dataset’s
+train and evaluation splits (Sang and De Meulder,
+2003), which contain part of speech and named
+entity information. Unlike the SpaCy tagger, our
+custom GPT-J-Tagger outputs a probability distri-
+bution over categories. We use this distribution
+over labels as input, rather than a one-hot vector.
+In the Appendix, Table 13 shows the performance
+of the tagger’s performance quatagger.
+Probing for characters using syntactic baselines
+We run the character probing experiment as before.
+But, rather than using the model embeddings, we
+use the syntactic feature vectors as the target of
+our probe. Table 3 shows the results of these ex-
+periments. Using the syntactic baselines leads to
+substantially improved performance over control
+tasks, and the GPT-J-Tagger does better than the
+SpaCy tagger. We hypothesize that these diver-
+gences occur because the custom GPT-J-Tagger is
+better suited to handling subwords, and because
+it enables us to use label distribution rather than
+one-hot vectors.
+Zooming in on the performance over individual
+characters, we observe that, relative to the control
+task, some English characters consistently perform
+much better when using syntactic features. As pre-
+dicted, these are precisely the characters that are
+highly correlated with particular parts of speech.
+The best-performing characters are: "s" (associ-
+ated with plural nouns and third-person singular
+verbs) and "y" (associated with adjective and ad-
+verb endings). Thus, the syntactic baselines seem
+to be capturing the information that they were in-
+tended to capture. But their performance still fell
+far below the best performing PLMs, suggesting
+that the large models are capturing more than just
+the information captured by the syntactic models.
+Moreover, as can be seen in Figure 2, the syntax
+baseline shows a sharp peak for morphologically
+informative characters like "s", but this pattern is
+much weaker in GPT-J (which shows only a slight
+performance increase for "s"). Therefore, we do
+not think syntactic information can explain all the
+character information learned by PLMs. In the next2493
+section, we consider another possibility: variability
+of tokenization, the focus of the next section.
+5 Experiment 3: Tokenization variability
+Consistent with other work suggesting benefits to
+variable tokenization (e.g., Provilkov et al., 2020;
+Kudo, 2018), we hypothesize that the variability of
+tokenization is another avenue by which character-
+level information could be learned by models. We
+first quantify this variability and then run an exper-
+iment using CBOW Word Embeddings (Mikolov
+et al., 2013) showing how increasing the variabil-
+ity in tokenization can lead to more character in-
+formation being learned. We posit that the same
+mechanism may be in play for PLMs.
+Subword tokenization like the one used by GPT
+models can cause the same lemma to have very dif-
+ferent tokenizations, depending on its form and/or
+its spelling. See Table 4 for possible tokeniza-
+tions of "dictionary" and related forms, including
+a misspelling (bottom row). This is a subset of the
+possible misspellings, variants, and morphologi-
+cal forms of the word. But the listed forms alone
+generate 8 unique tokens.
+It would be useful for the model to learn a rela-
+tionship between all these tokens, since they repre-
+sent the same lemma. We posit that the desirability
+of learning this mapping is a mechanism by which
+character information could be learned, by induc-
+ing an objective to map between atomic tokens like
+"dictionary" and the various substring tokens that
+can arise. While each of these mappings could
+be learned individually, learning character-level
+spelling information offers a more general solution
+to the problem, such that even an entirely novel
+tokenization could be interpreted by composing the
+characters of the tokens.
+For this to be plausible, though, variable tok-
+enizations like this must be frequent enough for
+it to matter. In Appendix E, we use heuristics to
+identify different forms in which a word appears
+and conduct a series of back-of-the-envelope cal-
+culations to determine how many different unique
+tokenizations are expected for a long word (8+ char-
+acters) like dictionary , in all its variant forms and
+misspellings in a sample of the Pile corpus (we used
+1/6 of the corpus as a sample; Gao et al., 2020). We
+found that, on average, we should expect over 200
+different tokenizations for a word like "dictionary",
+many pairs of which have entirely disjoint sets of
+subword tokens from each other.
+This hypothesis leads to a prediction: increas-
+ing the variability of tokenization should increase
+the amount of character-level information learned.
+To test this, we train models using tokenization
+schemes with different levels of variability and
+then test how much character-level information
+they learn, using our probing task.
+Because the overall goal of our paper is to
+characterize and explain the nature of character-
+level information learned, we conduct a proof-of-
+concept experiment using CBOW Word Embed-
+dings (Mikolov et al., 2013) on a portion of the Pile
+corpus with 1.1B characters, as opposed to training
+a large transformer model from scratch varying tok-
+enization schemes. We train 6 CBOW models from
+scratch, each with a different tokenization scheme.
+As baselines, we consider vanilla rule-based word-
+tokenization (the CBOW default, labeled "Word"
+in Table 5) and GPT-J’s default word piece tok-
+enization scheme. Comparing these two baselines
+against each other lets us compare the effect of
+word tokenization vs. subword tokenization on
+character information. But our key manipulation
+is to consider variations of GPT-J’s tokenizer in
+which we systematically increase tokenization vari-
+ability.
+In pre-processing the word-tokenized corpus for
+input, for each word token w, with probability
+(1−ρ), we tokenize it using the standard GPT-J tok-
+enizer. Under the standard tokenizer, " schematics"
+becomes " sche + mat + "ics". With probability ρ,
+however, we tokenize wusing a random tokeniza-
+tion that consists of alternative valid tokens from
+GPT-J. So, " schematics" could become " schema +
+tics" or " schematic + s" (but not " schemati + cs"2494since " schemati" is not a valid GPT token). We
+varyρfrom 0.05 to 0.5. See Appendix E for more
+details on this procedure. The result is a series of
+tokenized corpora, which have more variable tok-
+enization than the vanilla GPT-J-tokenized corpus.
+We train CBOW models separately for each of
+these corpora. Table 5 shows the results of these
+experiments on our probing task (using the same
+method as in Experiment 1). As expected, probes
+on the subword tokenization schemes reveal they
+learn more information about characters than the
+default word-level tokenizer. Most importantly,
+upon increasing the variability on GPT-J’s tok-
+enization scheme, the performance of the probe
+increases, peaking at ρ= 0.05andρ= 0.1. There-
+after, the performance decreases with variability,
+suggesting that increasing variability leads to in-
+creased character knowledge but only up to a point,
+likely because there is a tradeoff: since the corpus
+size for the toy experiment is small, having very
+high variability leads to the model seeing fewer
+instances of each token.
+While the magnitude of these differences is rel-
+atively small, they are consistent across random
+seeds and train-test splits. Thus, we believe that
+these results offer proof of concept that the vari-
+ability of tokenization affects how much charac-
+ter information is learned by CBOW models and
+that this finding would plausibly generalize to per-
+formance in PLMs (although we leave it to future
+work to confirm this). As such, increasing tokeniza-
+tion variability could be a means by which PLMs
+could be engineered to learn richer character-level
+information.
+6 Discussion and Conclusion
+Overall, our probing methodology revealed that
+PLMs with sub-word tokenization learn quite a lot
+about characters. The result is robust to the position
+of the character in the token, the identity of the
+character, the frequency of the token, the length of
+the token, and the alphabetic script (although we
+did not consider entirely non-alphabetic scripts like
+Chinese since such languages would require a very
+different formulation).
+We suggest at least two possible mechanisms
+by which this information is learned: systematic
+relationships between certain characters and syn-
+tactic/semantic features and the variability of tok-
+enization. Insofar as these methods (e.g., tokenizer
+variability) can be manipulated in model construc-tion, this knowledge could be used to build mod-
+els that perform better at tasks dependent on such
+knowledge. Given the particular importance of tok-
+enization in multilingual models (Rust et al., 2021;
+Singh et al., 2019), it would also be fruitful to con-
+sider the import of these results for multilingual
+settings.
+More generally, while the linguistic capabili-
+ties of PLMs are much studied (for overviews, see
+Rogers et al., 2020; Bommasani et al., 2021), the
+question whether PLMs learn the constituent char-
+acters of tokens is of a different nature in that it de-
+pends on learning a property of language (spelling)
+that is not explicitly tied to meaning. There is no a
+priori reason "dog" is spelled "D-O-G", and, in a
+sense, the spelling of the word does not matter. But,
+in another sense, it does matter: humans routinely
+use language in creative and character-dependent
+ways: e.g., alphabetizing text, scrambling letters to
+create codes, and solving crossword puzzles. Un-
+derstanding whether and how the building blocks
+of this meta-linguistic knowledge can emerge dur-
+ing self-supervised training on a word prediction
+task could be of interest not just in NLP, but in the
+cognitive sciences.
+7 Ethics and Broader Impacts
+This work consists of probing experiments and in-
+terpretability analyses of PLMs, and the risks and
+ethical considerations are largely those that affect
+any work with large PLMs (e.g., energy costs; see
+Bommasani et al., 2021, for an overview of risks
+and tradeoffs). The intended use of our code is for
+academic research. We consider probing publicly
+available PLMs, which are made publicly avail-
+able in part for research purposes, to be within the
+intended use of PLMs.
+8 Acknowledgments
+This work was supported by National Science Foun-
+dation Grants No. 2104995 to KM. We thank Chris
+Potts and Josh Rozner for conversations that helped
+inspire this work, Maria Ryskina and Kaj Bostrom
+for comments on drafts, and Eunsol Choi for intro-
+ducing the authors.
+References2495249624972498
+Appendix A Code details
+We release our code anonymously
+at https://github.com/ayushk4/
+character-probing-pytorch under MIT
+License.
+The models weights, data and other
+dependencies required for experiment
+are at https://github.com/ayushk4/
+character-probing-pytorch/releases .
+The intended use of our code is for academic
+research. We consider probing publicly available
+PLMs, which are made available for research as
+well as end use cases, to be within the intended use
+of PLMs.Appendix B Probing for Character
+Information
+We use off-the-shelf APIs for lemmatization and
+WordNet from NLTK (Apache License 2.0; Bird
+et al., 2009). Our implementation uses PyTorch
+(BSD License; Paszke et al., 2019), HuggingFace
+(Apache License 2.0; Wolf et al., 2019) and custom
+APIs for GPT-J’s embedding.
+The probes for each MLP are trained separately
+starting with random initialization weights. We
+train the probe via a binary classification task
+via backpropagation, using the Adam optimizer
+(Kingma and Ba, 2015) with betas of 0.9 & 0.999
+and epsilon of 1e-08 without weight decay, over
+the standard Binary Cross Entropy loss across the
+predicted logits ˆyand ground truth logits y.
+B.1 PLMs considered
+Details of the PLMs used along with their model-
+card on Huggingface:
+•GPT-J: We used the standard GPT-J with 6
+Billion parameters and its reversible Byte-Pair
+encoding based subword tokenizer. We ex-
+tracted the embeddings and have released it
+separately. Model Card: ‘EleutherAI/gpt-j-
+6B’ under Apache 2.0 License.
+•GPT-2: We consider the base model for GPT-
+2 with 124 Million parameters. The tokenizer
+used in this model is the exact same as the
+one used in GPT-3 and is also a subword tok-
+enizer based on reversible Byte-Pair encoding.
+Model Card: ‘gpt2’ under Modified MIT Li-
+cense.
+•RoBERTa: We again use the Base model
+for fairer comparison to the GPT-2 model
+with 125 Million parameters. This model has
+partially reversible Byte-Pair Encoding based
+on GPT-2’s byte-pair tokenizer but with addi-
+tional tokens for a BERT-like MLM discrim-
+inative pre-training. Model Card: ‘roberta-
+base’ under MIT License
+•BERT: The BERT-base models have roughly
+110 Million parameters. Both the Uncased
+and Cased versions of this model are consid-
+ered with their Word-Piece tokenizers. For
+this tokenizer, we also consider the charac-
+ter ‘##’ while filtering out vocabulary, as it
+denotes the token continues on the preceding2499
+word. Model Card: ‘bert-base-uncased’, ‘bert-
+base-cased’ under Apache 2.0 License
+•GloVe: We experiment with the 100 and 300
+dim version of 400K-V ocab GloVe trained on
+6B tokens. We consider the 40k most frequent
+tokens in GloVe, comparable to the vocab-
+ulary sizes of the other models. GloVe ver-
+sion used: ‘Wikipedia 2014 + Gigaword 5
+(6B tokens, 400K vocab, uncased, 50d, 100d,
+200d, & 300d vectors, 822 MB download):
+glove.6B.zip’
+•LXMERT: We use the uncased version of
+LXMERT-base model and, as with the BERT
+model, filter out ‘##’ preceding symbols.
+Model Card: ‘unc-nlp/lxmert-base-uncased’
+under
+B.2 Hyperparameter and other Details
+Each probe is trained for 5 epochs, with 128 batch-
+size. The Learning rate is tuned over averaged
+Macro-F1 in the grid {1e−5,3e−5,5e−5,1e−
+4,3e−4,1e−3,3e−3,1e−2,3e−2}. We
+trained the probe on the best hyperparameter set-
+tings across 5 different train-test splits and seeds.
+Table 9 shows the best learning rates and the num-
+ber of parameters (and frozen-parameters) in the
+probe. For all the control embedding, we assume
+the same dimension as the largest model (4096)
+and considered a maximum vocab of 100k, even
+though only the first few thousand might be used.
+These experiments take less than 20 minutes for
+each run and require less than 12 GB of GPU mem-
+ory. They were run on a mix of NVidia Tesla K80,
+GTX 1080 Ti, P100, V100 GPUs with Dell R740
+and Intel Xeon CPUs.
+Table 6 shows the result of the probe in a case-
+sensitive setting. The case-insensitive probe treats
+both "Cat" and "cat" both as a hit for "c". The
+case-sensitive probe treats only "cat" (not "Cat")
+as a hit for "c". Note that performance is the same
+for BERT-Uncased since it does not distinguish
+between these conditions.
+Appendix C Multilingual Analyses
+Model Details: We only consider mBART (Liu
+et al., 2020) with 610M parameters and 250k
+vocab size. Its model card in Huggingface is2500
+‘facebook/mbart-large-cc25’, without any mention
+of its license. Its tokenizer is a reversible one, simi-
+lar to GPT, except that it encodes preceding space
+with ‘_’.
+Languages: For the non-Latin scripts considered,
+we only consider those characters with more than
+250 occurrences in the tokenizer’s vocabulary. We
+consider the experiment case-insensitive (by lower-
+casing the string) across scripts that have lowercase
+and uppercase characters.
+Hyperparameters: Each probe is trained for
+5 epochs, with 128 batch-size. The learning
+rate is tuned over averaged Macro-F1 in the grid
+{1e−5,3e−5,5e−5,1e−4,3e−4,1e−3,3e−
+3,1e−2,3e−2}. We trained the probe on the best
+hyperparameter settings across 5 different train-test
+splits and seeds. Table 12 shows these best learn-
+ing rates and the number of parameters (and frozen
+parameters) in the probe. For all the control embed-
+ding, we assume the same dimension as the largest
+model (1024) and considered a maximum vocab of
+300k, even though only a few thousand are used.
+These experiments take less than 20 minutes for
+each run requiring less than 12 GB of GPU mem-
+ory and were run on a mix of NVidia Tesla K80,
+GTX 1080 Ti, P100, V100 GPUs with Dell R740
+and Intel Xeon CPUs.
+Appendix D Syntax Baseline for
+Character information
+D.1 Custom syntax taggers
+First we consider an off-the-shelf SpaCy model
+with 3 features for each token: NER, PoS, and
+Coarse-Grained PoS tags. Before running this
+model, we remove the preceding whitespace char-
+acters in the token, if present. The resultant fea-
+tures are discrete one-hot feature vectors over la-
+bels. The SpaCy tagger is not perfectly suited to
+our task since it operates at the word level, whereas
+we are concerned with obtaining a subword token’s
+embeddings. To solve that problem, we also built 3
+custom taggers for obtaining PoS and NER labels
+on subword tokens. These taggers take (a subword)
+token’s model embedding as input and output a vec-
+tor of probabilities over part of speech and named
+entity categories.
+To build our custom GPT-J-Tagger, we train an
+MLP to predict PoS and NER label based on GPT-
+J’s static embedding layer for each token. The
+tagger is trained on the CoNLL 2003 dataset’s train
+and evaluation splits (Sang and De Meulder, 2003),
+which contains part of speech and named entity
+information. Unlike the SpaCy tagger, our cus-
+tom GPT-J-Tagger outputs a probability distribu-
+tion over categories so we can use this distribution
+over labels as the vector of interest, rather than a
+one-hot vector.
+Table 13 show the performance of the tagger’s
+performance qua tagger. Table 10 shows the
+Dataset Checklist for this experiment. To build25012502the BERT sequence-labeling tagger, we fine-tuned
+a BERT sequence labeling model for the PoS and
+NER tasks, in order to output a label for each (sub-
+word) token in a sentence. When extracting syn-
+tactic features for this model, we first do the same
+pre-processing of removing the special preceding
+whitespace of GPT’s tokens as SpaCy before in-
+put into the BERT model. Since BERT’s tokenizer
+could have more than one token for a single GPT-
+J’s token, we consider the average of the logits as
+the pre-softmaxed feature vector.
+In addition to the BERT sentence-level tagger,
+we consider a BERT token classifier model fine-
+tuned for NER and PoS at token level rather than
+at sentence level. This token-level model does not
+leverage context to deduce the label, and is closer
+to how we use this model later to get features for
+predicting NER/PoS features.
+D.2 Results and Hyperparameters
+We use off-the-shelf APIs for lemmatization and
+WordNet from NLTK. Our implementation uses
+PyTorch (Paszke et al., 2019), HuggingFace (Wolf
+et al., 2019) and custom APIs (now released) for
+GPT-J’s embedding. The hyperparameter tuning
+was done on the dev set for only the learning rate
+in the grid {1e−5,3e−5,1e−4}for BERT and
+{1e−5,3e−5,5e−5,1e−4,3e−4,1e−3,3e−
+3,1e−2,3e−2}for GPT-J. Our MLP model is
+3-layered with SELU and Tanh activation and 0.1
+Dropout before the last layer. Our BERT-Model
+is initialized with ‘bert-base-cased‘ from Hugging-
+face with default values of hyperparameters. Our
+implementation was done using PyTorch and op-
+timized via Adam with betas of 0.9 & 0.999 and
+epsilon of 1e-08 without weight decay over the
+standard Cross Entropy loss. We set the batch size
+to 32 sentences for BERT and 64 for GPT-J. All
+the experiments can be done within 16GB of GPU
+memory and no run individually takes more than
+2 hours. We release these models along with our
+codebase with instructions to run them.
+Table 13 shows the performance of these NER
+and PoS models. As expected, the BERT-sentence
+model performs the best on both the tasks as it
+leverages the context while tagging. GPT-J slightly
+outperfoms BERT-token on both the tasks. Note
+that these performances are not comparable as their
+tokenizations differ and only one of the models
+leverages context to predict NER and PoS tags.D.3 Method
+Assume we have msyntactic features. Consider
+the tokenizer V ocabulary V(with only alphabetic
+tokens) and the Ddatapoint pairs for each letter
+αof the lowercased English alphabet. For each
+token-label pair (w, y), we obtain the msyntactic
+features of the word {x, x. . . x}using the
+trained models to tag the features.
+We train a classifier to predict whether a char-
+acter αis present in the token wusing only its
+syntactic features. Assume randomly initialized
+‘trainable’ embeddings {E, E. . . E}for each
+of the msyntactic features. We predict the logits
+ˆyfor token wover each letter αusing an MLP
+classifier over the embeddings:
+ˆy=σ(MLP([Ex;. . .;Ex]))
+Each syntactic feature xis a vector denoting
+probability distribution of a token over the corre-
+sponding feature labels (including being a one-hot
+vector), this is crucial because a token (especially
+subword-token) might have different labels depend-
+ing on the context.
+We train different MLPs and Embeddings from
+scratch for each alphabet αwith no shared parame-
+ters across the (case-insensitive) 26 English char-
+acters. We train our model for binary classifica-
+tion via backpropagation over the standard Binary
+Cross Entropy loss across the predicted logits ˆy
+and ground truth logits y.
+As before, for each character we create a bal-
+anced dataset consisting of an equal number of
+positive and negative examples, where each exam-
+ple is made up entirely of either English characters
+or whitespace. These are randomly divided into
+training and test split sucht that we keep words
+with with the same lemmas in the same split. As
+a control task, we randomly assign the syntactic
+features for each token. We set the batch size
+for runs with one-hot vectors as features to 128
+and to 64 for others, the learning rate is tuned in
+{1e−5,3e−5,1e−4,3e−4,1e−3,3e−3,1e−2}
+for all the features over the metric of Averaged F1-
+Scores across the 26 English letters. The best learn-
+ing rates for SpaCy, BERT-sentence, BERT-token,
+GPT-J and Control were found to be 1e-3, 1e-3,
+3e-3, 1e-4, 1e-2, respectively. Using Adam Opti-
+mizer we train each of the 26 models for 5 epochs
+with betas of 0.9 & 0.999 and epsilon of 1e-8. Our2503
+implementation is done using PyTorch and Hug-
+gingface. Finally for the best hyperparameter, we
+perform 5 runs with different train/test splits and
+seeds. Our MLP model is 3-layered with SELU
+and Tanh activation and 0.1 Dropout before the last
+layer.
+Tables 14 and 15 show the mean and vari-
+ance of the results over the 4 taggers and control
+task. We also show the performance over the best-
+performing and worst-performing characters.
+Appendix E Variability of Tokenization
+E.1 Quantifying variability in the Pile Corpus
+To quantify the variability in the tokenization of fre-
+quent words in corpora comparable to the corpora
+used to train these models, we consider 1/6th of the
+publicly available Pile Corpus used to train GPT-J
+( 250 GB of text). For our analysis we consider
+500 frequent words of 8+ characters (as measured
+using Google Ngrams) since long words are more
+likely to be the source of variability.
+For each target word, we first case-insensitively
+detect each of its occurrences in the sub-corpus. In
+order to also account for spelling errors, we used
+case-insensitive fuzzy search, allowing matches
+for substrings up to 1 Levenshtein distance away.
+Over these occurrences, we discard those where
+the substring is part of a bigger word, such as ‘dif-
+ferentiation’ for the target word ‘different’ or if the
+fuzzy match has whitespaces.
+Once we have such occurrences, we want to
+obtain the tokenization of the target word in the
+context. For each word in the set of matches, if the
+matched substring ends with a non-valid character
+for our probing task, we delete the final character.This allows for matches of [somethin’, somethin",
+somethin] all to be considered as the string ‘some-
+thin’. We also account for the factors that leads to
+differing tokenization, such as preceding whites-
+paces.
+Now, for each of the target words, we have a
+list of probable tokenization at most 1 Levenshtein
+distance away. Since two target words such as
+‘projection’ and ‘protection’ could themselves be
+at 1 Levenshtein distance, these may act as what
+we call “pseudo matches" for each other. So we
+consider only one of these two from our target list,
+leading to 466 word down from 500 words. Now,
+for each of these target words, we count the number
+of possible unique tokenizations.
+For each of these 466 target words, we also ob-
+tain a list of words from WordNet, which are 1
+Levenshtein distance away. We treat this word list
+as the pseudo-match list. We also consider the num-
+ber of tokenizations for each target word, excluding
+their pseudo-match list as well as by excluding all
+those which are equally close to or closer to a word
+in the pseudo-match list than they are to the target
+word. We also compute the statistics of those with
+exact matches.
+Table 16 shows these statistics for the target
+words. On average, a target word is expected to
+have 213 different tokenizations depending on the
+context. We observe that, while one may expect the
+number of tokenizations to go up with the number
+of characters in the target word, it doesn’t perfectly
+increase monotonically. This is because the num-
+ber of occurrences of the target word dictates the
+number of tokenization it will have. Unsurpris-
+ingly, we see a consistent trend that the number2504of tokenization greatly increases with increasing
+occurrences.
+We observe three factors contributing to a re-
+markably large number of tokenizations. First,
+Case-Sensitive tokenization leads to up to 6 dif-
+ferent tokenizations for each of the target words.
+Second, context-dependent tokenization increases
+the expected number of different tokenizations to
+12.91. The rest of the tokenizations are likely due
+to misspellings or variants.
+Our analyses were sped up using multiprocess-
+ing and fuzzy regex. To do so, we split the sub-
+corpus across multiple pieces. These runs take
+about 3 days across 40 CPU Cores, 60 GB of RAM
+and less than 600GB hard disk space. We report
+the mean and standard deviation for the number
+of tokenizations a word has across the portion of
+the Pile corpus considered. These are also reported
+as a function of word length and its frequency of
+occurrence in the corpus.
+Tables 16 and 17 shows these scores. The ‘All
+matches’ field considers the unique tokenizations
+of all matched substrings including those at 1 (case
+and whitespace insensitive) Levenshtein distance
+away. These word at 1 Levenshtein distance could
+be either misspellings or a different English word
+(for example an occurrence of the word ‘projec-
+tion’ for target word ‘protection’). The latter of
+these are identified using the Wordnet dictionary
+and the statistics recalculated and shown in the
+column ‘Matches except pseudo’. Some of the
+misspellings contributing to this score could be
+misspellinsg of either the target word or of one of
+the other English words at 1 Levenshtein distance
+away (‘prohection’ could be a misspelling of either
+‘projection’ or ‘protection’ being at distance 1 from
+both). Such occurrences are removed, with statis-
+tics recomputed for the column ‘Matches closer
+pseudo’. The column ‘Exact contain’ considers
+only those occurrences, which contain the exact tar-
+get word (case-insensitively) in the string ignoring
+whitespaces. The ‘Exact match’ column does not
+consider occurrences involving a preceding whites-
+pace.
+Table 18 shows some examples of variation in
+tokenization.E.2 Algorithm for increasing tokenization
+variability
+Algorithm 1 A simplified version of subword Tok-
+enization with controllable variability250525062507

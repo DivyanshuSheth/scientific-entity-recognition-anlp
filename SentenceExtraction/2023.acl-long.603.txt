@@ -1,1 +1,1080 @@
-10785 Proceedings of the 61st Annual Meeting of the Association for Computational Linguistics Volume 1 : Long Papers , pages 10785–10803 July 9 - 14 , 2023 © 2023 Association for Computational Linguistics 10786 10787 10788 10789 10790 10791 10792 10793 10794 10795 10796 10797 10798 10799 10800 10801 10802 10803 
+
+Xuan Long Do, Bowei Zou, Shafiq Joty, Anh Tai Tran,
+Liangming Pan, Nancy F. Chen, Ai Ti AwInstitute for Infocomm Research (IR), A*STAR, Singapore,Nanyang Technological University, Singapore,Salesforce AI,ByteDance,University of California, Santa Barbara
+Abstract
+Conversational Question Generation (CQG) is
+a critical task for machines to assist humans in
+fulfilling their information needs through con-
+versations. The task is generally cast into two
+different settings: answer-aware and answer-
+unaware. While the former facilitates the mod-
+els by exposing the expected answer, the latter
+is more realistic and receiving growing atten-
+tions recently. What-to-ask andhow-to-ask are
+the two main challenges in the answer-unaware
+setting. To address the first challenge, existing
+methods mainly select sequential sentences in
+context as the rationales. We argue that the
+conversation generated using such naive heuris-
+tics may not be natural enough as in reality,
+the interlocutors often talk about the relevant
+contents that are not necessarily sequential in
+context. Additionally, previous methods decide
+the type of question (boolean/span-based) to
+be generated implicitly. Modeling the ques-
+tion type explicitly is crucial in this (answer-
+unaware) setting, as the answer which hints
+the models to generate a boolean or span-based
+question, is unavailable. To this end, we present
+SG-CQG , a two-stage CQG framework. For the
+what-to-ask stage, a sentence is selected as the
+rationale from a semantic graph that we con-
+struct, and extract the answer span from it. For
+thehow-to-ask stage, a classifier determines the
+target answer type of the question via two ex-
+plicit control signals before generating and fil-
+tering. In addition, we propose Conv-Distinct ,
+a novel evaluation metric for CQG, to evaluate
+the diversity of the generated conversation from
+a context. Compared with the existing answer-
+unaware CQG models, the proposed SG-CQG
+achieves state-of-the-art performance.
+1 Introduction
+Building systems that can comprehend human
+speech and provide assistance to humans throughconversations is one of the main objectives in AI.
+Asking questions during a conversation is a cru-
+cial conversational behavior that helps AI agents
+communicate with humans more effectively (Allen
+et al., 2007; Li et al., 2016b). This line of research
+is known as Conversational Question Generation
+(CQG) , which targets generating questions given
+the context and conversational history (Nakanishi
+et al., 2019; Pan et al., 2019a; Gu et al., 2021; Do
+et al., 2022). Compared to traditional single-turn
+question generation (Pan et al., 2019b), CQG is
+more challenging as the generated multi-turn ques-
+tions in a conversation need not only to be coherent
+but also follow a naturally conversational flow.
+Generally, there are two main settings for the
+CQG task: answer-aware and answer-unaware. In
+the answer-aware setting, the expected answers of
+the (to be) generated questions are exposed to the
+models (Gao et al., 2019; Gu et al., 2021; Shen
+et al., 2021; Do et al., 2022). In reality, however,
+the answers are only “future” information that are
+unknown beforehand. Thus, growing attention has
+been on the more realistic answer-unaware setting,
+in which the answers are unknown to the CQG
+model (Wang et al., 2018; Pan et al., 2019a; Nakan-
+ishi et al., 2019; Qi et al., 2020; Do et al., 2022).
+Prior studies either attempt to ask the questions
+first, and compute the reward function to evaluate
+their answerability (Pan et al., 2019a) or informa-
+tiveness (Qi et al., 2020); or they extract the answer
+spans from the context as the what-to-ask first, and
+generate the questions based on them (Nakanishi
+et al., 2019; Do et al., 2022). However, it has been
+argued that the former approach tends to gener-
+ate repetitive questions (Qi et al., 2020; Do et al.,
+2022). For the latter approach, Do et al. (2022)
+recently proposed a selection module to shorten the
+context and history of the input and achieved state-
+of-the-art performance. Nonetheless, it simply em-
+ploys a naive heuristic to select the earliest forward
+sentence (without traceback) in the context as the10785rationale to extract the answer span. Although such
+heuristics ensure the flow of the generated ques-
+tions is aligned with the context, we argue that the
+resulting conversations may not be natural enough,
+because, in reality, the interlocutors often talk about
+the relevant parts that may not form a sequential
+context. Furthermore, previous studies (Gao et al.,
+2019; Do et al., 2022) trained the models to decide
+the type of the question (boolean/span-based) to be
+generated implicitly. We argue that modeling ques-
+tion type explicitly is critical since in this setting,
+the answer, which hints the models to generate a
+boolean or span-based question, is unavailable.
+To address the above problems, we propose a
+two-stage CQG framework based on a semantic
+graph, SG-CQG , which consists of two main com-
+ponents: what-to-ask andhow-to-ask . In particu-
+lar, given the referential context and dialog history,
+thewhat-to-ask module (1)constructs a semantic
+graph, which integrates the information of corefer-
+ence, co-occurrence, and named entities from the
+context to capture the keyword chains for the pos-
+sible “jumping” purpose; (2)traverses the graph
+to retrieve a relevant sentence as the rationale; and
+(3)extracts the expected answer span from the se-
+lected rationale (Section 3.1). Next, the how-to-ask
+module decides the question type (boolean/span-
+based) via two explicit control signals and conducts
+question generation and filtering (Section 3.2).
+In order to exhaustively assess the quality of
+the generated question-answer pairs, we propose
+a set of metrics to measure the diversity ,dialog
+entailment ,relevance ,flexibility , and context cover-
+agethrough both standard and human evaluations.
+Compared with the existing answer-unaware CQG
+models, our proposed SG-CQG achieves state-of-
+the-art performance on the standard benchmark,
+namely the CoQA dataset (Reddy et al., 2019).
+Our contributions can be summarized as follows:
+(1)We propose SG-CQG , a two-stage frame-
+work, which consists of two novel modules: what-
+to-ask encourages the models to generate coher-
+ent conversations; and how-to-ask promotes gen-
+erating naturally diverse questions. Our codes
+will be released at https://github.com/
+dxlong2000/SG-CQG .
+(2) SG-CQG achieves state-of-the-art perfor-
+mance on answer-unaware CQG on CoQA.
+(3)To the best of our knowledge, we are the
+first to propose a set of criteria to comprehensively
+evaluate the generated conversations. Moreover,we propose Conv-Distinct to measure the diversity
+of the generated conversation from a context, which
+takes the context coverage into account.
+(4)We conduct thorough analysis and evaluation
+of the questions and answers of our generated con-
+versations, which can bring some inspiration for
+future work on the answer-unaware CQG.
+2 Related Work
+Our work is closely related to two lines of prior
+work. Extended related work is in Appendix A.1.
+2.1 Conversational Question Generation
+Question Generation has gained much attention
+from the research community over the years (Pan
+et al., 2019b; Lu and Lu, 2021). Despite such in-
+tensive exploration, much less attention has been
+drawn to Conversational QG or CQG. Generally,
+CQG has been considered in two main settings:
+answer-aware and answer-unaware. In the answer-
+aware setting, the expected answers are revealed
+to models (Gao et al., 2019; Gu et al., 2021; Shen
+et al., 2021; Do et al., 2022). However, this is not
+always the case in reality, as the answers are “future
+information”. The answer-unaware setting; there-
+fore, receives growing interests recently (Wang
+et al., 2018; Pan et al., 2019a; Nakanishi et al.,
+2019; Qi et al., 2020; Do et al., 2022).
+To tackle the what-to-ask problem, prior studies
+(Pan et al., 2019a; Do et al., 2022) selected the next
+sentence in the context as the rationale. Do et al.
+(2022) extract the target answer span from the ra-
+tionale, while Pan et al. (2019a) generate the ques-
+tion, and compute a reward function to fine-tune
+the model by reinforcement learning. The how-
+to-ask challenge was simply formulated as that in
+the answer-aware setting. In contrast, we attempt
+to model the rationale selection in a more coher-
+ent way by constructing and traversing a semantic
+graph, which simulates the keyword chains. We
+further propose control signals to promote diversity
+and fluency in question generation.
+2.2 Knowledge-grounded Conversation
+Generation
+Leveraging graphs to enhance dialog response gen-
+eration has received growing interest (Moghe et al.,
+2018; Liu et al., 2019b; Xu et al., 2020, 2021).
+In particular, Xu et al. (2020) proposed to ex-
+tract event chains (Mostafazadeh et al., 2016), and
+utilised them to help determine a sketch of a multi-10786turn dialog. Nonetheless, the situation differs sig-
+nificantly when it comes to the CQG task. The
+responses in the dialog response generation task
+are normally full sentences with enough relevant
+mentions. However, in CQG, the questions and
+answers are mostly short and lack clear keywords,
+which makes the existing keyword-graph not ap-
+plicable. We thus present a semantic graph, which
+incorporates the coreference, co-occurrence, and
+named entities information from the context.
+3SG-CQG
+We formulate the answer-unaware con-
+versational question generation (CQG)
+task as: given the referential context
+C={s, s, ..., s}with sbeing the i-th
+sentence in context, and the conversational history
+H={(q, a),(q, a), ...,(q, a)}with
+(q, a)being the i-th turn of the question-answer
+pairs, as input D={C, H}, the model learns to
+generate the current question qand answer a.
+Figure 1 demonstrates an overview of our pro-
+posed framework. It consists of two main compo-
+nents: (1)Awhat-to-ask module aims to select a
+reasonable sentence in the referential context Cas
+the current rationale rand thereby a span in ras
+the target answer a, given D.(2)Ahow-to-ask
+module aims to generate the question q, guided
+by the rationale rand target answer a.
+3.1 What-to-ask Module (WTA)
+Existing answer-unaware CQG models (Pan et al.,
+2019a; Do et al., 2022) commonly utilize the next
+sentence of rin the context as the current ra-
+tionale r. Although such heuristics can guarantee
+that the flow of the generated questions is consis-
+tent with the narrative in context, the generated
+conversation may not always be as natural as in
+reality, since human speakers often jump back and
+forth across the relevant but not sequential contents
+in context. To facilitate the models in selecting
+the current rationale and target answer appropri-
+ately and further improve the semantic diversity
+of dialogue flow, we design a what-to-ask module,
+which consists of two components: semantic graph
+construction andgraph traversal algorithm .
+Semantic Graph Construction (SGC) Figure 1
+shows an example of our semantic graph. Each
+node is displayed as a textual span and the index of
+the sentence it belongs to. To construct the seman-
+tic graph G={V,E}, we first obtain the corefer-ence clusters from the context Cby AllenNLP (Shi
+and Lin, 2019) and build the set of initial nodes
+from phrases in the clusters. We then connect all
+the nodes in the same cluster as a chain: each node
+in the cluster (except the one that appears last in
+the context) is connected to the nearest forward
+one in the context. We denote this type of relation
+asCoreference . To enhance the connectedness of
+G, we extract all named entities by spaCyand
+add them as additional nodes if they are not in
+any clusters. We then connect all the nodes in the
+same sentence in the context in the same chaining
+style and name those edges as Same Sentence . Fi-
+nally, we add a type of Extra edges between all
+connected subgraphs to make Gfully-connected.
+Since those Extra edges do not bring any semantic
+relation to the graph, our objective is to minimize
+the number of those edges. Specifically, we grad-
+ually select, and connect two sentences such that
+their nodes are in different connected components
+and have the smallest indexes with the smallest
+difference, until the graph is fully-connected. To
+connect two sentences, we add an Extra edge be-
+tween the last phrase in the smaller-index sentence
+and the first phrase in the remaining sentence. The
+adding- Extra -edges algorithm is in Appendix A.4.
+Graph Traversal Algorithm (GTA) Given the
+conversational history Hand the semantic graph
+G, we create a queue qto store nodes for traversing.
+We first add the nodes that appear in any previous
+turn’ rationale to qin the index order. We then tra-
+verseGby popping the nodes in quntil it becomes
+empty. For each node, we retrieve the sentence that
+contains it as the rationale r. If the model can gen-
+erate a valid question from rand any answer span
+extracted from r, we add all unvisited neighbors
+of the current node to the beginning of q. A ques-
+tion is considered being valid if it passes the QF
+module (Section 3.2). Prepending the neighbors to
+queue is to prioritize the nodes that are connected
+so that the generated conversation can be formed
+from a chain of relevant sentences, which consol-
+idates the coherence of the conversation. If the
+model cannot generate any valid qby the current
+node, we add its unvisited neighbors to the end of q.
+The pseudocode of our proposed Graph Traversal
+Algorithm is described in Appendix A.2.10787
+Answer Span Extractor (AE) We follow Do
+et al. (2022) to design the answer span extractor
+module. In particular, a T5 model is trained on
+SQuAD (Rajpurkar et al., 2016) to predict the tar-
+get answer span ( a), given its original sentence in
+context ( r). We use this pretrained model to extract
+afrom r. Note that we also deselect the answer
+spans that are the same as those of previous turns.
+3.2 How-to-ask Module (HTA)
+A high ratio of boolean questions in conversational
+datasets such as CoQA (Reddy et al., 2019) (around
+20%) is one of the main challenges for current
+CQG studies (Gao et al., 2019; Pan et al., 2019a;
+Gu et al., 2021). To the best of our knowledge; how-
+ever, there is no up-to-date work which attempts to
+tackle this challenge. This problem is even worse
+in the answer-unaware setting since there is no
+Yes/No answer to be provided to guide the gen-
+eration of the models. Previous studies (Pan et al.,
+2019a; Do et al., 2022) simply train the CQG mod-
+els to let them implicitly decide when to generate
+the boolean and span-based questions without any
+explicit modeling of the question type. We argue
+that explicitly modeling the question type is critical,
+as the models will gain more control on generating
+diverse questions, thus making the conversation be-
+come more natural. To this end, we introduce two
+control signals as the additional input to the QG
+model, and develop a simple mechanism to select
+the signal for the current turn.
+Question Type Classifier (QTC) We design
+two control signals to guide the QG model:
+<BOOLEAN> is prepended to the textual input if
+we expect the model to generate a boolean ques-
+tion, and <NORMAL> otherwise. To classify which
+signal should be sent to the QG model, we train a
+RoBERTa (Liu et al., 2019a) as our Question Type
+Classifier . This binary clasifier takes the rationale
+rand the answer span agenerated from what-to-
+askmodule, the context and the shortened conversa-
+tional history as the input, and generates the label
+0/1corresponding to <NORMAL>/<BOOLEAN> .
+We conduct additional experiments to discuss why
+thecontrol _signals work in Section 6.3.
+Rewriting and Filtering (RF) Our RF module
+serves two purposes. Firstly, following Do et al.
+(2022), we train a T5 model on CoQA (Reddy
+et al., 2019) as our CQA model to answer the gen-
+erated questions. A question is passed this filtering
+step if the answer generated by the CQA model
+has a fuzzy matching score greater or equal to 0.8
+with the input answer span. Secondly, when in-
+vigilating the generated conversations, we observe
+multiple other errors that the blackbox model en-
+counters, as shown in Table 1. We thus propose
+extra post-processing heuristics to filter out the gen-10788erated questions and try to avoid the following is-
+sues: (1) Wrong answer . Unlike Do et al. (2022)
+that took the extracted spans as the conversational
+answers, we rewrite the extracted answer spans for
+the boolean questions by selecting the answers gen-
+erated from the CQA model; (2) Irrelevant . For
+each generated question, we remove stopwords and
+question marks only for filtering purpose, and we
+check if all the remaining tokens exist in the con-
+textC;(3) Uninformative . To remove the turns
+like(“Who woke up?”, “Justine”) , we check valid-
+ity if no more than 50% of the tokens of rexist
+in any previously generated QA pairs; (4) Redun-
+dant. Unlike previous studies (Qi et al., 2020; Do
+et al., 2022) which only considered the redundant
+information from the generated answers, for each
+generated question that has more than 3 tokens, we
+filter it out if it has a fuzzy matching score >= 0.8
+with any of the previously generated questions.
+Question Generation (QG) We fine-tune a T5
+model (Raffel et al., 2020) to generate conver-
+sational questions. We concatenate the input
+D={C, H, a, r, control _signal }in the for-
+mat:Signal :control _signal Answer :a,r
+Context: C[SEP] H, where H∈H.
+The model then learns to generate the target ques-
+tionq. In our experiments, His the shortened
+H, in which we keep at most three previous turns.
+It was shown to improve upon training with the
+whole Hsignificantly (Do et al., 2022). The per-
+formance of the QG model is in Appendix A.3.
+4 Experimentation
+4.1 Experimental Settings
+Dataset We use CoQA (Reddy et al., 2019), a
+large-scale CQA dataset, in our experiments. Each
+conversation includes a referential context and mul-
+tiple question-answer pairs, resulting in a total of
+127k question-answer pairs. Among them, around
+20% of questions are boolean, which makes this
+dataset become challenging for the CQG task (Pan
+et al., 2019a; Gu et al., 2021). Since the test set of
+CoQA is unavailable, we follow Do et al. (2022) to
+keep the original validation set as our test set and
+randomly sample 10% of the original training set
+as our new validation set .
+Automatic Evaluation We utilise BERTScore
+(Zhang et al., 2020) as our dialog entailment met-
+ric (BERTScore-entailment), a generalization of
+Dziri et al. (2019). It considers the generated re-sponse (question/answer) as the premise, and the
+utterances in the conversational history as the hy-
+pothesis, and measures their similarity score as the
+topic coherence score. This property is crucial as
+the questions/answers should focus on the same
+topic as the previous turn(s). In our experiment, we
+measure the dialog entailment score with 1, 2, and
+all previous turn(s). To measure the relevance be-
+tween the generated conversation and the context,
+we concatenate the generated QA pairs and com-
+pute the BERTScore. It provides how the generated
+conversation is explicitly relevant to the context.
+We observe short conversations with very few
+generated turns tend to yield very high scores on
+the available diversity measurement metrics such
+as Distinct (Li et al., 2016a). Since the conversa-
+tion is generated from a given context, we argue
+that how much information from the given context
+the generated conversation covers should be taken
+into account. To this end, we introduce Context
+Coverage (CC) to measure the percentage of the
+sentences in the context that are the rationales of
+generated QA pairs. Our proposed Conv-Distinct
+of a generated conversation is then computed by
+multiplying the Distinct score of the generated con-
+versation with its CC score, to measure the diversity
+of the turns generated from a given context : (1)
+We further provide Jumping Score (JS) to mea-
+sure the flexibility of the generated conversation.
+JS is defined as the percentage of turns in which the
+model jumps back to any previous content of their
+previous turn (i.e. trace-back). It is worth noting
+that we do not rank the models based on JS score.
+Details of proposed metrics are in Appendix A.7.
+Human Evaluation Human evaluation is critical
+to evaluate the quality of the generated conversa-
+tions since the CQG model may generate reason-
+able conversations but unmatched well with the
+provided ground-truth ones. We randomly select
+25 contexts in our test set and take the first five
+generated turns from the output of each model to
+compare, resulting in 125 samples in total. We hire
+three annotators who are English native speakers.
+Each generated question is rated by annotators on a
+1-3 scale (3 is the best). We follow Do et al. (2022)
+to utilize three criteria: (1) Factuality measures the
+factual correctness and meaning of generated ques-
+tions, (2) Conversational Alignment measures
+how aligned the generated questions are with the10789
+history, (3) Answerability measures how answer-
+able the generated questions are by the given con-
+text. Given the fact that LMs can generate fluent
+texts, we omit using Fluency andGrammaticality .
+We measure the annotators’ agreement by Krip-
+pendorff’s alpha (Krippendorff, 2011). Our human
+rating instructions are in Appendix A.9.
+Implementation Details We fine-tune a
+RoBERTa (Liu et al., 2019a) as our binary
+Question Type Classifier with the pretrained
+checkpoints from fairseq (Ott et al., 2019) on
+CoQA. We use a learning rate of 1e-5, a window
+size of 512, a batch size of 4, and AdamW
+(Loshchilov and Hutter, 2019) as our optimizer.
+Our classifier achieves an accuracy of 95.6%.
+The model is finetuned on a P40 Colab GPU
+for 10 epochs. Details of the input format are in
+Appendix A.5.
+We initialise SG-CQG with pretrained check-
+points of T5model (Raffel et al., 2020) from
+Huggingface (Wolf et al., 2020). We also use
+AdamW (Loshchilov and Hutter, 2019) as our opti-
+mizer with a warmup of 0.1 and an initial learning
+rate of 1e-4. We train the model for 100k iterations
+with a standard window size of 512, a batch size of
+4, and use a Beam search decoding strategy with a
+beam size of 4.
+5 Main Results
+To evaluate the performance of SG-CQG on the
+answer-unaware CQG task, we employ 4 baselines
+for comparison, as shown in Table 2. (1)T5
+(Raffel et al., 2020), (2)BART(Lewis et al.,
+2020), (3) GPT-2 (Radford et al., 2019) , which
+are fine-tuned to generate conversational question-
+answer pairs end-to-end, and (4)CoHS-CQG (Do
+et al., 2022) which adopts a strategy to shorten
+the context and history of the input, achieves the
+SoTA performance on CoQA in answer-aware and
+answer-unaware CQG.
+Firstly, we observe that SG-CQG outperforms
+other methods on most of the metrics, except Dis-
+tinct and BERTScore. The reason is that BART and
+T5 often generate short QA pairs (the CC scores are
+8.62% and23.33% on average, respectively), and
+copy more from the context, thus they get higher
+scores on Distinct and BERTScore. Secondly, the
+metric Conv-Distinct reasonably penalizes mod-
+els that generate too short conversations, on which
+SG-CQG achieves the best results. Thirdly, by al-
+lowing the model to jump back and forth across
+the relevant contents in the context by the semantic
+graph, SG-CQG outperforms other methods sig-
+nificantly on BERTScore-entailment, which indi-
+cates that conversational coherence is indeed im-10790proved. Furthermore, SG-CQG achieves the high-
+est JS score, which demonstrates that the what-
+to-ask module allows our model to be most flex-
+ible in selecting rationales compared to the base-
+lines. SG-CQG also achieves a significantly higher
+Context Coverage (CC) score compared to CoHS-
+CQG. Finally, compared with the results of Ora-
+cle, which are from the human-generated conver-
+sations, SG-CQG achieves commensurate perfor-
+mance on BERTScore-entailment and BERTScore.
+It demonstrates that our generated conversations
+are as closely coherent as human-generated ones.
+Question Generation Evaluation We compare
+the generated conversational questions of our
+model with 4 baselines: (1)ReDR (Pan et al.,
+2019a) is an encoder-decoder framework which
+incorporates a reasoning procedure to better under-
+stand what has been asked and what to ask next
+about the passage; (2)T5(Raffel et al., 2020);
+(3) GPT-2 (Radford et al., 2019) ;(4)CoHS-CQG
+(Do et al., 2022). For T5, GPT-2 and CoHS-CQG,
+we extract the generated questions from the gener-
+ated conversations for comparison. We measure the
+diversity of the generated questions by Distinct (Li
+et al., 2016a) and our proposed Conv-Distinct. Ta-
+ble 3 shows evaluation results of the generated con-
+versational questions. We observe that SG-CQG
+achieves the best performance on Conv-Distinct,
+which takes the context coverage into account.
+Answer Span Extraction Evaluation We fur-
+ther evaluate the generated conversational answers
+of our model with 4 baselines: (1)T5(Raffel
+et al., 2020); (2)BART(Lewis et al., 2020);
+(3)GPT-2 (Radford et al., 2019); (4)CoHS-CQG
+(Do et al., 2022). We extract the generated conver-
+sational answers from the generated conversations
+of the models for comparison. We train another
+T5model on CoQA for the CQA task (see Ap-
+pendix A.6) and utilize it to generate the ground-
+truth answers for the generated questions of the
+models. We then evaluate the quality of the gen-
+erated conversational answers by measuring the
+Exact Match (EM) andF1scores with the ground-
+truth ones. Table 4 shows the evaluation results.
+We observe that the generated conversational an-
+swers extracted by SG-CQG achieve the best EM
+and F1 scores, which are significantly higher than
+the other baselines.
+Human Evaluation The results of the human
+evaluation are present in Table 5. Generally, SG-
+CQG achieves the highest performances on all three
+proposed metrics with a good overall annotators’
+agreement with an alpha of 0.73. In particular, we
+observe that by integrating the semantic graph into
+the selection of the rationales, SG-CQG outper-
+forms CoHS-CQG (Do et al., 2022) significantly
+in the conversational alignment property. Further-
+more, SG-CQG improves CoHS-CQG by a gap in
+the answerability and factuality of the generated
+questions, which reflects that our RF module with
+additional post-processing steps works as expected.
+6 Discussion
+6.1 Ablation Studies
+Ablation of What-to-ask Module (WTA) To
+better understand how the what-to-ask module af-
+fects our proposed model in generating conversa-
+tions, we study its ablation named SG-CQG + w/o
+WTA in Tables 2, 3, 4. In this case, our model
+becomes an upgraded version of CoHS-CQG (Do
+et al., 2022). Compared to CoHS-CQG, it achieves
+higher scores on all metrics except the Context Cov-
+erage (CC), which reflects that the quality of the
+generated conversations is indeed improved. These
+improvements are expected as the model in this
+case gains more control over generating boolean
+questions and has a stricter filtering process. This
+stricter filtering process also explains why it gets a
+lower CC score compared to CoHS-CQG.
+Ablation of Question Type Classifier (QTC)
+We conduct an ablation study of the Question Type
+Classifier (QTC) module. We name this experiment
+SG-CQG + w/o QTC . Table 2 shows the evaluation
+results of generated question-answer pairs. Com-
+pared with SG-CQG, the performance of SG-CQG
++ w/o QTC drops slightly on nearly all metrics (ex-
+cept Distinct), which consolidates our hypothesis
+that explicitly modeling the question type improves
+the overall coherency of the conversation. Fur-
+thermore, Table 3 shows that QTC enhances the
+diversity of the generated questions, while Table 4
+illustrates that QTC improves the quality of the10791
+generated answers.
+Ablation of Rewriting and Filtering (RF) SG-
+CQG + w/o RF in Table 2 shows the ablation re-
+sults of the Rewriting and Filtering (RF) module.
+As removing the RF module means we do not fil-
+ter out any generated question, it results in two
+consequences. Firstly, since for each sentence, the
+model can generate at least one conversational ques-
+tion, the CC score of SG-CQG + w/o RF is perfect
+(100%). Second, redundant questions and answers
+are generated very frequently. As such, removing
+the RF module reduces the quality of the gener-
+ated question-answer pairs (Table 2) and questions
+(Table 3) significantly. Notably, without the RF
+module, the extracted answer spans by SG-CQG
++ w/o RF can be very different from the true con-
+versational answers, resulting in very low F1 and
+EM scores (Table 4). Although the CC score is
+perfect, the generated question-answer pairs from
+this experiment are of bad-quality.
+6.2 Case Study
+We present one conversation generated by our pro-
+posed SG-CQG in Table 6. We observe that the
+rationale of Q2-A2 is the 3-rd sentence in the con-
+text, and the rationale of Q3-A3 is the 8-th sentence,
+which is a forward jump of the model. On the other
+hand, the rationale of the Q4-A4 is the 7-th sen-
+tence, which is a traceback. Such a traceback en-
+hances reasonable coherence between Q3-A3 and
+Q4-A4. Furthermore, Q5-A5 to Q6-A6 is also a
+traceback, and especially, Q6 is a boolean question.
+More case studies are shown in Appendix A.10.
+6.3 Why Do Control Signals Work?
+Experimental Settings We design the experi-
+ments to verify the helpfulness of our two proposed
+control_signals :<BOOLEAN> and<NORMAL> .In particular, we train a T5 model (Raffel et al.,
+2020) in the answer-aware setting. Given the in-
+putD={C,H,a,r} with C,H,a,r
+as the context, ground-truth conversational his-
+tory, ground-truth answer, and round-truth ratio-
+nale, respectively, we conduct three experiments
+in Table 9: original input with Yes/No keyword
+(WithY/N ), original input without Yes/No key-
+word ( W/oY/N ), original input without Yes/No
+and with the ground-truth control _signal (W/o
+Y/N +control _signal ). Note that we train the
+model with the whole context, and a maximum of
+three previous history turns, as discussed in Ap-
+pendix A.3. We measure the performance of the
+answer-aware CQG model separately on two types
+of questions: boolean and span-based by ROUGE-
+L (Lin, 2004) and BERTScore (Zhang et al., 2020).
+Observations Table 9 shows the experimental
+results. We derive two main observations. Firstly,
+without knowing the keyword Yes/No (W/oY/N )
+-this is the case in the answer-unaware setting ,
+the model performs worse. This decrease shows
+that the Yes/No keyword is indeed helpful in
+hinting the model towards generating the correct
+questions. Secondly, by inputting the ground-
+truth control _signal into the model ( W/oY/N +
+control _signal ), the performance is improved by
+a large margin compared to ( W/oY/N ). We obtain
+three implications from the above improvement.
+Firstly, it consolidates our hypothesis that inputting
+the ground-truth control _signal is truly helpful.
+Secondly, by training with the control _signal ,
+the performance of the model is even higher than
+with Y/N in the span-based cases, which indi-
+cates that training the model with control _signal
+makes it more stable to generate the correct ques-
+tions. Thirdly, the performance of ( W/oY/N
++control _signal ) is lower than ( With Y/N ) in10792boolean cases. The reason is <BOOLEAN> only
+informs the model to generate a boolean question
+without informing to generate an Yes orNoone.
+7 Conclusion
+This paper presents SG-CQG, a two-stage frame-
+work for the CQG task in the answer-unaware set-
+ting. Firstly, the what-to-ask module aims to select
+a sentence as the rationale by the proposed seman-
+tic graph and extract the answer span from it. The
+how-to-ask module classifies the type of the ques-
+tion before generating and filtering it. Addition-
+ally, we propose a set of automatic evaluation cri-
+teria for answer-unaware CQG, especially a novel
+metric, Conv-Distinct , to evaluate the generated
+conversation from a context. Extensive automatic
+evaluation and human evaluation show that our
+method achieves state-of-the-art performances in
+the answer-unaware setting on CoQA, with a signif-
+icant improvement in the conversational alignment
+property compared to previous frameworks. In the
+future, we will focus on how to reason over our
+semantic graph to select the rationale, and further
+improve the performances of how-to-ask module.
+Limitations
+A limitation of our work is that our Graph Traversal
+Algorithm (Section 3.1) is a heuristic and unlearned
+algorithm. This leads to a number of nodes after
+being selected by this algorithm are not suitable for
+the model to generate conversational questions, and
+are eventually filtered out by other modules. Future
+works can focus on more advanced techniques to
+guide the model to select the nodes such as Graph
+Neural Networks (Wu et al., 2020). Furthermore,
+our algorithm to select the relevant turns in the con-
+versational history to generate the conversational
+questions is a heuristic of selecting a maximum of
+three previous turns. This heuristic may not be op-
+timal for the model to gather necessary information
+from history to generate conversational questions
+in the next turns, as discussed by Do et al. (2022).
+Ethical Considerations
+In this paper, we present a two-stage CQG frame-
+work (SG-CQG), which was trained on CoQA
+(Reddy et al., 2019), a published large-scale dataset
+for building Conversational Question Answering
+systems. Our framework is potentially helpful for
+building chatbot systems, which can serve differentstreams such as educational, medical, or commer-
+cial purposes.
+Through human evaluations, we observe that our
+proposed method does not generate any discrimina-
+tory, insulting responses (questions and answers).
+We validate the proposed method and baseline mod-
+els on human evaluation which involves manual
+labor. We hire three annotators to score 125 gen-
+erated questions in total. The hourly pay is set to
+S$15, which is higher than the local statutory min-
+imum wage. Therefore, we do not anticipate any
+major ethical concerns.
+Acknowledgements
+This research has been supported by the Institute
+for Infocomm Research of A*STAR (CR-2021-
+001). We would like to thank anonymous review-
+ers from ARR for their valuable feedback which
+helped us to improve our paper. We also want to
+thank Dr. Richeng Duan (A*STAR) for his feed-
+back in the initial stage of the project.
+References10793107941079510796A Appendix
+A.1 Extended Related Work
+Our work is related to two more lines of prior work.
+A.1.1 Synthetic Question-Answering (QA)
+Generation
+Synthetic QA generation based on pretrained lan-
+guage models (LM) has been studied and demon-
+strated the helpfulness in improving the down-
+stream Reading Comprehension (RC) task (Alberti
+et al., 2019; Puri et al., 2020; Shakeri et al., 2020).
+Alberti et al. (2019) proposed a novel method to
+generate synthetic data by combining models of
+question generation and answer extraction, and
+by filtering the results to ensure roundtrip consis-
+tency. However, this work differs from ours since
+it only considered the task of single-turn QA gen-
+eration and focused only on extractive QA genera-
+tion while we focus on multi-turn QA generation
+and have both span-based and boolean questions.
+Regarding the filtering technique, this work and
+Puri et al. (2020) used round-trip filtering method,
+which is similar to Do et al. (2022) and is a re-
+laxed version of our filtering module. Shakeri et al.
+(2020) later introduced an end-to-end framework
+to generate QA data. This work used LM filtering
+method, which is similar to sample-and-reranking
+(Holtzman et al., 2020) and ours. In our case (as
+discussed in (1) Wrong answer error in Section 3.2),
+to filter QA pairs, we also sample multiple an-
+swers from a QA model and select the answers
+with the highest frequency and confidence score by
+the model. If the highest frequency one is different
+from the highest confidence one, we filter our the
+question.
+A.1.2 Dialog Generation Evaluation
+Dialog evaluation metrics have been studied ex-
+tensively (Yeh et al., 2021). However, it is worth
+noting that this task is different from ours, since we
+prefer evaluating the questions in QA conversations
+only. In addition, when conducting experiments
+with reference-free dialog generation metrics like
+BERT-RUBER (Ghazarian et al., 2019) and Holis-
+ticEval (Pang et al., 2020), we observe that these
+metrics are not suitable for evaluating QA pairs
+since the questions and answers in QA conversa-
+tions are normally shorter without many referential
+details among turns compared to dialog responses.
+Previous works (Alberti et al., 2019; Puri et al.,
+2020; Shakeri et al., 2020) usually evaluated thegenerated QA data by training the RC systems with
+it and examining whether the synthetic data im-
+proves the RC systems without actually examining
+the synthetic data. Recent work (Do et al., 2022)
+evaluated the QA pairs manually. In addition, (Yue
+et al., 2022) proposed question value estimator , a
+novel module to estimate the usefulness of syn-
+thetic questions to improve the target-domain QA
+performance. However, this is not directly relevant
+to ours since even though the metric can evaluate
+the usefulness of the generated questions, it does
+not offer the actual properties of the generated ques-
+tions. To the best of our knowledge, our work is
+the first one that proposes a set of criteria to evalu-
+ate the question-answer pairs in QA conversations.
+The performance of models evaluated by our pro-
+posed automatic evaluation metrics (Table 2) is
+positively correlated with human evaluation (Ta-
+ble 5) where we observe that improvements on our
+metrics are also improvements on human evalua-
+tion metrics.
+A.2 Graph Traversal Algorithm
+We present the pseudocode of our Graph Traversal
+Algorithm , which is described in Section 3.1.
+Algorithm 1: Graph Traversal Algorithm
+Input: G={V,E},
+H={(q, a), ...,(q, a)}/∅.
+Output: Index of the sentence as r
+Initialize: I: nodes in rationales of H,
+q: queue of nodes to visit,
+Add nodes in Itoqin the index order.while q is not empty do cur=q[0] delq[0] ifcur is visited twice then continue end r= retrieve sentence contains q[0] A= answer spans set extracted from r ifsuccessfully generate qfromrand
+anya∈Athen Add unvisited neighbors of curto
+the beginning of q else Add unvisited neighbors of curto
+the end of q endend10797
+A.3 Question Generation
+Given the input D={C,H,a,r,
+control _signal }in which C,H,a,r,
+control _signal are the context, conversational his-
+tory, expected answer, rationale, and the control
+signal respectively, we fine-tune a T5model
+(Raffel et al., 2020) as our question generation
+model. Do et al. (2022) showed that by training
+the T5 model with the whole context and the short-
+ened conversational history, the performance of the
+model is improved. We replicate this experiment
+by reporting the performance of the T5 model with
+a different number of the previous history turns in
+Table 7. We derive the same observation as Do et al.
+(2022), which is the model performs the best with
+a maximum of two or three conversational previ-
+ous turns. As such, we opt for selecting at most 3
+previous turns to train our QG model.
+A.4 Adding Extra Edges Algorithm
+We provide the pseudocode for the adding- Extra -
+edges algorithm in Algorithm 2.
+A.5 Details of Question Type Classifier
+In this section, we detail our setting to train and
+validate the proposed Question Type Classifier . We
+conduct our experiments on train set, our test set
+(i.e. CoQA validation set) and our validation set
+of CoQA (Reddy et al., 2019). For each conver-
+sation, we automatically label its questions ac-
+cording to their answers. In particular, a ques-
+tion is labeled as boolean if its answer begins with
+Yes/No/yes/no/YES/NO , and span-based oth-
+erwise. Given the input D={C,H,a,
+r} with C,H,a,rare the context, ground-
+truth conversational history, ground-truth answer,
+round-truth rationale respectively, we construct
+the input to the classifier as followed. If a∈
+{Yes, No, yes, no, YES, NO }, the input
+to the classifier is Answer :rrContext: C
+[SEP] H, else, the input is Answer :ar
+rContext: C[SEP] where His the short-Algorithm 2: Adding Extra Edges
+Input: G={(u, v)} for u, v are nodes in
+directed graph that belong to the
+same sentence. For different
+sentences, only consider the starting
+node and the ending node.
+Output: The set of newly added edges
+Initialize: A disjoint set union (DSU) for
+checking whether 2 sentences
+are in the same component.addedEdges = []pairs = all pairs of 2 sentencessort(pairs )// for prioritizing
+those pairs with the
+minimum index differenceforpair inpairs do p,p=pair[0],pair[1] sameComponent = check the
+connectivity of p,pby DSU ifnotsameComponent then merge sentences pandpinto the
+same component by DSU add new edge between the ending
+node of sentence pwith starting
+node of sentence pto
+addedEdges endendreturn addedEdges10798enedH, in which we keep at most three previous
+turns, and the output is 0/1 indicating whether the
+ground-truth question is boolean/span-based. Our
+classifier achieves an accuracy of 95.6%.
+A.6 Details of CQA Model
+We fine-tuned a T5 (Raffel et al., 2020) as our Con-
+versational Question Answering (CQA) model on
+CoQA (Reddy et al., 2019). The input to the model
+follows the format: Question: Q [SEP]
+Context: C [SEP] H_sub in which Q, C
+are the question and the context respectively, and
+H_sub is the shortened conversational history with
+a maximum of 3 previous turns. Our CQA model
+achieves 63.65% Exact Match (EM) and 74.08%
+F1, as we presented in Table 4.
+A.7 Evaluation Metrics Discussion
+One of our core contributions is the set of criteria
+to evaluate question-answer conversations. In this
+section, we detail our intuitions as well as compu-
+tations of the metrics.
+A.7.1 Distinct-N (Li et al., 2016a)
+Distinct-N (Li et al., 2016a) is a N-gram metric to
+measure the diversity of a sentence. In our experi-
+ments, we calculate Distinct-1 score and Distinct-2
+score provided by Li et al. (2016a).
+A.7.2 Context Coverage and Conv-Distinct
+As we discussed in Section 4, one critical shortcom-
+ing when directly applying Distinct-N to evaluate
+the QA conversations is that the conversations with
+very few turns tend to attain very high Distinct-N
+scores. To address this challenge, we introduce
+Context Coverage (CC) and Conv-Distinct.
+Context Coverage (CC) is measured as the per-
+centage of sentences that are rationales. For exam-
+ple, given a context of 6 sentences, among them, 5
+sentences are selected as rationales for a generated
+conversation. Then the CC score of this generated
+conversation is 5/6 = 0.84.
+To compute CC Scores for E2E models, we clas-
+sify a sentence as a rationale if there is at least
+one question-answer pair generated from that sen-
+tence. As a result, the model of Do et al. (2022)
+and our SG-CQG can output which sentence is a ra-
+tionale, and it is straightforward to compute the CC
+scores. However, the end-to-end outputs of BART
+(Lewis et al., 2020) and T5 (Raffel et al., 2020) arethe question-answer pairs only, it is needed to find
+which sentence is a rationale of each pair. To do
+so, we adopt a simple heuristic. For each generated
+question-answer pair, we classify a sentence as its
+rationale if that sentence has the longest common
+substring with the concatenation of its question and
+answer among all the sentences in the context. By
+that, we get the set of sentences that are rationales.
+Conv-Distinct is defined as the multiplication of
+the Distinct score of the generated conversation
+with its CC score. For example, in the above gener-
+ated conversation, the Distinct-1 score is 60.50. So
+its Conv-Distinct-1 score is 60.50 * 0.84 = 50.42.
+It is worth noting that the diversity in token level
+is a common property of the dialog which has been
+discussed in many previous works (Qi et al., 2020;
+Pang et al., 2020; Adiwardana et al., 2020).
+A.7.3 BERTScore −entailment 1,2,3
+BERTScore −entailment is an upgraded version
+of Dialog −entailment metric (Dziri et al., 2019),
+which measures the topic coherence property by
+deep contextual representation. We follow Dziri
+et al. (2019) to characterize the consistency of dia-
+logue systems as a natural language inference (NLI)
+problem (Dagan et al., 2006). This property is im-
+portant for questions and answers in the QA con-
+versation, because the questions should focus on
+the topic of previous turns, and the answers should
+focus on their questions. In our experiments, we
+compute BERTScore −entailment with 1,2, and all
+previous turn(s). The BERTScore calculation is
+adopted from its authors.
+A.7.4 BERTScore (Zhang et al., 2020)
+We observe that Distinct-N, Conv-Distinct-N and
+BERTScore-entailment are only to measure the
+quality of the QA pairs. None of them measures
+the relationship between QA pairs and the given
+context. As such, we propose to use BERTScore
+(Zhang et al., 2020) to measure the similarity of
+the generated conversation and the given context.
+It is worth noting that this metric only serves for
+measuring the similarity between the generated
+conversation and context only. A generated con-
+versation with a very high similarity score with the
+given context does not reflect that it is a very good
+conversation, as in the case of BART (Lewis et al.,
+2020) in Table 2. We provide this metric to give10799audiences "a sense" of how the generated conversa-
+tion is explicitly relevant to the given context.
+A.7.5 EM & F1 Answerability Measurements
+The Exact Match (EM) and F1 measurements in
+Section 5 are to evaluate the answerability and the
+correctness of our generated questions and answers
+respectively (i.e. the quality of the generated con-
+versational answers). Since from a context, multi-
+ple conversations can be generated, we argue that
+one critical aspect of a good conversation is the
+quality of the generated conversational answers, i.e.
+the conversational questions must be answerable
+by the given context, and their answers must be
+exactly the generated conversational answers.
+A.7.6 Jumping Score (JS)
+To further understand the characteristics of each
+model in generating conversations, we measure its
+jumping score. We define this score as the percent-
+age of turns in which the model jumps back to any
+previous content of their previous turn (i.e. trace-
+back). For example, a generated conversation with
+the indexes of rationales [1,4,3,5,8,6] has the JS
+score is 2/5 = 0.4. It has 2 turns (over a maximum
+of 5 jumping back turns) in which the model jumps
+back, which are the 3−rd turn and 6−th turn. It
+is worth noting that the JS only shows one of the
+aspects of the result analysis. We could not say
+a system with the highest JS is better than others.
+JS only reflects a kind of flexibility for a what-to-
+ask module to some extent. We observe that our
+proposed SG-CQG achieves the highest JS score,
+which reflects that our proposed what-to-ask mod-
+ule is the most flexible in terms of selecting the
+sentences in the context.
+A.8 Statistical Significance of Results
+We compute the Student’s t-test to measure the
+significant difference between our model’s perfor-
+mance and the best baseline for each evaluation
+metric with the null hypothesis H0: There is
+no significant difference , and H1:
+There is a significant difference .
+We obtained the p-values as in Table 2:
+•Compared to T5: 4.32e-11 (BERT-entailment
+all), 5.20e-98, (BERT-entailment 1), 2.48e-34
+(BERT-entailment 2).
+•Compared to CoHS-CQG: 7.62e-188 (CC
+Score), 5.12e-119 (Conv-Distinct 1), 8.11e-173
+(Conv-Distinct 2). The p-values, in this case, are
+too small because the improvements are intuitively
+significant.
+We observe that all the p-values are less than .01,
+which indicates that our improvements on those
+metrics are significant.
+A.9 Human Evaluation Scoring System
+We describe how we instructed three annotators to
+point the generated questions based on three cri-
+teria: Factuality ,Conversational Alignment , and
+Answerability , as discussed in Section 4, in Fig-
+ure 2. Following the discussion of Do et al. (2022),
+it is noted that in the answer-unaware setting, there
+is no target answer and rationale. However, since
+the what-to-ask module first seeks for one sentence
+in the context as the rationale and extracts the target
+answer from it, we still have the target answer and
+rationale. We thus define the Score 2, 3 based on
+the retrieved rationale and extracted target answer.
+A.10 Extended Case Studies
+We present additional samples generated by SG-
+CQG in Table 8. In these samples, the first turn
+of the conversations is input to the model, and it
+generates their following turns.
+A.11 Supplement: Why Do Control Signals
+Work?
+In this section, we supplement the experimental
+results of the experiments with the control_signal .
+The results are presented in Table 9, and the discus-
+sions are in Section 6.3.1080010801ACL 2023 Responsible NLP Checklist
+A For every submission:
+/squareA1. Did you describe the limitations of your work?
+Left blank.
+/squareA2. Did you discuss any potential risks of your work?
+Left blank.
+/squareA3. Do the abstract and introduction summarize the paper’s main claims?
+Left blank.
+/squareA4. Have you used AI writing assistants when working on this paper?
+Left blank.
+B/squareDid you use or create scientiﬁc artifacts?
+Left blank.
+/squareB1. Did you cite the creators of artifacts you used?
+Left blank.
+/squareB2. Did you discuss the license or terms for use and / or distribution of any artifacts?
+Left blank.
+/squareB3. Did you discuss if your use of existing artifact(s) was consistent with their intended use, provided
+that it was speciﬁed? For the artifacts you create, do you specify intended use and whether that is
+compatible with the original access conditions (in particular, derivatives of data accessed for research
+purposes should not be used outside of research contexts)?
+Left blank.
+/squareB4. Did you discuss the steps taken to check whether the data that was collected / used contains any
+information that names or uniquely identiﬁes individual people or offensive content, and the steps
+taken to protect / anonymize it?
+Left blank.
+/squareB5. Did you provide documentation of the artifacts, e.g., coverage of domains, languages, and
+linguistic phenomena, demographic groups represented, etc.?
+Left blank.
+/squareB6. Did you report relevant statistics like the number of examples, details of train / test / dev splits,
+etc. for the data that you used / created? Even for commonly-used benchmark datasets, include the
+number of examples in train / validation / test splits, as these provide necessary context for a reader
+to understand experimental results. For example, small differences in accuracy on large test sets may
+be signiﬁcant, while on small test sets they may not be.
+Left blank.
+C/squareDid you run computational experiments?
+Left blank.
+/squareC1. Did you report the number of parameters in the models used, the total computational budget
+(e.g., GPU hours), and computing infrastructure used?
+Left blank.10802/squareC2. Did you discuss the experimental setup, including hyperparameter search and best-found
+hyperparameter values?
+Left blank.
+/squareC3. Did you report descriptive statistics about your results (e.g., error bars around results, summary
+statistics from sets of experiments), and is it transparent whether you are reporting the max, mean,
+etc. or just a single run?
+Left blank.
+/squareC4. If you used existing packages (e.g., for preprocessing, for normalization, or for evaluation), did
+you report the implementation, model, and parameter settings used (e.g., NLTK, Spacy, ROUGE,
+etc.)?
+Left blank.
+D/squareDid you use human annotators (e.g., crowdworkers) or research with human participants?
+Left blank.
+/squareD1. Did you report the full text of instructions given to participants, including e.g., screenshots,
+disclaimers of any risks to participants or annotators, etc.?
+Left blank.
+/squareD2. Did you report information about how you recruited (e.g., crowdsourcing platform, students)
+and paid participants, and discuss if such payment is adequate given the participants’ demographic
+(e.g., country of residence)?
+Left blank.
+/squareD3. Did you discuss whether and how consent was obtained from people whose data you’re
+using/curating? For example, if you collected data via crowdsourcing, did your instructions to
+crowdworkers explain how the data would be used?
+Left blank.
+/squareD4. Was the data collection protocol approved (or determined exempt) by an ethics review board?
+Left blank.
+/squareD5. Did you report the basic demographic and geographic characteristics of the annotator population
+that is the source of the data?
+Left blank.10803

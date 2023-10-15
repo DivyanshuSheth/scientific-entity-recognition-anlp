@@ -1,1 +1,899 @@
-6970 Proceedings of the 2022 Conference on Empirical Methods in Natural Language Processing , pages 6970 6984 December 7 - 11 , 2022 © 2022 Association for Computational Linguistics 6971 6972 6973 6974 6975 6976 6977 6978 6979 6980 6981 6982 6983 6984 
+∗
+Yang Deng, Wenqiang Lei, Wenxuan Zhang, Wai Lam, Tat-Seng ChuaThe Chinese University of Hong Kong,Sichuan University,DAMO Academy, Alibaba Group,Sea-NExT Joint Lab, National University of Singapore
+{ydeng,wlam}@se.cuhk.edu.hk ,{wenqianglei,isakzhang}@gmail.com
+Abstract
+To facilitate conversational question answer-
+ing (CQA) over hybrid contexts in finance, we
+present a new dataset, named PACIFIC. Com-
+pared with existing CQA datasets, PACIFIC
+exhibits three key features: (i) proactivity, (ii)
+numerical reasoning, and (iii) hybrid context
+of tables and text. A new task is defined ac-
+cordingly to study Proactive Conversational
+Question Answering (PCQA), which combines
+clarification question generation and CQA. In
+addition, we propose a novel method, namely
+UniPCQA, to adapt a hybrid format of input
+and output content in PCQA into the Seq2Seq
+problem, including the reformulation of the
+numerical reasoning process as code genera-
+tion. UniPCQA performs multi-task learning
+over all sub-tasks in PCQA and incorporates a
+simple ensemble strategy to alleviate the error
+propagation issue in the multi-task learning by
+cross-validating top- ksampled Seq2Seq out-
+puts. We benchmark the PACIFIC dataset with
+extensive baselines and provide comprehensive
+evaluations on each sub-task of PCQA.
+1 Introduction
+Financial question answering (QA) systems aim to
+answer user’s instant queries by selecting appropri-
+ate information from financial documents, which
+often contain a hybrid of tabular and textual con-
+tent, and performing complex quantitative analysis.
+Existing studies on financial QA (Zhu et al., 2021;
+Chen et al., 2021b; Zhu et al., 2022; Li et al., 2022a)
+mainly focus on building single-turn QA systems
+topassively respond to user queries. However, in
+real-world information-seeking applications (Za-
+mani et al., 2022), the system is expected to (i)
+answer highly context-dependent questions in amulti-turn conversation , and (ii) proactively assist
+users in performing complicated information seeks.
+In an interactive setting, users tend to ask follow-
+up or co-referencing questions (Kundu et al., 2020;
+Liu et al., 2021) without repeating previous infor-
+mation, and provide a succinct or brief query that
+may be ambiguous or lack the necessary content.
+Especially in financial QA, the user queries often
+contain multiple constraints from different aspects
+for the concerned objective, as the examples shown
+in Fig. 1. Even just missing one constraint may
+cause ambiguity. Therefore, a proactive conversa-
+tional system that can help clarify the ambiguity is
+of great importance in financial QA.
+To this end, this paper introduces a new dataset
+to promote research into ProActive Conversat Ional
+question answering in FInanCe, named PACIFIC.
+PACIFIC is constructed by using the QA pairs
+in an expert-annotated financial QA dataset, TAT-
+QA (Zhu et al., 2021), as guidance to build con-
+versation sessions with consecutive topics. As
+shown in Fig. 1, we rewrite the original self-
+contained questions into conversational questions
+with anaphora (co-referencing among different
+turns) and ellipsis (omitting repeated words in the
+follow-up questions), as well as construct ambigu-
+ous questions that require clarification. Accord-
+ingly, we define a new task, named Proactive Con-
+versational Question Answering (PCQA), which
+combines the problems of clarification question
+generation (CQG) (Aliannejadi et al., 2021) and
+conversational question answering (CQA) (Reddy
+et al., 2019). PCQA consists of three sub-tasks: (i)
+Given the user’s query, the system first identifies
+whether the question is ambiguous ( i.e., clarifica-
+tion need prediction). (ii) If so, the system will
+proactively ask a clarifying question to clarify the
+uncertainty ( i.e., CQG). (iii) If not, it will directly
+answer the question ( i.e., CQA).
+Compared with existing datasets listed in Table 1,
+PACIFIC exhibits three key challenges: (i) proac-6970
+tivity : the system needs to proactively assist the
+user to clarify their question intent by asking clari-
+fying questions; (ii) numerical reasoning : there are
+a large number of questions that require numerical
+reasoning to answer; and (iii) hybrid context : the
+grounded document is composed by both tabular
+and textual content.
+To tackle these challenges, we propose a novel
+method, named UniPCQA, to unify all sub-tasks in
+PCQA as a sequence-to-sequence (Seq2Seq) prob-
+lem. Specifically, we reformulate the numerical
+reasoning process in financial question answering
+as a code generation task, which captures the input
+knowledge ( e.g., figures or entities) and condenses
+their numerical reasoning relations ( e.g., arithmetic
+operators) into a piece of executable code ( e.g.,
+Python ). We further design specific input and out-
+put representations to adapt a hybrid of tabular, tex-
+tual, and arithmetic content into the Seq2Seq frame-
+work. In addition, UniPCQA can perform multi-
+task learning over all sub-tasks to enable the proac-
+tive detection of the need for clarification. Finally,
+we propose an ensemble strategy, named Consen-
+sus V oting, to alleviate the error propagation issue
+in the multi-task learning by cross-validating the
+top-ksampled Seq2Seq outputs. The main contri-
+butions of this paper are:
+•To study the proactivity in financial question an-
+swering, we propose a novel dataset, namely
+PACIFIC, for conversational question answering
+over tabular and textual contexts, and define the
+problem of PCQA.
+•We reformulate the numerical reasoning process
+as code generation and propose a unified hybrid
+Seq2Seq framework, namely UniPCQA, to han-
+dle the hybrid contexts and diverse responses in
+PCQA.
+•We benchmark the PACIFIC dataset with exten-
+sive baselines and provide comprehensive eval-
+uations on each sub-task of PCQA. Despite the
+effectiveness of UniPCQA, the performance is
+far behind human experts, showing that PACIFIC
+presents a challenging problem for future studies.
+2 Related Works
+Conversational Question Answering Evolving
+from single-turn QA tasks (Chen et al., 2020; Deng
+et al., 2022a), CQA aims at interactively answering
+multiple turns of information-seeking questions ac-
+cording to the given document (Reddy et al., 2019;
+Choi et al., 2018). Common challenges in CQA
+include the anaphora and ellipsis issue (Iyyer et al.,
+2017; Kundu et al., 2020; Liu et al., 2021). To this6971end, several attempts have been made on develop-
+ing end-to-end CQA models with dialogue history
+tracking (Qu et al., 2019; Qiu et al., 2021). An-
+other group of works emphasizes the importance
+of query rewriting in CQA (Vakulenko et al., 2021;
+Raposo et al., 2022; Anantha et al., 2021; Kim
+et al., 2021), which generates self-contained ques-
+tions for performing single-turn QA. In addition,
+beyond simply focusing on one kind of informa-
+tion source, it has received increasing attentions
+to investigate CQA over hetergeneous sources (Li
+et al., 2022b; Christmann et al., 2022).
+Proactive Conversational Systems Early stud-
+ies on conversational systems basically develop
+dialogue systems that passively respond to user
+queries, including all the CQA studies discussed
+above. As for conversational recommendation (Lei
+et al., 2020a,b; Deng et al., 2021) and goal-oriented
+dialogues (Lei et al., 2022; Deng et al., 2022b),
+policy learning or goal planning attaches great
+importance in building a proactive conversational
+system for promptly adjusting dialogue strategies
+or soliciting user intents. Recently, many efforts
+have been made on CQA systems that can proac-
+tively assist users to clarify the ambiguity or un-
+certainty in their queries by asking clarifying ques-
+tions (Wang and Li, 2021; Zamani et al., 2020a;
+Sekulic et al., 2021; Gao and Lam, 2022). Several
+datasets such as ClariQ (Aliannejadi et al., 2021)
+and Abg-CoQA (Guo et al., 2021) have been con-
+structed to facilitate this line of research. However,
+these datasets solely target at the clarification ques-
+tion generation (CQG) or clarification-based CQA
+problem. To stimulate progress of building the
+whole system for proactive CQA, we define the
+PCQA task, which unifies CQG and CQA.
+Numerical Reasoning Numerical reasoning is
+the key to many NLP applications (Thawani et al.,
+2021; Pal and Baral, 2021), especially in QA, such
+as Mathematical QA (Dua et al., 2019; Amini et al.,
+2019) and Financial QA (Zhu et al., 2021; Chen
+et al., 2021b). Early works typically design special-
+ized operation or reasoning modules for handling
+different types of questions (Andor et al., 2019;
+Hu et al., 2019; Ran et al., 2019). Despite the ef-
+fectiveness, it is challenging for them to scale to
+different numerical reasoning scenarios due to their
+task-specific designs. Recent years have witnessed
+many advanced approaches to injecting the numer-
+ical reasoning skills into pre-trained language mod-
+els (PLMs), by post-training (Geva et al., 2020; Piet al., 2022) or prompt-based learning (Wei et al.,
+2022; Wang et al., 2022). However, these methods
+are developed to perform numerical reasoning over
+texts. Suadaa et al. (2021) investigate template-
+based table representations for numerical reason-
+ing in PLMs-based table-to-text generation. In this
+paper, we propose to handle numerical reasoning
+as the code generation task over hybrid contexts.
+3 PACIFIC Dataset Creation
+3.1 Annotation & Quality Control
+Similar to the dataset creation process of other CIS
+datasets, such as HybriDialogue (Nakamura et al.,
+2022) from OTT-QA (Chen et al., 2021a) and MM-
+ConvQA (Li et al., 2022b) from MMQA (Talmor
+et al., 2021), we build the PACIFIC dataset from
+the TAT-QA dataset by using its question-answer
+pairs as guidance for constructing conversation ses-
+sions. There are on average 6 individual question-
+answer pairs shared with the same grounded con-
+texts in TAT-QA, which are integrally regarded as
+one conversation session. However, we construct
+the conversation session in a different way from
+the traditional manner where a complex single-
+turn question is decomposed into multiple context-
+dependent simple questions (Nakamura et al., 2022;
+Li et al., 2022b), since this manner may discard the
+nature of financial QA. Instead, we rewrite each
+question into one conversational question, which
+not only increases the efficiency of dataset construc-
+tion, but also preserves the quality and difficulty
+of the dataset with expert-annotated answers and
+informative user queries.
+Due to the space limitation, the overall pipeline
+for PACIFIC creation is presented in Appendix A.
+An example is presented in Figure 1 with its origi-
+nal sample in TAT-QA. For each conversation sam-
+ple, two annotators are asked to build a natural and
+consecutive conversation session. They are well-
+educated postgraduate students majored in finance
+or similar disciplines. The first annotator serves as
+the seeker to perform the annotation tasks; while
+the second annotator plays the role of the agent
+to provide clarifying questions. The instructions
+given to the first annotator are as follows:
+1)Organize Conversation Sessions . Given the
+same hybrid context, set up a conversation session
+with consecutive topics from multiple individual
+QA pairs. Two questions that share the same enti-
+ties are regarded as talking about the same topic.
+For example, Q1,Q2, and Q3are concerned about6972
+the same time ( December 2019 ), while Q4,Q5,
+andQ6are asking about the same region ( EMEA ).
+We, thus, order these questions into adjacent turns.
+2)Rewrite Conversational Questions . If consec-
+utive questions share the same entities, rewrite the
+original self-contained questions to produce con-
+versational questions with anaphora and ellipsis.
+For example, the only difference between Q3and
+Q4is the concerned region ( Americas &EMEA ).
+After the rewriting, T6becomes “ How about that
+for EMEA? " without the repeated content in T4.
+3)Construct Ambiguous Questions . If the ques-
+tion contains multiple entities, rewrite it to con-
+struct an ambiguous question by omitting one of
+the entities that can introduce ambiguity. For ex-
+ample, Q3is asking about the average value under
+multiple constraints. In T4, the portfolio segment
+(Lease and loan receivables ) is omitted to construct
+an ambiguous question that required clarification.
+Given the set of reconstructed questions, the sec-
+ond annotator is served as the agent to Provide Clar-
+ification Questions :i.e., ask a clarification question
+in terms of the omitted entity. Subsequently, the
+omitted entity will be the seeker’s query in the next
+turn, as T3andT5in Fig. 1.
+To ensure the quality of annotation in PACIFIC,
+we ask two verifiers to validate each turn in the con-
+structed conversations. If any mistake or problem
+is found, e.g., the constructed conversation is inco-
+herent, the annotator will be asked to fix it until the
+annotation passes the checks by the two verifiers.
+The first-round validation captures 212 mistakes
+(212/19,008=1.1%), and the inter-annotator agree-
+ment between the two verifiers is 0.62.3.2 Statistical Analysis
+Finally, we obtain a total of 2,757 conversations
+over the hybrid contexts, which contains 19,008
+corresponding QA pairs in total and an average of
+7 turns of QA in each conversation. The train-dev-
+test split is the same as TAT-QA. We present the
+data statistics of PACIFIC in Table 2, and the ques-
+tion distribution regarding different answer types
+and sources in Table 3. Compared with TAT-QA,
+PACIFIC contains 2,462 more QA turns for ask-
+ing clarification questions (2,462/19,008=13.0%).
+The average length of the questions in PACIFIC
+is shorter than that in TAT-QA, which means that
+the conversational questions are more succinct and
+brief. Conversely, the average length of the answers
+in PACIFIC is longer than that in TAT-QA, due to
+the incorporation of clarification questions.
+3.3 Problem Definition
+We introduce the Proactive Conversational Ques-
+tion Answering (PCQA) task, which unifies two
+tasks: (I) Clarification Question Generation and
+(II) Conversational Question Answering. Given
+the conversation history C={q, r, ..., q}and
+the grounded document D={E, T}consisting of
+both textual contexts Eand structured table T, the
+goal is to generate the response rat the current
+turnt. As shown in Fig. 2, the overall task can be
+decomposed into three sub-tasks:
+1)Clarification Need Prediction (CNP) aims to
+predict the binary label yto determine whether to
+ask a question for clarifying the uncertainty. Other-
+wise the query qcan be directly responded to.
+2)Clarification Question Generation (CQG)
+will generate a clarification question as the re-
+sponse r, if CNP detects the need for clarification.
+3)Conversational Question Answering (CQA)
+will directly produce the answer as the response r,
+if it is not required for clarification.
+It is worth noting that the PACIFIC dataset can
+be adopted for the evaluation of both end-to-end
+and pipeline-based PCQA methods, as well as the
+separated evaluation on each sub-task.
+4 Method
+We introduce the UniPCQA model, which unifies
+all sub-tasks in PCQA as the Seq2Seq problem and
+performs multi-task learning among them.6973
+4.1 Numerical Reasoning as Code Generation
+One of the key challenges of PACIFIC is the re-
+quirement to conduct numerical reasoning, due to
+the large proportion of questions involving numer-
+ical calculation. However, existing methods pro-
+posed for financial question answering suffer from
+two main issues: 1) they rely heavily on hand-
+crafted designs for numerical operators (Zhu et al.,
+2021) or symbolic programs (Chen et al., 2021b),
+which are hard to be generalized to complex numer-
+ical calculation; 2) the knowledge from large-scale
+PLMs cannot be fully utilized for the down-stream
+problem of numerical reasoning, due to the large
+gap between them.
+In the light of these issues, we formulate the nu-
+merical reasoning process as the code generation
+task, which aims to capture the input knowledge
+(e.g., figures or entities) and condense their numer-
+ical reasoning relations ( e.g., arithmetic operators)
+into a piece of executable code. Take Python as an
+example. Python can handle the derivation with
+different kinds of operations, such as arithmetic,
+counting, enumeration, etc. The addition, subtrac-
+tion, multiplication and division operators are de-
+noted by +, -, *, and /, respectively. The len()
+function that returns the number of items in an ob-
+ject can be used for the counting operation. To be
+consistent, we also regard span-based and question-
+based responses as a list() of items in Python
+for code generation. Examples of Python code for
+different types of answers are shown in Fig. 1.
+Without the need for designing another execu-
+tion algorithm (Zhu et al., 2021; Chen et al., 2021b),
+the generated Python code can be directly executed
+by the eval() function to derive the final answer
+r, as the following examples:
+eval((36.6−20.5)/20.5)→0.7854
+eval(len([“2018” ,“2019”])) →2
+Therefore, we can reconstruct the target Python
+code from the original answer derivation, accord-
+ing to the Python syntax, which can be easily gen-
+eralized into different types of numerical calcu-
+lation. The numerical reasoning process can not
+only get free of manually designed operators or
+programs, but also leverage the knowledge from
+PLMs, especially those code-related PLMs, such
+as CodeT5 (Wang et al., 2021).
+4.2 Hybrid Seq2Seq Generation
+In financial PCQA, the input sequence contains
+both textual and tabular content, while the out-
+put sequence can be a piece of code, a natural
+language sentence, or even a mix of code and
+text. In order to handle all sub-tasks in PCQA,
+we design the hybrid input/output representations
+for a unified Seq2Seq framework. Specifically,
+we add special tokens to indicate different types
+of information as well as specify each sub-task.
+Assuming that the grounded textual context is
+E={p, ...p}and the grounded structure table is
+T={c, ..., c, ..., c, ..., c}, then the input
+can be linearized as follows:
+“[paragraph] p</p> ...</p> p</p> [table]
+c:c|...|c</t> ... c:c|...|c
+[user] q[system] r...[user] q”
+As shown in Fig. 3, this Seq2Seq formulation can
+be applied to each sub-task, or perform multi-task
+learning of all sub-tasks in order. The output se-
+quence for multi-task learning is represented as:
+“[clari.] y[resp.] r”
+where y∈ {True,False}, and rwill be a clarifi-
+cation question or a piece of code accordingly.
+UniPCQA can be initialized with weights from
+any generative PLM, e.g., T5 (Raffel et al., 2020).
+Given a training sample (C, D, o ), the model is
+trained to maximize the sequential log-likelihood:
+L=/summationdisplaylogp(o|o;C, D), (1)
+where θdenote the model parameters, Lis the
+maximum target sequence length, and ois the target
+sequence according to the target task.69744.3 Consensus Voting
+As UniPCQA solves the end task using multi-task
+learning in sequential order, the error in the pre-
+vious task may be propagated to the latter one.
+Specifically, if the model makes a wrong predic-
+tion in the CNP task, the model will generate an
+inappropriate response at the end.
+Inspired by the Self-Consistency strategy (Wang
+et al., 2022) for improving the few-shot learning ac-
+curacy of PLMs, we investigate a similar ensemble-
+based strategy, namely Consensus V oting, to alle-
+viate the error propagation issue in the multi-task
+learning. Specifically, Consensus V oting samples a
+set of candidate sequences O={o:i∈1, ..., N }
+generated by the PLM, which contains a diverse set
+of multi-task results as well as different reasoning
+paths, instead of using Greedy Decode. We then
+select the final response by ensembling the derived
+responses from Obased on plurality voting:
+r= arg max/summationdisplayI(σ(o) =σ(o)),(2)
+where σ(·)denotes the execution of deriving the
+answer from the generated sequence, e.g.,eval() .
+The motivation is that it will be difficult for
+the sampled outputs to reach a consensus if the
+user query is ambiguous, since the decoder will be
+confused about how to generate a correct derivation
+with incomplete information. At this time, the plu-
+rality vote will tend to ask a clarification question.
+In addition, the same answer can be obtained by
+executing different derivations in some cases. As
+shown in Fig. 1, different extraction orders of three
+regions can lead to the same answer in T1, e.g.,
+len([“Americas", “EMEA", “Asia Pacific"]) =
+len([“EMEA", “Americas", “Asia Pacific"]) . So
+does the derivation in T8, i.e.,(88−105)/105 =
+88/105−1. Therefore, if there are multiple
+generated derivations that lead to the same answer,
+this answer will get higher votes.
+5 Experiments
+We first evaluate methods on two widely-studied
+tasks in conversational information seeking, in-
+cluding (I) clarification question generation (CQG)
+and (II) conversational question answering (CQA).
+Then we benchmark the overall performance
+of proactive conversational question answering
+(PCQA) on PACIFIC.
+5.1 Implementation
+We evaluate UniPCQA with T5as the base-
+line. To study the effectiveness of the refor-
+mulation of code generation, we further adopt
+CodeT5(Wang et al., 2021) for evaluation,
+which is a unified encoder-decoder model pre-
+trained with both code-related understanding and
+generation tasks. Following previous studies (Fan
+et al., 2018; Holtzman et al., 2020), we apply top- k
+sampling with temperature T= 0.5andk= 40
+to sample a diverse set of decoded sequences. For
+Consensus V oting, we sample N= 40 outputs,
+while the baseline is to apply Greedy Decode to
+generate a single output. More implementation
+details can be found in Appendix B.
+5.2 Task I: Clarification Question Generation
+The CQG task is commonly performed in two steps:
+1) clarification need prediction (CNP), and 2) clari-
+fication question generation.
+5.2.1 Baselines and Evaluation Metrics
+Following ClariQ (Aliannejadi et al., 2021), a pop-
+ular CQG challenge, we include BERT(Devlin
+et al., 2019) and RoBERTa(Liu et al., 2019)
+based classifiers as baselines, and use Precision,
+Recall, and F1 for CNP evaluation. For CQG, we
+compare to several CQG baselines in latest stud-
+ies, including Template-based Question Generation
+(TB) (Zamani et al., 2020a), CopyTrans. (Wang
+and Li, 2021), and Q-GPT (Sekulic et al., 2021),
+and adopt ROUGE-2 (F1), Exact Match (EM), and
+token-level F1 as evaluation metrics. Note that we
+simply flatten the table into a sequence by row fol-
+lowed by tokens from the paragraphs for all the
+baselines, which is also applied to the baselines
+in the following evaluation. More details about
+baselines can be found in Appendix C.
+5.2.2 Experimental Results
+Table 4 presents the experimental results on the
+CNP task, showing that a stronger PLM leads to
+better performance in this binary classification task.6975
+Table 5 summarizes the experimental results on
+the CQG task. Baseline methods can achieve rela-
+tively higher scores for ROUGE and F1, due to the
+similar expressions among different clarification
+questions. However, without using PLMs, Copy-
+Trans. has a similar performance as the template-
+based method (BERT+TB). UniPCQA outperforms
+Q-GPT by a noticeable margin, indicating the effec-
+tiveness of the hybrid input sequence construction
+in such an CQG task based on hybrid contexts.
+5.3 Task II: Conversational QA
+Following previous studies (Vakulenko et al., 2021;
+Kim et al., 2021), we compare to both end-to-end
+and pipeline-based methods. End-to-end methods
+adopt a single QA or CQA model to encode the doc-
+ument and the whole conversation history, while
+pipeline-based methods decompose the CQA task
+into Query Rewriting (QR) and single-turn QA that
+are solved by different models.
+5.3.1 Baselines and Evaluation Metrics
+We adopt the following QR methods for compar-
+isons: Original, Trans.++ (Vakulenko et al., 2021),
+and T5 (Lin et al., 2020; Kim et al., 2021). QRmethods are trained on the QReCC dataset (Anan-
+tha et al., 2021). We include three QA/CQA models
+for comparisons: HAE (Qu et al., 2019), NumNet+
+V2 (Ran et al., 2019), and TO(Zhu et al., 2021).
+Details can be found in Appendix C.
+In addition, we report the performance of using
+ground-truth self-contained questions ( Gold ) as in-
+put for single-turn QA models. This is equivalent
+to their performance on the TAT-QA dataset, in-
+cluding two latest results, i.e., TaCube (Zhou et al.,
+2022) and PE-SQL (Pi et al., 2022).
+Following previous studies on financial ques-
+tion answering (Zhu et al., 2021), we use EM and
+numeracy-focused F1 score (Dua et al., 2019) for
+the CQA evaluation.
+5.3.2 Experimental Results
+The CQA results are summarized in Table 6. There
+are several noticeable observations:
+(1) A good QR model can lead to better perfor-
+mance on the CQA task for pipeline-based meth-
+ods, where using ground-truth self-contained ques-
+tions (Gold) can be regarded as an estimate of the
+upper bound for these methods. For a fair compar-
+ison, the QR models should not be trained on the
+QR data from PACIFIC. Therefore, pipeline-based
+methods barely work on PACIFIC when using an
+out-of-domain QR model. We also report the per-
+formance of each QR method in Appendix D.
+(2) Conventional CQA methods, e.g., HAE, fail
+to achieve promising results on PACIFIC, due to
+the inability of handling numerical reasoning.
+(3) UniPCQA not only achieves the best perfor-
+mance on the original TAT-QA dataset, but also
+outperforms both pipeline-based and end-to-end
+methods on the CQA task, i.e., PACIFIC. These
+results show the superiority of UniPCQA in han-
+dling both single-turn and conversational finance
+QA problems.
+5.4 Overall Evaluation on PCQA
+5.4.1 Baselines and Evaluation Metrics
+Since this is a preliminary attempt on PCQA over
+hybrid contexts, we implement several alternative
+solutions for method comparisons, including two
+end-to-end generation methods, DialoGPT (Naka-
+mura et al., 2022) and FinQANet (Chen et al.,
+2021b), as well as one pipeline-based method,
+T5+TO(Zhu et al., 2021). As a union of CQG
+and CQA, we adopt their shared evaluation metrics
+for the evaluation of PCQA models, including EM6976
+and numeracy-focused token-level F1. More de-
+tails about baselines can be found in Appendix C.
+5.4.2 Experimental Results
+Table 7 presents the experimental results on the
+PCQA task. Among the baselines, due to the
+inability of performing numerical reasoning, Di-
+aloGPT performs much worse than FinQANet and
+T5+TO. T5+ TOachieves a better perfor-
+mance than FinQANet, as its operators are specifi-
+cally designed for the TAT-QA dataset, which can
+also be effectively applied to PACIFIC. Finally,
+UniPCQA substantially outperforms all these base-
+lines, i.e., 56.9/65.4 vs. 46.6/52.3 in EM/F1. In
+addition, UniPCQA is more flexible to different nu-
+merical calculations without the reliance on manu-
+ally designed operators or programs and additional
+algorithms for executing the system outputs.
+Among different variants of UniPCQA, CodeT5
+achieves a better performance than T5 with the
+same size of model parameters, which indicates
+that UniPCQA effectively leverages the knowledge
+from the code-related pre-training tasks. The multi-
+task learning (MTL) improves the performance by
+explicitly learning from the clarification need la-
+bels. Further, the error propagation issue intro-
+duced by the MTL is alleviated by the Consensus
+V oting strategy (CV). However, compared with the
+performance of human experts (Human), there is
+still much room for improvement.
+5.4.3 Detailed Analyses
+Low-resource Evaluation Due to the high ex-
+penses in annotations, data is one of the largest
+bottlenecks for financial QA. We investigate how
+UniPCQA performs w.r.t different number of train-
+ing data, by splitting 10% to 100% of training data
+for evaluation. As shown in Fig. 4, compared with
+FinQANet and T5+ TO, UniPCQA can better
+transfer the knowledge from PLMs to achieve a
+much better performance in low-resource settings,
+especially from CodeT5.
+Answer Type and Source Analysis We further
+compare the performance of UniPCQA w.r.t an-
+swer types and sources. As shown in Table 8, it can
+be observed that UniPCQA initialized with CodeT5
+or T5 performs differently in terms of answer types
+and sources. CodeT5 performs much better than
+T5 on arithmetic questions (60.7 vs. 56.1), which
+indicates the effectiveness of reformulating the nu-
+merical reasoning process as code generation. This
+leads to better performance in the overall evalua-
+tion, since the majority in PACIFIC are arithmetic
+questions. Conversely, T5 has better performance
+on textual data as well as questions relying on span
+extraction, e.g., Span and Spans.
+Case Study for Consensus Voting Table 9 illus-
+trates two examples where the Consensus V oting
+strategy remedies the mistakes made by greedy de-
+code. In the first example, greedy decode generates
+a wrong formula, while Consensus V oting derives
+the correct answer by taking the plurality vote of
+the results from diverse numerical calculations. In
+the second example, the question is ambiguous as
+the period is not specified for the percentage change
+value. Greedy decode makes the wrong prediction
+on clarification needs, which affects the final an-
+swer. However, based on the plurality vote, most
+sampled outputs in Consensus V oting decide to ask
+a clarifying question, instead of directly calculating6977
+the percentage change value in a random period.
+More details about the case study can be found in
+Appendix F.
+5.4.4 Error Analysis
+In order to investigate the typical failure cases in
+UniPCQA, we randomly sample 100 error cases
+for analysis. As shown in Table 10, we categorize
+these failure cases into the following six groups:
+•Wrong Evidence (34%): The model extracts
+wrong supporting evidences from the context.
+•Wrong Clarification Need Prediction (18%): The
+model makes a wrong prediction on whether the
+user query requires clarification. More specific,
+11% of all the failure cases are predicted to be
+unnecessary for clarification, while they are am-
+biguous in fact. And 7% of them vice versa.
+•Wrong Derivation (13%): Although the model
+extracts all the necessary supporting evidences,
+the model fails to compute the answer with a
+correct derivation, e.g., wrong formula or order.
+•Missing Evidence (12%): Although the extracted
+evidences are correct, the model fails to extract
+all the required evidences from the context.
+•Wrong Clarification Question (7%): The model
+generates a wrong clarification question that fails
+to clarify the ambiguity of the user query.
+•Other Errors (18%): There are several other er-
+rors that are relatively acceptable, such as the
+scale error, missing symbols or missing punctua-
+tion marks.
+Compared with the error analysis of the TO
+model in the TAT-QA dataset (Zhu et al., 2021), it
+is worth noting that the percentage of errors that re-
+lated to span extraction largely decreases from 84%
+to 46%. However, there are about 25% and 13%
+of errors that are related to the clarification ques-
+tion generation task and the numerical calculation,
+respectively.
+6 Conclusions
+In this paper, we present a new dataset, PACIFIC,
+for proactive conversational question answering
+over a hybrid context of tables and text. Accord-
+ingly, we define the problem of Proactive Conver-
+sational Question Answering that combines clar-
+ification question generation and conversational
+question answering. In addition, we reformulate
+the numerical reasoning process as code generation
+and recast all sub-tasks in PCQA into a Seq2Seq
+problem solved by a unified model, UniPCQA. Ex-
+tensive experiments show that the PACIFIC dataset
+is very challenging and demonstrate the need to
+build models that can handle hybrid input and out-
+put formats as well as diverse numerical reasoning.6978Ethical Considerations
+The PACIFIC dataset was built from the TAT-
+QA dataset, which is publicly available. The au-
+thors of the TAT-QA dataset paper have allowed
+us to utilize the dataset for further construction.
+We will provide open access to our dataset and
+code for future studies via https://github.com/
+dengyang17/PACIFIC/ .
+Limitations
+In this section, we analyze the limitations from the
+perspectives of both the constructed dataset and the
+proposed method.
+Limitations of PACIFIC Dataset
+Since PACIFIC is the first CIS dataset in finance
+domain as well as the first proactive CQA dataset,
+there are inevitably some limitations and room for
+further improvement.
+•Numerical Reasoning . Similar to other pop-
+ular NLP datasets that require numerical rea-
+soning, such as DROP (Dua et al., 2019) and
+FinQA (Chen et al., 2021b), the questions in PA-
+CIFIC only require some basic numerical calcula-
+tions, including arithmetic operations, counting,
+and comparison. In the future, with the advance
+in the model capability of numerical reasoning,
+it would be better to add questions that require
+more complicated numerical calculations.
+•Clarification Question . In the clarification turn,
+PACIFIC only provides the clarification question.
+In some cases, it is beneficial to further provide
+the candidate options for better clarifying the un-
+certainty (Xu et al., 2019; Zamani et al., 2020b).
+Besides, in the data creation process, we con-
+struct ambiguous questions that contain only one
+missing information for guaranteeing the objec-
+tivity of the clarification question annotations.
+However, it is also worth studying the situation
+where there are multiple missing information for
+clarification.
+•Multimodality . Although the PACIFIC dataset
+is based on a hybrid context of tables and text,
+there are more diverse information in the real-
+world financial documents with different modali-
+ties, such as images, charts, etc. It is necessary
+to consider more comprehensive QA or CQA
+datasets and problem settings for real-world ap-
+plications in finance domain.Limitations of UniPCQA
+The error analysis in Section 5.4.4 reveals some
+limitations in the proposed method. Currently, the
+capability of numerical reasoning in UniPCQA re-
+lies on the pre-trained language models. In the
+future, we would like to investigate post-training
+strategies to transfer task-adaptive or domain-
+specific knowledge from other post-training tasks
+for further improving this capability. In addition,
+due to the heterogeneous input and output content,
+it would also be beneficial to investigate more ro-
+bust prompt-based learning approaches for better
+learning the relationships among different types of
+information.
+References697969806981
+Appendix
+A Pipeline of Dataset Creation
+Fig. 5 presents the illustration of overall pipeline
+for the PACIFIC dataset creation with examples.
+In financial question answering (Zhu et al., 2021;
+Chen et al., 2021b), the user query is supposed to
+be informative and complicated with multiple con-
+straints. Therefore, it is inappropriate to adopt the
+traditional way of decomposing a complex single-
+turn question into multiple conversational questions
+with limited information for constructing a finan-
+cial conversational question answering dataset.
+To this end, we employ a different pipeline to
+create the PACIFIC dataset. As described in Sec-
+tion 3.1, there are totally four steps for the cre-
+ation of the PACIFIC dataset, including (1) Orga-
+nize Conversation Sessions, (2) Rewrite Conversa-
+tional Questions, (3) Construct Ambiguous Ques-
+tions, and (4) Provide Clarification Questions.
+This annotation pipeline not only increases effi-
+ciency in the dataset construction, but also guaran-
+tees the quality and preserves the difficulty of thedataset with expert-annotated answers and informa-
+tive user queries for financial CQA.
+B Implementation Details
+The pre-trained weights of T5 and CodeT5 are ini-
+tialized using HuggingFace. We use the same
+hyper-parameter settings for different initialization.
+The learning rate and the weight decay rate are set
+to be 5e-5 and 0.01, respectively. The max source
+sequence length and the max target sequence length
+are 1280 and 128, respectively. We train the model
+up to 15 epochs with mini-batch size of 4, and se-
+lect the best checkpoints based on the EM score
+on the validation set. We train the model on three
+NVIDIA Tesla V100 GPUs with 32GB RAM.
+For a fair comparison, all the PLM-based base-
+lines adopt the version of PLMs with a simi-
+lar size of model parameters as T5(220M)
+and CodeT5 (220M). For example, BERT,
+RoBERTa, and GPT-2 based methods adopt
+BERT (340M), RoBERTa (355M), and
+GPT-2 (345M), respectively.
+C Compared Baselines
+Following Zhu et al. (2021), we simply flatten the
+table into a sequence by row followed by tokens
+from the paragraphs for all the baselines.6982C.1 Clarification Need Prediction
+We fine-tune the vanilla BERT(Devlin et al.,
+2019) and RoBERTa(Liu et al., 2019) based
+classifiers for the CNP task.
+C.2 Clarification Question Generation
+We compare to the following CQG baselines:
+•Template-based Question Generation (TB) : A
+template-based approach (Zamani et al., 2020a)
+to generating clarifying questions produces a
+question by simply filling a slot in a pre-defined
+question, i.e., “What kind of _ are you asking
+about?”. And we adopt a fine-tuned BERT-based
+span extraction model to extract the slot value
+from the document.
+•CopyTrans. (Wang and Li, 2021) adopts the
+Transfomer-based encoder-decoder with the copy
+mechanism for the CQG task.
+•Q-GPT (Sekulic et al., 2021) fine-tunes GPT-
+2 (Radford et al., 2019) to generate clarifying
+questions.
+C.3 Query Rewriting
+We adopt the following QR baselines for evalua-
+tion:
+•Original : Use the original conversational ques-
+tion at the current conversation turn without
+query rewriting, which is often regarded as the
+lower bound for the pipeline-based CQA evalua-
+tion.
+•Trans.++ : A Transformer-based QR model
+(Vakulenko et al., 2021) initialized with the
+weights of pre-trained GPT-2 model (Radford
+et al., 2019).
+•T5: Following (Lin et al., 2020; Kim et al., 2021),
+we adopt a T5-based sequence generator (Raffel
+et al., 2020) as a baseline QR model.
+C.4 Conversational Question Answering
+We adopt the following QA and CQA baselines for
+evaluation:
+•NumNet+ V2: A numerical QA model utilizes a
+numerically-aware graph neural network to con-
+sider the comparing information and performs
+numerical reasoning over texts (Ran et al., 2019).•TO: A RoBERTa-based QA model adopts
+sequence tagging to extract information and ap-
+plies numerical reasoning over tables and texts
+with a set of aggregation operators (Zhu et al.,
+2021).
+•BERT+HAE: A BERT-based CQA model adds
+the history answer embeddings (HAE) to the
+BERT’s word embeddings (Qu et al., 2019).
+Since there is no numerical reasoning module
+in this method, the output only contains the ex-
+tracted spans from the documents.
+C.5 Proactive Conversational Question
+Answering
+We adapt the following methods for the evaluation
+of the overall PCQA problem:
+•DialoGPT Following Nakamura et al.
+(2022), we fine-tuned a pre-trained DialoGPT
+model (Zhang et al., 2020) for dialogue response
+generation. Similar to BERT+HAE, the target
+sequence only contains the required spans from
+the document without numerical calculations.
+•FinQANet(Chen et al., 2021b) A retriever
+using BERT first retrieves the supporting facts
+from the document, then a generator combin-
+ing RoBERTa and LSTM generates the response,
+which can be either a schema-based program for
+CQA or a natural language question for CQG.
+•T5+TOA pipeline-based method first uses
+T5 (Raffel et al., 2020) for the sub-tasks of CNP
+and CQG. If it is not required for clarification,
+TO(Zhu et al., 2021) is adopted to produce
+the answer as an end-to-end CQA method.
+Note that for two end-to-end methods, including
+DialoGPT and FinQANet, there is no sub-task of
+CNP, while the whole PCQA problem can be re-
+garded as the response generation problem in dia-
+logue systems.
+D Evaluation on Query Rewriting
+Following previous studies (Vakulenko et al.,
+2021), we adopt ROUGE-1 (Recall) and EM for
+the evaluation of QR models.
+The performance of each Query Rewriting (QR)
+method is presented in Table 11. Due to the substan-
+tial difference between financial CQA and general6983
+CQA, i.e., PACIFIC and QReCC, the QR models
+trained on QReCC perform poorly in PACIFIC.
+E Effect of Sampling Number
+Fig. 6 shows the performance of Consensus V oting
+in terms of different number of sampled outputs
+from the decoder, ranging from [1, 5, 10, 20, 40].
+Due to the restriction of experimental environment,
+the maximum number of sample outputs is set to
+be 40. Experimental results show that a higher
+number of sampled outputs generally leads to a
+better performance for both T5 and CodeT5-based
+UniPCQA models, which indicates the effective-
+ness of the plurality voting in the Consensus V oting
+strategy for alleviating the error propagation issue.
+F Detailed Case Study
+Fig. 7 presents the details of the case study in Ta-
+ble 9, including the grounded document and the
+conversation history. At the current turn T6, the
+user query is “What is the change in its amount as a
+percentage?", where “it" refers to “ Total Revenue "
+at the previous turn T5. As shown in the tabular
+context, the amount of “ Total Revenue " is recorded
+in three years, from 2017 to 2019. Due to the un-
+certainty of the concerned period, the user query,
+“What is the change in its amount as a percentage?",
+is ambiguous under this context.
+In the inference, the decoder will be confused
+about which figures are supposed to be extracted
+from the grounded document. We can observe
+that Greedy Decode generates a wrong derivation,
+which may answer the query “What is the change
+in its amount as a percentage from 2019 to 2019?".
+Similarly, for CV 3, the generated derivation is sup-
+posed to answer the query “What is the change in
+its amount as a percentage from 2018 to 2019?".
+However, at this conversation turn, the system is
+not aware of the specific period that the user is ask-
+ing. Therefore, all these derivations with a random
+period are incorrect. Overall, with the plurality
+voting, Consensus V oting effectively alleviates this
+kind of issue, since it would be difficult for the
+sampled derivation outputs to make a consensus
+for an ambiguous question.6984

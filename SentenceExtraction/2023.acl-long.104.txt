@@ -1,1 +1,718 @@
-1862 Proceedings of the 61st Annual Meeting of the Association for Computational Linguistics Volume 1 : Long Papers , pages 1862–1877 July 9 - 14 , 2023 © 2023 Association for Computational Linguistics 1863 1864 1865 1866 1867 1868 1869 1870 1871 1872 1873 1874 1875 1876 1877 
+
+Mohamed Elgaar and Hadi Amiri
+Department of Computer Science
+University of Massachusetts Lowell
+{melgaar,hadi}@cs.uml.edu
+Abstract
+We introduce the problem of curriculum discov-
+eryand describe a curriculum learning frame-
+work capable of discovering effective curricula
+in a curriculum space based on prior knowl-
+edge about sample difficulty. Using annota-
+tion entropy and loss as measures of difficulty,
+we show that (i): the top-performing discov-
+ered curricula for a given model and dataset
+are often non-monotonic as apposed to mono-
+tonic curricula in existing literature, (ii): the
+prevailing easy-to-hard or hard-to-easy transi-
+tion curricula are often at the risk of underper-
+forming, and (iii): the curricula discovered for
+smaller datasets and models perform well on
+larger datasets and models respectively. The
+proposed framework encompasses some of the
+existing curriculum learning approaches and
+can discover curricula that outperform them
+across several NLP tasks.
+1 Introduction
+Annotation information has been extensively used
+by previous research in NLP to devise strategies
+for further data collection (Yang et al., 2019; Dli-
+gach et al., 2010), model improvement and annota-
+tion analysis (Zaidan and Eisner, 2008; Paun et al.,
+2018), pruning and weighting samples for better
+learning (Yang et al., 2019), or efficient use of mon-
+etary funds (Dligach et al., 2010). Recent studies
+show consistent positive correlation between dif-
+ficulty of samples to the model and their level of
+human agreement (Nie et al., 2020a; Zaidan and
+Eisner, 2008; Yang et al., 2019). Building on these
+findings, we aim to utilize such prior knowledge
+about sample difficulty to develop a curriculum
+learning (CL) framework that is capable of discov-
+ering effective curricula for NLP tasks.
+A curriculum is a planned sequence of learning
+materials and an effective one can improve train-
+ing of NLP systems (Settles and Meeder, 2016;
+Amiri et al., 2017; Zhang et al., 2019; Lalor and
+Yu, 2020; Xu et al., 2020; Kreutzer et al., 2021;Agrawal and Carpuat, 2022; Maharana and Bansal,
+2022). CL seeks to improve model generalizability
+by ordering samples for training based on their la-
+tent difficulty (Bengio et al., 2009). Recent work
+reported efficiency and effectiveness gains through
+CL (Jiang et al., 2018; Castells et al., 2020; Zhou
+et al., 2020), especially in cases of harder tasks and
+limited or noisy data (Wu et al., 2021).
+Existing CL approaches are designed to learn a
+single curriculum that works best for a given model
+and dataset. However, effective training could be
+achieved in multiple ways. In addition, existing ap-
+proaches quantify sample difficulty through model
+behavior during training. Although efficient and
+effective, model behavior can be affected by initial-
+ization and training dynamics (Erhan et al., 2010;
+Wu et al., 2021), which limits the curriculum space
+that can be examined for finding effective curricula.
+This paper advocates a re-imagining of CL
+paradigms by introducing and formalizing the task
+ofcurriculum discovery , which aims to find effec-
+tive curricula for a given model and dataset over
+a curriculum space. The present work specifically
+focuses on determining when and in which diffi-
+culty order text data samples should be learned for
+effective training of NLP systems. We propose
+a framework that employs prior knowledge about
+sample difficulty, such as entropy in human anno-
+tations, to inform an effective and flexible sample
+weighting scheme for curriculum discovery. The
+framework is capable of discovering optimal cur-
+ricula (within the space of its weight functions)
+for any given model and dataset by optimizing
+the weight functions and adjusting the difficulty
+group of data samples as training progresses. The
+discovered curricula provide useful insights about
+datasets and models, such as the relative impor-
+tance of different groups of samples for models or
+knowledge dependency among samples. We illus-
+trate that the proposed framework has the potential
+to encompass some of the existing CL approaches.1862Experimental results show that (a): the top-
+performing discovered curricula for the same
+model and dataset can be fundamentally dissimilar
+in their training strategies, indicating that effective
+training can be achieved in multiple ways; (b): the
+discovered curricula are often non-monotonic and
+greatly differ from the known strategies reported in
+existing literature, indicating that existing curricula,
+including easy-to-hard transition curricula, are at
+the risk of underperforming; and (c): the curricula
+discovered on small datasets and models perform
+exceptionally well on larger datasets and models
+respectively, illustrating the transferability of the
+discovered curricula. The paper presents a new
+curriculum learning approach that unlike existing
+approaches can discover multiple high-performing
+(and often diverse) curricula for each given NLP
+model and dataset, provide interpretable curricula
+in terms of sample difficulty, and encompass some
+of the existing curriculum learning approaches.
+2 Related Work
+Existing CL approaches are designed to learn
+asingle curriculum that works best for a given
+model and dataset. They estimate sample dif-
+ficulty through model behavior during training,
+quantified by the instantaneous loss (Xu et al.,
+2020; Wu et al., 2021), consistency in instanta-
+neous loss (Xu et al., 2020), moving average of
+loss (Jiang et al., 2018; Zhou et al., 2020), transfor-
+mations of loss (Amiri et al., 2017; Castells et al.,
+2020; Chen et al., 2021; Vakil and Amiri, 2022),
+loss regularization (Kumar et al., 2010; Jiang et al.,
+2015; Castells et al., 2020), or learnable per-sample
+confidence (Shu et al., 2021; Saxena et al., 2019;
+Jiang et al., 2018). In terms of data ordering, sub-
+sampling approaches sample the easiest or hardest
+instances at every training iteration (Bengio et al.,
+2009; Kumar et al., 2010; Guo et al., 2018; Platan-
+ios et al., 2019; Xu et al., 2020), sample weighting
+techniques weight instances according to their es-
+timated difficulty (Kumar et al., 2010; Jiang et al.,
+2015, 2018; Yang et al., 2019; Castells et al., 2020;
+Zhou et al., 2020), and sample pruning techniques
+filter hard or noisy instances from data prior to
+training (Northcutt et al., 2021). Sub-sampling
+methods can be cumulative, exclusive or a combi-
+nation of both. Cumulative approaches add new
+samples to the ones that have been previously used
+for training (Guo et al., 2018; Xu et al., 2020),
+while exclusive approaches create a new subset of
+the data at every training stage (Bengio et al., 2009;
+Zhou and Bilmes, 2018). In addition, previous re-
+search has developed model-driven (Karras et al.,
+2018; Morerio et al., 2017; Sinha et al., 2020) and
+task-driven (Caubrière et al., 2019; Florensa et al.,
+2017; Sarafianos et al., 2017) techniques.
+3 Curriculum Discovery Framework
+We consider the training dataset D =
+{(x, y), . . . , (x, y)}of size n, where x
+denotes the ith training sample with the ground-
+truth label yandψ∈[0,1]indicates the initial
+difficulty estimates of training samples, see §3.4.
+The data is initially clustered into kgroups of
+increasing difficulty, e.g. { easy,medium ,hard }
+groups for k= 3, which can be achieved using dif-
+ficulty score percentiles or 1-dimensional K-means
+applied to ψ. As Figure 1 shows, the framework
+develops a separate parameterized weight function
+for each difficulty group (§3.1), and dynamically
+weights training samples and adjust their difficulty
+groups according to the training progress of the
+downstream model (§3.2). Specifically, at training
+iteration t, the weighted loss ˆlfor sample iof the
+difficulty group c∈ {1, . . . , k }will be computed
+as follows:
+ˆl=w(t;r, s)×l, (1)
+where lis the instantaneous loss of sample i, and
+w(t;r, s)is the weight of sample iin its difficulty
+group cat training iteration t, with class-specific
+weight function parameters rands(see below).18633.1 Monotonic Curricula
+We define a curriculum using the generalized logis-
+tic function (Richards, 1959) of the form:
+w(t;r, s) =1
+1 + exp( −r×(t−s)),(2)
+where r∈Ris the rate-of-change parameter,
+which specifies how fast the weight can increase
+(r >0) or decrease ( r <0);t∈[0,1]is the train-
+ing progress (typically iteration number divided
+by max iterations); and s∈Rshifts the pivot
+weight of the logistic function ( w(.) =.5) to the
+left or right such that at t=sthe weight is 0.5.
+Figure 2a illustrates the effect of these parame-
+ters. Greater absolute values for the rate parameter
+enforce faster rates of change in weights, while
+greater values of the shift parameter enforce longer
+delays in reaching the pivot weight of 0.5. These
+parameters provide flexibility in controlling sample
+weights during training, which is key for deriving
+effective curricula. The above function can approx-
+imate existing predefined curricula. For example,
+Figure 2b shows a specific configuration for the
+logistic functions for standard CL (Bengio et al.,
+2009), where training starts with easier samples
+and gradually proceeds with harder ones.
+3.2 Non-monotonic Curricula
+Although the generalized logistic function in (2)
+can lead to effective curricula, monotonic functions
+are limited in their coverage capacity. For example,
+they do not allow easy samples with low weights
+to become important again (receive high weights)
+at later stages of training to mitigate forgetting ,
+which is a major challenge for effective curriculum
+learning (Toneva et al., 2019; Zhou et al., 2020).
+We address this challenge by extending the
+framework to non-monotonic curricula, where sam-
+ples can move between difficulty classes based on
+their learning progress during training. We quan-
+tify learning progress for training samples based on
+the deviation of their losses from the average losses
+of their corresponding difficulty groups. At every
+iteration, samples with loss values greater than the
+average are promoted to their immediate higher
+difficulty groups and the rest are demoted to their
+immediate lower difficulty groups. These move-
+ments allow monotonic weight functions result in
+non-monotonic and multimodal weight trajectories
+for training samples, which improves the search
+capability of our framework and addresses the for-
+getting challenge.
+3.3 Parameter Optimization
+We find the optimal curriculum parameters (r, s)
+for each difficulty group using the Tree-structured
+Parzen Estimator (TPE) algorithm (Bergstra et al.,
+2011; Akiba et al., 2019), which, unlike the grid
+or random search, traverses the parameter space by
+estimating the parameters that are most probable
+to perform better on a trial. Using this method, we
+can learn data-driven curricula beyond what could
+be manually designed through empirical settings or
+choices among the limited ordering strategies.
+The discovered curricula are optimal within our
+search space, as defined by the weight functions
+and searchable parameters. However, in practice,
+we observed that the change in performance across
+the missing regions in the search space is minor.
+Given that our weight functions can approximate
+other curricula learned by existing CL models, see
+§4.7, we expect the optimum curriculum within
+our search space closely approximates the optimal
+curriculum for each dataset and model pair.
+3.4 Prior Knowledge of Difficulty
+Annotation entropy is a natural measure of diffi-
+culty (for humans) and may serve as a reliable dif-
+ficulty metric for models. Entropy of each sample
+xis calculated as −/summationtextplogp(Shannon, 1948),
+where cis a class category and pis the fraction of
+annotators who chose label cfor the sample. The1864
+use of entropy is supported in (Nie et al., 2020a),
+reporting a consistent positive correlation between
+model accuracy and level of human agreement.
+Furthermore, moving average of a sample’s in-
+stantaneous loss is a good metric for difficulty
+(Zhou et al., 2020). Using a baseline model
+trained with no curriculum and with default hyper-
+parameters, we collect the loss values of all training
+instances at intervals of 0.5 epochs and use the aver-
+age loss as prior knowledge about sample difficulty.
+We obtain twenty observations of the loss and com-
+pute the average for each sample.
+Figure 3 shows the distributions of entropy and
+loss, and examples of data partitions across four
+datasets. Most datasets are highly imbalanced
+across difficulty groups, often containing more eas-
+ier samples than harder ones. Such data disparities
+would perhaps explain why computational models
+can achieve human-level performance on complex
+NLP tasks or recent results reporting neural mod-
+els being largely invariant to random word order
+permutation of data (Sinha et al., 2021).
+We acknowledge that while multiple annotations
+per sample may not be readily available for many
+NLP datasets, such annotations were collected for
+most NLP datasets at their dataset development
+time. Our work shows that such information can
+be used to find effective curricula for NLP mod-
+els and encourages dataset creators to publish their
+full annotation information. In addition, our cur-
+riculum discovery framework is independent ofannotation information. In fact, we evaluated our
+approach with both annotation entropy and loss as
+two choices for sample-level difficulty estimation.
+4 Experiments
+4.1 Datasets
+For the purpose of our experiments, we chose
+datasets for which several annotations per sample
+are available. Such annotator-level information is
+often available at the creation time of most NLP
+datasets and provide rich information for effective
+learning. Before training, we partition each dataset
+intokdifficulty groups using {}quantiles.
+SNLI (Bowman et al., 2015). The Stanford Nat-
+ural Language Inference (SNLI) benchmark (Bow-
+man et al., 2015) contains 36.7k and 2.6k samples
+annotated by 5 and 4 workers respectively, which
+we refer to as SNLI full in our experiments.
+ChaosNLI (Nie et al., 2020b) contains 100 an-
+notations per sample for about 1.5K development
+samples of SNLI and MNLI (Williams et al., 2018).
+We use these samples as training data, the remain-
+ing 8.5K development samples of SNLI as devel-
+opment set, and the test set of SNLI as test set.
+Twitter (Amiri et al., 2018). This dataset has
+been developed to obtain population-level statistics
+of alcohol use reports through social media. It
+contains more than 9k tweet, annotated by at least
+three workers for report of first-person alcohol use,
+intensity of the drinking (light vs. heavy), context1865of drinking (social vs. individual), and time of
+drinking (past, present, or future). We define a
+multi-class classification task for this dataset based
+on the above categories, see the data distribution in
+Appendix A. We randomly split the data into 5.4k,
+1.8k and 1.8k training, development and test sets.
+Reddit. We developed this dataset to obtain
+population-level statistics of cancer patients. It con-
+tains 3.8k Reddit posts annotated by at least three
+annotators for relevance to specific cancer types.
+We define a multi-class classification task based on
+post relevance and cancer type, see Appendix A.
+We randomly split the data into 2.2k, 765, and 765
+training, development and test sets respectively.
+ChaosNLI is balanced in its difficulty groups.
+We create difficulty-balanced versions of SNLI,
+Twitter and Reddit by collecting an equal num-
+ber of samples from each difficulty group. The
+resulting datasets contain 1.7K to 2.3K samples.
+4.2 Baselines
+No-CL The conventional training approach,
+which involves utilizing all samples for training
+in each iteration.
+Self-paced Learning (SPL) (Kumar et al., 2010)
+weights instances based on their difficulty to the
+model by optimizing the following objective:
+L(D;θ) = arg min/summationdisplayvl+f(v;λ),(3)
+where lis the loss of instance iparameterized by θ,
+vis a trainable weight parameter assigned to each
+instance, and fis a regularization function for the
+weights. The model finds vthat minimizes its loss
+under the constraint of f. The binary scheme SPL
+is defined by the regularization function f(v;λ) =
+−λ∥v∥; ifl< λ,v= 1, otherwise v= 0, i.e.,
+only easy samples are selected at each step.
+Mentornet (Jiang et al., 2018) uses an auxiliary
+network to weight samples at every iteration. The
+network takes as input recent loss history, running
+mean of the loss, current epoch number (to account
+for training progress), and target labels. The net-
+work consists of an LSTM layer to encode the k
+steps of loss, embedding matrices for the target la-
+bel and epoch number; a fully connected layer; and
+a final sigmoid layer. The sigmoid layer outputs
+weights of samples for training.Difficulty Prediction (DP) (Yang et al., 2019)
+defines sample difficulty as follows:
+d=/summationtextf(y,ˆy)
+l, (4)
+where ˆyis the ground truth label and fmeasures
+the Spearman’s rank correlation coefficient be-
+tween labels produced by experts and non-experts.
+The model re-weights samples for performance im-
+provement using a pre-defined threshold τ,:
+1−αd−τ
+1−τ. (5)
+SuperLoss (SL) (Castells et al., 2020) uses the
+following function to estimate sample weights:
+L= (l−τ)σ+λ(logσ), (6)
+where τis the moving average of loss (as the mea-
+sure of difficulty) and σis sample confidence. The
+model emphasizes easy samples (those with small
+losses) throughout the training.
+Our approach employs two difficulty scoring
+functions and two curriculum types for each dataset.
+The difficulty scoring functions are Loss andEnt
+(entropy) described in §3.4. The first curriculum
+type ( inc) is the off-the-shelf gradually increasing
+approach in Figure 2b, which is rapidly computed
+and applied to all models, resulting in Ent(inc)
+andLoss(inc) approaches. The non-monotonic
+version of the inccurriculum (§3.2) are labeled
+Ent+(inc) andLoss+(inc) . The second curriculum
+type ( sp, for specialized) is obtained through the
+proposed optimization approach (§3.3) that finds
+optimal curricula for each model and dataset, re-
+sulting in Ent(sp) andLoss(sp) .
+4.3 Settings
+We use bayesian optimization to tune the param-
+eters λof SL and αandτof DP on development
+data. The optimal values found are λ= 1.2,
+α= 0.9andτis set dynamically upon loading
+the dataset to the 50 percentile difficulty value of
+the training data. We use twitter-roberta-base for
+Twitter and roberta-base for other datasets, both
+from (Wolf et al., 2020). We set learning rate
+to1×10, batch size to 16, epochs to 10(we
+confirm that this number of iterations is sufficient
+for all models to converge), and use Adam opti-
+mizer (Kingma and Ba, 2017). The checkpoint
+with the best performance is used for testing. For1866Full Difficulty Balanced
+SNLI Twitter Reddit ChaosNLI SNLI Twitter Reddit Avg
+Ent (sp)
+Ent (inc)
+Ent+ (inc)
+Loss (sp)
+Loss (inc)
+Loss+ (inc)
+DP
+SL
+MentorNet
+No-CL
+each experiment, we train the model using five ran-
+dom seeds and report standard error.
+In addition, we set the search space for the rate
+(r) and shift ( s) parameters to [−10,10]with a step
+of2and[−0.5,1.5]with a step of 0.25respectively.
+The search is run for at least 100 trials using the
+method described in (§3.3). Each trial is run with
+three seeds and the result is averaged. The search
+objective is to maximize accuracy over develop-
+ment data. The trial number in which the best
+parameters are found is reported in Appendix C.
+We only search for curricula with three difficulty
+groups to ease interpretability and improve read-
+ability, and to minimize the number of search pa-
+rameters. However, in case of inccurriculum, the
+optimal number of difficulty groups for ChaosNLI,
+SNLI, Twitter, Reddit are 12, 3, 28, and 12 respec-
+tively; in all cases, we tune the number of groups
+on the development set and evaluate on the best
+performing one. Appendix B includes the results
+of tuning the number of groups.
+4.4 Curriculum Discovery Improves Models
+Table 1 shows that the gradually increasing cur-
+riculum using entropy, Ent (inc) , achieves better
+accuracy than No-CL and other baselines, and the
+difference is significant. The gain is often greater
+with more than 3 difficulty groups, see detail results
+in Figure 8, Appendix B. Both ( inc) and the spe-
+cialized ( sp) curricula often perform better than the
+baselines. On average, entropy as scoring function
+performs better than loss, indicating prior knowl-
+edge based on difficulty to humans is useful to themodel. The results also show that non-monotonic
+curricula (Ent+, Loss+) can further improve the
+performance; we attribute this result to the ability
+of the non-monotonic curricula to dynamically ad-
+just the difficulty of samples according to model
+behavior as training progresses, allowing easier or
+harder samples to the model accumulate in the eas-
+ier and harder difficulty groups. The performance
+improvement is more pronounced on the difficulty
+balanced datasets compared to full datasets, which
+can be attributed to the balanced nature or smaller
+size of these datasets.
+4.5 Discovered Curricula Are Non-monotonic
+Figure 4 shows the mean and 95% CI of the top 25
+performing curricula. The resulting curricula are
+non-monotonic and greatly differ from the known
+strategies reported in literature, such as gradually
+increasing difficulty or anti-curriculum. In addi-
+tion, the weights of hard samples tend to decrease,
+supporting the hypothesis that these instances may
+be too difficult or noisy for models to learn. In addi-
+tion, in SNLI and Twitter easy samples often carry
+the most significant weight, unlike Reddit, where
+easy samples are often down-weighted early dur-
+ing the training. These weighting patterns reveal
+the relative importance of samples in each dataset.
+Finally, the full SNLI dataset with entropy parti-
+tions provides useful information. In Figure 4c,
+hard samples are assigned weights around 0.5, un-
+like the three other cases of SNLI. We attribute
+this result to the reduced presence of hard samples
+(skewed entropy in Figure 3b).1867
+4.6 Discovered Curricula Are Generalizable
+Figure 5 shows the accuracy obtained when the top-
+performing discovered curriculum for one dataset
+(from Figure 4) is applied to other datasets. Each
+cell is the average result of 5 seeds. We observe
+common characteristics among datasets that cause
+the curriculum to be transferable between them.
+First, the top generalizable configuration is ob-
+tained from ChaosNLI, the dataset with the rich-
+est inter-annotator entropy signal. Therefore, the
+quality of the difficulty score is important to the
+discovery of an effective curriculum. Second, the
+incconfiguration is among the most generaliz-
+able configurations, with no added cost in its cre-
+ation. Third, the curricula obtained using the small,
+down-sampled difficulty-balanced datasets general-
+ize well and achieve high performance on the large
+datasets. This is useful as curriculum discovery is
+much faster on smaller datasets, and the framework
+can be applied to large datasets by searching for a
+curriculum on a small subset of the data, mitigatingCurriculum 82M 125M 406M
+No-CL
+Best baseline
+Ent (sp)
+Ent (sp) –
+Ent (sp) – –
+the computational expenses of using full datasets.
+Fourth, as noted previously, instances of the Reddit
+dataset consist of long paragraphs, causing high
+variance in models trained using the dataset. Con-
+sequently, the curricula obtained using the Reddit
+and loss as measure of difficulty are of lower qual-
+ity and perform poorly. Appendix D reports the
+results of all configurations.
+Table 2 shows the transferability of discov-
+ered curricula across model sizes. We consider
+three models with increasing sizes applied to
+ChaosNLI: distilroberta-base with 82M
+parameters, roberta-base with 125M param-
+eters, and bart-large with 406M parameters.
+The results show that the curricula discovered for
+small models are transferable to larger models, with
+significant improvement over No-CL and other CL
+baselines. In particular, we observe greater trans-
+ferability for smaller model sizes, which indicates
+curriculum discovery is more beneficial to smaller
+models than larger (more robust) models. In some
+cases, the curricula discovered for smaller mod-
+els perform better than those discovered for larger
+models, see Ent(sp)and . This is because
+curriculum discovery is less expensive on smaller
+models, allowing better exploration of curriculum
+space to find better curricula.
+Figure 6 shows the curricula obtained using mod-
+els of different sizes. The three curricula are simi-
+lar in their relative treatment of difficulty groups:
+samples from the easy class are assigned higher
+weights than those from the medium class, and
+medium samples receive higher weights than hard
+samples. In addition, hard samples are consider-
+ably down-weighted, which indicates deemphasiz-
+ing hard samples during training can lead to better
+results on the test data of ChaosNLi.1868
+4.7 Potential to Encompass Existing Models
+The framework presented in this paper is capa-
+ble of representing curriculum learning approaches
+that prune noisy data, e.g. (Northcutt et al., 2021),
+use different sub-samples of data during training,
+e.g. (Xu et al., 2020), and re-weight loss according
+to sample difficulty, choosing to emphasize either
+easy or hard samples, e.g. (Castells et al., 2020).
+First, data pruning can be achieved by assigning
+negative values to the rate and shift parameters in
+our framework, randsin (1), which cause the
+weights to approach zero before training begins.
+Second, data sub-sampling can be represented by
+“inc” in Figure 2b. Third, approaches that estimate
+sample confidence based on loss (Castells et al.,
+2020; Felzenszwalb et al., 2009; Kumar et al., 2010;
+Jiang et al., 2015; Zhou et al., 2020) tend to gen-
+erate monotonic curves over the course of training
+because training loss tends to be non-increasing at
+every step. Figure 7 shows the confidence scores
+assigned to our data by three loss re-weighting
+approaches. The results are generated by our im-
+plementations of the three approaches, where each
+model runs with five random seeds. The partition-
+ing of easy,medium , and hard is according to the
+entropy, as described in §3.4. We record the av-
+erage weight assigned to each group. The resultis averaged over all the runs, and the shaded area
+indicates the 95% confidence interval (CI). The re-
+sults show that the confidence scores assigned by
+these approaches follow a monotonic curve that
+can be approximated by our curriculum discovery
+framework. We note that although the weight scale
+of SuperLoss (Castells et al., 2020) in Figure 7a is
+larger than one, this model can still be represented
+by our framework because the increased scale cor-
+responds to scaling of the learning rate, as shown:
+θ=θ−η∇1
+n/summationdisplayσl
+=θ−(η·σ)∇1
+n/summationdisplayσ
+σl,(7)
+where landσare the instantaneous loss and confi-
+dence of sample irespectively. Therefore, the pro-
+posed framework can also represent CL approaches
+with a confidence scale larger than one.
+5 Conclusion and Future Work
+We introduce an effective curriculum learning
+framework that employs prior knowledge about
+sample difficulty in its training paradigm for cur-
+riculum discovery. The proposed framework ini-
+tially partitions its input data into several groups
+of increasing difficulty, defines parameterized func-1869
+tions to weight sample losses in each difficulty
+group, moves samples across difficulty groups
+based on their learning progress, and enables tun-
+ing the parameters of the weight function to dis-
+cover novel curricula. We demonstrate that this
+framework is capable of representing several cate-
+gories of curriculum learning approaches. The task
+of curriculum discovery alleviates the limitations
+imposed by selecting a single curriculum strategy,
+and instead, focuses on finding and analyzing dif-
+ferent curricula that work equally-well for a given
+model and dataset. In addition, the discovered cur-
+ricula provide insight into how different portions of
+the dataset contribute toward learning at different
+stages of training a model, which, in turn, provide
+knowledge about the learning dynamics of different
+models. The task of curriculum discovery could
+be costly on large datasets, in particular, when the
+goal is to find optimal curricula for different mod-
+els and datasets. To mitigate the computational
+cost, we show that it is possible to rapidly discover
+a curriculum on a small subset of the dataset (or
+a smaller version of the model with significantly
+less number of parameters) and apply the resulting
+curriculum to the full dataset.
+There are several promising areas for future
+work. These include approaches for learning new
+difficulty indicators from data (e.g., linguistic dif-
+ficulty including lexical, syntactic and semantic
+difficulty), prioritizing medium level instances and
+those with greatest progress during training, and
+developing challenge datasets that contain diverse
+data samples with different levels of difficulty. Fi-
+nally, investigating diverse curricula that are suit-
+able for general use and across datasets through cur-
+riculum discovery and generalization is a promising
+area for research.1870Limitations
+The present work investigates the use of two sample
+difficulty scoring functions, human-induced anno-
+tation entropy and model-induced loss, for NLP
+models and datasets. The former requires the avail-
+ability of multiple annotations per sample and the
+latter requires training an auxiliary model to com-
+pute sample instantaneous loss during the course
+of training. Our work does not provide a general
+solution to the choice or availability of good dif-
+ficulty scoring functions. However, once such a
+function is available, our work presents solutions
+to the problem of finding high-performing curricula
+in curriculum space. Our approach, although effec-
+tive at finding such curricula, requires a Bayesian
+search of its hyperparameters. We reduce these
+costs by finding curricula on smaller datasets and
+smaller models that can then be applied to corre-
+sponding larger datasets and models. Finally, the
+proposed method lacks theoretical analysis of the
+dynamic interactions between data, downstream
+models, and discovered curricula.
+References187118721873A Data Categories Distribution
+Table 3 shows the target class distributions of the Reddit and Twitter datasets.
+B Finer-grained Difficulty Classes
+Figure 8 shows the effect of different number of difficulty classes on he accuracy of models trained with
+ourinccurriculum (see §4.2). The results show that the number of difficulty classes used is an important
+factor in our framework, and further tuning of this parameter can further improve the performance of our
+model.
+C Curriculum Search Computational Cost1874With our experimental settings, it takes around 15 minutes on average to train a base model on our
+datasets of up to 3k samples using a single GPU. Therefore, a curriculum search take around 9 hours (36
+trials) to around 35 hours (139 trials) using a single GPU.
+D Extended Configuration Generalizablity Experiments
+Figure 9 shows the result of every model trained using every specialized curricula (and inc). We see
+that the generalizable curricula that are effective on small (down-sampled) datasets, also tend to perform
+well on large (full) datasets.1875ACL 2023 Responsible NLP Checklist
+A For every submission:
+/squareA1. Did you describe the limitations of your work?
+Left blank.
+/squareA2. Did you discuss any potential risks of your work?
+Left blank.
+/squareA3. Do the abstract and introduction summarize the paper’s main claims?
+Left blank.
+/squareA4. Have you used AI writing assistants when working on this paper?
+Left blank.
+B/squareDid you use or create scientiﬁc artifacts?
+Left blank.
+/squareB1. Did you cite the creators of artifacts you used?
+Left blank.
+/squareB2. Did you discuss the license or terms for use and / or distribution of any artifacts?
+Left blank.
+/squareB3. Did you discuss if your use of existing artifact(s) was consistent with their intended use, provided
+that it was speciﬁed? For the artifacts you create, do you specify intended use and whether that is
+compatible with the original access conditions (in particular, derivatives of data accessed for research
+purposes should not be used outside of research contexts)?
+Left blank.
+/squareB4. Did you discuss the steps taken to check whether the data that was collected / used contains any
+information that names or uniquely identiﬁes individual people or offensive content, and the steps
+taken to protect / anonymize it?
+Left blank.
+/squareB5. Did you provide documentation of the artifacts, e.g., coverage of domains, languages, and
+linguistic phenomena, demographic groups represented, etc.?
+Left blank.
+/squareB6. Did you report relevant statistics like the number of examples, details of train / test / dev splits,
+etc. for the data that you used / created? Even for commonly-used benchmark datasets, include the
+number of examples in train / validation / test splits, as these provide necessary context for a reader
+to understand experimental results. For example, small differences in accuracy on large test sets may
+be signiﬁcant, while on small test sets they may not be.
+Left blank.
+C/squareDid you run computational experiments?
+Left blank.
+/squareC1. Did you report the number of parameters in the models used, the total computational budget
+(e.g., GPU hours), and computing infrastructure used?
+Left blank.1876/squareC2. Did you discuss the experimental setup, including hyperparameter search and best-found
+hyperparameter values?
+Left blank.
+/squareC3. Did you report descriptive statistics about your results (e.g., error bars around results, summary
+statistics from sets of experiments), and is it transparent whether you are reporting the max, mean,
+etc. or just a single run?
+Left blank.
+/squareC4. If you used existing packages (e.g., for preprocessing, for normalization, or for evaluation), did
+you report the implementation, model, and parameter settings used (e.g., NLTK, Spacy, ROUGE,
+etc.)?
+Left blank.
+D/squareDid you use human annotators (e.g., crowdworkers) or research with human participants?
+Left blank.
+/squareD1. Did you report the full text of instructions given to participants, including e.g., screenshots,
+disclaimers of any risks to participants or annotators, etc.?
+Left blank.
+/squareD2. Did you report information about how you recruited (e.g., crowdsourcing platform, students)
+and paid participants, and discuss if such payment is adequate given the participants’ demographic
+(e.g., country of residence)?
+Left blank.
+/squareD3. Did you discuss whether and how consent was obtained from people whose data you’re
+using/curating? For example, if you collected data via crowdsourcing, did your instructions to
+crowdworkers explain how the data would be used?
+Left blank.
+/squareD4. Was the data collection protocol approved (or determined exempt) by an ethics review board?
+Left blank.
+/squareD5. Did you report the basic demographic and geographic characteristics of the annotator population
+that is the source of the data?
+Left blank.1877

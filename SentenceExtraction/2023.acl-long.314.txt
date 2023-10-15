@@ -1,1 +1,770 @@
-5712 Proceedings of the 61st Annual Meeting of the Association for Computational Linguistics Volume 1 : Long Papers , pages 5712–5730 July 9 - 14 , 2023 © 2023 Association for Computational Linguistics 5713 5714 5715 5716 5717 5718 5719 5720 5721 5722 5723 5724 5725 5726 5727 5728 5729 5730 
+
+Fabian David Schmidt, Ivan Vuli ´c, Goran GlavašCenter For Artiﬁcial Intelligence and Data Science, University of Würzburg, GermanyLanguage Technology Lab, University of Cambridge, UK
+{fabian.schmidt, goran.glavas}@uni-wuerzburg.de
+iv250@cam.ac.uk
+Abstract
+Massively multilingual language models have
+displayed strong performance in zero-shot (-) and few-shot (-) cross-lingual trans-
+fer setups, where models ﬁne-tuned on task
+data in a source language are transferred with-
+out any or with only a few annotated instances
+to the target language(s). However, current
+work typically overestimates model perfor-
+mance as ﬁne-tuned models are frequently eval-
+uated at model checkpoints that generalize best
+to validation instances in the target languages.
+This effectively violates the main assumptions
+of‘true’- and-. Such se-
+tups require robust methods that do not depend
+on labeled target language data for validation
+and model selection. In this work, aiming to
+improve the robustness of ‘true’-and-, we propose a simple and effective method
+thataverages different checkpoints (i.e., model
+snapshots) during task ﬁne-tuning. We conduct
+exhaustive- and- experiments
+across higher-level semantic tasks (NLI, extrac-
+tive QA) and lower-level token classiﬁcation
+tasks (NER, POS). The results indicate that
+averaging model checkpoints yields system-
+atic and consistent performance gains across
+diverse target languages in all tasks. Impor-
+tantly, it simultaneously substantially desensi-
+tizes to varying hyperparameter choices
+in the absence of target language validation.
+We also show that checkpoint averaging bene-
+ﬁts performance when further combined with
+run averaging (i.e., averaging the parameters
+of models ﬁne-tuned over independent runs).
+1 Introduction and Motivation
+Massively multilingual transformers (MMT) such
+as mBERT ( Devlin et al. ,2019 ) and XLM-R ( Con-
+neau et al. ,2020 ) have become the main driver
+of multilingual NLP research. When ﬁne-tuned
+on sizable task data in a high-resource source lan-
+guage, typically English, MMTs demonstrate cross-
+lingual transfer capabilities ( Pires et al. ,2019 ) inzero-shot (-; without any task-annotated in-
+stances in the target language) and few-shot (-; only a few task-annotated instances/shots
+available in the target language) transfer setups ( Hu
+et al. ,2020 ;Lauscher et al. ,2020 ). However, re-
+cent work has shown that both cross-lingual trans-
+fer () paradigms are subject to large variation inperformance, especially if the target language
+is typologically distant to the source ( Keung et al. ,
+2020 ;Zhao et al. ,2021 ;Schmidt et al. ,2022 ).
+The protocols for model selection in previouswork vary broadly, which exacerbates the com-
+parison of reportedresults. Some studies (i)
+do not sufﬁciently discuss their protocol ( Conneau
+et al. ,2020 ;Xu et al. ,2022 ), while others (ii)
+tune hyperparameters on the English development
+splits ( Hu et al. ,2020 ;Wu and Dredze ,2020b ), or
+even (iii) perform model selection on the target-
+language validation sets ( Luo et al. ,2021 ;Fang
+et al.,2021 ;Zhao et al. ,2021 ). Assuming the avail-
+ability of sufﬁciently large target-language vali-
+dation sets for hyperparameter-tuning and model
+selection is unrealistic and violates the assumption
+of a true-and-setup ( Perez et al. ,
+2021 ;Schmidt et al. ,2022 ). On the other hand,
+model selection on English validation data often
+does not correlate well with target-language perfor-
+mance ( Keung et al. ,2020 ).
+Furthermore, benchmarking new and emergingapproaches with existing methods is even more
+challenging when the code or models from prior
+work are not publicly available (e.g., Wei et al. ,
+2021 ;Xu et al. ,2022 ).We therefore seek meth-
+ods that reliably improve-and-irre-
+spective of the underlying model and the transfer
+paradigm, are easy to implement, inexpensive to
+evaluate, robust to varying hyperparameters, and
+applicable to truesetups where the existence5712of any target-language validation data cannot be
+assumed nor guaranteed.
+In this work, we propose a simple and effective
+method of checkpoint averaging () that satisﬁes
+all the desiderata above. The principal idea is to
+save model snapshots at periodic intervals during
+ﬁne-tuning and then average the weights of the mul-
+tiple single-run snapshots (i.e., checkpoints) prior
+toevaluation. A similar procedure has been
+successfully adopted, for instance, in computer
+vision ( Huang et al. ,2017 ), other NLP domains
+such as machine translation ( Vaswani et al. ,2017 ;
+Gao et al. ,2022 ,inter alia ), and speech processing
+(Dong et al. ,2018 ;Karita et al. ,2019 ,inter alia );
+however, it has not investigated nor adequately
+leveraged in, notorious for its sensitivity to
+different choices of shots and hyperparameters.
+Averaging model weights can be extended to
+merging last or multiple model snapshots from
+multiple model runs in a straightforward manner.
+As we show later, within-run snapshot averaging
+performs comparable, or even better in individual
+experiments, than the computationally more ex-
+pensive ensembling of last snapshots of multiple
+models (i.e., from different training runs).
+Contributions. (1) To the best of our knowledge,
+we are the ﬁrst to extensively benchmark and ana-
+lyzefor both-and-; we do this
+on a range of higher-level semantic (NLI, extrac-
+tive QA) and lower-level token classiﬁcation tasks
+(NER, POS).yields two beneﬁts in truese-
+tups, coming for ‘free’ (i.e., at no additional compu-
+tation cost): the transfer performance (i) improves
+consistently, and (ii) it becomes much less sen-
+sitive to varying hyperparameters. (2)We shed
+more light on averaging models across runs (i.e.,
+ensembling). We ﬁrst conﬁrm that standard plain
+ensembling (i.e., averaging the models across mul-
+tiple runs) does not improve over single runs for
+natural language understanding tasks ( Wortsman
+et al. ,2022 ). We then illustrate that sizable gains
+from run averaging () are unlocked only once
+models are constrained a priori to converge to more
+structurally similar sets of parameters. We also
+show that averaging the averaged checkpoints as
+opposed to averaging only the ﬁnal models further
+beneﬁts performance. Further, (3)for multilingual-, we benchmarkagainst the established
+gradient surgery method (), which aims to bet-
+ter align gradients between languages in a batch
+during training for improved-(Xu and Mur-ray,2022 ). We demonstrate that the intricate and
+hyperparameter-conditionedperforms subpar to
+the simple. Finally, (4)we validate that bene-
+ﬁts of,, and their combinations extend to a
+variety of experimental settings for, across a
+large number of different languages.
+2 Background and Related Work
+Zero-Shot and Few-Shot.Modern multilin-
+gual and cross-lingual NLP is underpinned by the
+MMTs like mBERT ( Devlin et al. ,2019 ), XLM(-R)
+(Lample and Conneau ,2019 ;Conneau et al. ,2020 ),
+or mT5 ( Xue et al. ,2021 ), pretrained via language
+modeling (LM) objectives on web-scale corpora for
+100+ languages. The MMTs supportby seman-
+tically aligning representation spaces across multi-
+ple languages. ( Hu et al. ,2020 ;Cao et al. ,2020 ).
+However, some languages ‘are more equal than
+others’ in the MMTs’ representation spaces ( Wu
+and Dredze ,2020a ), and the expected quality ofis highly dependent on (i) the pretraining data
+size for the target languages, as well as on (ii) the
+degree of linguistic and typological (dis)similarity
+between the source and the target ( Lauscher et al. ,
+2020 ;Ruder et al. ,2021 ).
+Prior work on- thus typically aims at
+better aligning the language-speciﬁc subspaces
+for. For instance, modular approaches such
+as adapters ( Pfeiffer et al. ,2020 ;Ansell et al. ,
+2021 ) and sparse subnetworks ( Ansell et al. ,2022 ;
+Foroutan et al. ,2022 ) extend MMT to new lan-
+guages by assigning a small number of language-
+speciﬁc parameters (i.e., modules) that can be com-
+bined with the base MMT. Another strand of work
+utilizes signals from word translations or parallel
+data aiming to tie cross-lingual representations of
+languages of interest closer together ( Wang et al. ,
+2019b ;Wu and Dredze ,2020b ;Hu et al. ,2021 ).
+Research on-empirically validated that
+using even a handful of labeled instances in the
+target language along with source-language in-
+stances can considerably improvebeyond-(Lauscher et al. ,2020 ;Zhao et al. ,2021 ;Xu
+and Murray ,2022 ;Schmidt et al. ,2022 ).-
+can be stabilized and improved with (i) joint train-
+ing on source- and target-language data ( Schmidt
+et al. ,2022 ) or (ii) the so-called gradient surgery
+approach () which ‘de-conﬂicts’ gradients be-
+tween instances belonging to different languages
+within a training batch ( Xu and Murray ,2022 ).
+In general, the methods that aim to boost5713suffer from issues such as incurring large com-
+putational costs ( Xu and Murray ,2022 ;Schmidt
+et al. ,2022 ), require additional task-annotated
+data ( Lauscher et al. ,2020 ), and other external data
+(e.g., parallel data), which limits their wider porta-
+bility to a multitude of possible tasks, domains, and
+languages ( Ponti et al. ,2019 ).
+Averaging Model Weights. As a method that
+is simultaneously easy to implement and inex-
+pensive to evaluate, averaging model weights has
+found successful application in areas such as com-
+puter vision ( Huang et al. ,2017 ;Izmailov et al. ,
+2018 ;Wortsman et al. ,2022 ), machine transla-
+tion ( Vaswani et al. ,2017 ;Gao et al. ,2022 ), and
+speech processing ( Dong et al. ,2018 ;Karita et al. ,
+2019 ). The approaches can be clustered over two
+core axes: (i) what checkpoints to select to aver-
+age model snapshots, (ii) and how to aggregate the
+selected model snapshots.
+Stochastic weight averaging () leverages in-
+trainingto guide gradient descent towards a
+better generalization ( Izmailov et al. ,2018 ).
+has been proven to beneﬁt machine translation
+(Vaswani et al. ,2017 ;Gao et al. ,2022 ).Popel and
+Bojar (2018 ) recommend taking a large number of
+model snapshots at broad intervals. ‘Model soup-
+ing’ ( ) refers to averaging distinct runs with
+varying hyperparameters to further improve perfor-
+mance in computer vision tasks ( Wortsman et al. ,
+2022 ). In monolingual NLP contexts, Wang et al.
+(2022 ) simultaneously train multiple adapters with
+consistency constraints , allocating 2-10×more
+time to their total training than what would be al-
+located to training only a single task adapter for
+GLUE tasks ( Wang et al. ,2019a ). In contrast, we
+do not expand training time or computational re-
+sources in our work. Wang et al. (2022 ) also show
+that subsequent adapter averaging outperforms con-
+ventional logit ensembling.
+Checkpoint selection and weighting schemes are
+typically devised based on validation sets ( Worts-
+man et al. ,2022 ;Matena and Raffel ,2022 ). One
+strategy is to select the kcheckpoints that perform
+best on the validation set ( Wortsman et al. ,2022 ),
+where kis a tunable hyperparameter. Matena and
+Raffel (2022 ) show that the Fisher information ma-
+trix can be exploited to compute a weighted averageof models to boost transfer across tasks.
+In this work, we show that even (arguably) naive
+hyperparameter-free strategies to average model
+snapshots improve both-and-, and
+make transfer much more robust. They operate
+without any target-language validation data, do
+not increase computational demands, and even of-
+ten exceed the performance of the best individual
+model selected using target-language validation.
+3 Methodology
+Motivated by the success of weight averaging dis-
+cussed in § 2, we hypothesize that the approach
+might also prove effective for: weight aver-
+aging should ‘denoisify’ idiosyncratic variation in
+weights of different model snapshots, which should
+in turn stabilize training and improve transfer.
+In particular, we propose checkpoint averaging
+() and run averaging () of model snapshots
+for-and-. For, we ﬁrst initialize
+the model with the parameters of the pretrained
+MMT: we refer to this set of parameters as θ. We
+then ﬁne-tune the MMT for Tsteps on the task
+data. We store the model weights ktimes at a reg-
+ular interval oftraining steps. Before inference,
+we then re-initialize the model with the averaged
+weights/summationtextθ=¯θ, and then use the averaged
+parameter set ¯θfor inference.
+Run averaging () denotes the straightforward
+extension ofto average model snapshots taken
+at checkpoints across Rindependent training runs .
+For, we put forth and evaluate two different
+variants. First, we can average only the model
+snapshots taken at the last checkpoint of each in-
+dividual run. The parameters at inference for this
+variant, termed- are then computed as/summationtextθ. Here, θdenotes the ﬁnal (i.e., k-th)
+model snapshot at the end of run i,i= 1, . . . , R .
+The second variant, termed-, combines
+with: we average all kmodel snapshots per run
+over all Rindependent runs. Effectively, we aver-
+age over all k·Rdifferent model snapshots. The
+ﬁnal set of model parameters used for inference is
+then computed as/summationtext¯θ.
+Checkpoint Selection. We only evaluate straight-
+forwardandstrategies and dispose of more
+involved weighting schemes. Such schemes would
+require (i) either target-language validation data vi-
+olating the truesetup or (ii) rely on the valida-
+tion data of the source language, which often yields
+subparperformance ( Keung et al. ,2020 ).5714Ensuring Alignment for Run Averaging. Prior
+work hinted that ‘plain’ off-the-shelfdoes not
+improve over individual models (carefully selected
+on validation data) on monolingual sequence classi-
+ﬁcation tasks ( Wortsman et al. ,2022 ).We suspect
+that the different random-uniform initialized classi-
+ﬁers from different runs draw models into unrelated
+training trajectories, which might also have a detri-
+mental effect on-.Pairs of random high-
+dimensional vectors, i.e., classiﬁers, are orthogonal
+and do not systemically align across self-contained
+individual runs. We have veriﬁed this hypothesis
+empirically in our preliminary experiments.
+Put simply, independent models converge to out-
+put representations that are orthogonal. This in
+turn neutralizes potential beneﬁts of, since the
+sets of checkpoints across runs are mutually ‘too
+distant’ to complement each other. We address this
+shortcoming in two steps. We ﬁrst ﬁne-tune the
+model on the task in a standard fashion, yielding
+the ﬁrst single run. We then re-train the model R
+times, but now we freeze all the classiﬁers of the
+Rmodels to the parameters to which the initial run
+converged. This boosts alignment of the parameters
+of the models’ respective Transformer ‘bodies’. Im-
+portantly, this procedure is not required in-,
+as we initialize all models with the same mono-
+lingually (source language) ﬁne-tuned weights θ,
+which ensures comparability across-runs.
+4 Experimental Setup
+Tasks and Languages. We follow prior work ( Hu
+et al.,2020 ;Lauscher et al. ,2020 ;Xu and Murray ,
+2022 ;Schmidt et al. ,2022 ) and evaluate-
+and-on benchmarks that require nuanced
+syntactic and semantic understanding for effective
+cross-lingual transfer, outlined in what follows.
+We always use English as the source language.
+Natural Language Inference (NLI). We evalu-
+ate- on a broad range of typologically
+and geographically diverse NLI datasets span-
+ning a total 37 languages: XNLI ( Conneau et al. ,2018 ), IndicXNLI ( Aggarwal et al. ,2022 ), Jampa-
+toisNLI ( Armstrong et al. ,2022 ), and Americas-
+NLI (AmNLI) ( Ebrahimi et al. ,2021 ). For-
+experiments, we rely on 7 languages from Amer-
+icasNLI which come with sizable validation and
+test sets: Aymara (), Bribri (), Guarani
+(), Quechua (), Raramuri (), Shipibo-
+Konibo (), Wixarika (). We feed the output
+[CLS] token of the embedded hypothesis-premise
+pair into the classiﬁer.
+Extractive QA (TyDiQA-GoldP). TyDiQA-GoldP
+consists of questions that can always be extracted
+from the provided gold passage ( Clark et al. ,2020 ).
+Our- experiments enclose all languages:
+Arabic (), Bengali (), Finnish (), Indonesian
+(), Korean (), Russian (), Swahili (), and
+Telegu (). The embeddings of a question-passage
+pair are fed into a span classiﬁer that predicts the
+start and the end of the answer.
+Named Entity Recognition (NER). We evaluate
+on a broad set of 24 languages from WikiANN ( Pan
+et al. ,2017 ) and 10 African languages from
+MasakhaNER ( Adelani et al. ,2021 ). We choose a
+subset of 9 heterogeneous languages for-:
+Arabic (), Finnish (), Hungarian (), Swahili
+(), Tamil (), Turkish (), Urdu (), Viet-
+namese (), and Chinese (). The token repre-
+sentations of a sequence are fed into the classiﬁer.
+POS Tagging (POS). We use the UD treebanks ( Ze-
+man et al. ,2020 ) and evaluate-on 32 lan-
+guages from the XTREME benchmark ( Hu et al. ,
+2020 ).- experiments include the follow-
+ing typologically diverse language sample: Arabic
+(), Basque (), Chinese (), Finnish (), Ger-
+man (), Indonesian (), Japanese (), Turkish
+(), and Urdu (). The model architecture ex-
+actly matches the one used for NER.
+Training Setup. XLM-Ris the main MMT in
+ourexperiments ( Wolf et al. ,2020 ;Conneau
+et al.,2020 ).We train models for 10 epochs with
+AdamW ( Loshchilov and Hutter ,2019 ), weight
+decay of 0.05, the learning rate set to 2ewith a5715linear schedule of 10% warm-up and decay, and
+mixed precision, unless stated otherwise.We
+simply take model snapshots at the end of each
+epoch.The maximum input sequence length is
+256 subwords for NLI, 384 with a stride of 128 for
+TyDiQA, and 512 for NER and POS. We ﬁne-tune
+models for-in batches of 32 instances. In-experiments, we train with 4 examples per
+language in one batch.-Setup. We follow Schmidt et al. (2022 )
+and compute a loss for examples of one language
+and subsequently average language-speciﬁc losses
+with equal weighting into a single loss. We further-
+more compare against the gradient surgery (),
+the state-of-the-art approach for boosting multilin-
+gual-(Xu and Murray ,2022 ). For, we
+randomly exclude one language in a batch from
+training. We then applyfor the remaining lan-
+guages with respect to the held-out language.
+Data Sampling and Shots. For-
+experiments, we train models with s∈
+{5,10,50,100,250}target-language shots. The
+training and validation splits for TyDiQA-GoldP
+and AmNLI are sampled from the original training
+and validation sets, respectively. NER and POS
+datasets offer sizable training portions from which
+we sample the ‘few’ training shots.
+Random Seeds. For-, we initially execute 5
+single runs with distinct random seeds. We then run
+5 more runs per each classiﬁer we keep frozen from
+the initial runs. For-, we sample 5 diverse
+sets of sshots, for each of which we conduct 5
+differently seeded runs for.
+Evaluation Metrics. We report average scores
+computed with the following metrics: accuracy for
+NLI, span- Fscore for TyDiQA-GoldP and token-
+level Ffor NER and POS. In order to analyze
+robustness and sensitivity of results across different
+tasks and model variants, we also track and reportthe standard deviation over runs.
+Model Variants in Evaluation. Beyond the pro-
+posed averaging strategies,-, and- (see § 3), we also evaluate other transfer vari-
+ants outlined in what follows. simply evalu-
+ates the model snapshot at the ﬁnal checkpoint of
+a single run.- selects the checkpoint with
+the corresponding model snapshot that maximizes
+the source-language validation metric ( Hu et al. ,
+2020 ).- violates the assumption of trueand assumes that the best checkpoint for
+can be selected using a validation set in the target
+language ( Keung et al. ,2020 ). This ‘upper-bound’
+single-run variant is not directly comparable to the
+other variants and is used for analysis purposes.
+For-, run-averaging is additionally evalu-
+ated with the ‘model soups’ approach ( Wortsman
+et al. ,2022 ) (termed ). It comprises 5 runs
+spanned by varying the learning rates {1,2,3}e
+paired with a binary switch of using or not using a
+learning scheduler with 10% warm-up.
+5 Results and Discussion
+The full results for each task, dataset, and language
+are available in Appendix A.2. In what follows,
+we analyse results top-down, by type of transfer,
+between single runs and ensembling, along metrics,
+and ﬁnally datasets.-.Table 1summarizes the main of-
+results. We verify that our results align with rel-
+evant work for respective tasks and datasets ( Hu
+et al. ,2021 ;Wu and Dredze ,2020b ).
+Single Run . Model snapshot selection based on
+the development set of the source language (-) slightly but consistently improves over the
+last model snapshot ( ), albeit with higher vari-
+ance.steadily outperforms both and-, and often with signiﬁcantly lower variance
+across runs. On higher-level tasks (NLI),even
+performs on a par with snapshot selection based on
+target language validation data (-), a setup5716
+that violates true-. The- strategy
+performs best by sizable margin on POS & NER
+because those test sets include a much larger num-
+ber of target languages. In such a setup,-
+selects – for each of the many target languages – a
+snapshot tailored to a concrete language. The fact
+that all fair snapshot selection strategies (i.e., all ex-
+cept-) yield similar performance on POS
+suggests performance saturation when transferring
+from English with a single model.
+Ensembling . On tasks other than POS, ensembling
+(i.e., run averaging) substantially boosts-,
+but only if applied with our proposed training cur-
+riculum (see “Ensuring Alignment for Run Aver-
+aging” in § 3). The results indicate that within-
+runis generally beneﬁcial for ensembling too,
+with {, }-, in which average checkpoint-
+averages of individual runs, often brings gains over
+{, }- , in which we average only the
+last model snapshots of each run. NER in partic-
+ular seems to beneﬁt fromprior to either run-
+averaging () or souping (i.e., averaging of runs
+with different hyperparameters).
+Overall, our results indicate thateliminates
+the need for model selection in-. For a sin-
+gle run (i.e., ﬁxed random seed)clearly outper-
+forms-– from the-perspective, this
+means that there is no need for a development set
+in the source language. In ensembling,-per-
+forms on a par with -and - , and
+better than any single run with optimal hyperparam-
+eters (cf. Table 5), suggesting that it removes the
+need for hyperparameter optimization.could
+likely be further improved by weeding out poorly
+performing checkpoints. This primarily facilitates-for tasks with small training datasets, such
+as TyDiQA. If target-language shots are available
+(cf.-), i.e.-, models are best trained
+on all shots for(Schmidt et al. ,2022 ).-.Few-shot transfer results are shown inTable 2. We ensure that the results can, wherever
+possible, be directly compared to prior work ( Xu
+and Murray ,2022 ;Schmidt et al. ,2022 ).
+Single Run . Unlike in-, and- result in almost identical-performance,
+since they now most often select the same check-
+point. We conﬁrm the ﬁndings of Schmidt et al.
+(2022 ) in two regards: (1) gets closer to or
+even exceeds the oracle- as we increase
+the number of target-language shots; (2) using
+available target-language shots for training is better
+than leveraging them for model selection (com-
+pare, e.g.,- with 50 shots against
+with 100 shots). Unlike in-, in-
+most often surpasses the oracle-, since all
+target languages (with few shots) are now part of
+training. The gains over- are particularly
+pronounced for TyDiQA and NER and generally
+larger for the smaller number of shots.’s gains
+over legitimate selection strategies ( and-) are even more pronounced.
+Replication of Gradient Surgery (GS). We do not
+ﬁnd that- (Xu and Murray ,2022 ) improves-, if training batches are balanced across all
+target languages ( Schmidt et al. ,2022 ).We be-
+lieve the gains that Xu and Murray (2022 ) report
+originate from the fact that, due to their small batch
+size ( 2-4), individual batches only couple English
+examples with those from only 1-3 target languages
+by accumulating the gradients across batches to up-
+date the model only when 32 examples are seen.
+They effectively applyon many ‘oracle’ lan-
+guages instead of only one before a parameter up-
+date (cf. Algorithm 1 of Xu and Murray ,2022 ).
+We thus believe thatmostly offsets the within-
+batch imbalance between languages in the original
+experiments. Our replication further illustrates how5717
+challenging it is to reproduce theresults from
+prior work. Besides differing implementations, hid-
+den effects – such as within-batch per-language
+imbalance intraining, or other opaque hyperpa-
+rameters – hinder replication.
+Ensembling .-and- average 5 runs
+with different random seeds for each of ﬁve differ-
+ent shot setups ( {5, ...,250}). Ensembling again
+brings gains, especially in conﬁgurations with
+smaller numbers of shots. The gains even extend
+to POS, a simple and saturated task on which it is
+otherwise difﬁcult to improve performance.is
+beneﬁcial in-ensembling too, with-
+at least matching, and often notably outperforming- . Overall, the-results corroborate
+the effectiveness ofthat we noted in-.
+5.1 Further Analyses and Discussion
+To test the robustness of, we run additional
+ablations: we compare-results for models
+trained (1) with different learning rates; and (2)
+under different computational budgets.
+Hyperparameters for-.We repeat-
+experiments with LRs of {1,2,3}e, with and
+without a scheduler of 10% warm-up and subse-
+quent decay (5 runs for each combination). Figure
+1summarizes the ﬁndings for- and
+on NLI and NER (complete results are in Table 5
+in the Appendix). In comparison with-,reduces the variance in results between runs
+with different learning rates as well within differ-
+ent runs with the same learning rate for both tasks.
+This yields further beneﬁts., unlike-,
+allows for-performance to depend much
+less on the selection of learning rates, rendering
+hyperparameter tuning less important for the ﬁnal
+performance. This also in part explains why-
+further improves over- : it averages more
+robust models from individual runs (cf. ‘ s‘
+in Table 1). This ablation contributes to the ex-
+planation of why-results greatly differ in
+the literature ( Keung et al. ,2020 ). For example,
+with learning rate scheduling, deteriorates
+much more severely than- (especially at
+higher learning rates). This again stresses the need
+for strategies such asthat stabilizeperfor-
+mance across runs and hyperparameters.5718
+Training Duration for.Table 3presents ex-
+periments for-and-with {10,250}
+shots, in which we halve and double the number
+of training steps.In-, the takeaways align
+with the original experiments of Table 1. For-,gains further ground relative to and- in prolonged training. This particularly
+proves true when only 10 shots per target language
+are available. Performance may be further im-
+proved by distributing the added compute budget
+more diversely. Rather than doubling the steps
+along a single trajectory that well converges in the
+original compute budget (i.e., 1 B), averaging two
+runs likely mitigates unfavorable variation within
+the snapshots of each run. Our-variants in the
+main- results in Table 2hint at that this
+likely proves true in-as averaging across
+runs consistently yielded sizable improvements.
+We however leave such experiments to future work.-for Multilingual Models. We additionally
+test the behaviour of multilingual models – trained
+on large source-language dataset and a multilingual
+dataset consisting of few-shots of target languages
+(included in-training) – in-to fewremaining unseen languages: (1) for NLI – 3 lan-
+guages from AmNLI ( Ebrahimi et al. ,2021 ), all
+languages from JampatoisNLI ( Armstrong et al. ,
+2022 ) and IndicXNLI ( Aggarwal et al. ,2022 ); (2)
+for NER, all languages from MasakhaNER ( Ade-
+lani et al. ,2021 ). Table 4summarizes the results of
+this experiment. We again observe similar trends.
+Within a single run,yields large gains, now even
+more pronounced with more multilingual shots.-continues to generally outperform-
+in the ensembling setup. Interestingly, for NER,
+single-runeven outperforms the- en-
+semble. Results of this realistic transfer of a multi-
+lingually trained model to a new (unseen) language
+conﬁrms the utility of model averaging in.
+6 Conclusion
+It is hard to meaningfully compare prior work on: experimental setups are opaque and models
+are (often unreportedly) selected based on perfor-
+mance on English development data or even target-
+language instances. On the one hand, selecting
+models based on target-language performance vi-
+olates the ‘zero-shot’ assumption of-and
+overestimates performance in both-and-. Model selection on source-language data, on
+the other hand, has been proven unreliable ( Ke-
+ung et al. ,2020 ). Further, reproducing existing
+work onis unwieldy: even if code and models
+are available, replication incurs a signiﬁcant over-
+head in terms of integration efforts and computing
+resources. In this work, we propose to average
+checkpoints () stored periodically in training
+as a simple, computationally cheap, and effective
+baseline forthat remedies for all of the above.
+We show that (1)consistently improves both-and-over model selection based on
+source-language databaselines and (2) brings
+stability in performance across different runs. Fur-
+ther, we propose a curriculum training that involves5719freezing of classiﬁer’s parameters, allowing
+beneﬁts to propagate to ensembling, i.e., averaging
+of models from independent runs. We hope that
+future works adoptsas a competitive and robust
+baseline. This would lead to more transparency
+and fairness in evaluation, leading to more
+trustworthy results.
+Limitations
+The primary weakness of ‘fairly’ averaging model
+weights foris that sensible checkpoints need
+to be averaged. This manifests, for instance, in
+hyperparameter ablation for-on TyDiQA-
+GoldP. TyDiQA-GoldP is a complex task with
+merely 3,696 training instances that observes un-
+usual training dynamics. On such a dataset, the
+early checkpoints often underperform models that
+(nearly) have converged, especially if training uti-
+lizes low learning rates with schedulers. Here,- could be used to weed out underperforming
+checkpoints, such thatthen always exceeds the
+baseline that performs model selection on source-
+language validation data. Whenever the English
+training portion is sizable – like in our other tasks
+– checkpoint averaging is consistently beneﬁcial.
+Our experiments also demonstrate thatbehaves
+differently by task. Averaging checkpoints conse-
+quently might affect other tasks differently like, for
+instance, document classiﬁcation that reason about
+long contexts or retrieval tasks like Tatoeba that
+jointly require sequence- and word-level semantics.
+Another dimension we did not explore further due
+to a limited compute budget is how to ensure best
+that monolingual models are aligned for run aver-
+aging. For instance, it may not be required or even
+desirable to keep classiﬁers frozen throughout the
+second step of our proposed training curriculum
+(§3), as we would ideally also want to average out
+idiosyncratic noise of the original classiﬁer.
+Acknowledgments
+We thank the state of Baden-Württemberg for its
+support through access to the bwHPC. Ivan Vuli ´c
+is supported by a personal Royal Society Univer-
+sity Research Fellowship ‘Inclusive and Sustain-
+able Language Technology for a Truly Multilingual
+World’ (no 221137; 2022–).References572057215722
+A Appendix
+A.1 Reproduction Details
+Code . Our code is available at: https://github.
+com/fdschmidt93/free-lunch-xlt
+Model architectures. All models rely on the
+AutoModelFor{SequenceClassification,
+TokenClassification, QuestionAnswering}
+ofxlm-roberta-base implementations ﬁtting the
+corresponding task of the transformers library
+(Wolf et al. ,2020 ).
+Compute Requirements. All the experiments
+were run on a single V100 with 32GB VRAM. The
+total required GPU time (training & evaluation) per
+run for-is c.2.75 hours and-5 hours
+on average. We repeated each set of experiments
+at least 5 (and up to 25) times to reliably measure
+mean and standard deviation of performance. For-, we trained, per task, 5 initial models, 25
+×2 additional models to evaluateand s
+(i.e. 5 varying classiﬁcation heads, cf § 3), and 20
+further models per conﬁguration for each hyper-
+parameter ablation. We trained 25 models per s
+shots in- (i.e. 5 sets of different sshots
+with 5 runs each). We roughly estimate that total5723GPU time accumulates to 6,400 hours across all
+experiments.
+Further Dataset Details . All datasets are accessed
+via the datasets library ( Lhoest et al. ,2021 ). We
+sub-sample shots for datasets that do not comprise
+a training split for-experiments as follows.
+We ﬁrst randomly shufﬂe the validation split with
+one of seed s∈ {42, . . . , 46}with the built-in
+datasets shuffle method and then gather the ini-
+tial{5,10,50,100,250}instances as training shots
+for ourexperiments. We then validate our mod-
+els on the the |N| −500remaining instances to
+measure- performance.
+Natural Language Inference (NLI). As is custom,
+we use the sizable training split of MNLI (Williams
+et al. ,2018 ) as our high-resource training dataset
+with 393K training instances for English. The
+source-language validation split is the development
+portion of XNLI (Conneau et al. ,2018 ). We fur-
+thermore evaluate on IndicXNLI (Aggarwal et al. ,
+2022 ),JampatoisNLI (Armstrong et al. ,2022 ), and
+AmericasNLI (AmNLI) ( Ebrahimi et al. ,2021 ).
+Extractive QA (TyDiQA-GoldP). For TyDiQA-
+GoldP , we sub-sample training and validation in-
+stances as per the procedure noted above from all
+the training sets and use the ofﬁcial validation splits
+for testing ( Clark et al. ,2020 ). We compute- on the bases of the 440 ‘test’ set instances
+of English, as the training split merely comprises
+3,696 instances. This favors- compared
+to other selection strategies based on the source
+language, as another 10% of the training data are
+used for early stopping.
+Named Entity Recognition (NER). As with other
+tasks, we access both WikiANN andMasakhaNER
+via the Huggingface datasets library ( Lhoest
+et al. ,2021 ). We train monolingual models for-on the English training portion of Wikiann.
+POS Tagging (POS). We use the UD treebanks ( Ze-
+man et al. ,2020 ) and evaluate-on 32 lan-
+guages from the XTREME benchmark ( Hu et al. ,
+2020 ). We omit Kazakh, Thai, Yoruba, and Taga-
+log from-results, since these languages do
+not comprise validation data to measure-.
+Sample Implementation. The below exem-
+plary code is a simple implementation to aver-
+age the state_dict of identical PyTorch mod-
+els. The resulting averaged parameter can
+the been used to reinitialize the model with
+model.load_state_dict(state_dict) .5724A.2 Full Results
+A.2.1-Results57255726A.2.2-Results57275728ACL 2023 Responsible NLP Checklist
+A For every submission:
+/squareA1. Did you describe the limitations of your work?
+7
+/squareA2. Did you discuss any potential risks of your work?
+Not applicable. Left blank.
+/squareA3. Do the abstract and introduction summarize the paper’s main claims?
+1
+/squareA4. Have you used AI writing assistants when working on this paper?
+Left blank.
+B/squareDid you use or create scientiﬁc artifacts?
+A
+/squareB1. Did you cite the creators of artifacts you used?
+No response.
+/squareB2. Did you discuss the license or terms for use and / or distribution of any artifacts?
+All open-source packages (e.g. ransformers, pytorch-lightning, wandb, hydra) use highly permissive
+licenses allowing for the free use for research.
+/squareB3. Did you discuss if your use of existing artifact(s) was consistent with their intended use, provided
+that it was speciﬁed? For the artifacts you create, do you specify intended use and whether that is
+compatible with the original access conditions (in particular, derivatives of data accessed for research
+purposes should not be used outside of research contexts)?
+Not applicable. Left blank.
+/squareB4. Did you discuss the steps taken to check whether the data that was collected / used contains any
+information that names or uniquely identiﬁes individual people or offensive content, and the steps
+taken to protect / anonymize it?
+Not applicable. Left blank.
+/squareB5. Did you provide documentation of the artifacts, e.g., coverage of domains, languages, and
+linguistic phenomena, demographic groups represented, etc.?
+Not applicable. Left blank.
+/squareB6. Did you report relevant statistics like the number of examples, details of train / test / dev splits,
+etc. for the data that you used / created? Even for commonly-used benchmark datasets, include the
+number of examples in train / validation / test splits, as these provide necessary context for a reader
+to understand experimental results. For example, small differences in accuracy on large test sets may
+be signiﬁcant, while on small test sets they may not be.
+4,A
+C/squareDid you run computational experiments?
+5
+/squareC1. Did you report the number of parameters in the models used, the total computational budget
+(e.g., GPU hours), and computing infrastructure used?
+4,A5729/squareC2. Did you discuss the experimental setup, including hyperparameter search and best-found
+hyperparameter values?
+4
+/squareC3. Did you report descriptive statistics about your results (e.g., error bars around results, summary
+statistics from sets of experiments), and is it transparent whether you are reporting the max, mean,
+etc. or just a single run?
+5
+/squareC4. If you used existing packages (e.g., for preprocessing, for normalization, or for evaluation), did
+you report the implementation, model, and parameter settings used (e.g., NLTK, Spacy, ROUGE,
+etc.)?
+4,A
+D/squareDid you use human annotators (e.g., crowdworkers) or research with human participants?
+Left blank.
+/squareD1. Did you report the full text of instructions given to participants, including e.g., screenshots,
+disclaimers of any risks to participants or annotators, etc.?
+No response.
+/squareD2. Did you report information about how you recruited (e.g., crowdsourcing platform, students)
+and paid participants, and discuss if such payment is adequate given the participants’ demographic
+(e.g., country of residence)?
+No response.
+/squareD3. Did you discuss whether and how consent was obtained from people whose data you’re
+using/curating? For example, if you collected data via crowdsourcing, did your instructions to
+crowdworkers explain how the data would be used?
+No response.
+/squareD4. Was the data collection protocol approved (or determined exempt) by an ethics review board?
+No response.
+/squareD5. Did you report the basic demographic and geographic characteristics of the annotator population
+that is the source of the data?
+No response.5730

@@ -1,1 +1,759 @@
-1878 Proceedings of the 2022 Conference on Empirical Methods in Natural Language Processing , pages 1878 1891 December 7 - 11 , 2022 © 2022 Association for Computational Linguistics 1879 1880 1881 1882 1883 1884 1885 1886 1887 1888 1889 1890 1891 
+
+Xueliang Zhao, Tingchen Fu, Chongyang Tao, Rui YanWangxuan Institute of Computer Technology, Peking UniversityGaoling School of Artificial Intelligence, Renmin University of ChinaMicrosoft Corporation
+{zhaoxlpku,lucas.futingchen,chongyangtao}@gmail.com
+ruiyan@ruc.edu.cn
+Abstract
+Knowledge-grounded conversation (KGC)
+shows excellent potential to deliver an engag-
+ing and informative response. However, exist-
+ing approaches emphasize selecting one golden
+knowledge given a particular dialogue context,
+overlooking the one-to-many phenomenon in
+dialogue. As a result, the existing paradigm
+limits the diversity of knowledge selection and
+generation. To this end, we establish a multi-
+reference KGC dataset and propose a series
+of metrics to systematically assess the one-to-
+many efficacy of existing KGC models. Fur-
+thermore, to extend the hypothesis space of
+knowledge selection to enhance the mapping
+relationship between multiple knowledge and
+multiple responses, we devise a span-based
+variational model and optimize the model in
+a wake-sleep style with an ameliorated evi-
+dence lower bound objective to learn the one-
+to-many generalization. Both automatic and
+human evaluations demonstrate the efficacy of
+our approach.
+1 Introduction
+Maintaining appropriate human-computer dialogue
+is an important task leaping toward advanced artifi-
+cial intelligence and external knowledge is a key in-
+gredient to engaging and meaningful responses (Di-
+nan et al., 2019). To this end, the research area
+of knowledge-grounded conversation (KGC) has
+been explored with great interest. In recent years,
+a number of methods (Lian et al., 2019; Kim et al.,
+2020; Zhao et al., 2020a,b) and benchmarks (Di-
+nan et al., 2019; Zhou et al., 2018) have been pro-
+posed. These methods mainly follow the two-step
+paradigm proposed by Dinan et al. (2019): Given a
+dialogue context and a candidate knowledge pool,Figure 1: A conversation from Reddit. Text highlighted
+in the same color are responses and their corresponding
+groundings in the knowledge pool.
+they (1) first select one or more knowledge pas-
+sages from the candidate pool, and then (2) gener-
+ate a response based on the dialogue context and
+the selected knowledge.
+A large body of works put the emphasis on dis-
+covering the golden knowledge from the knowledge
+pool. To be more specific, although many knowl-
+edge passages in the candidate pool are relevant to
+the current conversation context (context-relevant),
+usually only one of them pertains to the observed
+response (label-relevant), which is often dubbed
+as golden knowledge by a number of works and
+researchers. Although many techniques have been
+developed to discriminate the golden knowledge
+from the candidate pool, their precision is still far
+from satisfactory (Zhao et al., 2020b). Moreover,
+it seems that even humans are unable to accurately
+identify the so-called golden knowledge.1878In light of the poor performance of humans, we
+postulate that the so-called golden knowledge is an
+oversimplification of KGC. Concretely, dialogue
+is one-to-many in nature with high entropy (Paran-
+jape et al., 2022), thus there might exist more than
+one proper knowledge to ground on. Take a conver-
+sation from Reddit as an example (Figure 1). All
+the knowledge is relevant and the four responses
+grounded on them are reasonable. In a word, there
+is no such golden knowledge in this case. The
+hypothesis of golden knowledge overlooks the one-
+to-many properties in conversation, penalizing per-
+fectly valid knowledge and therefore is harmful to
+the diversity of generation.
+We identify two limitations for previous meth-
+ods to go beyond the golden knowledge and learn
+the one-to-many generalization. Firstly, previous
+methods that tacitly assume the existence of golden
+knowledge already produce acceptable perfor-
+mance successfully, since most benchmarks (Zhou
+et al., 2018; Dinan et al., 2019) provide only one
+response, which coincidentally support the golden
+knowledge hypothesis when evaluation. Besides, a
+KGC model has no chance to be exposed to more
+than one response when training on these bench-
+marks. In a word, existing benchmarks are unable
+to train or evaluate the one-to-many generaliza-
+tion of a model. Second, the golden knowledge is
+flexible in granularity, not limited to a complete
+sentence (Figure 1). But previous methods usually
+limit the granularity of grounding to a complete
+sentence. Consequently, their decision space of
+knowledge selection is severely skewed and over-
+fitted by the observed response. In the compressed
+decision space, they are incapable to model the
+underlying relationship between the multiple re-
+sponses and their groundings as well.
+In this work, we propose a new KGC frame-
+work that is better in one-to-many generalization
+ability on two counts: (1) To train and evaluate
+the one-to-many generalization ability of a KGC
+model, we establish the first multi-reference KGC
+dataset and a series of metrics. (2) To extend the
+hypothesis space of knowledge selection, instead of
+choosing a knowledge sentence from the candidate
+set, we design a variational span reading model
+which directly reads the knowledge text and sam-
+ples a span as our grounding. We further propose
+a wake-sleep style learning algorithm to adapt the
+original evidence lower bound objective (ELBO) to
+the multi-reference scenario. We conduct extensiveexperiments and both automatic evaluation and hu-
+man evaluation suggest the efficacy of our methods
+in multi-reference KGC.
+Our contributions are summarized below:
+•To our best knowledge, we are the first to ex-
+plore the one-to-many problem in KGC and estab-
+lish a multi-reference KGC dataset as well as a
+series of metrics.
+•We propose a variational span reading model,
+which reads and comprehends knowledge at a finer
+granularity and sample a span as the knowledge to
+ground on.
+•We propose an adversarial activated multi-
+reference learning algorithm to ameliorate the orig-
+inal ELBO in the multi-reference scenario.
+2 Related Work
+Our work is in line with the research of knowledge-
+grounded conversation , whose goal is to generate
+informative responses with external knowledge (Di-
+nan et al., 2019; Kim et al., 2020; Zhao et al.,
+2020b). Since existing benchmarks usually only
+contain one reference for a conversation (Zhou
+et al., 2018; Dinan et al., 2019; Gopalakrishnan
+et al., 2019; Wu et al., 2019), most previous works
+take the assumption of golden knowledge (Zhao
+et al., 2020b; Dinan et al., 2019), and some of them
+use hindsight information from response to detect
+the golden knowledge (Chen et al., 2020; Kim et al.,
+2020; Paranjape et al., 2022), omitting all the other
+unobserved but plausible responses. Besides, the
+granularity of grounding is limited to a complete
+sentence or passage. Recently, some researchers
+have attempted to explore the possibility of ground-
+ing dialogue with span (Wu et al., 2021; Meng et al.,
+2020; Zhan et al., 2021). Their spans are determin-
+istic from hard selection process. Differently, we
+view the span prediction as a probabilistic process
+and propose a variational method to capture the
+attention span.
+The proposed model also relates to the one-to-
+many property in dialogue, referring to the phe-
+nomenon that the multiple responses are proper
+for a single dialogue context. How to train and
+evaluate the one-to-many generalization of a di-
+alogue system is a widely studied topic in open-
+domain response generation (Gupta et al., 2019;
+Zhao et al., 2017; Chan et al., 2021). Inspired by
+the efficacy of Variational Auto-Encoder (V AE),
+some previous works resort to latent variables to
+model the one-to-many property of dialogue. For1879
+example, Zhao et al. (2017) model discourse-level
+diversity with a latent variable subjecting to the
+Gaussian distribution. Qiu et al. (2019) posit a two-
+stage method that represents the distinct features of
+multiple references with a continuous latent vari-
+able. However, their latent variables are poor in
+interpretability. Bao et al. (2020) and Bao et al.
+(2021) introduce discrete latent variables into the
+pre-training process. Each value of the latent vari-
+able corresponds to the particular latent speech act.
+As for the evaluation of dialogue system, Gupta
+et al. (2019) show that multi-reference evaluation
+achieves better correlation with human judgments
+and release a test set for open-domain dialogue.
+But to our best knowledge, although Moghe et al.
+(2018) construct a multi-reference test set for KGC,
+there is no standard benchmark for one-to-many
+training and evaluation in KGC.
+3 Methodology
+3.1 Problem Formulation and Overview
+For a multi-reference KGC dataset, each case is a
+triplet (C, K,R)where C= [w, w,···, w]is
+the context of a conversation composed of previ-
+ous utterance tokens and K= [k, k,···, k]is
+the concatenated sequence of background knowl-
+edge and facts. We use wandkto denote
+thei-th token in context and the j-th token in
+knowledge respectively. R={R}is a set
+of observed responses. Our goal is to predict
+various spans (S, S,···, S)in knowledge indi-
+cated by the start position Zand the end position
+Z, and then generate multiple diverse responses
+(R, R,···, R)accordingly.
+The architecture of our approach is exhibited
+in Figure 2. It mainly consists of two parts, se-
+lective reading (Section 3.2) and multi-reference
+learning (Section 3.3). Concretely, for selective
+reading, we calculate the prior distribution of ZandZwith the dialogue context and the knowl-
+edge, which we refer to as p(Z)andp(Z).
+The two distributions are used to estimate the joint
+distribution p(Z, Z). Meanwhile, we compute
+an auxiliary posterior distribution q(Z|R)and
+q(Z|R), which are used for teaching the prior
+through minimizing KL-divergence. Note that the
+posterior is only involved in the training process.
+For multi-reference learning, We devise a wake-
+sleep style learning algorithm. In the wake step,
+the posterior and generator learn to maximize the
+evidence lower bound objective with respect to the
+augmented response set; In the sleep step, a dis-
+criminator is trained to distinguish the observed
+real responses and augmented responses. The two
+steps are conducted iteratively to learn one-to-many
+generalization in dialogue.
+3.2 Variational Span Reading
+Prior Reading. To compute the prior distribution
+of the span, we first concatenate the context and
+the knowledge together into a single sequence:
+I={w, w,···, w, k, k,···, k},(1)
+before passing through multiple BERT layers (De-
+vlin et al., 2019):
+H= BERT( I)∈R.(2)
+Compared with independent encoding, it allows
+more sufficient interaction between the dialogue
+context and knowledge to obtain the context-aware
+knowledge K=Has a slice of knowl-
+edge part in Hand knowledge-aware context
+representation as a mean pooling of the context
+part:
+h=1
+l/summationdisplayH. (3)1880Next we calculate the joint distribution of
+p(Z, Z). It is not straightforward since it re-
+quires enumerating all possibilities of different Z
+andZ. So we propose to first calculate the dis-
+tribution of the start position and the end position
+independently:
+p(Z) = softmax(MLP([ h;K])),(4)
+where MLP is a multi-layer perceptron. We use
+[·;·]to denote vector concatenation.p(Z)is
+calculated in a similar way. Next, we approach the
+conditional distribution p(Z|Z)by aggregating
+the probability in a constrained area such that the
+end position always falls behind the start position
+to form a well-defined span:
+ˆp(Z=i|Z) =
+
+, i≥Z
+0, i < Z,
+(5)
+thus the join distribution could be efficiently com-
+puted as p(Z, Z) =p(Z)ˆp(Z|Z).
+Posterior Reading. The hint in a response Ris
+used to identify the latent ZandZand calculate
+q(Z|R)andq(Z|R), which are much easier
+since the response is a semantic reflection of the
+span. Firstly, the response is concatenated after the
+context:
+I={w,···, wr,···, rk,···, k}.
+(6)
+Then the sequence passes through a 3-layer trans-
+former F:
+H=F(I)∈R.(7)
+Similar to prior reading, the response-aware con-
+text representation is pooled with average pooling:
+and knowledge representation Kis the slice of
+Hcorresponding to the knowledge part.
+The hint in the response is sufficient to deter-
+mine the start point and the end point independently.
+Thanks to the mean-field approximation, the joint
+distribution could be factorized as:
+q(Z, Z) =q(Z)q(Z). (9)The posterior distribution is calculated as:
+q(Z|R) = softmax(MLP([ h;K])),
+(10)
+andq(Z|R)is calculated in a similar way.
+Generator. After obtaining the joint distribution
+p(Z, Z), a sampling from the joint distribution
+produces a pair of (Z, Z), corresponding to a
+spanSin knowledge:
+(Z, Z)∼p(Z, Z)
+S= [k, k, k,···, k].(11)
+The sampled span and context are then fed into
+a generator to predict the response in an auto-
+regressive way:
+Theoretically, the generator could be specified as
+any large-scale pre-trained language model. Here
+we use GPT-2 (Radford et al., 2019). Repeating the
+sampling process produces multiple diverse spans,
+thus allowing the generator to synthesize diverse
+responses for a single case.
+3.3 Adversarial Activated Multi-reference
+Learning
+Directly optimizing the marginal likelihood is pro-
+hibitively time-consuming and a traditional substi-
+tution for marginal likelihood is the evidence lower
+bound objective (ELBO):
+L=EElogp(R|C, Z, Z)
+−KL(q(Z, Z|R)||p(Z, Z)).
+(13)
+A step-wise derivation could be found in Ap-
+pendix A. After a closer look at the ELBO, we find
+that the objective is still based on existing responses
+inRand tries to maximize the overall likelihood
+of all the observed data (C, K,R)in our dataset.
+But as a matter of fact, the one-to-many property
+of dialogue indicates that the possible responses
+could be infinite and not enumerable. And a dia-
+logue system is supposed to infer the unobserved
+responses based on the observed ones, or in other
+words, be able to discriminate whether a candidate
+is a possible response or not. In light of this, draw-
+ing inspiration from Hu et al. (2018), we propose1881an A dversarial A ctivated ELBO (AAELBO):
+L
+=EElogp(R|C, Z, Z)
+−KL(q(Z, Z|R)d(R)||p(Z, Z)d(R)),
+(14)
+whereRis the augmented response set comprised
+of the originally observed response Rand the aug-
+mented ones:
+R=R ∪ { R}, (15)
+where λis a hyper-parameter. d(·)is a discrimina-
+tor with a trainable parameter πto classify whether
+a response is an observed one or an augmented one.
+d(·)is the corresponding prior defined as the sam-
+pling probability among original Rand{R}.
+AAELBO is optimized iteratively in two steps:
+Sleep-Step. The parameter of posterior reading,
+prior reading and generator are fixed. To synthesize
+{R}, we first calculate the posterior distribu-
+tionp(Z, Z|R)and sample multiple grounding
+spans accordingly. Then we concatenate the spans
+to the context respectively and send them to the
+generator to obtain R. The discriminator is a L-
+layer bidirectional transformer trained to maximize
+the following objective:
+where y= 1 ifRis an observed response in the
+original dataset else y= 0.
+Wake-Step. The parameter of the discriminator
+is frozen. We use the discriminator to assign an
+importance weight to each response in the candi-
+date set. The posterior reading, prior reading and
+the generator are then optimized on the augmented
+Rwith the importance weight given by the dis-
+criminator. Mathematically, the training objective
+in this step is:
+maxEElogp(R|C, Z, Z)
+−KL(q(Z, Z|R)d(R)||p(Z, Z)d(R)).
+(17)
+As spans are obtained from a discrete sampling pro-
+cess, the gradient of the AAELBO objective is not
+differentiable to ϕ. Therefore, we exploit policy-
+gradient method (Sutton et al., 2000) to estimate
+the gradient, which is formulated as:
+∇EElogp(R|C, Z, Z)
+=EE∇logq(Z, Z)Re.
+(18)Conventionally, the reward Reis calculated
+aslogp(R|C, Z, Z)in a teacher-forcing way,
+which is incompetent in modeling the complex
+mapping relationship between the multiple spans
+and multiple references. As a possible remedy, we
+propose to reinforce the relationship between the
+pairs of span and the response for both the posterior
+reading and the generation. We ameliorate the orig-
+inal reward to adapt to the multi-reference scenario:
+The reward is composed of two parts: the recon-
+struction reward Rec(R,R)and the ground-
+ing reward Gnd( S, R), which we will elaborate
+as below. To optimize the objective, we first sample
+a response R∈ Rand calculate q(Z, Z|R).
+Next, we sample a span Sand send the span to the
+generator together with the context to synthesize
+R.αis a hyper-parameter.
+Reconstruction Reward. The reconstruction re-
+ward is designed for strengthening the span-
+response mapping relationship in posterior reading:
+Rec(R,R) =1
+|R|/summationdisplay(ys(R, R)
++ (1−y) (1−s(R, R))).
+(20)
+We have y= 1 ifRis the sampled response R
+else0.s(·,·)is a similarity function. The recon-
+struction reward gives the posterior a bigger reward
+when the span predicted by the posterior is easy
+for the generator to synthesize the corresponding
+response.
+Grounding Reward. The grounding reward is
+designed for strengthening the span-response map-
+ping relationship in generation. It uses BERT as its
+backbone, accepts a span and a generated response
+as input:
+I={r,···, rk,···, k}, (21)
+and maps the representation of the [CLS] token to
+a grounding reward:
+H= BERT( I),
+Gnd( S, R) =σ(MLP( H)),(22)
+where σ(·)denotes Sigmoid function. To train
+the discrimination network, for every response R,1882we first heuristically tag a corresponding span in
+knowledge text as a pseudo span label:
+¯S= argmaxs(S, R), (23)
+where s(·,·)is a similarity function and Ωis a
+candidate set constructed by enumerating all the
+possible spans in the knowledge with a sliding win-
+dow. The grounding reward network is trained to
+minimize the following objective:
+where µis a hyper-parameter.
+4 Experiment Setup
+4.1 Dataset
+We establish a multi-reference KGC dataset with
+conversations from Reddit. As a social news aggre-
+gation, conversations in Reddit are well-grounded
+by an external website, usually a Wikipedia page.
+Elaborated filtering and cleaning are carried out
+to construct a multi-reference KGC dataset with
+a training set, a validation set and two test sets,
+namely General Test and Focused Test. In the
+Focused Test, multiple references are grounded
+within a single knowledge sentence. So it is de-
+signed to evaluate the one-to-many generalization
+ability only with respect to the grounding granu-
+larity. Apart from that, we also develop a General
+Test, in which the grounding on the knowledge
+passages is unconstrained since in real-world sce-
+narios, it is more common that multiple references
+are grounded on various knowledge. The statistics
+of the dataset are shown in Table 1. For more de-
+tails about the data collection protocol, please refer
+to Appendix B.4.2 Baselines
+We compare our proposed approach with the fol-
+lowing methods: (1) MTASK-RF (Ghazvininejad
+et al., 2018) is an early model for KGC using an
+independent dialogue encoder and fact encoder to
+encode utterance history and knowledge separately.
+(2)TMN (Dinan et al., 2019) is a transformer ver-
+sion of memory network. (3) VHRED(Zhao
+and Kawahara, 2021)is a variational hierarchical
+model with linear Gaussian prior and is trained with
+multiple augmented responses.(4) SKT (Kim et al.,
+2020)uses sequential latent variables to predict the
+grounding knowledge sentences at each turn. (5)
+CGRG (Wu et al., 2021)is a two-stage method
+that first predicts the control phrase and then gen-
+erates a response with a GPT-2 that is extended
+with inductive attention. (6) KnowledGPT (Zhao
+et al., 2020b)jointly trains a knowledge selector and
+a generator with the policy-gradient method and
+curriculum learning, achieving state-of-the-art per-
+formance on two benchmarks. (7) KTWM (Zheng
+et al., 2021)incorporates term-level denoising into
+the knowledge selection and generates a simu-
+lated response vector to determine the fine-grained
+weight of knowledge terms. (8) CoLV (Zhan et al.,
+2021) uses two latent variables to boost the diver-
+sity in knowledge selection and response genera-
+tion, respectively. (9) K2R (Adolphs et al., 2021)
+is a new method that first probes knowledge from
+a large-scale pre-trained language model and then
+generates a response with the context and probed
+knowledge.
+All baselines are implemented strictly following
+the official code and the original paper. Their pa-
+rameters are tuned to achieve the best results on the
+validation set.
+5 End-to-End Evaluation
+5.1 Evaluation Metrics
+We choose distinct (Li et al., 2015), entropy,
+BLEU (Papineni et al., 2002)and ROUGE (Lin,
+2004)to be our automatic metrics. BLEU and
+ROUGE evaluate the appropriateness of the pro-
+posed model while distinct and entropy focus on
+the diversity of generation.We measure both Inter-
+Dist (the distinct score of generated text in the1883
+whole dataset) and Intra-Dist (the averaged distinct
+score of multiple generated hypotheses for every
+single case)following Qiu et al. (2019). Apart
+from automatic evaluation, 300examples are ran-
+domly sampled from the General Test and well-
+educated native speakers are recruited to assess
+the quality of the generation from different models.
+Each annotators are required to given a score in
+{0 : bad ,1 : fair ,2 : good }for three aspects: (1)
+fluency : whether the reply is fluent; (2) coherence :
+whether the reply is coherent with the context; and
+(3)faithfulness : whether the reply is well-grounded
+and faithful to the clue. The agreement of annota-
+tors is measured via Fleiss’ kappa (Fleiss, 1971).
+5.2 Results and Discussions
+The automatic evaluation results on General Test
+are presented in Table 2. We can have the follow-
+ing observations: (1) Our model outperforms most
+of the baseline methods in both appropriateness
+and diversity, especially KnowledGPT, a compet-
+itive baseline in KGC, due to the more flexible
+grounding. To verify this point, we measure the
+unigram F1 between the chosen knowledge/span
+and the corresponding responses. The result is13.6%for KnowledGPT and 14.4%for ours. (2)
+CGRG and CoLV both achieve comparable distinct
+scores to ours, thanks to their control phrase and
+the latent variable in generation, respectively. (3)
+KTWM achieves a competitive appropriateness per-
+formance due to its fine-grained weight mechanism.
+But without consideration for the multi-reference
+scenario, it disproportionately attends to generic
+words, indicated by its poor diversity. (4) SKT and
+VHREDare V AE-based methods as well. SKT
+highly relies on ground-truth knowledge labels,
+which are not always available in KGC datasets.
+VHREDsupports multi-reference training but
+does not take external knowledge into account. Its
+poor performance reveals the necessity of a multi-
+reference KGC model.
+The automatic results on the Focused Test are
+shown in Table 3. When comparing Table 3 with
+Table 2, we could see a decline in appropriateness
+for nearly all methods and a drop or fluctuation in
+Intra-dist for three V AE-based models. We con-
+jecture the reason is that the case in the Focused
+Test is much more challenging and their responses
+are more semantically concentrated. The advan-
+tage of the proposed model over KnowledGPT is
+more obvious since KnowledGPT only considers1884
+the selection of knowledge at a coarse granularity.
+The performance of CGRG is impressive in dis-
+tinct and entropy with the help of control phrases.
+Conversely, K2R is low in diversity in both Gen-
+eral Test and Focused Test. We gauge that is be-
+cause of the knowledge module of K2R. It is in
+vanilla encoder-decoder architecture and is unable
+to generate diverse knowledge, thus limiting the
+hypothesis space of generation.
+The human evaluation results are displayed in
+Table 4.Notably, there is a significant improve-
+ment in faithfulness for the proposed model. We at-
+tribute this to the span mechanism as the semantics
+in a span are more concentrated. The kappa signi-
+fies the effectiveness of human evaluation. Also,
+we note that K2R is poor in faithfulness since its
+knowledge is generated and might suffer from hal-
+lucinations.
+A case study could be found in Appendix D.
+5.3 Ablation Study
+To understand the impact of each component, we
+compare the proposed model with several variants
+on General Test: (1) -span : the degenerated knowl-
+edge sentence selection version of our model.(2)
+-dis: the discrimination network is removed and
+our training objective is reduced to vanilla ELBO;
+(3)-rec: the Reconstruction reward is removed. (4)
+-ground : the Grounding reward is removed. Fromthe results presented in Table 5, we could observe
+that (1) The removal of the span mechanism causes
+a drop in appropriateness since the irrelevant parts
+in a complete knowledge passage bring noise to
+the model. (2) The discrimination network plays
+an important role in improving the diversity of the
+generation, indicated by the performance of -dis.
+It is reasonable since our AAELBO augments the
+original response set with unobserved responses.
+(3) Both reward components are crucial as the re-
+moval of any destroys the mapping relationship
+between grounding span and response, leading to a
+sub-optimal solution.
+6 One-to-Many Evaluation
+6.1 Evaluation Metrics
+One-to-many generalization pays attention to the
+diversity of a dialogue model. In KGC, the diver-
+sity originates from not only the synthesis process
+of the generator but also the knowledge selection
+process. Intra-Dist and Inter-Dist only evaluate the
+diversity of the end-to-end generation, thus are in-
+sufficient to measure the effect of each component.
+Inspired by Shen et al. (2019), we propose a series
+of metrics to fill in the gap: (1) The ratio of unique
+grounding : When conducting repetitive experi-
+ments, the ratio of unique knowledge (either in the
+forms of sentence or span) is selected.This met-
+ric measures the diversity in the grounding process.
+(2)The ratio of unique generation : When con-1885
+ducting repetitive experiments, the ratio of unique
+generated responses. This metric measures overall
+diversity. (3) The effect of grounding : When con-
+ducting repetitive experiments, the ratio of unique
+grounding to unique generation, or the ratio of (2)
+to (1). It measures the diversity contributed by the
+generator and the influence of the knowledge.
+6.2 Results And Discussions
+We choose two V AE-based methods SKT (Kim
+et al., 2020) and CoLV (Zhan et al., 2021) as our
+baseline and also include two variants of our ap-
+proach, namely -span and-dis. We note that -span
+accomplishes the best result in the effect of span
+and the result of SKT is very similar. That is be-
+cause their grounding is always a complete knowl-
+edge sentence, thus more influential and decisive
+when fed into the generator. This also accounts
+for the low ratio of the unique span since their
+decision space of knowledge selection is limited.
+Besides, when comparing -disand CoLV , which
+is also a span-based method, we could conclude
+that the latent variables of CoLV help to boost the
+generation diversity. Our method achieves the best
+results on the ratio of unique grounding and the
+effect of grounding, verifying the effectiveness of
+our proposed AAELBO.
+7 Conclusions
+We have shown that the proposed variational knowl-
+edge attention method is helpful to ground a dia-
+logue flexibly at different levels of granularity. Be-
+sides, we devise a wake-sleep style learning algo-
+rithm to adapt the original ELBO. And to enhance
+the mapping relationship between different spans
+and different responses, we ameliorate the original
+reward in REINFORCE (Williams, 1992) to adapt
+to the multi-reference scenario. We have demon-
+strated the efficacy of our model with extensive
+experiments.Limitations
+This paper has presented an approach to address the
+one-to-many generalization problem in KGC. All
+technologies built upon the large-scale PLM more
+or less inherit their potential harms (Bender et al.,
+2021). Besides, we acknowledge some specific
+limitations:
+(1) In the dataset collection, we use unigram-F1
+to measure the similarity between the response and
+the knowledge passage. This method is not exactly
+precise and could miss useful information or intro-
+duce unwanted noise. If the selected knowledge is
+not accurate, the response may contain extra hallu-
+cinations. To make up for that, we recruit crowd
+workers to control the quality of our dataset.
+(2) In the generation process, we sample a single
+span to ground. However, sometimes choosing
+multiple pieces of knowledge has the potential to
+include more useful information. If this is required,
+we could simply sample multiple times (Eq.11) to
+obtain multiple spans for grounding.
+Ethics Statement
+This paper studies knowledge-grounded conver-
+sation. We extend the existing paradigm to the
+multi-reference scenario, which is more practical
+in real-world settings. The dataset we constructed
+contains no personal identifiable information and
+the proposed approach does not introduce ethical
+or societal prejudice.
+Acknowledgements
+This work was supported by National Natu-
+ral Science Foundation of China (NSFC Grant
+No. 62122089 and No. 61876196), Bei-
+jing Outstanding Young Scientist Program NO.
+BJJWZYJH012019100020098, and Intelligent
+Social Governance Platform, Major Innovation
+& Planning Interdisciplinary Platform for the
+“Double-First Class” Initiative, Renmin University
+of China. This work was also supported in part by
+Independent Research Fund Denmark under agree-
+ment 8048-00038B. We wish to acknowledge the
+support provided and contribution made by Pub-
+lic Policy and Decision-making Research Lab of
+RUC. Rui Yan is supported by Beijing Academy of
+Artificial Intelligence (BAAI).1886References18871888A Derivation of ELBO
+Note that we use q(Z, Z)as a shorthand for
+q(Z, Z|R)to avoid cluttering. So finally we
+have:
+The likelihood term could be expanded as:
+EE[logp(R|Z, Z)]
+=EE
+/productdisplaylogp(r|Z, Z, r)
+(27)
+Note that the expectation above is with respect to
+the posterior q(Z, Z). With mean-field approxi-
+mation, we could assume that:
+q(Z, Z) =q(Z)q(Z) (28)
+So the second term could be rewritten as:
+BDataset Collection and Quality Control
+Conversations in Reddit follow the pattern of “ini-
+tialize new topic-comment-reply-new comment-
+new reply”, and is suitable to construct a
+multi-reference knowledge-grounded conversation
+dataset in nature. A message tree is parsed forevery post and every utterance is a node whose
+parent node is the comment it replies to and the
+root node is the initial utterance of the post host.
+A node and its all siblings are then viewed as
+multi-reference for a dialogue whose utterance his-
+tory is the path from the root node to its parent
+node. The knowledge is crawled from a website
+whose URL is provided by the initial post. Elab-
+orated cleaning and filtering are conducted to en-
+sure the quality of the dataset: (1) The length of
+response is no less than 6 tokens; (2) Only the
+knowledge sentence tagged as a paragraph in the
+website source code is kept; (3) The knowledge
+sentence in (2) should contain more than 15 tokens;
+(4) maxSim(R, K)≥0.1andn≥2,
+m≥3where n,mare the number of responses and
+the number of knowledge sentences in a case, re-
+spectively. The similarity function is implemented
+as the unigram F1, which is coincident with the
+tagging of the pseudo span label. The date of col-
+lected Reddit conversations ranges from 2011 to
+2017 following (Qin et al., 2019). The split of the
+dataset is based on date: January to June in 2012
+for validation, July to December in 2012 for test,
+and the rest for training. This test set is referred to
+as General Test in the main document.
+To harvest the Focused Test, the filtering
+process is more sophisticated. Except from
+the aforementioned rules, we require that: (5)
+arg maxSim(R, K) =j∀i∈ {1,2,···, n}.
+nis the number of responses in a case and jis the
+index of the collaborative attended knowledge. It
+means that all responses in a case are most similar
+to a single knowledge sentence, a much more chal-
+lenging situation for a knowledge-grounded con-
+versation model. However, using the lexical match
+to determine the groundings of the response is in-
+accurate. As a possible remedy, we hire Amazon
+Mechanical Turkannotators from native English-
+speaking countries with approval rates higher than
+95%. Each case meeting the above 5 rules is dis-
+tributed to three workers to examine whether the
+multiple responses in the dialogue are referred to
+the same knowledge sentences or not and the ma-
+jority of the labels are taken as the final decision.
+After the strict filtering and cleaning procedure, we
+finally get 833dialogues in the Focused Test.1889C Implementation Details
+During the development of this paper, we adjust
+the learning rate from 1e−6to1e−4and try batch
+sizes ranging from 16to128and finally set the
+batch size to be 32since it produces the best result
+in the validation set. A cosine learning schedule is
+applied to adjust the learning rate during training.
+We set the minimum learning rate to be 0in the
+cosine learning schedule. The gradient clip is
+set to 2.0to avoid the explosion of the gradient.
+All modules are optimized with Adam with the
+hyper-parameters β=0.9, β=0.999. When decod-
+ing, beam search is applied with a beam width of
+2. The length of the generated text is restrained
+in a range from 10to30. We set the repetition
+penalty to be 2.0. The discriminator network and
+the grounding reward network use BERTas
+backbone. The similarity score function s(·,·)is
+implemented as unigram F1 (Dinan et al., 2019)
+with the code shared at https://github.
+com/facebookresearch/ParlAI/blob/
+master/parlai/core/metrics.py . The
+hyper-parameter in training grounding reward
+network is µ= 1. We sweep the λandαfrom 1to
+10and0.5to2.5respectively. All experiments are
+performed on GTX 1080.
+D Case Study
+Table 7 shows an example from the General Test.
+From the case we could have an intuitive cognition
+about the superiority of our model over existing
+V AE-based methods. The proposed model is not
+only expert in broadly concentrating on different
+knowledge sentences but also good at discovering
+ample semantics within a single knowledge sen-
+tence. Thus it is competent in generating diverse
+and knowledgeable responses. In contrast, the re-
+sponses given by SKT and VHREDare either
+bland or tedious in semantics.18901891

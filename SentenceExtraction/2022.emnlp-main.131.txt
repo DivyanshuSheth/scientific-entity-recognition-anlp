@@ -1,1 +1,768 @@
-2023 Proceedings of the 2022 Conference on Empirical Methods in Natural Language Processing , pages 2023 2038 December 7 - 11 , 2022 © 2022 Association for Computational Linguistics 2024 2025 2026 2027 2028 2029 2030 2031 2032 2033 2034 2035 2036 2037 2038 
+
+Ming ZhongYang LiuDa YinYuning MaoYizhu Jiao
+Pengfei LiuChenguang ZhuHeng JiJiawei HanUniversity of Illinois at Urbana-ChampaignMicrosoft Cognitive Services ResearchUniversity of California, Los AngelesCarnegie Mellon University
+{mingz5, yuningm2, yizhuj2, hengji, hanj} @illinois.edu
+{yaliu10, chezhu} @microsoft.com da.yin@cs.ucla.edu pliu3@cs.cmu.edu
+Abstract
+Multi-dimensional evaluation is the dominant
+paradigm for human evaluation in Natural Lan-
+guage Generation (NLG), i.e., evaluating the
+generated text from multiple explainable di-
+mensions, such as coherence and fluency. How-
+ever, automatic evaluation in NLG is still dom-
+inated by similarity-based metrics, and we lack
+a reliable framework for a more comprehensive
+evaluation of advanced models. In this paper,
+we propose a unified multi-dimensional eval-
+uator UE for NLG. We re-frame NLG
+evaluation as a Boolean Question Answering
+(QA) task, and by guiding the model with dif-
+ferent questions, we can use one evaluator to
+evaluate from multiple dimensions. Further-
+more, thanks to the unified Boolean QA format,
+we are able to introduce an intermediate learn-
+ing phase that enables UE to incorporate
+external knowledge from multiple related tasks
+and gain further improvement. Experiments on
+three typical NLG tasks show that UE
+correlates substantially better with human judg-
+ments than existing metrics. Specifically, com-
+pared to the top-performing unified evaluators,
+UE achieves a 23% higher correlation
+on text summarization, and over 43% on di-
+alogue response generation. Also, UE
+demonstrates a strong zero-shot learning abil-
+ity for unseen evaluation dimensions and tasks.
+Source code, data and all pre-trained evaluators
+are available on our GitHub repository.
+1 Introduction
+The rapid development of Natural Language Gen-
+eration (NLG) tasks with the support of pre-trained
+language models (Raffel et al., 2020; Brown et al.,
+2020; Lewis et al., 2020) calls for a higher qual-
+ity evaluation of generated texts. However, the
+evaluation process is still dominated by traditional
+similarity-based metrics (Kasai et al., 2021), ex-
+emplified by ROUGE (Lin, 2004) and BLEU (Pa-
+pineni et al., 2002) that compute n-gram overlapbetween the model output and the reference text.
+These metrics are potentially misleading as NLG
+models have advanced to the point where discrep-
+ancies between them are unlikely to be detected
+based on surface-level features (Gehrmann et al.,
+2022). Although using pre-trained models to obtain
+embedding-based similarity may alleviate this is-
+sue (Zhang et al., 2019), these metrics still naturally
+lead to the question: does similarity to reference
+text indicate the overall quality of model output?
+Belz and Gatt (2008) referred to this similarity as
+“human-likeness” and pointed out that the ability
+to output human-like text may be completely unre-
+lated to the final performance on generation tasks.
+Realizing that creating a one-size-fits-all score
+is infeasible, subsequent research has focused on
+a more comprehensive multi-dimensional evalua-
+tion for NLG tasks. It aims to evaluate the model
+output from multiple explainable dimensions and
+has been the dominant paradigm in human evalu-
+ation (Fabbri et al., 2021). For example, text sum-
+marization typically uses four dimensions for eval-
+uation:coherence ,consistency ,fluency , and
+relevance (see Table 1). One way to achieve this
+fine-grained evaluation is to develop multiple eval-
+uators dedicated to every single dimension (Dziri
+et al., 2019; Kry ´sci´nski et al., 2020). However,
+it requires extensive effort to individually select
+and train an evaluator for each dimension when
+conducting multi-dimensional evaluations. On the
+other hand, several studies worked on building a
+unified evaluator, i.e., a single model that can pro-
+duce multiple metrics (e.g., precision and recall)
+for the generated text (Yuan et al., 2021). Never-
+theless, their evaluation scores cannot be directly
+aligned with the dimensions designed in human
+evaluation (e.g., consistency andcoherence ).
+In this paper, we propose a unified multi-
+dimensional evaluator UE for text genera-
+tion tasks. UE unifies all evaluation dimen-
+sions into a Boolean Question Answering (QA)2023
+problem (Clark et al., 2019a), thus enabling the
+evaluation of the generated text from different per-
+spectives using only a single model. For instance,
+UE can evaluate coherence in summariza-
+tion by inputting a specific question, such as “Is
+this a coherent summary to the document?” . More-
+over, thanks to the unified Boolean QA format, we
+are able to perform an intermediate training stage
+on four types of tasks related to NLG evaluation.
+This can be crucial for evaluation quality, since
+we lack large-scale human scores of model outputs
+to train an evaluator, a unified format that encom-
+passes diverse existing tasks (namely, intermediate
+tasks) can substantially help UE incorporate
+external knowledge related to NLG evaluations.
+Specifically, a unified framework can bring the
+following benefits:
+1)Ease of use . One model is sufficient, without
+the effort of picking multiple appropriate single-
+dimensional evaluators for all the dimensions.
+2)Internal complementarity . Different dimen-
+sions in the same NLG task can be closely related
+to each other, so it is useful to perform joint training
+for these dimensions to share knowledge.
+3)External knowledge incorporation . The uni-
+fied Boolean QA format makes it possible to en-
+hance the pre-trained language model by multi-task
+learning on diverse and relevant intermediate tasks
+before being trained on evaluation tasks.
+4)Extensibility and transferability . A unified
+evaluator can achieve better extensibility and trans-
+ferability with continual learning (Parisi et al.,2019) or prompting (Liu et al., 2021b; Chen et al.,
+2022), as it can accommodate more evaluation di-
+mensions by modifying the input question.
+Experimentally, UE surpasses advanced
+evaluators by a large margin when evaluating three
+typical NLG tasks. Concretely, compared to the
+best unified evaluators (Yuan et al., 2021; Mehri
+and Eskenazi, 2020), UE improves the cor-
+relation with human judgment by 23% on text sum-
+marization, and the improvement exceeds 43% on
+dialogue response generation. Ablation studies ver-
+ify the effectiveness of our intermediate tasks. We
+also conduct transfer experiments and show that
+UE achieves better performance compared
+with strong baseline metrics on unseen dimensions
+and NLG tasks in a zero-shot setting.
+2 Related Work
+Similarity-based Metrics Similarity-based met-
+rics refer to the scores for evaluating the NLG mod-
+els by measuring the similarity between a generated
+text and a reference text. They can be divided into
+lexical overlap-based (Papineni et al., 2002; Lin,
+2004; Banerjee and Lavie, 2005) as well as con-
+textualized embedding-based (Zhang et al., 2019;
+Zhao et al., 2019; Clark et al., 2019b) evaluators.
+Although more than 60% of recent NLG papers
+solely use ROUGE or BLEU as the evaluation met-
+ric (Kasai et al., 2021), they fail to measure con-
+tent quality (Reiter and Belz, 2009) and syntactic
+correctness (Stent et al., 2005), and are thus insuffi-
+cient to portray the reliability of NLG systems.2024Single-dimensional Evaluator To conduct more
+fine-grained evaluations for NLG, recent studies
+develop evaluators for a specific dimension, such as
+consistency in summarization (Kry ´sci´nski et al.,
+2020; Wang et al., 2020; Cao et al., 2020; Dur-
+mus et al., 2020) and coherence in dialogue re-
+sponse generation (Dziri et al., 2019; Huang et al.,
+2020; Ye et al., 2021). These evaluators can help us
+better understand the characteristics of advanced
+NLG models from different perspectives. However,
+considering that most dimensions currently have
+no corresponding standard evaluators, solely using
+multiple single-dimensional evaluators to perform
+multi-dimensional evaluation is hard to achieve.
+Unified Evaluator Several recent evaluators can
+predict multiple numbers for evaluating text by
+using different input and output contents (Yuan
+et al., 2021), multiple model variants (Mehri and
+Eskenazi, 2020), or different formulas (Scialom
+et al., 2021), and we refer to them as unified evalu-
+ators. These evaluation scores usually have no cor-
+responding explanations or are simply categorized
+as precision, recall, and F, which poses difficul-
+ties in how to use them. Therefore, we propose a
+unified multi-dimensional evaluator in this paper,
+which attempts to align the evaluation scores with
+different dimensions in human evaluation.
+3 Method
+In this section, we first introduce how to formulate
+multi-dimensional evaluation as a unified Boolean
+QA problem, and then describe in detail the train-
+ing paradigm for UE.
+3.1 Problem Formulation
+Multi-dimensional evaluation of NLG requires to
+evaluate nparticular dimensions d= (d, . . . , d)
+of the model output, and the input can include
+the candidate output x, reference text y, and con-
+textc.yis removed when evaluating reference-
+independent dimensions, such as consistency in
+summarization. Depending on the specific gener-
+ation task, ccan contain different content or even
+be omitted. Evaluators need to evaluate the quality
+of the model output on each dimension and output
+scores s= (s, . . . , s)for all the dimensions.
+To unify all evaluation dimensions into one eval-
+uator, we transform each dimension into a Boolean
+question q. For example, for d=coherence in
+summarization, the transformed question qis“Is
+this a coherent summary to the document?” . Thenfor each input (x, y, c, q), evaluator should output
+“Yes” or “No” and calculate sas:
+s=P(“Yes” |x, y, c, q)
+P(“Yes” |x, y, c, q) +P(“No”|x, y, c, q),
+(1)
+where P(·)denotes the probability of the model
+generating a specific word. In this way, a single
+evaluator can evaluate xof all dimensions by mod-
+ifying the question description.
+3.2 Unsupervised Learning on Multiple
+Evaluation Dimensions
+Since annotating large-scale human scores to judge
+the quality of the generated text is unaffordable,
+we adopt an unsupervised setting to develop our
+evaluator. Using T5 (Raffel et al., 2020) as the
+backbone model, we first design specific rules for
+several commonly evaluated dimensions to con-
+struct pseudo data, and then combine them to train
+the evaluator.
+Pseudo Data Construction To train an evaluator,
+we need to construct positive and negative samples
+for different dimensions. The former implies high-
+quality generated text, so we use groundtruth such
+as the reference summary in summarization. Then
+we propose particular rules for each dimension to
+convert positive samples into negative ones.
+Taking text summarization as an example, the
+specific rule-based transformations are as follows:
+1)Coherence refers to whether all the sentences
+form a coherent body. To build incoherent sum-
+maries, we use BM25 (Robertson and Zaragoza,
+2009) to retrieve similar summaries, and randomly
+select a sentence from the retrieved summary to re-
+place one of the sentences in groundtruth summary.
+2)Consistency is the factual alignment between
+the summary and the source document. We use the
+method in Chen et al. (2021) to construct inconsis-
+tent summaries by antonym substitution, numerical
+editing, entity replacement, and syntactic pruning.
+3)Fluency represents the quality of individual sen-
+tences. We randomly draw a spanfrom the posi-
+tive sample and perform one of repeating, deleting,
+and shuffling to obtain the disfluent summaries.
+4)Relevance means whether the summary con-
+tains only the important information of the source2025
+document. The transformation rule is similar to co-
+herence, except that we replace multiple sentences
+at random instead of one.
+We include the designed rules for other NLG
+tasks in Appendix A.2. The detailed descriptions
+and concrete examples for all dimensions can also
+be found in Appendices A.1 and A.3.
+Training Strategy For each generation task, we
+attempt to build a single evaluator to evaluate the
+NLG model from different dimensions. A straight-
+forward approach is to perform multi-task learn-
+ing on synthetic data of all dimensions to obtain a
+unified evaluator. However, we observe the nega-
+tive transfer problem in several dimensions (e.g.,
+coherence in summarization and engagingness
+in dialogue generation, see Tables 3 and 4). To
+tackle this issue, we employ a simple and effective
+method from continual learning (Parisi et al., 2019):
+whenever a new dimension is introduced, we add
+small portion of data from all previous dimensions
+to replay. The benefit is that we can easily extend
+our evaluator to new dimensions without training
+from scratch. Moreover, this method enables to
+explicitly learn dimensions related to linguistic fea-
+tures (e.g., fluency ) first, and then move on to the
+dimensions that require a better understanding of
+the text (e.g., consistency ). We show that this
+sequential training approach can alleviate the nega-
+tive transfer problem in Section 4.3.3 Intermediate Multi-task Learning
+Benefiting from the unified Boolean QA format, we
+can additionally introduce intermediate tasks for
+UE to incorporate external knowledge from
+existing related datasets. As shown in Figure 1, this
+stage is placed before the unsupervised learning on
+evaluation tasks. Notably, the input here is (c, q),
+which no longer includes the candidate output x
+and the reference text y. In total, we collect four
+types of intermediate tasks as follows.
+Natural Language Inference. The task of NLI
+is to determine whether a “hypothesis” is true (en-
+tailment), false (contradiction), or undetermined
+(neutral) under a “premise”. We transform the NLI
+task into a question: “ Is this hypothesis entailed
+in the premise? ”, and only convert entailment into
+the label “Yes” and the rest to “No”. The context c
+consists of a hypothesis and a premise. We use the
+following three datasets: document-level NLI (Yin
+et al., 2021), MRPC corpus (Dolan and Brockett,
+2005) and QQP (Wang et al., 2017).
+Self-Supervised Task. Based on the classical next
+sentence prediction task (Devlin et al., 2019), we
+propose a new opening sentence prediction task .
+The goal of this task is to determine whether a sen-
+tence is the starting sentence of a given news article.
+The motivation is that the first few sentences in the
+news tend to be salient and informative (See et al.,
+2017; Zhong et al., 2019), so it allows the model
+to learn inter-sentence coherence while also captur-2026
+ing the central idea of the document. We sample
+news from the CNN/DailyMail news corpus (Her-
+mann et al., 2015) and randomly select the opening
+sentence of other news as negative samples.
+Linguistics-Related Task. To facilitate the incor-
+poration of linguistic knowledge into the unified
+model, we also include CoLA dataset (Warstadt
+et al., 2019) as the linguistic task. This requires the
+model to judge whether a sentence is linguistically
+acceptable, so the input question is: “ Is this a fluent
+and linguistically acceptable sentence? ”.
+Generic QA. We collect the existing Boolean
+QA datasets: BoolQ (Clark et al., 2019a), BoolQ-
+NP (Khashabi et al., 2020), BoolQ-CS (Gardner
+et al., 2020), StrategyQA (Geva et al., 2021), and
+extract the questions in MultiRC dataset (Khashabi
+et al., 2018) that can be answered with Yes/No as
+the data for generic QA task. Introducing these
+diverse question descriptions enables the model
+to better understand the importance of question in
+the input format as well as incorporate more open-
+ended external knowledge.
+The statistics of data can be found in Table 2 and
+concrete examples for each task are also provided
+in Appendix B. Since this phase is not related to the
+evaluation metric, we train the model with cross-
+entropy loss without computing s.
+4 Experiments
+Following Deng et al. (2021), we classify NLG
+tasks into three types: compression, creation, and
+transduction, and select typical tasks from each
+category to conduct experiments. For compres-
+sion and creation, we choose summarization and
+dialogue response generation to measure the per-
+formance of UE, as well as the ability to
+zero-shot to unseen dimensions. For transduction,
+we select data-to-text to test whether UEhas
+the ability to transfer to a new NLG task.4.1 Implementation Details
+We use “google/t5-v1_1-large” version of T5
+as the backbone model in all the experiments.
+The number of pseudo samples for each di-
+mension is 30k, with an equal number of pos-
+itive and negative examples. The order for
+continual learning is coherence →fluency
+→consistency →relevance for summa-
+rization, and coherence →naturalness →
+groundedness →engagingness for dialogue
+generation. For the score calculation, we follow
+previous work to compute sentence-level average
+scores for fluency andconsistency (Laban et al.,
+2021) in summarization, and sentence-level cumu-
+lative scores for engagingness (Deng et al., 2021),
+while the rest is calculated as Equation 1. More
+details can be found in Appendix C.
+4.2 Baselines
+We compare UEwith several state-of-the-art
+evaluators. Notably, all the single-dimensional and
+unified evaluators are built on the same corpus.
+BERTScore (Zhang et al., 2019) is a similarity-
+based evaluator. It computes the similarity between
+two text sequences based on the contextualized
+embedding obtained by BERT (Devlin et al., 2019).
+MoverScore (Zhao et al., 2019) adds many-to-
+one alignment to BERTScore and introduces new
+aggregation methods to achieve a more powerful
+similarity-based evaluator.
+CTC (Deng et al., 2021) utilizes information
+alignment to define metrics for several specific di-
+mensions in NLG tasks, and proposes three model
+variants for each dimension. We compare the best
+variants of CTC in each dimension as the single-
+dimensional evaluators in our experiments.
+BARTScore (Yuan et al., 2021) is a unified eval-
+uator which uses average likelihood of the model
+output as the metric. It can predict different scores
+depending on the different input and output. We
+follow the original paper using c→xas the score
+forcoherence ,consistency andfluency , and
+x→yas the score for relevance .
+USR (Mehri and Eskenazi, 2020) is a unified
+evaluator designed for dialogue response genera-
+tion task. It uses different variants (e.g., MLM,
+dialogue retrieval and overall metric) to predict
+multiple scores for each generated response. We
+choose the score with the best correlation for each
+dimension for comparison in the experiments.2027
+4.3 Benchmarks
+We adopt four meta-evaluation benchmarks for var-
+ious NLG tasks to measure the correlation between
+UE and human judgments.
+SummEval (Fabbri et al., 2021) is a meta-
+evaluation benchmark for summarization. For
+each summary to be evaluated, it provides hu-
+man scores from four dimensions: fluency ,
+coherence ,consistency andrelevance . We
+use it to measure the performance of UE.
+Topical-Chat (Mehri and Eskenazi, 2020) is
+a benchmark for knowledge-based dialogue re-
+sponse generation task. It includes human
+scores from five dimensions: naturalness ,
+coherence ,engagingness ,groundedness and
+understandability. The first four dimensions
+are used to measure the performance of UE,
+and the last one is used for the transfer experiment.
+SFRES andSFHOT (Wen et al., 2015) are meta-
+evaluation benchmarks for data-to-text task. They
+provide information about restaurants and hotels
+in San Francisco and aim to let the model gener-
+ate corresponding utterances. We leverage the an-
+notations of informativeness andnaturalness
+dimension to conduct transfer experiment.
+QAGS (Wang et al., 2020) is also a bench-mark for summarization. It is designed to detect
+consistency dimension on two summarization
+corpora (Narayan et al., 2018). We use it to test the
+performance of the single-dimensional version of
+UE, and the results are listed in Appendix D.
+4.4 Results For Summarization
+Following Liu et al. (2021a), we use summary-level
+Spearman and Kendall-Tau correlation to assess the
+performance of different evaluators for summariza-
+tion. Results of similarity-based metrics are listed
+in the first part of Table 3. They are designed to
+measure the semantic overlap between the model
+output and the reference text, so they can obtain
+relatively high correlations in relevance dimen-
+sion. However, they are not qualified metrics for
+the other dimensions due to the poor correlation.
+The second part contains the results of single-
+dimensional evaluators. CTC is currently the best
+evaluators of consistency andrelevance , but it
+fails to excel on coherence andfluency . Here we
+also adapt UE to several single-dimensional
+variants by training the model on pseudo data of
+only one dimension. Our proposed evaluators ex-
+ceed CTC models and achieve the best correla-
+tion in all dimensions. It reveals that our proposed
+Boolean QA formulation can clearly enhance the
+backbone pre-trained model. Furthermore, we at-
+tempt to transfer the single-dimensional evalua-
+tors to other dimensions, and the underlined num-2028
+bers in Table 3 are transferred results. Overall
+UE is better than CTC, but we can see that
+no single-dimensional evaluator can transfer well
+to all dimensions. For example, both consistency
+⇒coherence andfluency ⇒relevance exhibit
+poor correlations, indicating that evaluators that
+focus solely on a single evaluation dimension lack
+acceptable transfer capability.
+As shown in the last part, UE substan-
+tially surpasses the state-of-the-art unified evalua-
+tor BARTScore in the summarization task. Specif-
+ically, UE trained by multi-task learning
+brings an average improvement of more than 15%
+across all dimensions compared to BARTScore.
+And this gain is boosted to more than 23% by
+adapting continual learning in the unsupervised
+learning phase. The main gap between the two
+training strategies of UE is the negative
+transfer on coherence , which clarifies that explic-
+itly learning basic language features before learn-
+ing more complex dimensions can alleviate this
+problem. It is also notable that compared with
+its single-dimensional version, the unified version
+ofUE is improved in both coherence and
+fluency , while having a slight decrement in the
+other two dimensions. This suggests that follow-
+ing continual learning, we can sequentially extend
+our evaluator to a new dimension while preserving
+the performance on previous dimensions. More-over, the clear performance drop after removing
+the intermediate tasks in the last row illustrates the
+importance and usefulness of this phase.
+4.5 Results For Dialogue Generation
+To test the performance of different evaluators on
+the dialogue response generation task, we compute
+turn-level Pearson and Spearman correlation on
+the Topical-chat benchmark as in Mehri and Eske-
+nazi (2020). Table 4 presents that similarity-based
+metrics correlate relatively well on engagingness
+andgroundedness while performing poorly on the
+remaining dimensions. With respect to the single-
+dimensional evaluator, we can reach the same con-
+clusion as for the summarization task: the scores
+predicted by UEhave the highest correlation
+with human judgments in all dimensions.
+Compared to USR, the state-of-the-art unified
+evaluator in the dialogue response generation
+task, our evaluator demonstrates more remark-
+able boosts. According to Pearson and Spearman
+correlation, UE (Continual) improves the
+results by an average of 48.9% and 43.2%, re-
+spectively. In comparison with the corresponding
+single-dimensional version, although there is a per-
+formance loss in naturalness ,UE(Contin-
+ual) brings improvements in the remaining dimen-
+sions based on Spearman correlation. Especially
+forgrounedness , the unified version increases the
+correlation by 12.5% (0.511 ⇒0.575) compared2029
+Pearson Spearman
+to the single-dimensional version. Meanwhile, in-
+termediate tasks also display an indispensable role
+in evaluating dialogue generation, indicating that
+its benefits can span a variety of NLG tasks.
+4.6 Transfer Experiments
+We perform two zero-shot experiments to exhibit
+the transfer ability of UE.
+Zero-shot to Unseen Dimension To meet the
+requirements of different users, new evaluation di-
+mensions often emerge for particular NLG tasks.
+For instance, certain users may prefer a new
+“understandability” dimension over other di-
+mensions for the dialogue generation task. There-
+fore, we conduct experiments on the Topical-
+chat meta-evaluation benchmark to observe if
+UEhas the transfer capability in this sce-
+nario. Concretely, we adjust the input question
+to“Is this an understandable response in the dia-
+logue?” , and calculate the metric based on Equa-
+tion 1. As shown in Figure 2, although UE
+has not seen or been trained on this dimension be-
+fore, its predicted score still correlates well with
+human judgments. It even outperforms the best
+USR metric for both Pearson (0.326 ⇒0.380) and
+Spearman (0.327 ⇒0.468) correlations, which de-
+notes that UE is capable of transferring to
+unseen dimensions by modifying the prompt.
+Zero-shot to Unseen Task In a more radical set-
+ting, we also transfer UE to a new NLG
+task of data-to-text generation in the zero-shot set-
+ting. As annotated in the SFRES and SFHOT
+benchmarks, users emphasize the naturalness
+andinformativeness of the generated utterance
+for this task. Therefore, we adapt the question to
+“Is this a fluent utterance? ” and “ Is this sentence
+informative according to the reference? ” to predict
+the evaluation scores for these two dimensions. “T5
++ intermediate” in Table 5 represents the model ob-
+tained after the intermediate multi-learning stage.
+While it has not been trained on any evaluation
+tasks, it performs on par with BARTScore based
+on average correlations and is particularly good at
+evaluating the naturalness of utterances. After
+training on multiple evaluation dimensions on sum-
+marization, UE (Summ)demonstrates bet-
+ter transfer ability and superior performance over
+BARTScore in most dimensions of both datasets.
+This illustrates the capability of UE to trans-
+fer to new NLG tasks without further adaptation.
+4.7 Ablation Study of Intermediate Tasks
+We conduct ablation studies on the single-
+dimensional version of UE to better investi-
+gate the contribution of each type of intermediate
+task to NLG evaluation. The results of Spearman
+correlation are presented in Table 6. Because of the
+similar task requirements, NLI contributes most
+toconsistency , while our proposed opening sen-
+tence prediction task facilitates the evaluator to
+capturecoherence between sentences. Due to the
+small data size of the linguistics-related task (see
+Table 2), removing it does not have a significant
+impact on the performance, but it can still help the2030model better understand fluency of individual sen-
+tences. Generic QA enhances each dimension by
+engaging the evaluator to focus on the meaning of
+the input question. Overall, training on the combi-
+nation of all four types of intermediate tasks leads
+to the best NLG evaluation performance.
+5 Conclusion
+In this paper, we emphasize the necessity of multi-
+dimensional evaluation in advancing the field of
+NLG. To promote this comprehensive and fine-
+grained evaluation approach, we propose a unified
+multi-dimensional evaluator UE for various
+NLG tasks. UE correlates well with human
+judgment on three typical generation tasks and ex-
+hibits excellent transfer performance.
+Limitations
+We state the limitations of this paper from the fol-
+lowing four aspects:
+1) Most of the current evaluators, including
+UE, are black-box models. With the sup-
+port of pre-trained language model, even though
+the neural evaluators can already correlate well
+with human judgments, it is still unclear how the
+model predicts these evaluation scores. Therefore,
+a better understanding of the evaluation process
+of different evaluators or the development of an
+interpretable and multi-dimensional evaluator may
+be the next stage for improving NLG evaluation.
+2) Most of the neural evaluators are trained on
+synthetic data, while the pseudo data constructed
+in this paper still contain noise. For instance, for
+fluency in summarization, removing an unimpor-
+tant span may not affect the fluency of the sentence,
+but we always treat the sentence after deleting as a
+negative sample. Thus, how to improve the quality
+of synthetic data could be an interesting topic.
+3) We only use T5-large as the backbone model
+in the experiments due to the limited computational
+resources. How to extend the use of neural eval-
+uators by using smaller models but retaining sim-
+ilar performance, or how to introduce more data
+to build larger evaluators with better performance,
+could be two future research directions.
+4) We follow the categorization of NLG tasks
+in Deng et al. (2021) and select three typical tasks
+for our experiments, but UE is still limited
+to English tasks. The generation tasks for cross-
+language scenarios are left for our future work.Acknowledgements
+We thank Weizhe Yuan, Mingkai Deng, Yu Meng,
+Hou Pong Chan, Dan Iter and Reid Pryzant for help-
+ful discussions and feedback. We would also like to
+thank anonymous reviewers for valuable comments
+and suggestions. Research was supported in part by
+US DARPA KAIROS Program No. FA8750-19-2-
+1004 and INCAS Program No. HR001121C0165,
+National Science Foundation IIS-19-56151, IIS-17-
+41317, and IIS 17-04532, and the Molecule Maker
+Lab Institute: An AI Research Institutes program
+supported by NSF under Award No. 2019897, and
+the Institute for Geospatial Understanding through
+an Integrative Discovery Environment (I-GUIDE)
+by NSF under Award No. 2118329. Any opinions,
+findings, and conclusions or recommendations ex-
+pressed herein are those of the authors and do not
+necessarily represent the views, either expressed or
+implied, of DARPA or the U.S. Government. The
+views and conclusions contained in this paper are
+those of the authors and should not be interpreted
+as representing any funding agencies.
+References2031203220332034A Dimensions in Evaluation tasks
+A.1 Explanation of Each Dimension
+We introduce different dimensions for text sum-
+marization in Section 3.2. Here we include the
+detailed descriptions of different dimensions in di-
+alogue response generation and data-to-text tasks.
+For dialogue response generation (Mehri and
+Eskenazi, 2020):
+•1)Naturalness : judge whether a response is
+like something a person would naturally say
+•2)Coherence : determine whether this re-
+sponse serves as a valid continuation of the
+previous conversation.
+•3)Engagingness : determine if the response
+is interesting or dull.
+•4)Groundedness : given the fact that this re-
+sponse is conditioned on, determine whether
+this response uses that fact.
+•5)Understandability : judge whether the
+response is understandable.
+For data-to-text (Wen et al., 2015):
+•1)Naturalness : determine whether the utter-
+ance could plausibly have been produced by a
+human.
+•2)Informativeness : determine whether the
+utterance contains all the information in the
+given content.
+A.2 Pseudo Data Construction for Dialogue
+Response Generation
+We produce pseudo data for the four dimensions of
+the dialogue response generation task as follows:
+•1)Naturalness : similar to fluency in sum-
+marization, except that we modify λto 3.
+•2)Coherence : we randomly select gold re-
+sponse from other dialogues as the negative
+samples.
+•3)Engagingness : responses that are not en-
+gaging are dull and uninformative (Mehri
+and Eskenazi, 2020). So we let DialogGPT-
+small (Zhang et al., 2020) generate response
+given just one sentence, thus creating unattrac-
+tive samples.•4)Groundedness : this dimension is used to
+measure how well the response refers to the
+knowledge context in knowledge-based con-
+versations (Dinan et al., 2019). Therefore, we
+randomly extract a sentence from the current
+knowledge context and use a paraphrase gen-
+eratorto rewrite it as a positive example, and
+sample a sentence from other knowledge con-
+texts as a negative example.
+A.3 Examples for Evaluation Tasks
+We provide the concrete examples for dif-
+ferent dimensions of evaluation tasks in Ta-
+ble 7. All the pseudo data is constructed on
+the CNN/DailyMail (Hermann et al., 2015) and
+Topical-Chat (Gopalakrishnan et al., 2019) corpus.
+We input reference text y(green text) to the model
+only when evaluating the relevance dimension in
+text summarization, while in the other dimensions
+UE is a reference-free evaluator. Depending
+on the specific dimension, we feed the model with
+different contexts c. In addition, We use “\n” to
+separate the different turns in the dialogue history
+and end it with “\n\n”.
+B Examples for Intermediate Tasks
+We also include the examples for each intermediate
+task in Table 8. We define the input as a (c, q)pair
+and let the model answer with “Yes” or “No”.
+C Implementation Details
+We first train T5 on intermediate tasks for 2 epochs.
+For the evaluation tasks, we construct pseudo data
+on the CNN/DailyMail (Hermann et al., 2015)
+and Topical-Chat corpus (Gopalakrishnan et al.,
+2019) for summarization and dialogue generation,
+respectively. The number of samples for each di-
+mension is 30k, with an equal number of positive
+and negative examples. We set batch size to 36
+and the maximum learning rate to 5e-5 for both
+stages. Regarding continuous learning, we ran-
+domly select 20% of the data from the previously
+learned tasks to replay. The order is coherence
+→fluency →consistency →relevance for
+summarization, and coherence →naturalness
+→groundedness →engagingness for dialogue
+generation. Considering the difference in learning
+difficulty, we train 0.2-2.0 epochs for each dimen-
+sion. And for multi-task learning in the evaluation203520362037
+tasks, we train the evaluator for 1-3 epochs in differ-
+ent NLG tasks. We train UE on two A6000
+GPUs for a total of 5 hours. If the meta-evaluation
+benchmark contains multiple references, we only
+use the first one as input.
+In addition, although we can compute the scores
+for all dimensions directly from Equation 1, we
+slightly modify the score calculation for several
+certain dimensions due to their characteristics. For
+example, for fluency andconsistency in sum-
+marization, disfluency and inconsistency are usu-
+ally detected using sentences as the basic unit (Fab-
+bri et al., 2021; Laban et al., 2021), so we split the
+model output xinto several sentences and calculate
+the score sforj-th sentence as:
+s=P(“Yes” |x, y, c, q)
+P(“Yes” |x, y, c, q) +P(“No”|x, y, c, q).
+(2)
+Then the final score for xin these two dimen-
+sions is s=/summationtexts/m, where mis the number
+of sentences in x. Another special dimension is
+engagingness in dialogue generation. Since it
+indicates the total volume of interesting facts pre-
+sented in the response (Deng et al., 2021), we use
+the summation to compute it as s=/summationtexts.
+Therefore, the scoring range for engagingness is
+[0,+∞), while all others are [0, 1].
+D Results on QAGS
+Advanced NLG models suffer from the problem of
+generating text that is inconsistent with the source
+document (Cao et al., 2018), which has led recent
+research to develop evaluators for evaluating theconsistency dimension in summarization (Kry ´s-
+ci´nski et al., 2020; Wang et al., 2020; Cao et al.,
+2020; Durmus et al., 2020). Therefore, we partic-
+ularly compare the single-dimensional version of
+UE forconsistency with the state-of-the-
+art factuality checkers.
+We conduct experiments on the QAGS meta-
+evaluation benchmark, which contains two differ-
+ent summarizaion corpus: CNN/DailyMail (Her-
+mann et al., 2015) and XSum (Narayan et al., 2018).
+As shown in Table 9, BARTScore performs best
+on the more extractivepart (QAGS-CNN), but
+shows poor correlation on the more abstractive
+subset (QAGS-Xsum). UE (Consistency)
+correlates well in both parts of the data, especially
+in the more challenging Xsum dataset, greatly out-
+performing all previous consistency detectors. On
+average, UE (Consistency) outperforms the
+state-of-the-art evaluator CTC by more than 30%
+based on Spearman and Kendall-Tau correlations.
+Thus, a high-performance single-dimensional eval-
+uators can also be developed under our proposed
+framework.2038

@@ -1,1 +1,699 @@
-2982 Proceedings of the 2022 Conference of the North American Chapter of the Association for Computational Linguistics : Human Language Technologies , pages 2982 2995 July 10 - 15 , 2022 © 2022 Association for Computational Linguistics 2983 2984 2985 2986 2987 2988 2989 2990 2991 2992 2993 2994 2995 
+
+Quanyu Long, Tianze Luo, Wenya Wang andSinno Jialin Pan
+Nanyang Technological University, Singapore
+{quanyu001, tianze001, wangwy, sinnopan}@ntu.edu.sg
+Abstract
+In this work, we study Unsupervised Do-
+main Adaptation (UDA) in a challenging self-
+supervised approach. One of the difficulties
+is how to learn task discrimination in the ab-
+sence of target labels. Unlike previous litera-
+ture which directly aligns cross-domain distri-
+butions or leverages reverse gradient, we pro-
+pose Domain Confused Contrastive Learning
+(DCCL) to bridge the source and the target do-
+mains via domain puzzles, and retain discrim-
+inative representations after adaptation. Tech-
+nically, DCCL searches for a most domain-
+challenging direction and exquisitely crafts do-
+main confused augmentations as positive pairs,
+then it contrastively encourages the model to
+pull representations towards the other domain,
+thus learning more stable and effective domain
+invariances. We also investigate whether con-
+trastive learning necessarily helps with UDA
+when performing other data augmentations. Ex-
+tensive experiments demonstrate that DCCL
+significantly outperforms baselines.
+1 Introduction
+Pre-trained language models (Devlin et al., 2019;
+Liu et al., 2019; Yang et al., 2019) have yielded
+considerable improvements with datasets drawing
+from various sources. However, the lack of porta-
+bility of language model to adapt to a new textual
+domain remains a central issue (Gururangan et al.,
+2020), especially when the training set and testing
+set do not follow the same underlying distribution
+(changing of topic and genres) - usually referred to
+as domain shift. In this paper, we focus on studying
+Unsupervised Domain Adaptation (UDA). UDA
+aims at designing adaptation algorithms that at-
+tempt to generalize well on the target domain by
+learning from both labeled samples from the source
+domain and unlabeled samples from the target do-
+main. Studying UDA fits real-world scenarios since
+labeled data in the target domain is usually absent.
+Moreover, advances in UDA will also help out-of-Figure 1: Domain puzzles that are domain-confused
+and overlook domain-related information, could be re-
+garded as lying in an intermediate domain that aims to
+pull source and target samples closer to each other and
+bridge the two domains by learning domain invariant
+representations.
+distribution generalizations (Ramponi and Plank,
+2020; Krueger et al., 2021).
+Extensive algorithms have been proposed to miti-
+gate the domain shift problem, for example, domain
+adversarial neural network (DANN) (Ganin et al.,
+2016) and distribution matching (Zhuang et al.,
+2015). For DANN, the training process of joint
+optimization is unstable, requiring extensive effort
+to tune the hyperparameters (Shah et al., 2018; Du
+et al., 2020; Karouzos et al., 2021). As for distri-
+bution matching, it is very difficult to preserve the
+discriminative power of the model on the target task
+while trying to perform instance level alignment
+(Saito et al., 2017; Lee et al., 2019). To this end,
+it is essential to develop stable and effective solu-
+tions to learn domain invariance and instance-wise
+matching for UDA.
+Recent advances in self-supervised learning
+(SSL), such as contrastive learning (CL), have been
+proven effective at instance level by leveraging raw
+data to define surrogate tasks that help learn repre-2982sentations (Chen et al., 2020a; Khosla et al., 2020;
+He et al., 2020; Chen et al., 2020b). CL benefits
+from treating instances as classes and conducting
+data augmentations to generate positive instance
+pairs. Regarding CL for UDA, previous works
+mark cross-domain images with the same labels
+(for example, real and cartoon dogs) as the positive
+pairs in contrastive loss (Wang et al., 2021; Park
+et al., 2020). However, such methods are not appli-
+cable to NLP tasks because of the massive semantic
+and syntactic shifts between two cross-domain sen-
+tences. Besides, from the domain adaptation per-
+spective, constructing cross-domain positive sam-
+ples and aligning domain-agnostic pairs have re-
+ceived less emphasis in related literature, since pre-
+vious works focus on designing label preserving
+text transformations, such as back-translation, syn-
+onym, dropout and their combinations (Qu et al.,
+2021; Gao et al., 2021).
+Confronting with limitations mentioned above,
+we propose the concept of domain puzzles which
+discard domain-related information to confuse the
+model, making it difficult to differentiate which
+domain these puzzles belong to. Instead of directly
+seeking matched sentences across the source and
+target domains which is infeasible, we propose to
+pull the source (target) data and its corresponding
+domain puzzles closer to reduce the domain dis-
+crepancy, as shown in Fig. 1. A simple idea to craft
+domain puzzles is to mask domain-specific tokens.
+However, token-level operations are too discrete
+and non-flexible to reflect the complex semantic
+change of natural languages. Hence, we aim to seek
+better domain puzzles that retain high-confidence
+predictions and task-discriminative power in the
+representation space for each training instance.
+In this paper, we propose Domain Confused Con-
+trastive Learning (DCCL) to encourage the model
+to learn similar representations for the original sen-
+tence and its curated domain-confused version with
+contrastive loss. More specifically, we synthesize
+these domain puzzles by utilizing adversarial ex-
+amples (Zhu et al., 2020; Jiang et al., 2020). The
+algorithm will search for an extreme direction that
+roughly points to the opposite domain and produces
+most domain-challenging puzzles. We encourage
+the model to encode original and domain-confused
+samples closer, gradually pulling examples to the
+domain decision boundary as training progresses
+via CL, thus learning the domain invariance. Fur-
+thermore, in order to investigate whether CL neces-sarily benefits UDA, we conduct experiments and
+find that constructing domain puzzles as paired pos-
+itive samples is favorable for UDA, however, other
+data augmentation methods such as back transla-
+tion (Sennrich et al., 2016; Edunov et al., 2018)
+do not have the same effect. The experiment re-
+sults show that the proposed DCCL significantly
+outperforms all the baselines. We also conduct
+quantitative experiments to measure the domain
+discrepancy after adaptation demonstrating that
+DCCL can decrease the divergence between do-
+mains in a self-supervised way. Overall, the paper
+makes the following contributions:
+•First, a new concept of domain puzzles is put
+forward. We propose to craft the domain puz-
+zles via domain-confused adversarial attack;
+•Second, we propose DCCL, which is able to
+pull source and target samples closer to the
+crafted domain puzzles. The DCCL is capable
+of reducing domain shift and learning domain
+invariance;
+•Third, experiments demonstrate that the pro-
+posed DCCL surpasses baselines with a large
+margin. We also conduct analyzing experi-
+ments to verify the effectiveness.
+2 Preliminaries
+2.1 Unsupervised Domain Adaptation
+Problem Setup Suppose we have access to a
+source dataset with nlabeled data points D=
+{x, y} sampled i.i.d. from the source do-
+main, and a target dataset with munlabeled points
+D={x} sampled i.i.d. from the target
+domain, where x, xare sequences of tokens, y
+is the class label for x. For in-domain training
+with labeled training instances, the model aims to
+learn a function f(x;θ, θ) :x→C.θis the
+parameter of the deep neural network encoder (e.g.,
+pretrained language model), θdenotes parameters
+that compute the network’s class label predictions,
+andCis the label set. The model is learned with
+the following objective:
+min/summationdisplay[L(f(x;θ, θ), y)].(1)
+However, for Unsupervised Domain Adaptation
+(UDA), the goal of the adaptation algorithm is to
+learn a discriminative classifier from the source2983
+domain, which at the same time could general-
+ize well on the target domain by leveraging un-
+labeled target data and learning a mapping between
+source and target domains. It is generally acknowl-
+edged that the discrepancy between two datasets
+(domain shift) can be reduced by aligning two dis-
+tributions (Ben-David et al., 2006; Ben-David et al.,
+2010). The methods that learn domain invariant fea-
+tures for domain alignment include KL divergence
+(Zhuang et al., 2015), Maximum Mean Discrep-
+ancy (MMD) (Gretton et al., 2012), and Domain
+Adversarial Neural Network (DANN) (Ganin et al.,
+2016) (details of DANN can be found in Appendix.
+B). DANN suffers from a vanishing gradient prob-
+lem (Shen et al., 2018), and the training process is
+unstable (Shah et al., 2018; Du et al., 2020). Hence,
+more efficient and stable algorithms are essential
+for UDA (Wu et al., 2019b).
+2.2 Adversarial Training
+Adversarial training with perturbations has been
+shown to significantly improve the performance
+of the state-of-the-art language models for many
+natural language understanding tasks (Madry et al.,
+2018; Zhu et al., 2020; Jiang et al., 2020; Pereira
+et al., 2021). The algorithm generally considers
+adversarial attacks with perturbations to word em-
+beddings and minimizes the resultant adversarial
+loss around the input samples. In a single domain,
+adversarial training (Goodfellow et al., 2015) is an
+inner max, outer min adversarial problem with the
+objective:
+min/summationdisplay[maxL(f(x+δ;θ, θ), y)].(2)
+With (2), the standard adversarial training can also
+be regularized using virtual adversarial training
+(Miyato et al., 2018), which encourages smooth-
+ness in the embedding space. The αcontrols
+the trade-off between the two losses, usually set tobe1.
+min/summationdisplay/bracketleftbig
+L(f(x;θ, θ), y) +α
+maxL(f(x+δ;θ, θ), f(x;θ, θ))/bracketrightbig
+.(3)
+For (2)(3), the inner maximization can be solved
+by Projected Gradient Decent (PGD) (Madry et al.,
+2018) with an additional assumption that the loss
+function is locally linear. A following iteration can
+approximate the adversarial perturbation δ:
+δ= Π(δ+ηg(δ)
+∥g(δ)∥), (4)
+g(δ) =∇L(f(x+δ;θ, θ), y), (5)
+where Πperforms a projection onto the ϵ-
+ball. The advantages of PGD lie in that it only relies
+on the model itself to produce diverse adversarial
+samples, enabling the model to generalize better to
+unseen data.
+3 Method
+In this section, we focus our discussions on the
+proposed Domain Confused Contrastive Learning
+(DCCL) under a sentiment classification scenario.
+The overall framework of our method is illustrated
+in Fig. 2. The model will take source labeled and
+target unlabeled sentences as input. It will then
+augment the input data with domain puzzles by
+fabricating adversarial perturbations. With the aug-
+mented data, the next step produces a hidden repre-
+sentation for each instance with an encoder which
+will be further used to produce three losses to train
+the entire model, namely sentiment classification
+loss, contrastive loss and consistency loss.
+3.1 Crafting domain puzzles
+For UDA, Saito et al. (2017) mentions that simply
+matching the distributions cannot ensure high accu-
+racy on the target domain without the target labels.2984
+Moreover, it may cause negative transfer, deteri-
+orating knowledge transfer from source domain
+to the target domain (Wang et al., 2019). Even if
+the matched sentences have the same label, due to
+huge syntactic and semantic shift, instance-based
+matching strategies that align examples from differ-
+ent domains will introduce noises for pre-trained
+language models, for example, aligning source do-
+main and target domain sentences in Fig. 3.
+Alternatively, we can locate and mask domain-
+specific tokens which are related to sentence topics
+and genres. Since sentences in the green box of
+Fig. 3 become domain-agnostic, we refer to those
+domain-confused sentences (one cannot tell which
+domain these sentences belong to) as domain puz-
+zles. Matching distributions between the source
+domain and the domain puzzles, as well as the
+target domain and the domain puzzles, will also
+make language models produce domain invariant
+representations.
+However, the domain-specific tokens are not al-
+ways evident, due to the discrete nature of natural
+languages, it is challenging to decide correct tokens
+to mask without hurting the semantics especially
+when the sentences are complicated. Hence, we
+seek domain puzzles in the representation space
+and introduce adversarial perturbations, because
+we can rely on the model itself to produce diverse
+but targeted domain puzzles. Note that the pur-
+pose of adversarial attack here is not to enhance the
+robustness, but to construct exquisitely produced
+perturbations for a better domain invariance in the
+representation space.
+To generate domain-confused augmentations,
+we adopt adversarial attack with perturbations for
+domain classification. The loss for learning a do-
+main classifier with adversarial attack can be speci-
+fied as follows:
+L =L(f(x;θ, θ), d)+
+αL(f(x+δ;θ, θ), f(x;θ, θ)),(6)
+δ= Π(δ+ηg(δ)
+∥g(δ)∥), (7)
+where δis the initialized noise, θis the parameter
+corresponding to the computation of the domain
+classification, and dis the domain label. Due to ad-
+ditional overhead incurred during fine-tuning large
+pre-trained language models, the number of itera-
+tions for perturbation estimation is usually 1 (Jiang
+et al., 2020; Pereira et al., 2021), as shown in Eq. 7.
+We synthesize the perturbation δby searching for
+an extreme direction that perplexes the domain clas-
+sifier most in the embedding space, and f(x+δ;θ)
+is the crafted domain puzzles encoded by the lan-
+guage model.
+3.2 Learning invariance with domain puzzles
+After acquiring domain puzzles, simply applying
+distribution matching will sacrifice discriminative
+knowledge learned from the source domain (Saito
+et al., 2017; Lee et al., 2019), and instance-based
+matching will also overlook global intra-domain in-
+formation. To learn sentiment-wise discriminative2985representations in the absence of the target labels,
+we propose to learn domain invariance via con-
+trastive learning (CL). In general, CL benefits from
+the definition of the augmented positive and neg-
+ative pairs by treating instances as classes (Chen
+et al., 2020a; Khosla et al., 2020; He et al., 2020;
+Chen et al., 2020b). Furthermore, the contrastive
+loss encourages the positive pairs to be close to
+each other and negative pairs to be far apart. Specif-
+ically, maximizing the similarities between positive
+pairs learns an invariant instance-based representa-
+tion, and minimizing the similarities between nega-
+tive pairs learns a uniformly distributed represen-
+tation from a global view, making instances gath-
+ered near the task decision boundary away from
+each other (Saunshi et al., 2019; Grill et al., 2020).
+This will help to enhance task discrimination of the
+learned model.
+For positive pairs, intuitively, we hope that the
+model could encode the original sentence and most
+domain-challenging examples to be closer in the
+representation space, gradually pulling examples
+to the domain decision boundary as training pro-
+gresses. For negative sampling, it widens the
+sentiment decision boundary and promotes better
+sentiment-wise discriminative features for both do-
+mains. However, for cross-domain negative sam-
+pling, the contrastive loss may push the negative
+samples in the target (source) domain away from
+the anchor in the source (target) domain (see Fig. 4
+(b) left). This is contradictory to the objective of
+domain puzzles which try to pull different domains
+closer. To avoid the detriment of cross-domain re-
+pulsion, excluding samples with different domains
+from the negative set is of great importance. There-
+fore, we write the following contrastive infoNCE
+loss (Chen et al., 2020a) as follow:
+where Nis the mini batch size with samples from
+the same domain, z=g(f(x;θ)), and g(·)
+is one hidden layer projection head. We denote
+x=x+δas the domain puzzle augmentation, s(·)
+computes cosine similarity, 1is the indicator
+function, and τis the temperature hyperparameter.
+3.3 Consistency Regularization
+Given perturbed embedding x+δ, which is crafted
+based on domain classification, we also encourage
+the model to produce consistent sentiment predic-
+tions with that of the original instance f(x;θ, θ).Algorithm 1 DCCL
+Input: For simplicity, θis the parameter of the
+whole model. T: the total number of iterations,
+(x, y)∼ D: source dataset with sentiment
+label y,(x, d)∼ DD: source and target
+dataset with domain label d,K: the number
+of iterations for updating δ,σ: the initialized
+variance, ϵ: perturbation bound, η: the step
+size,γ: global learning rate, N: batch size, τ:
+temperature, g(·):one hidden layer projection
+head. α,α,λandβ: weighting factor.for do forminibatch Ndo for do end for for do end for end forend for
+Output: θ
+For this, we minimize the symmetric KL diver-
+gence, which is formulated as:
+L =L(f(x;θ, θ), f(x+δ;θ, θ)).(9)
+For overall training objective, we train the neural
+network in an end-to-end manner with a weighted
+sum of losses as follows.
+Details of proposed DCCL are summarized in Al-
+gorithm 1.29864 Experiments
+4.1 Datasets
+Amazon Benchmark (Blitzer et al., 2007). We
+conduct experiments on this dataset for complete-
+ness since most of previous works report results
+on it. The dataset contains four domains: Book
+(BK), DVD (D), Electronics (E) and Kitchen house-
+wares (K). There are 2,000 balanced labeled data
+for each domain, we randomly select 20,000 unla-
+beled reviews for BK, D and E. For K, only 17,856
+unlabeled reviews are available.
+Amazon review dataset (He et al., 2018). This
+dataset considers neutral instances which may not
+bias the dataset and bring more challenges. The
+dataset also contains four domains: Book (BK),
+Electronics (E), Beauty (BT), and Music (M). Fol-
+lowing He et al. (2018), we treat set 1as labeled
+dataset containing 6,000instances, and treat set
+2as unlabeled dataset which also contains 6,000
+instances. More details about two datasets can be
+found in Appendix A.
+4.2 Experiment Settings
+For unsupervised adaptation setting, we should not
+have access to target labeled data at the training
+phase, so trained models with minimum classifica-
+tion error on the source validation set is saved for
+evaluation. At this point, we suppose a good model
+that generalizes well on the target domain is able to
+reach high performance on both validation and test
+set at the same time. We evaluate our model with 5
+runs in all experiments, and we report the average
+score, standard deviation and paired t-test results.
+4.3 Implementation Details
+For pre-trained language model, we use BERT base
+uncased (Devlin et al., 2019) as the basis for all
+experiments. The max length is set to 512. For
+optimizer, we use AdamW (Kingma and Ba, 2015;
+Loshchilov and Hutter, 2019) with weight decay
+0.01 (for BERT baseline, we set 1e-4). We set the
+learning rate as 1e-5, and we use a linear scheduler
+with warm-up steps 0.1of total training steps.
+We set the number of adversarial iterations to
+be 1, adversarial weighting factor α= 1 and
+we use lnorm to compute projections. We alsofollow Zhu et al. (2020) to set other adversarial hy-
+perparameters, e.g., adversarial step size η= 5e-2,
+perturbation bound ϵ= 5e-2. For weighting factors,
+we set α= 1e-3, λ= 3e-2 and β= 5. We train the
+model with 8epochs, temperature τand batch size
+Nwill be discussed later. Each adaptation requires
+half one hour on one A-100.
+4.4 Baselines
+BERT base : Fine-tune BERT on the source, with-
+out using target unlabeled data, then directly eval-
+uate on the target labeled data. KL: Use sym-
+metric KL-divergence loss of embedded instances
+between the source and target domains (Zhuang
+et al., 2015). MMD : Maximum Mean Discrepancy
+loss (Gretton et al., 2012) measures the distance
+based on the notion of embedding probabilities
+in a reproducing kernel Hilbert space. We imple-
+ment a gaussian kernel which is a common choice.
+DANN : The adaptation rate is λ=−1,
+p=, where tandTare the number of cur-
+rent training steps and total steps. γrequires
+careful tuning within [0.05,0.1,0.15,0.2].back-
+trans+CL : To investigate the effectiveness of do-
+main puzzles, we implement Back translation (Sen-
+nrich et al., 2016; Edunov et al., 2018), which is
+one of the widely used data augmentation tech-
+niques. We utilize en-de translation model pre-
+trained on WMT19 and released in fairseq (Ott
+et al., 2019). The model is trained with con-
+trastive loss on the source and target domain re-
+spectively. mask+CL : We mask domain specific
+tokens to make the augmentation become domain-
+agnostic. Since information extraction is not our
+focus, we identify domain specific tokens via a
+simple frequency-ratio method (Li et al., 2018; Wu
+et al., 2019a): s(u, d) =,
+where count( u,D)represents the number of
+times a token uappears in domain d. Smoothing λ
+is set to 1. When s(u, d)is larger than 5, we mark
+a token uas a domain specific token. Through
+counting, the number of masked tokens accounted
+for 0.06 of the total length. mask : To investigate
+the effectiveness of contrastive loss, after masking
+domain-specific tokens, we further let the model
+train with augmented data without contrastive loss.
+R-PERL (Ben-David et al., 2020) is a pivot-based
+method, and DAAT (Du et al., 2020) combines
+DANN and post-training. All the methods in Tabel
+1 and Table 2 are implemented based on BERT
+model for fair comparisons.2987
+4.5 Results
+Will contrastive learning necessarily help the
+Unsupervised Domain Adaptation?
+As discussed earlier, when performing contrastive
+learning on source labeled examples and target un-
+labeled examples respectively, it learns a uniformly
+distribute representation and helps promote better
+discriminative features for both domains. However,
+for some adaptation tasks in Table 1, for example,
+BT→E, M→E, and E →M, back-trans+CL shows
+that contrastive learning only gains marginal ben-
+efit. When masking domain-specific tokens and
+pulling original sentence representations to those
+domain puzzles, the effect of contrastive learning
+becomes more apparent (mask+CL with average
+score 65.17 compared with back-trans+CL 63.79
+and mask 61.40 in Table.1). This finding helps
+to explain that choices of positive examples are
+critical and domain confused augmentations will
+further benefit adaptation.
+DCCL outperforms baselines.
+From Table 1 we can observe that the proposed
+DCCL outperforms all other methods with a large
+margin and p <0.05using paired t-test, and 5.94%
+improvement over BERT base. From Table 2, we
+can also observe 1.74% improvement over BERT
+base, and DCCL also surpasses state-of-the-artmethods R-PERL (Ben-David et al., 2020) and
+DAAT (Du et al., 2020). We note that Amazon
+Benchmark dataset is quite easy, since it discards
+neutral instances, BERT base model has already
+achieved high scores on this dataset. Besides, we
+observe that the effect of distribution matching
+methods (KL and MMD) is limited on two datasets.
+The reason might be that pre-trained language mod-
+els trained with massive and heterogeneous corpora
+already have strong generalization ability. Learn-
+ing such cross-domain and instance-based match-
+ing will bring perplexity to language models and
+sacrifice task discrimination (Saito et al., 2017; Lee
+et al., 2019). On the contrary, the proposed DCCL
+retains such information in a self-supervised way.
+Furthermore, we notice that DANN is very unsta-
+ble, besides adaptation rate λ, the model is also
+sensitive to other hyperparameters such as learning
+rate and training epochs because the performance
+on the target domain will keep decreasing when
+training with longer steps. Hence, it is difficult
+for the model to achieve the lowest error rates on
+both the source and target domains simultaneously.
+Compared to DANN, DCCL is much more stable
+and has lower standard deviations on most adapta-
+tion tasks.
+Contrastive learning designs.
+We explore different hyperparameter values for the2988
+proposed DCCL in E →BK, as is shown in Fig. 5.
+We find that a temperature of 0.5 combined with
+the batch size 32 can achieve the best performance.
+We also notice that setting the temperature too high
+or too low can significantly affect adaptation per-
+formances, while a larger batch size usually brings
+a relatively smaller improvement.
+4.6 Ablation Studies
+We conduct an ablation study on each component
+in Eq. 10 to inspect the contribution of contrastive
+learning, as is shown in Table 3. We can see that
+every single component can render a better adapta-
+tion performance. In particular, the effectiveness of
+L is observable with 3~5 performance gain
+compared to baselines (row 4 vs. row 2, and row 5
+vs. row 3). When training curated domain puzzles
+as simple augmentations without contrastive loss,
+we can observe only a slight improvement (row 2
+vs. row 1). This result demonstrates that the perfor-
+mance gain brought by DCCL does not come from
+data augmentation, and learning robustness against
+adversarial attacks will not largely help adaptation.
+5 Analysis
+5.1 Visualization
+We perform visualizations for trained representa-
+tions as illustrated in Fig. 6. When training with the
+source domain and then adapting to the target do-
+main (BERT-base), we can observe a considerabledomain shift for BERT encoder on this amazon
+review dataset. Moreover, as mentioned before,
+continuing training DANN with larger epochs will
+substantially drop the score (from the highest point
+(DANN-best) to the lowest point (DANN-worst)).
+However, we can also see that DCCL mitigates
+domain shift but remains good sentiment discrimi-
+nation on the target domain.
+5.2 Quantitative Results
+A-distance measures domain discrepancies (Ben-
+David et al., 2006; Ben-David et al., 2010), with
+the definition as d= 2(1 −2ϵ), where ϵis the
+domain classification error. To fairly compare with
+A-distance of the baselines, we use linear SVM to
+calculate ϵfollowing previous work (Saito et al.,
+2017; Du et al., 2020). We randomly select 2,000
+instances for both source and target domain and
+split them with 1:1 for train and test for the SVM
+model. From Fig. 7, we can observe that DCCL
+can learn a good balance between sentiment clas-
+sification and domain discrepancy, compared to
+DANN-best and DANN-worst.
+6 Related Work
+Unsupervised Domain Adaptation
+UDA in NLP has the following approaches: (1)
+Pivot-based methods use unlabeled data from both
+domains, trying to discover characteristics that are
+similar (Pan et al., 2010). Some recent works2989
+extend pivots with autoencoders and contextual-
+ized embeddings (Ziser and Reichart, 2017; Miller,
+2019; Ben-David et al., 2020). (2) Pseudo-labeling
+leverages a trained classifier to predict labels on
+unlabeled examples, which are subsequently con-
+sidered as gold labels (Yarowsky, 1995; Zhou and
+Li, 2005; McClosky et al., 2006). Recent works
+also combine this technique with pre-trained lan-
+guage models (Lim et al., 2020; Ye et al., 2020).
+(3) Data selection methods adopt domain similarity
+metrics to find the best match for each data and use
+curriculum learning for large pre-trained models
+(Ma et al., 2019; Aharoni and Goldberg, 2020). A
+recent method adopt distance-bandit (Guo et al.,
+2020) for similarity metric. (4) Domain Adversar-
+ial Neural Networks (Ganin et al., 2016). Some ap-
+proaches leverage Wasserstein distance to stabilize
+adversarial training (Shen et al., 2018; Shah et al.,
+2018), and combine it with post-training which can
+produce better adversarial results (Du et al., 2020).
+(5) Adaptive pre-training is a more straightforward
+but effective method (Gururangan et al., 2020; Han
+and Eisenstein, 2019; Karouzos et al., 2021) by
+leveraging the objective of masked language model
+(MLM). A wide range of pre-training methods for
+domain adaptation (multi-phase, multi-task) are put
+forward (Han and Eisenstein, 2019; Karouzos et al.,
+2021).
+Contrastive learning
+CL has recently gained popularity as a reliable ap-
+proach for unsupervised representation learning. It
+is generally acknowledged that a good representa-
+tion should distinguish itself from other instances
+while identifying similar instances. For Computer
+Vision, there are approaches obtaining augmented
+images using transformations including cropping,
+rotation, etc. (Chen et al., 2020a; Khosla et al.,
+2020; He et al., 2020; Chen et al., 2020b). As for
+Natural Language Processing, many works study
+different label-preserving augmentations, such as
+back-translations, synonyms, adversaries, dropout,and their combinations (Qu et al., 2021; Gao et al.,
+2021). In addition, many pre-trained language mod-
+els trained with contrastive loss are also released.
+DeCLUTR (Giorgi et al., 2021) and CLEAR (Wu
+et al., 2020) jointly train the model with a con-
+trastive objective and a masked language model
+setting. ConSERT (Yan et al., 2021) overcomes
+the collapse problem of BERT-derived sentence
+representations and makes them more suitable for
+downstream applications by using unlabeled texts.
+7 Conclusion
+In this work, we put forward a new concept, domain
+puzzles, which can be crafted through domain-
+specific token mask and domain-confused adver-
+sarial attacks. And we provide a more stable and
+effective solution to learn domain invariance for
+unsupervised domain adaptation. The proposed
+method DCCL surpasses baselines with a large
+margin by mitigating domain shift without losing
+discriminative power on the target domain. More-
+over, the proposed framework can also be extended
+to other NLP tasks demanding adaptations, and we
+leave this for future work.
+Acknowledgements
+This work is supported by the 2020 Microsoft Re-
+search Asia collaborative research grant.
+References29902991299229932994A Datasets
+We obtain the Amazon review datasets from He
+et al. (2018). This dataset does not remove neu-
+tral labels and will not be problematic in UDA
+situation where the label information of the tar-
+get domain is not available. In addition, reserving
+neutral labels also bring challenges for pre-trained
+language model, making it more favorable for self-
+supervised representation learning. Summary of
+this dataset is availble in Table 4.
+Each domain contains two sets, set 1 contains
+6000 instances with balanced class labels, and set 2
+contains instances that are randomly sampled from
+the larger dataset (McAuley et al., 2015), preserv-
+ing authentic label distribution, examples in these
+two datasets do not overlap. Following (He et al.,
+2018), we use set 1 from the source domain as the
+training set for all our experiments. Since label dis-
+tribution in the target domain is unpredictable and
+out of control in real life, so it’s more reasonable to
+use set 2 from the target domain as the unlabeled
+set, lastly the model will be evaluated in set 1 from
+target domain. For data split, we randomly sample
+1000 instances from the source labeled dataset as
+validation set. When running UDA experiments,
+the model will train on 5000 source labeled ex-
+amples and 6000 target unlabeled examples, then
+validate on 1000 source labeled examples.
+For Amazon Benchmark(Blitzer et al., 2007), it
+also contains four domains: Book (BK), DVD (D),
+Electronics (E) and Kitchen housewares (K). There
+are 2000 balanced labeled data for each domain,
+we randomly select 20000 unlabeled reviews for
+BK, D and E. For K, only 17856 unlabeled reviews
+are available, statistics of Amazon Benchmark can
+be find in Table.5. For data split, 1600 balanced
+samples are randomly sampled from the source
+labeled dataset, and 400 for validation.
+B DANN
+Domain Adversarial Neural Network Ganin et al.
+(2016) proposes Domain Adversarial Neural Net-
+work (DANN), which learns domain invariant and
+discriminative features simultaneously. This ap-
+proach is motivated by the idea that an adapta-
+tion algorithm could learn good representations for
+cross-domain transfer if it cannot differentiate the
+domain of the input observations. The optimization
+objective is:
+min/summationdisplay[L(f(x;θ, θ), y) +λR],(11)
+R= max/summationdisplay[−L(f(x;θ, θ), d)],
+(12)
+where θis the parameter corresponding to the
+computation of the domain classification, dis the
+domain label, Ris a regularizer weighted by λ.
+Objective (11) learns task discrimination by min-
+imizing task classification loss and tries to make
+features similar across domains by maximizing the
+domain classification loss.
+Although the domain classifier with parameters
+θcould perfectly classify different domains, the
+balance between two terms in (11) is hard to main-
+tain. Hence, the training process becomes unsta-
+ble, requiring an elaborate adaptation rate λtuning
+(Shen et al., 2018; Shah et al., 2018; Du et al.,
+2020). Furthermore, the encoder could learn trivial
+solutions (Karouzos et al., 2021) which produce
+features with flipped domain predictions.2995

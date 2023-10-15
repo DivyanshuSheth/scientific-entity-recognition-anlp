@@ -1,1 +1,816 @@
-3781 Proceedings of the 2022 Conference on Empirical Methods in Natural Language Processing , pages 3781 3797 December 7 - 11 , 2022 © 2022 Association for Computational Linguistics 3782 3783 3784 3785 3786 3787 3788 3789 3790 3791 3792 3793 3794 3795 3796 3797 
+
+Devendra Singh Sachan, Mike Lewis, Mandar Joshi, Armen Aghajanyan,
+Wen-tau Yih, Joelle Pineau, Luke ZettlemoyerMcGill University;Mila - Quebec AI InstituteMeta AI Research;Google Research;University of Washington
+sachande@mila.quebec, mandarj@google.com
+{mikelewis,armenag,scottyih,jpineau,lsz}@meta.com
+Abstract
+We propose a simple and effective re-ranking
+method for improving passage retrieval in open
+question answering. The re-ranker re-scores
+retrieved passages with a zero-shot question
+generation model, which uses a pre-trained lan-
+guage model to compute the probability of the
+input question conditioned on a retrieved pas-
+sage. This approach can be applied on top of
+any retrieval method (e.g. neural or keyword-
+based), does not require any domain- or task-
+specific training (and therefore is expected to
+generalize better to data distribution shifts), and
+provides rich cross-attention between query
+and passage (i.e. it must explain every token in
+the question). When evaluated on a number of
+open-domain retrieval datasets, our re-ranker
+improves strong unsupervised retrieval mod-
+els by 6%-18% absolute and strong supervised
+models by up to 12% in terms of top-20 passage
+retrieval accuracy. We also obtain new state-
+of-the-art results on full open-domain question
+answering by simply adding the new re-ranker
+to existing models with no further changes.
+1 Introduction
+Text retrieval is a core sub-task in many NLP prob-
+lems, for example, open-domain question answer-
+ing where a document must be retrieved and then
+read to answer an input query. Queries and docu-
+ments are typically embedded in a shared represen-
+tation space to enable efficient search, before using
+a task-specific model to perform a deeper, token-
+level document analysis (e.g. a document reader
+that selects an answer span). We show that adding
+a zero-shot re-ranker to the retrieval stage of such
+models leads to large gains in performance, by do-
+ing deep token-level analysis with no task-specific
+data or tuning.Figure 1: After UPR re-ranking of the Contriever’s
+(unsupervised) (Izacard et al., 2022) top-1000 pas-
+sages, we outperform strong supervised models like
+DPR (Karpukhin et al., 2020) on Natural Questions and
+TriviaQA datasets.
+We focus on open-domain question answering
+and introduce a re-ranker based on zero-shot ques-
+tion generation with a pre-trained language model.
+Our re-ranker, which we call Unsupervised Passage
+Re-ranker (UPR), re-scores the retrieved passages
+by computing the likelihood of the input question
+conditioned on a retrieved passage.This simple
+method enables task-independent cross-attention
+between query and passage that can be applied on
+top of any retrieval method (e.g. neural or keyword-
+based) and is highly effective in practice (Figure 1).
+In part, UPR is inspired by the traditional mod-
+els of query scoring with count-based language
+models (Zhai and Lafferty, 2001). However, in-
+stead of estimating a language model from each
+passage, UPR uses pre-trained language models
+(PLMs). More recent work on re-rankers have fine-
+tuned PLMs on question-passage pairs to gener-
+ate relevance labels (Nogueira et al., 2020), some-
+times to jointly generate question and relevance
+labels (Nogueira dos Santos et al., 2020; Ju et al.,
+2021). In contrast, UPR uses off-the-shelf PLMs,3781does not require any training data or finetuning, and
+still leads to strong performance gains (Figure 1).
+Comprehensive experiments across a wide range
+of datasets, retrievers, and PLMs highlight the
+strengths of UPR:
+•By re-ranking the top-1000 passages from Con-
+triever (unsupervised), UPR obtains a gain of
+6%-18% points absolute in the top-20 retrieval
+accuracy across four QA datasets. UPR also
+achieves new state-of-the-art results on the diffi-
+cult SQuAD-Open and Entity Questions datasets,
+outperforming BM25 by 14% and 8%.
+•These performance gains are consistent across
+both different kinds of retrievers and PLMs. Ab-
+lation studies reveal that instruction-tuned mod-
+els such as T0 perform the best as re-rankers.
+•On the open-domain QA task, just by performing
+inference with the re-ranked passages and a pre-
+trained reader, we obtain improvements of up to
+3 EM points on three benchmark datasets.
+To the best of our knowledge, this is the first
+work to show that a fully unsupervised pipeline
+(consisting of a retriever and re-ranker) can greatly
+outperform supervised dense retrieval models like
+DPR (Karpukhin et al., 2020). As language mod-
+els continue to improve rapidly (Rae et al., 2021;
+Chowdhery et al., 2022), the performance of UPR
+may see corresponding gains over time. UPR re-
+quires no annotated data and uses only generic
+pre-trained models, which means it may be easy to
+apply to a wide range of retrieval problems.
+2 Method
+Figure 2 presents an overview of our approach for
+open-domain retrieval, which introduces a new un-
+supervised re-ranker (Sec 2.2) that can be applied
+to any existing text retriever (Sec 2.1).
+2.1 Retriever
+LetD={d, . . . , d}be a collection of evidence
+documents. Given a question ( q), the retriever se-
+lects a subset of relevant passages Z ⊂ D , one or
+more of which will ideally contain the answer to
+q. Our method will work with passages obtained
+from any retriever — either based on sparse repre-
+sentations like BM25 or dense representations like
+DPR. We only assume that the retriever provides
+theKmost relevant passages. We denote this set
+oftop-K passages as Z={z, . . . , z}.2.2 Unsupervised Passage Re-ranking (UPR)
+Given the top-K retrieved passages, the goal of the
+re-ranker is to reorder them such that a passage with
+the correct answer is ranked as highly as possible.
+The ordering is computed with a relevance score
+p(z|q)for each passage z∈ Z.
+Our re-ranking approach is unsupervised, i.e.,
+it does not use any task-specific training exam-
+ples. We refer to it as UPR , for Unsupervised Pas-
+sage Re-ranking . UPR uses a pre-trained language
+model to score the probability of generating the
+question qgiven the passage text z, as described
+below. The question generation model is zero-shot,
+allowing for dataset-independent re-ranking, and
+also incorporates cross-attention between the ques-
+tion and passage tokens while forcing the model to
+explain every token in the input question. UPR is,
+therefore, more expressive than using dense retriev-
+ers alone, even if both methods fundamentally build
+on top of the same (or very similar) pre-trained
+models.
+More specifically, we estimate p(z|q)by com-
+puting the likelihood of question generation condi-
+tioned on the passage, i.e., the quantity p(q|z).
+This also naturally emerges when applying Bayes’
+rule to p(z|q)as
+logp(z|q) = log p(q|z) + log p(z) +c ,
+where p(z)is the prior on the retrieved passage
+andcis a common constant for all z.
+As a simplifying assumption, we assume that
+the passage prior logp(z)is uniform, and can be
+ignored for re-ranking. With this, the above expres-
+sion reduces to
+logp(z|q)∝logp(q|z),∀z∈ Z.
+We estimate logp(q|z)using a pre-trained
+language model (PLM) to compute the average log-
+likelihood of the question tokens conditioned on
+the passage:
+logp(q|z) =1
+|q|/summationdisplaylogp(q|q,z; Θ).
+where Θdenotes the parameters of the PLM and |q|
+denotes the number of question tokens. We apply
+the PLM in a zero-shot fashion with no finetuning
+by simply appending the natural language instruc-
+tion “ Please write a question based on this passage ”
+to the passage tokens as shown in Figure 2.3782
+The initial passage ordering is then sorted based
+onlogp(q|z). This enables us to re-rank the
+passages by just performing inference using off-the-
+shelf language models avoiding the need to label
+question-passage pairs for finetuning. Because the
+question generation model is applied zero-shot, this
+overall approach can be applied to improve the
+retrieval accuracy of any test collection, with no
+dataset-specific models or tuning data.
+3 Experimental Setup
+In this section, we describe the datasets, unsuper-
+vised and supervised retrievers, and language mod-
+els used for our passage re-ranking experiments.
+3.1 Open-Domain QA Datasets
+Following previous work on passage retrieval, we
+use the popular datasets of SQuAD-Open (Ra-
+jpurkar et al., 2016), TriviaQA (Joshi et al., 2017),
+Natural Questions (NQ; Kwiatkowski et al. (2019)),
+and WebQuestions (WebQ; Berant et al. (2013)).
+Their statistics are presented in Table 1.
+Evidence Passages D.We use the preprocessed
+English Wikipedia dump from December 2018 as
+released by Karpukhin et al. (2020) as our evidence
+passages. Each Wikipedia article is split into non-
+overlapping 100 word passages. There are over 21
+million total passages.3.2 Keyword-centric Datasets
+To examine the robustness of UPR to keyword-
+centric datasets, we experiment with test collec-
+tions where dense retrievers struggle and when the
+questions are from different domains.
+Entity Questions contains 22K short ques-
+tions about named entities based on facts from
+Wikipedia. Previous work on this dataset has
+shown that dense retrievers struggle to retrieve rel-
+evant passages while sparse approaches like BM25
+are more successful (Sciavolino et al., 2021).
+BEIR Benchmark is a test suite for benchmark-
+ing retrieval algorithms and consists of multiple
+datasets, where each dataset consists of test set
+queries, evidence documents, and relevance doc-
+ument annotations (Thakur et al., 2021). These
+datasets contain different kinds of retrieval tasks
+like fact-checking, question answering, etc. and
+span diverse domains including news, technical,
+and Wikipedia making it a challenging benchmark.
+3.3 Retrievers
+In our re-ranking experiments, we retrieve passages
+from both unsupervised and supervised retrievers,
+as detailed below.
+3.3.1 Unsupervised Retrievers
+BM25 ranks based on the term-frequency and
+inverse document frequency of the keywords
+present in the question and passage (Robertson
+and Zaragoza, 2009). Prior work (Ma et al., 2021)
+has shown that BM25 is a strong baseline for the
+datasets we consider.
+MSS is a dense retriever trained by predicting
+masked salient spans like named entities with the
+help of a reader network (Sachan et al., 2021a).
+MSS pre-training has also shown to improve super-
+vised retrieval performance.3783Contriever uses momentum contrastive training
+to learn dense retrievers from text paragraphs (Izac-
+ard et al., 2022). Such training has shown to obtain
+strong zero-shot retrieval performance on many
+benchmarks.
+3.3.2 Supervised Retrievers
+DPR uses annotated question-context paragraphs
+and hard negative examples to train a supervised
+dense retriever (Karpukhin et al., 2020).
+MSS-DPR further improves DPR performance
+by first pre-training the dense retriever using
+MSS followed by DPR-style supervised finetun-
+ing (Sachan et al., 2021a).
+3.4 Pre-Trained Language Models (PLMs)
+We use a range of pre-trained models for computing
+our re-ranking relevance scores.
+T5 Series These models consist of encoder and
+decoder transformers pre-trained by denoising in-
+put text sequences. We experiment with the T5
+model (Raffel et al., 2020), its language model
+adapted version (T5-lm-adapt; Lester et al. (2021)),
+and the T0 language model (Sanh et al., 2022). T0
+was trained by finetuning T5-lm-adapt with multi-
+ple tasks defined by instructions. We use the “xl”
+configurations that contain 3B parameters.
+GPT These consist of a transformer decoder
+trained with the autoregressive language model-
+ing objective. We use the GPT-neo model with
+2.7B parameters (Black et al., 2021).
+3.5 Implementation Details
+We run all the experiments on a cluster with V100-
+32GB GPUs. We use PyTorch (Paszke et al., 2019)
+to implement the UPR approach and relevant base-
+lines. To get the top-K retrieved passages, we use
+the open-source implementations of the retrievers
+and their checkpoints. For BM25, we use the pre-
+computed top-k passages outputs from the pyserini
+toolkit (Lin et al., 2021).For MSS, DPR, and
+MSS-DPR retrievers, we use the open-source im-
+plementations from (Sachan et al., 2021b).For
+Contriever and PLMs, we use their checkpoints as
+hosted in Huggingface (Wolf et al., 2020).For the dense retriever experiments, we use the
+base configuration , which consists of 12 attention
+heads, 12 layers, and 768 model dimensions. To ex-
+periment with supervised retrievers, we train DPR
+and MSS-DPR for 3 epochs on SQuAD-Open, 40
+epochs on NQ and TriviaQA, and 20 epochs on
+WebQ.Detailed hyperparameter settings are spec-
+ified in Appendix A.1 and A.2.
+4 Experiments: Passage Retrieval
+We evaluate the performance of our proposed Un-
+supervised Passage Re-ranker (UPR), conduct ab-
+lations to better understand the approach, evaluate
+robustness on challenging test collections, and dis-
+cuss run-time efficiency.
+Our goal is to improve the rankings of top-{20,
+100} passages. Hence, in the first stage, a larger
+candidate list is fetched by retrieving the top-1000
+passages. Then, in the second stage, these passages
+are re-ranked with the T0-3B PLM unless speci-
+fied otherwise. To evaluate UPR performance, we
+compute the conventional top-K retrieval accuracy
+metric. It is defined as the fraction of questions
+for which at least one passage within the top-K
+passages contains a span that matches the human-
+annotated answer to the question.
+4.1 Main Task
+We experiment with the four datasets and five re-
+trievers as introduced in §3.1 and §3.3, respectively
+and perform re-ranking with the T0-3B model. Ta-
+ble 2 reports the top-20 and top-100 retrieval ac-
+curacy before and after re-ranking. UPR provides
+consistent improvements across all the retrievers
+and datasets, improving unsupervised models by
+6%-18% absolute and supervised models by up to
+12% in top-20 accuracy.
+Re-ranked Contriever outperforms DPR by an
+average of 7% in top-20 and 4% in top-100 when
+considering all the datasets. This shows that a
+fully unsupervised pipeline of a retriever and re-
+ranker can outperform strong supervised models
+like DPR . Sparse representations still remain com-
+petitive, with BM25 outperforming Contriever and
+MSS on SQuAD-Open and TriviaQA re-ranking.
+We also see that re-ranked MSS-DPR comes
+close to or matches the performance of state-of-
+the-art supervised retrievers (last row in Table 2).
+Because these supervised models are based on end-3784
+to-end training of the retriever and language model,
+they are memory-intensive and too expensive to
+train for very large models. As such, UPR offers a
+viable alternative to expensive joint training .
+Intuition behind the performance gains ob-
+tained by UPR The question generation step in
+the re-ranker involves expressive cross-attention
+with the passage tokens. As a result, each ques-
+tion token attends to all the passage tokens in each
+decoder layer before predicting the next question
+token. This results in an accurate estimation of the
+relevance (or log-likelihood) scores than the orig-
+inal retriever scores, thus leading to an improved
+retrieval accuracy after re-ranking. This reason-
+ing is further corroborated by our error analysis
+in Appendix A.3, where we present several exam-
+ples where UPR improves over the incorrect BM25
+retrievals.
+4.2 Ablation Studies
+4.2.1 Importance of Question Generation
+To understand the importance of re-ranking based
+on question generation p(q|z), we compare
+it with another unsupervised approach where re-
+ranking is based on passage generation conditioned
+on the question p(z|q). This quantity can be
+estimated by computing the average log-likelihood
+of generating the passage tokens using PLM and
+teacher-forcing as
+logp(z|q; Θ) =1
+|z|/summationdisplaylogp(z|z,q; Θ),
+where Θdenotes the parameters of the PLM and
+|z|denotes the number of passage tokens.
+For this analysis, we work with the NQ develop-
+ment set and obtain the union of top-1000 passages
+from the BM25 and MSS retrievers. These pas-
+sages are re-ranked with two PLMs: T0-3B and
+GPT-2.7B. Our results in Figure 3 demonstrate that
+question generation obtains substantial improve-3785
+ments over the BM25 and MSS, highlighting its
+usefulness in passage re-ranking. On the other
+hand, re-ranking based on passage generation leads
+to a drop in retrieval accuracy in comparison to the
+baseline retrievers, empirically confirming that this
+approach does not work well in practice.
+4.2.2 Impact of Pre-trained Language Models
+To understand how much the choice of PLM con-
+tributes to top-K accuracy, we compare the perfor-
+mance of T5 (3B), T5-lm-adapt (different sizes),
+T0-{3B, 11B}, and GPT-neo (2.7 B) (as introduced
+in §3.4) on the NQ development set. We obtain the
+union of top-1000 passages retrieved from BM25
+and MSS and then re-rank them with UPR. Results
+in Table 3 reflect that all the PLMs obtain signif-
+icant improvements over the baseline retrievers,
+with the T0 models achieving the best results. Scal-
+ing up the PLM size, especially the T5-lm-adapt
+models, leads to consistent performance improve-
+ments.
+When comparing across PLMs, we see that the
+performance of T5 suffers especially on top-{1,
+5} accuracy levels. This might be because it was
+trained to predict corrupted spans, which is not
+ideal for text generation. On the other hand, au-
+toregressive PLMs such as GPT-neo and T5-lm-
+adapt tend to be better re-rankers. Furthermore,
+T0 obtains large improvements on top-{1, 5, 20},
+demonstrating that finetuning with instructions on
+unrelated tasks is also beneficial for re-ranking.
+4.2.3 Passage Candidate Size vs Latency
+We study the effect of the number of passage candi-
+dates to be re-ranked on the retrieval performance
+along with the time taken. For this, we consider
+the NQ development set, re-rank up to top-1000
+passages obtained from BM25, and use top-20 ac-
+curacy as the evaluation criteria. Results in Figure 4
+illustrate that a larger pool of passage candidates
+indeed helps to improve the performance. However,
+the gains tend to plateau as the number of passages
+is increased.
+With more passages, the latency in re-ranking
+per question linearly increases reflecting the trade-
+off between accuracy and throughput. The higher
+latency can be partly alleviated with approaches
+like weight quantization, efficient implementa-
+tions of the transformer kernel, model distillation,
+caching passage embeddings, and using data par-
+allelism. However, we leave these explorations to
+future work.
+4.3 Zero-Shot Supervised Transfer
+To gain a better understanding of the relative
+strengths of UPR and supervised (or finetuned)
+re-rankers, we perform zero-shot supervised trans-
+fer experiments and compare the results with UPR.
+We adopt the training method of Nogueira et al.
+(2020), henceforth referred to as monoT5 , who fine-
+tune the T5 PLMs on the MS MARCO (Bajaj et al.,
+2016) passage ranking dataset. To train, question
+and passage tokens are concatenated and fed to the
+T5 encoder. The decoder attends to the encoded
+sequence and the T5 PLM is finetuned to maximize
+the likelihood of the “true” label. To re-rank the
+passages during inference, the log-likelihood score
+of the “true” label is used as the relevance score.3786
+We use the open-source checkpoints of monoT5
+to re-rank the top-1000 passages retrieved by
+BM25 and report results on the NQ development
+set (Table 4).Interestingly, we see that supervised
+transfer improves the top-1 and top-5 retrieval accu-
+racy by a large margin over UPR. However, when
+the set of retrieved passages increases, such as 20-
+100, the results of UPR come close to or match
+the results of monoT5. As end tasks such as open-
+domain question answering rely on a larger set of
+passages to achieve good results (as demonstrated
+in Sec 5), this highlights the importance of UPR
+over supervised models as it does not require col-
+lecting annotated data for finetuning .
+4.4 Evaluation on Keyword-centric Datasets
+4.4.1 Entity Questions
+We re-rank the top-1000 passages from every re-
+triever with UPR. As the training set is not pro-
+vided, we use the checkpoints of DPR and MSS-
+DPR trained on NQ. Results are presented in Ta-
+ble 5. Re-ranking leads to a gain of 8-20% absolute
+in top-20 accuracy and 4-10% in top-100 accu-
+racy, with BM25 achieving the best results after
+re-ranking. It also substantially narrows the gap
+between BM25 and dense retrievers. Re-ranking
+the union of BM25 and Contriever outputs outper-
+forms the current best results by 6% and 3% in
+top-20 and top-100, respectively.
+4.4.2 BEIR Benchmark
+We re-rank the top-1000 documents from Con-
+triever and BM25 with the T0-3B PLM. Follow-
+ing convention, we report the macro average of
+NDCG@10 and Recall@100 metrics in Table 6.
+Results demonstrate the effectiveness of UPR as
+NDCG@10 scores improve by 3-8% absolute and
+Recall@100 improves by 5-6%. We include per-
+formance numbers on individual datasets with fine-
+grained analysis in Appendix A.4.
+5 Experiments: Question Answering
+Finally, we show that UPR improves the perfor-
+mance of full open-domain QA systems.
+5.1 Method
+An open-domain QA system consists of a retriever
+and a reader component. The reader attends to the
+retrieved passages to produce a final answer to the
+question. We use the Fusion-in-Decoder (FiD; Izac-
+ard and Grave (2021b)) model as the reader. In
+FiD, each retrieved passage is concatenated with
+the question and is then passed as an input to the T5
+encoder (Raffel et al., 2020). Then the encoded rep-
+resentations for all the passages are concatenated
+which the T5 decoder leverages for cross-attention.3787
+We train the FiD reader using standard negative
+log-likelihood loss and teacher-forcing to gener-
+ate an answer autoregressively. To understand the
+effect of UPR on answer generation, we then do
+inference with the previously trained reader and the
+re-ranked passages for each question.
+5.2 Results
+For training FiD models, we use the top-100 re-
+trieved passages and a batch size of 64. De-
+tailed training hyperparameters are provided in Ap-
+pendix A.1. During inference, an answer is gener-
+ated using greedy decoding. For our experiments,
+we train the FiD base and large models using the
+retrieved documents from MSS, DPR, and MSS-
+DPR retrievers. We re-rank the top-1000 passages
+with UPR using the T0-3B PLM and then perform
+inference with the top-100 re-ranked passages. We
+conduct experiments on SQuAD-Open, TriviaQA,
+and NQ datasets and report the exact match (EM)
+scores for evaluation. We employ the same set of
+evidence passages for all the datasets.Results are presented in Table 7. More accurate
+passages after re-ranking improve the performance
+of the pre-trained FiD models for all the retrievers.
+Performing inference on the FiD-large model with
+re-ranked MSS-DPR passages achieves new state-
+of-the-art results, outperforming the pre-trained
+FiD model by 1-3 EM points. Overall, this provides
+a simple approach for obtaining performance gains
+without the need to iteratively re-train (Izacard and
+Grave, 2021a) or perform expensive end-to-end
+training (Sachan et al., 2021b).
+6 Related Work
+Our work is based on re-ranking passages for open-
+domain retrieval using pre-trained language models
+(PLMs) which we have covered in earlier sections.
+Here, we instead focus on covering previous work
+related to generative pre-training, query likelihood
+for document ranking, and open-domain QA.
+Generative Pre-training and Instruction Tuning
+Recently, there has been an increased adoption of
+the generative pre-trained transformer (GPT) se-3788ries of models by the NLP community (Radford
+et al., 2019). Among the interesting properties of
+GPT models is their ability to understand task in-
+structions specified in natural language and then
+perform well on tasks in a zero-shot or few-shot
+manner (Brown et al., 2020; Smith et al., 2022).
+The zero-shot performance of GPT models further
+improves when finetuning them on multiple differ-
+ent tasks using task-specific instructions, which is
+also known as instruction-tuning (Sanh et al., 2022;
+Wei et al., 2022; Min et al., 2022).
+Document Ranking based on Query Likelihood
+In information retrieval, an appealing approach to
+rank documents is by utilizing language models to
+compute relevance scores for a query (Ponte and
+Croft, 1998). Prior approaches estimated a count-
+based language model for each document that was
+used to compute query likelihood scores for rank-
+ing (Zhai and Lafferty, 2001). However, these ap-
+proaches suffer from issues such as data sparsity.
+More recent approaches utilize PLMs such as GPT
+or T5 to compute query likelihood (Nogueira dos
+Santos et al., 2020). To improve ranking accuracy,
+they perform supervised finetuning using query-
+document pairs (Ju et al., 2021). Our work also
+utilizes PLMs, but instead, we leverage a larger
+instruction-tuned language model and apply them
+in a zero-shot manner without finetuning.
+Open-Domain QA involves producing answers
+to information-seeking questions from large doc-
+ument collections. Typical approaches consist of
+retriever and reader networks, where the retriever
+identifies a small number of documents to aid the
+reader in producing answers (Chen et al., 2017).
+To be scalable, retrievers are often modeled us-
+ing dual-encoders (Lee et al., 2019) or with multi-
+vector encoders (Zhou and Devlin, 2021) and then
+to further improve retieval accuracy, re-rankers are
+employed (Nogueira et al., 2020). Given retrieved
+documents, a reader is then trained to generate a
+short answer to the question (Izacard and Grave,
+2021b; Sachan et al., 2021b).
+7 Conclusions and Future Work
+In this work, we propose UPR, an approach to
+perform unsupervised passage re-ranking for open-
+domain retrieval. To re-rank, UPR computes a rele-
+vance score for question generation conditioned on
+each retrieved passage using pre-trained language
+models. Extensive experiments across a wide rangeof QA datasets show that an unsupervised pipeline
+consisting of retriever and UPR greatly outper-
+forms strong supervised retriever models. In addi-
+tion, UPR further improves the performance of su-
+pervised retrievers. On the open-domain QA task,
+by just performing inference using re-ranked pas-
+sages and a pre-trained reader model, we achieve
+new state-of-the-art results.
+UPR presents several interesting directions for
+future work. First, its applications to other retrieval
+tasks such as improving source-code retrieval based
+on textual queries can be explored. Second, an-
+other promising direction would be to tune instruc-
+tions according to the nature of the retrieval tasks.
+For instance, when retrieving similar sentences in
+the BEIR benchmark, variations of the instruction
+prompt used in UPR can be explored. Finally, it
+would also be interesting to investigate the extent
+to which specialized language models such as the
+ones finetuned to generate questions using passage-
+questions data would further help in improving
+retrieval.
+Acknowledgements
+This work was done during the first author’s intern-
+ship at Meta AI Research. The authors would like
+to thank Dmytro Okhonko and the anonymous re-
+viewers for providing useful suggestions and feed-
+back about this work that helped us to improve the
+paper. We would also like to thank the administra-
+tors of the compute cluster at FAIR, Meta AI for
+their assistance in facilitating experimental runs.
+Limitations
+A limitation of UPR is that re-ranking a large pool
+of passages can have a high latency as it involves
+performing cross-attention whose complexity is
+proportional to the product of the question and
+passage tokens and the number of layers of the
+pre-trained language model (PLM). We have also
+discussed this quantitatively in Sec 4.2.3. UPR also
+shares the inherent limitation associated with all
+the re-ranking approaches in that its maximum pos-
+sible performance is dependent on the first-stage
+retrieval. For example, when processing the top-
+1000 retrieved passages, the upper limit of top-100
+re-ranking accuracy would be the top-1000 accu-
+racy of the retrieved passages. Finally, we want to
+remark that UPR results might be sensitive to the
+training data used to train the PLM. As a result, in
+a domain-specific retrieval or question-answering3789task, PLMs trained on in-domain text (Gururangan
+et al., 2020) are expected to be more accurate than
+those trained on broad-coverage text.
+Ethics Statement
+The experiments conducted in the paper demon-
+strate the usefulness of large language models for
+information retrieval tasks when using English
+Wikipedia as the evidence source. However, when
+deployed in production, our work shares the typical
+ethical risks associated with large language models.
+There are chances that the re-ranked results may
+not be fair to all communities. This can potentially
+lead to an increased discrimination and exclusion
+of marginalized groups. These risks can also per-
+petuate to question-answering applications such as
+generating toxic or fake text as answers. Therefore,
+care should be taken before deploying our approach
+in real-world or customer facing applications; it is
+advisable to conduct tests and benchmark the mod-
+els covering these aspects.
+References379037913792A Appendix
+A.1 Training Hyperparameters
+Supervised Retriever We use Adam opti-
+mizer (Kingma and Ba, 2015), a batch size of 128,
+1 hard negative example for each positive pair, a
+learning rate of 2e-5 with a linear decay, weight de-
+cay of 0.1, and train for 3 epochs on SQuAD-Open,
+40 epochs for NQ and TriviaQA, and 20 epochs on
+WebQ. Model training was performed on 16 GPUs.
+Fusion-in-Decoder Reader We use Adam opti-
+mizer (Kingma and Ba, 2015), a batch size of 64, a
+learning rate of 2e-5 with a linear decay, a weight
+decay of 0.1, gradient clipping with a maximum
+value of 1.0, and train for 3 epochs on SQuAD-
+Open, 10 epochs for NQ and TriviaQA. Model
+training was performed on 64 GPUs. For our exper-
+iments, we use the Fusion-in-Decoder model imple-
+mentation from the open-source repository ( ) (Sachan
+et al., 2021b).
+A.2 Instruction Prompt Selection
+We cross-validate using several prompts formulated
+as natural language instructions to aid in question
+reconstruction. We re-rank top-1000 BM25 pas-
+sages of NQ development set using different in-
+structions including the case with no instruction.
+Results in Table 8 reveal that when prompted via in-
+structions, PLMs perform better than the case when
+not given any instructions. We also note that simple
+but effective instructions can lead to a higher top-1
+accuracy. Due to its better accuracy, we use the
+instruction " Please write a question based on this
+passage " for all the experiments in this paper.
+A.3 Analysis
+In Table 9, we present some examples of ques-
+tions and their BM25 retrieved and UPR re-ranked
+top-1 passages. While BM25 retrieves passages
+with high lexical overlap, UPR owing to its cross-
+attention mechanism is more able to understand the
+relationships between tokens in the question and
+passage and thus leads to an improvement in pas-
+sage rankings over the first-stage retriever. In the
+last example, we note that although the BM25 re-
+trieved passage contains the ground-truth answer, it
+should be considered a false positive result. On the
+other hand, UPR leads to the correctly ranked pas-
+sage but the exact match evaluation metric marksit as incorrect as it does not match the full ground-
+truth answer.
+A.4 BEIR Benchmark Results
+We re-rank the top-1000 documents from the
+BM25 and Contriever retrievers with the T0-3B
+pre-trained language model and evaluate perfor-
+mance with NDCG@10 and Recall@100 metrics.
+We present the results of the individual datasets
+included in the BEIR benchmark in Table 10. On
+both the metrics, the initial scores of BM25 are
+much higher than those of Contriever. After re-
+ranking, BM25 retriever obtains improvements on
+12 out of 15 datasets while Contriever obtains im-
+provements on 13 out of 15 datasets. On aver-
+age, NDCG@10 scores improve by 3-8% and Re-
+call@100 improves by 5-6%. The performance gap
+between BM25 and Contriever also narrows down
+after re-ranking.
+Due to the diversity in datasets, there is a con-
+siderable variation in performance gains across
+them. In the case of BM25, the highest relative per-
+formance gains are obtained by UPR on datasets
+containing information-seeking questions such as
+FIQA-2018, NQ, MS-Marco, etc. Similarly, for
+Contriever, the relative gains are much higher for
+the datasets of Trec-Covid, NQ, HotpotQA, etc.,
+where the queries are questions. On other datasets,
+the relative gains from re-ranking are moderate to
+little.
+For both the retrievers, we also observe a drop
+in performance on the fact-verification datasets
+of Fever and Climate-fever (results highlighted in
+red color in Table 10). In addition, re-ranking
+BM25 also results in a drop in performance on
+the Touche-2020 dataset. We note that in these
+datasets, the queries are statements such as claims,
+which presents a different retrieval challenge for
+re-ranking. We anticipate that by experimenting
+with different prompt instructions in UPR to better
+suit the end-task and cross-validating with the num-
+ber of top-K documents to be re-ranked, results can
+be improved on these datasets. However, we leave
+these explorations as a part of future work.
+B Reproducibility Checklist
+B.1 For all reported experimental results
+•A clear description of the mathematical set-
+ting, algorithm, and/or model : This is pro-
+vided in the main paper in Sec. 2.3793
+•A link to a downloadable source code, with
+specification of all dependencies, including ex-
+ternal libraries : We are submitting the source
+codes as a zip file.
+•A description of computing infrastructure
+used : We run experiments on a cluster con-
+taining V100 GPUs where each node’s spec-
+ifications are: Number of CPUs: 256, Phys-
+ical Memory: 1.2TB, GPU model: 8 x
+Nvidia V100, GPU architecture and memory:
+V olta/32GB, Arch: x86_64, and Disk size:
+4TB. For experiments in Sec. 4.2.3, we used
+a single node of 8 x A100 GPUs of 40GB
+memory.
+•The average runtime for each model or algo-
+rithm (e.g., training, inference, etc.), or esti-
+mated energy cost : We discuss the average
+runtime of performing inference with UPR in
+Sec. 4.2.3. However, we want to highlight
+that our codes were not carefully optimized to
+minimize runtime or to make optimal use of
+the hardware resources.
+•Number of parameters in each model : We
+provide these details in Sec. 3.4 and Table 7.
+•Corresponding validation performance for
+each reported test result : The re-ranking ex-
+periments does not require validation set for
+model selection, as we only perform inference
+for each query using the language model and
+retrieved passages. If the program committee
+or reviewers require the validation set perfor-
+mance, we will include it in the Appendix in
+the final version of the paper. Our ablations
+and analysis are conducted on the validation
+set of datasets. For the open-domain QA ex-
+periments, we also report the performance on
+the validation set.•Explanation of evaluation metrics used, with
+links to code : Our evaluation metrics are
+standard and widely used by the community.
+We provide their details in the main paper in
+Sec. 4. The code is submitted with the paper.
+B.2 For all results involving multiple
+experiments, such as hyperparameter
+search
+•The exact number of training and evaluation
+runs: We provide training details for all mod-
+els in Sec. 3.5.
+•Hyperparameter configurations for best-
+performing models : We provide the hyper-
+parameter settings in Appendix A.1.
+•The bounds for each hyperparameter : As
+described in Appendix A.1, our model and
+training setting uses standard hyperparam-
+eters such as different dropouts ∈[0,1),
+warmup ratio of optimizer ∈[0.01,0.05],
+weight regularization ∈[0,1], and learning
+rate∈[1e,1e].
+•Number of hyperparameter search trials :
+maximum 5.
+•The method of choosing hyperparameter val-
+ues (e.g., uniform sampling, manual tuning,
+etc.) and the criterion used to select among
+them (e.g., accuracy) : For the open-domain
+QA experiments, we performed manual hyper-
+parameter tuning. We selected the best hyper-
+parameter using EM results on the validation
+set.
+•Summary statistics of the results (e.g. mean,
+variance, error bars, etc.) : The re-ranking
+experiments are based on performing infer-
+ence using open-source PLMs using a single3794prompt. As such, these summary statistics are
+not applicable to UPR. The open-domain QA
+experiments are compute expensive utilizing a
+lot of CPU and GPUs resources and take time
+in the range of tens of hours. Therefore, due to
+computational and time constraints perform-
+ing multiple runs for each experiment was not
+feasible. Therefore, we adopted the approach
+of using the same seed value (1234) for all the
+training runs.
+B.3 For all datasets used
+•Details of train/validation/test splits : We use
+the standard training / dev / test splits whose
+details are provided in Sec. 3.1 and Table 1.
+•Relevant statistics such as number of exam-
+ples and label distributions : We provide
+dataset statistics details in Table 1.
+•An explanation of any data that were excluded,
+and all pre-processing steps : We include the
+relevant details in Sec. 3.
+•For natural language data, the name of the
+language(s) : Our datasets are in English lan-
+guage.
+•A zip file containing data or link to a down-
+loadable version of the data : All the datasets
+used in this work are open-source available
+and widely used by the community. Please
+refer to the respective dataset papers for the
+download links.
+•For new data collected, a complete descrip-
+tion of the data collection process, such as
+instructions to annotators and methods for
+quality control : This is not applicable to this
+work.379537963797

@@ -1,1 +1,672 @@
-596 Proceedings of the 60th Annual Meeting of the Association for Computational Linguistics Volume 1 : Long Papers , pages 596 609 May 22 - 27 , 2022 c(cid:13)2022 Association for Computational Linguistics 597 598 599 600 601 602 603 604 605 606 607 608 609 
+
+Elron BandelRanit AharonovMichal Shmueli-Scheuer
+Ilya ShnaydermanNoam SlonimLiat Ein-DorIBM ResearchComputer Science Department, Bar Ilan University
+elron.bandel@ibm.com
+{shmueli,ilyashn,noams,liate }@il.ibm.com
+Abstract
+Paraphrase generation has been widely used in
+various downstream tasks. Most tasks benefit
+mainly from high quality paraphrases, namely
+those that are semantically similar to, yet lin-
+guistically diverse from, the original sentence.
+Generating high-quality paraphrases is chal-
+lenging as it becomes increasingly hard to pre-
+serve meaning as linguistic diversity increases.
+Recent works achieve nice results by control-
+ling specific aspects of the paraphrase, such
+as its syntactic tree. However, they do not al-
+low to directly control the quality of the gener-
+ated paraphrase, and suffer from low flexibil-
+ity and scalability. Here we propose QCPG ,
+a quality-guided controlled paraphrase gener-
+ation model, that allows directly controlling
+the quality dimensions. Furthermore, we sug-
+gest a method that given a sentence, identi-
+fies points in the quality control space that
+are expected to yield optimal generated para-
+phrases. We show that our method is able
+to generate paraphrases which maintain the
+original meaning while achieving higher di-
+versity than the uncontrolled baseline. The
+models, the code, and the data can be found
+in .
+1 Introduction
+Paraphrase generation, namely rewriting a sentence
+using different words and/or syntax while preserv-
+ing its meaning (Bhagat and Hovy, 2013), is an
+important technique in natural language processing,
+that has been widely used in various downstream
+tasks including question answering (Fader et al.,
+2014a; McCann et al., 2018), summarization (Rush
+et al., 2015), data augmentation (Yu et al., 2018)
+and adversarial learning (Iyyer et al., 2018). How-
+ever, not all paraphrases are equally useful. For
+most real-world applications, paraphrases which
+are too similar to the original sentence are of lim-
+ited value, while those with high linguistic diversity,Figure 1: Density of paraphrases in WikiAnswers as
+a function of the semantic similarity and the linguistic
+diversity. The marked area, which contains high quality
+paraphrases, is very sparse (The measures used in the
+figure are described in Section 2.1) .
+i.e. with large syntactic/lexical differences between
+the paraphrase and the original sentence, are more
+beneficial to the robustness and accuracy of auto-
+matic text evaluation and classification, and can
+avoid the blandness caused by repetitive patterns
+(Qian et al., 2019). The quality of paraphrases is
+often evaluated using three dimensions, where high
+quality paraphrases are those with high semantic
+similarity as well as high lexical and/or syntactic
+diversity (McCarthy et al., 2009).
+Generating high quality paraphrases can be chal-
+lenging (for both humans and automatic models)
+since it is increasingly difficult to preserve meaning
+with increasing linguistic diversity. Indeed, when
+examining the quality of paraphrases among para-
+phrase generation datasets, one can find a wide
+range of paraphrase qualities, where the area of
+high quality is often very sparse (see Figure 1).
+This in turn results in scarcity of supervised data
+for high-quality paraphrase generation.596A recent approach aiming to produce high qual-
+ity paraphrases is controlled paraphrase generation,
+which exposes control mechanisms that can be ma-
+nipulated to produce diversity. While the controlled
+generation approaches have yielded impressive re-
+sults, they require providing the model with very
+specific information regarding the target sentence,
+such as its parse tree (Iyyer et al., 2018) or the list
+of keywords it needs to contain (Zeng et al., 2019).
+However, for most downstream applications, the
+important property of the paraphrase is its overall
+quality, rather than its specific syntactic or lexi-
+cal form. The over-specificity of existing control-
+based methods not only complicates their usage
+and limits their scalability, but also hinders their
+coverage. Thus, it would be desirable to develop
+a paraphrase generation model, which uses a sim-
+ple mechanism for directly controlling paraphrase
+quality, while avoiding unnecessary complications
+associated with fine-grained controls.
+In this paper we propose QCPG , a Quality Con-
+trolled Paraphrase Generation model, that given
+an input sentence and quality constraints, repre-
+sented by a three dimensional vector of semantic
+similarity, and syntactic and lexical distances, pro-
+duces a target sentence that conforms to the quality
+constraints.
+Our constraints are much simpler than previously
+suggested ones, such as parse trees or keyword lists,
+and leave the model the freedom to choose how to
+attain the desired quality levels.
+Enabling the direct control of the three quality
+dimensions, allows flexibility with respect to the
+specific requirements of the task at hand, and opens
+a range of generation possibilities: paraphrases of
+various flavors (e.g. syntactically vs. lexically di-
+verse), quasi-paraphrases (with lower semantic sim-
+ilarity), and even non-paraphrases which may be
+useful for downstream tasks (e.g. hard negative
+examples of sentences that are linguistically simi-
+lar but have different meanings (Guo et al., 2018;
+Reimers and Gurevych, 2020)).
+Our results show that the QCPG model indeed
+enables controlling paraphrase quality along the
+three quality dimensions.
+Furthermore, even though the training data is
+of mixed quality, and exhibits scarcity in the high
+quality area (see Figure 1), our model is able to
+learn high quality paraphrasing behavior, i.e. it
+increases the linguistic diversity of the generated
+paraphrases without decreasing the semantic simi-larity compared to the uncontrolled baseline.
+2 Method
+In this section we provide a general description
+of our approach. We first explain how the differ-
+ent quality dimensions are measured. We then de-
+scribe the controlled paraphrase generation model,
+QCPG , and finally we suggest a method that given
+the task requirements, detects the input control val-
+ues which maximize the quality of the generated
+paraphrases. Figure 2 summarizes our proposed so-
+lution for generating controlled paraphrases, which
+is detailed in the rest of the section.
+2.1 Quantifying Paraphrase Quality
+The most common dimensions for measuring
+paraphrase quality are the semantic, syntactic
+and lexical dimensions. Several previous works
+used also a fluency evaluation metric (Siddique
+et al., 2020). However, since our focus is on
+the supervised setting, we rely on the gold para-
+phrases as fluency guidance for the model (Mc-
+Carthy et al., 2009). Thus, given a sentence s
+and a paraphrase s, we define the paraphrase
+quality as a three dimensional vector q(s, s) =
+(q(s, s), q(s, s), q(s, s)), where qis
+a measure of semantic similarity, and qandq
+are measures of syntactic and lexical variation, re-
+spectively. For the syntactic score, inspired by
+Iyyer et al. (2018) we choose q(s, s)to be the
+normalized tree edit distance (Zhang and Shasha,
+1989) between the third level constituency parse-
+trees of sands, after removing the tokens - to
+increase the decoupling from the lexical distance
+metric. We define the lexical score q(s, s)to
+be the normalized character-level minimal edit dis-
+tance between the bag of words. This measure is
+independent of word order, and hence increases the
+decoupling from syntactic measures. Additionally,
+calculating the token distances on the character
+level enables to capture tokens that share the same
+stem/lemma. Character-level distance is also more
+robust to typos that may be found in noisy data.
+As for the semantic score, several strong metrics
+have been recently proposed for measuring seman-
+tic similarity between sentences. In order to se-
+lectq(s, s), we studied the agreement between
+the candidate metrics and human judgments, using
+only development data, and found Bleurt (Sellam
+et al., 2020) to have the highest correlation with hu-
+man judgments (see Appendix A). Thus, we define597
+q(s, s)to be the Bleurt score, normalized using
+the sigmoid function to ensure a uniform range of
+values, [0,1], for all three quality dimensions. For
+ease of presentation all metrics are presented on a
+0−100scale.
+2.2 The QCPG Model
+The main component of our solution is a quality
+controlled paraphrase generation model ( QCPG ),
+which is an encoder-decoder model trained on the
+task of controlled paraphrase generation. Given
+an input sentence sand a control vector c=
+(c, c, c), the goal of QCPG is to generate
+an output paraphrase QCPG (s,c)that conforms
+toc. We train QCPG using the training set pairs
+(s, t), by setting cto be q(s, t), and maximizing
+P(t|s,c=q(s, t))over the training set via the
+autoregressive cross entropy loss.
+2.3 Control Values Selection
+A major challenge in the research of controlled
+paraphrase generation, is selecting appropriate in-
+put control values that can be achieved by the
+model (Goyal and Durrett, 2020). Clearly, given a
+sentence, not all paraphrase qualities are achievable.
+Some sentences are more amenable to paraphrasing
+than others. For example, named entities and num-
+bers are much harder to be replaced while keeping
+sentence meaning, and hence, the potential lexical
+diversity of paraphrases involving such terms is
+relatively limited. Forcing QCPG to conform to
+quality control values that are too high with respect
+to the input sentence, may lead to suboptimal qual-
+ity of the resultant paraphrases. Thus, for a moreeffective use of QCPG , the control values should
+be determined with respect to the input sentence.
+Below we describe the second part of our so-
+lution, namely a method that given a sentence,
+predicts the input control values, c(s), that opti-
+mize the expected quality of the paraphrases gen-
+erated by QCPG . For simplicity we assume that
+the quality distribution p(q|s)of all paraphrases
+of sentence s, is approximately normally dis-
+tributed around a sentence dependent mean q(s),
+and that the variance is approximately sentence-
+independent. We further assume that given an input
+sentence s, the difficulty to generate a paraphrase
+of a given quality, q, is dominated by p(q|s)rather
+than by the quality vector qitself.
+Following our assumptions, the level of dif-
+ficulty can be expressed by the offset, o=
+(o, o, o)ofqfromq(s). Thus, the in-
+put control, c(s), for QCPG , is the sum of q(s)
+and an offset o.
+Our aim is to analyze the model results for vary-
+ing levels of difficulty, namely under different off-
+sets,o, from q(s).
+The Quality Predictor ( QP):Since q(s)is
+unknown, we introduce QP, a regressor whose
+output, termed the reference of s,r(s) =
+(r(s), r(s), r(s)), approximates q(s).
+During training, QPaims to predict q(s, t)given
+s, where (s, t)are the input-output pairs of the
+training data.
+To summarize, we define sentence-aware quality
+control by decomposing the QCPG input control,
+c, into a sum of a sentence dependent reference598point, r(s), and a sentence independent offset, o.
+3 Data and Implementation Details
+3.1 Datasets
+To test the ability of our model to learn high quality
+behavior from mixed quality data we use weakly
+annotated datasets. These datasets are large but
+noisy, and contain only a relatively small amount
+of high quality paraphrases.
+MSCOCO : This dataset consists of 123K im-
+ages, where each image contains at most five
+human-labeled captions (Lin et al., 2014). Similar
+to previous works we consider different captions
+of the same image as paraphrases.
+WikiAnswers (WikiAns for short) : The
+WikiAnswers corpus contains clusters of ques-
+tions tagged by wiki-answers.com users as similar.
+There are 30,370,994clusters with 25question in
+each on average. In total, the corpus contains over
+70million question pairs (Fader et al., 2014b).
+ParaBank2.0 : A dataset containing clusters of
+sentential paraphrases, produced from a bilingual
+corpus using negative constraints, inference sam-
+pling, and clustering (Hu et al., 2019). The dataset
+is composed of avarage of 5paraphrases in every
+cluster and close to 100million pairs in total.
+To get comparable results across all datasets, we
+randomly sub-sampled ParaBank2.0 and WikiAns
+to the same size as MSCOCO, and split them to
+train, dev and test sets, of sizes 900K,14Kand
+14Krespectively. We carefully made sure that
+there are no pairs from the same cluster in differ-
+ent splits of the data. The full data splits will be
+published with our code.
+3.2 Implementation Details
+All models are trained with batch size of 32on2
+NVIDIA A100 GPUs for 6epochs. Full details
+as well as train and dev results can be found in
+Appendix C.1.
+QCPG: We use the pre-trained T5-base (Raffel
+et al., 2020) as the encoder-decoder model. The
+control input vector to QCPG is quantized at every
+dimension into 20equally spaced values ranging
+from 0to100. Each value is assigned to a special
+saved-token. The three tokens corresponding to
+the quantized values of the control vector c, are
+concatenated to the head of the input sentence, and
+together used as input to the model. r(s)andoare
+also quantized in a similar way.QP: An Electra base model (Clark et al., 2020)
+finetuned with MSE loss to predict the typical qual-
+ity values (see Section 2.3).
+Baseline Model (BL): A T5-base model fine-
+tuned on the training data.
+For all the models, we adopt the experimental
+setup used in (Devlin et al., 2019), i.e. we train the
+model with several learning rates and choose the
+one that achieves the highest dev set performance
+(see appendix C.1).
+4 Results
+4.1 Controlling the Quality Dimensions
+The aim of the following analysis is to study the
+level of control achieved by QCPG . To this end,
+we measure the model response to changes in the
+input offsets. We compute the expected difference
+in paraphrase quality, as a result of applying an
+input offset ocompared to zero offset as a refer-
+ence. More formally, we define the 3-dimensional
+responsiveness vector of QCPG at an offset o,
+R(o)asQ(o)−Q((0,0,0)), where Q(o)is the
+expected quality of the paraphrases generated by
+QCPG at an offset o. We estimate Q(o)by aver-
+aging q(QCPG (s,r(s) +o))over the input sen-
+tences sof the dev set, and denote this estimate by
+˜Q(o) = ( ˜Q(o),˜Q(o),˜Q(o)), and the
+corresponding estimate of R(o)by˜R(o).
+Specifically, in the following analysis we are in-
+terested in studying the model response to each
+of the dimensions separately, i.e. how changing
+the input offset along a given quality dimension
+dim – the controlled dimension – while keeping
+the two other dimensions constant, affects the re-
+sponsiveness in each of the three dimensions. A
+good control mechanism would imply that increas-
+ing the input offset in one dimension will result in
+a monotonically increasing responsiveness in that
+dimension, with relatively small responsiveness in
+the other two dimensions.
+Figure 3 shows, for each of the three datasets,
+the responsiveness in the three quality dimensions,
+when changing the input offset along each of the
+three dimensions, while fixing the input offsets in
+the other two dimensions at 0. Examining the ac-
+tual values of quality in the paraphrases of the dev
+sets, reveals that the standard deviation is different
+in each dimension. Hence, for clarity of presen-
+tation, we present the input offset values and the
+responsiveness in units of standard deviation as
+measured in the respective dimension and dev set.599For the range of offsets displayed in Figure 3,
+the responsiveness in the controlled dimension in-
+creases monotonically with the input offsets across
+all datasets and dimensions. As expected, the re-
+sponsiveness in the uncontrolled dimensions does
+not zeros due to the inherent coupling between
+the dimensions. For example, many changes that
+increase syntactic diversity, also increase lexical
+diversity (e.g. a move from passive to active voice).
+Still, our control mechanism is able to increase the
+responsiveness in the controlled dimension with
+relative low responsiveness in the uncontrolled di-
+mensions. Specifically, focusing on the relation
+between semantic similarity and expression diver-
+sity, the figure shows that there is a minor decrease
+in semantic similarity in response to an increase
+in lexical and syntactic diversity. In the next sec-
+tion, we will show that this does not prevent our
+model from generating paraphrases that are not
+only more lexically and syntactically diverse, but
+also more semantically similar to the source sen-
+tences, compared to the paraphrases generated by
+the uncontrolled baseline.
+Figure 3 focused on small to moderate input off-
+sets, i.e. offsets up to 2stds from the reference
+point. However, as we speculated before, with in-
+creasing offsets, i.e. the more the requested control
+value deviates from the typical value, it becomes
+increasingly difficult to generate a paraphrase that
+conforms to the requested control value. Figure 4
+depicts the responsiveness in the syntactic and lexi-
+cal dimensions for a larger range of offset values.
+For the semantic dimension, the typical values are
+too high to allow large positive offsets, which for
+most sentences result in exceeding the upper limit
+of the semantic score. Indeed, as can be seen in
+Figure 4, when moving to high offset values, the
+responsiveness in the syntactic and lexical dimen-
+sions starts to decrease. This behavior is in line
+with our aforementioned hypothesis, and reflects
+the detrimental effect of feeding QCPG with in-
+put control values that are too far from the typical
+paraphrase qualities of the input sentence. The non-
+monotonic behavior of the responsiveness implies
+that the input offsets should be selected carefully in
+order to optimize the quality of the resultant para-
+phrases. In Section 4.2 we suggest a method for
+identifying these optimal offsets.4.2 Selecting Optimal Input Control Values
+In this section, we suggest a method that given task
+requirements, selects the input offsets that are ex-
+pected to yield the desired quality of paraphrases.
+The idea is to compute the estimated expected qual-
+ity,˜Q(o), for each input offset o, using the dev
+set as described in Section 4.1, and then search
+the 3D grid of input offsets to find the point for
+which ˜Q(o)is best suited for the user’s require-
+ments. We envision this analysis as a preliminary
+step in which the user chooses the input control pa-
+rameters that best achieve his desired paraphrasing
+operation point, and then uses the chosen values at
+inference – which is why we use the dev set.
+We study the behavior of ˜Q(o)as a function of
+the 3D grid of offset points in the relevant range, i.e
+every owhere o,oandoin0,5,10...50.
+Figure 5 depicts ˜Q(o)for WikiAns, on a slice of
+the full offset grid. The results for the full grid
+on all datasets are shown in Figure 6. The right-
+hand-side map depicts the estimated linguistic di-
+versity (the average of ˜Q(o)and˜Q(o)) and
+the left-hand-side depicts the semantic similarity,
+˜Q(o)). The maps are presented for o= 50 ,
+and for different values of oando. As
+expected, the two measures are anti-correlated,
+where areas with increased semantic similarity
+are characterized by decreased linguistic diversity.
+TheQCPG results are compared to two reference
+points, which are invariant to oand are marked
+on the colorbars with black squares: ’Dataset’
+is the semantic-similarity/linguistic-diversity av-
+erage value over the corresponding dev set para-
+phrases, and ’Baseline’ is the average semantic-
+similarity/linguistic-diversity of the uncontrolled
+baseline over the corresponding dev set. Notice
+that the average diversity level achieved by the un-
+controlled baseline is lower than that of the dev
+set mean, reflecting the difficulty of this model to
+generate diverse paraphrases. QCPG on the other
+hand, with suitable input offset values, is able to
+generate paraphrases which are on average higher
+than the baseline both in their linguistic diversity
+and in their semantic similarity, and in fact even
+higher in many cases than the values of the ground
+truth paraphrases in the dev-set.
+In general, the estimates of the expected qual-
+ity achieved by QCPG at different input offsets,
+enable a user to generate paraphrases at different
+operation points, by manipulating the input offset
+control oto meet her desired quality values. Con-600601
+sider for example a typical use case, of aiming to
+maximize linguistic diversity under a constraint on
+semantic similarity. An example of such a case
+is an operation point, denoted by QCPG, which
+aims to exemplify the advantage of QCPG over the
+baseline, by maximizing linguistic diversity under
+the constraint that the semantic similarity is at least
+5points higher than the baseline. The input off-
+set values to obtain this operation point depend on
+the dataset, and can be found using heatmaps such
+as in Figure 5. For WikiAns the input offset for
+theQCPGoperation point values are (50,35,5)
+(entry marked by the black square).
+4.3 Quality Evaluation on the Test Set
+In the previous section we saw, using estimates
+based on the dev sets, that there are many opera-
+tion points which generate paraphrases with higher
+quality than those achieved by the uncontrolled
+baseline. We now turn to evaluate one such op-
+eration point, namely QCPG, using the source
+sentences of the testsets which were not used in
+the selection of the input offset values.
+Automatic Evaluation We use four quality mea-
+sures to evaluate different aspects of generated para-
+phrases. The three quality measures used in the
+control of QCPG (Section 2.1) and Self-BLEU
+(Zhu et al., 2018) as adapted in Li et al. (2019); Liu
+et al. (2020a), which aims to measure the linguistic
+diversity in the generated paraphrases by penaliz-
+ing copying from input sentences. As can be seen
+in Table 1, QCPGoutperforms the baseline in allmetrics across all datasets, as predicted using the
+dev-set heatmaps. A clear advantage is obtained
+even for Self-BLEU, which was not part of the met-
+rics used as input controls. Importantly, the quality
+of the paraphrases generated by our model is com-
+parable to, or at times better than the quality of
+the paraphrases in the ground truth of the datasets.
+Examples of paraphrases generated by QCPG
+compared to the ground truth paraphrases appear
+in Table 10. This is an important step towards the
+goal of obtaining paraphrases in the sparse area of
+high quality (recall the top right corner of Figure
+1).
+Additionally, we examined QCPG from another
+perspective: the effect of the quality guidance on
+the model’s ability to predict the ground truth para-
+phrases. Tables 5 and 6 show the BLEU scores
+(Papineni et al., 2002) obtained by QCPG and the
+uncontrolled baseline respectively. The results ver-
+ify that the input quality vectors induced by the
+target sentences are effectively utilized by QCPG
+to achieve better prediction performance.
+Human Evaluation While linguistic diversity
+can be automatically measured by reliable met-
+rics such as Self-BLEU, measuring semantic sim-
+ilarity is more challenging. We therefore rely on
+automatic metrics for evaluating the lexical and
+syntactic diversity, but use human annotation for
+validating the semantic evaluation. To this end, we
+selected a sample of 50source sentences from each
+test set, and generated one paraphrase using the
+uncontrolled baseline and one using QCPG. The602
+annotators were shown the source sentence, along
+with the two generated paraphrases (randomly or-
+dered), and were asked which of the two better pre-
+serves the semantic meaning of the source sentence
+(ties are also allowed). In total, 150triplets were
+evaluated by 5judges. Table 2 demonstrates an
+advantage for QCPGin all datasets, with a large
+margin in MSCOCO and WikiAns. This advantage
+is statistically significant ( p−value < 0.05) as ob-
+tained by applying the Wilcoxon signed-rank test
+to the difference between the number of annota-
+tors that voted for QCPGand those voted for the
+baseline, across all datasets. Thus, the human eval-
+uation is in line with the results of the automatic
+semantic similarity measure. We also verified, that
+the results of this sample, in terms of linguistic
+diversity, are very similar to those shown in Table
+1.
+For examples of paraphrases generated by
+QCPGsee Table 10 in the Appendix.
+5 Related Work
+Many recent works on paraphrase generation have
+been focused on attempting to achieve high-quality
+paraphrases. These works can be divided into su-
+pervised and unsupervised approaches.
+Supervised Approaches To achieve diversity,some works focused on diverse decoding using
+heuristics such as Hamming distance or distinct
+n-grams to preserve diverse options during beam
+search (Vijayakumar et al., 2018). Other works
+generate multiple outputs by perturbing latent rep-
+resentations (Gupta et al., 2018; Park et al., 2019).
+or by using distinct generators (Qian et al., 2019).
+These methods achieve some diversity, but do not
+control generation in an interpretable manner.
+The works that are most similar to ours strive
+to gain diversity using controlled-paraphrase gen-
+eration, by exposing control mechanisms that are
+manipulated to produce either lexically (Zeng et al.,
+2019; Thompson and Post, 2020) or syntactically
+(Chen et al., 2019; Goyal and Durrett, 2020) di-
+verse paraphrases. One approach is to use an ex-
+emplar sentence for guiding the syntax of the gen-
+erated paraphrase (Chen et al., 2019; Bao et al.,
+2019; Hosking and Lapata, 2021). An alternative is
+to directly employ constituency tree as the syntax
+guidance (Iyyer et al., 2018; Li and Choi, 2020).
+Goyal and Durrett (2020) promote syntactic diver-
+sity by conditioning over possible syntactic rear-
+rangements of the input. Zeng et al. (2019) use
+keywords as lexical guidance for the generation
+process. Here we introduce a simple model for
+jointly controlling the lexical, syntactic and seman-
+tic aspects of the generated paraphrases.
+Unsupervised Approaches Niu et al. (2020)
+rely on neural models to generate high quality para-
+phrases, using a decoding method that enforces
+diversity by preventing repetitive copying of the
+input tokens. Liu et al. (2020b) optimize a quality
+oriented objective by casting paraphrase generation
+as an optimization problem, and searching the sen-
+tence space to find the optimal point. Garg et al.
+(2021) and Siddique et al. (2020) use reinforcement
+learning with quality-oriented reward combining
+textual entailment, semantic similarity, expression603diversity and fluency. In this work, we employ
+similar metrics for guiding the generation of para-
+phrases within the supervised framework.
+6 Discussion
+In this paper, we propose a novel controlled para-
+phrase generation model, that leverages measures
+of paraphrase quality for encouraging the genera-
+tion of paraphrases with desired quality. We demon-
+strate the high level of control achieved by the
+model, and suggest a method for coping with the
+challenging problem of finding suitable control val-
+ues.
+Aside from offering a simple and effective way
+for controlling models’ output quality, the qual-
+ity control paradigm enables a holistic view of the
+data, the training process and the final model anal-
+ysis. Namely: (I) Examination of the training data
+through the lens of data quality enables to charac-
+terize the data at hand, its strengths and limitations.
+(II) A quality-aware training process can be viewed
+as multi-task learning, where each quality level is a
+separate task with its own accurate supervision, as
+opposed to the standard quality-agnostic approach,
+where low quality data is in fact used as a poor
+supervision for a model which aims at generating
+higher quality output. (III) Analyzing the model be-
+havior under different quality controls, allows finer
+understanding of the different model behaviors and
+the trade-offs between their output qualities. Better
+understanding the expected output quality of neural
+NLG models, for different input quality controls,
+can increase the trust in their output.
+Finally, our model analysis consistently shows
+that although the models generally follow the qual-
+ity requirements, there is still room for improve-
+ment. A possible direction for future research is
+exploring methods, such as reinforcement learning,
+for further improving the ability of the model to
+satisfy the quality requirements.
+References604605
+A Selecting the semantic similarity
+measure
+Recently, several strong metrics have been pro-
+posed for measuring semantic similarity between
+sentences (Reimers and Gurevych, 2019; ?; Sel-
+lam et al., 2020). In order to select the semantic
+similarity metric for QCPG , we performed a small
+experiment over the three dev sets, with the aim of
+measuring the agreement of the candidate metrics
+with human judgments. To this end, we leveraged
+two properties that characterize weakly labeled
+datasets, the underlying clusters of sentences, and
+the high variability of semantic similarity. Given
+a dataset, we randomly selected 100clusters, and
+picked three sentences at random from each clus-
+ter. For each triplet of sentences t= (t, t, t)
+we asked 5human annotators to choose which of
+the two sentences, tort, better preserves the
+semantic meaning of t. In order to find the candi-
+date similarity measure with the highest agreement
+with human judgments, we first computed, for each
+triplet, the difference between the number of anno-
+tators voted for tand those voted for t. We then
+computed for each candidate measure, the differ-
+ence between the similarity of ttotand and of
+ttot. We then measured Kendall’s Tau correla-
+tion (Daniel, 1990) between the difference vector
+of the human judgments and that of the judgments
+of each of the candidate measures. Table 3 shows
+the resultant correlations. The highest correlations
+are obtained for SBERT (Reimers and Gurevych,
+2019), but since it was trained on WikiAns and
+MSCOCO, we could not use it in our study. We
+selected Bleurt due to its highest correlation with
+human judgments over the three datasets (among
+the methods that were not exposed to the consid-
+ered datasets). We normalize Bleurt score using
+the sigmoid function to ensure a uniform range of
+values, [0,1], for the three quality dimensions.
+B Correlation of semantic similarity
+measures with linguistic diversity
+We study the coupling between the different seman-
+tic similarity measures and the linguistic diversity.
+We assume that the level of coupling of a good sim-
+ilarity measure will resemble that of humans, and
+will be less sensitive to lexical and syntactic proper-
+ties of the paraphrase. Table 4 presents the Kendall
+tau correlation between the different similarity mea-
+sures and the linguistic diversity. Results for hu-
+man judgments are also shown for a reference. The
+correlation calculation is performed between the
+vectors of differences as described in section A).
+The results show that Bleurt demonstrates the low-
+est coupling with linguistic diversity among the
+automatic measures (aside from SBERT which, as
+mentioned before, was trained with MSCOCO and
+WikiAns). The comparison to human judgments
+shows that Bleurt is more influenced by linguistic
+features, indicating that automatic measures need
+to be further improved to reach the decoupling level
+achieved by humans.606
+C Models Details and Training Results
+The learning rates for the QCPG and the Baseline
+models were selected in the following way. For
+a given dataset, we finetuned the models with 4
+learning rates ( 1e-3,1e-4,5e-3,5e-4) (The training
+results of the baseline presented in Table 5 and the
+results of QCPG presented in Table 6.). For the
+baseline we selected the one which yielded the
+best BLEU score (Papineni et al., 2002) on the
+corresponding dev set The best learning rate for
+every dataset was chosen based on the Dev set
+BLEU score. For the QCPG we chose the model
+that best conforms to the control input as measured
+by the MSE between the input control vector and
+the output quality vector (see Table 9). The QP
+model is an Electra-Base model finetuned with 4
+different learning rates ( 1.5e-4,1e-4,3e-5,5e-5).
+We choose the learning rate the yields the minimal
+MSE on the dev set (For full results see Table 8)
+C.1 Full Heatmaps
+The full heatmaps can be found in Figure 6.607608609

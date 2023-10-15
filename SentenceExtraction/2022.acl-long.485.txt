@@ -1,1 +1,749 @@
-7037 Proceedings of the 60th Annual Meeting of the Association for Computational Linguistics Volume 1 : Long Papers , pages 7037 7049 May 22 - 27 , 2022 c(cid:13)2022 Association for Computational Linguistics 7038 7039 7040 7041 7042 7043 7044 7045 7046 7047 7048 7049 
+
+Wangchunshu Zhou, Canwen Xu, Julian McAuleyStanford University,University of California, San Diegowcszhou@stanford.edu ,{cxu,jmcauley}@ucsd.edu
+Abstract
+We present Knowledge Distillation with Meta
+Learning (MetaDistil), a simple yet effective
+alternative to traditional knowledge distilla-
+tion (KD) methods where the teacher model
+is ﬁxed during training. We show the teacher
+network can learn to better transfer knowledge
+to the student network (i.e., learning to teach )
+with the feedback from the performance of the
+distilled student network in a meta learning
+framework. Moreover, we introduce a pilot
+update mechanism to improve the alignment
+between the inner-learner and meta-learner in
+meta learning algorithms that focus on an im-
+proved inner-learner. Experiments on various
+benchmarks show that MetaDistil can yield
+signiﬁcant improvements compared with tradi-
+tional KD algorithms and is less sensitive to
+the choice of different student capacity and hy-
+perparameters, facilitating the use of KD on
+different tasks and models.
+1 Introduction
+With the prevalence of large neural networks with
+millions or billions of parameters, model compres-
+sion is gaining prominence for facilitating efﬁcient,
+eco-friendly deployment for machine learning ap-
+plications. Among techniques for compression,
+knowledge distillation (KD) (Hinton et al., 2015b)
+has shown effectiveness in both Computer Vision
+and Natural Language Processing tasks (Hinton
+et al., 2015b; Romero et al., 2015; Zagoruyko &
+Komodakis, 2017; Tung & Mori, 2019; Peng et al.,
+2019; Ahn et al., 2019; Park et al., 2019; Passalis
+& Tefas, 2018; Heo et al., 2019; Kim et al., 2018;
+Shi et al., 2021; Sanh et al., 2019; Jiao et al., 2019;
+Wang et al., 2020b). Previous works often train
+a large model as the “teacher”; then they ﬁx the
+teacher and train a “student” model to mimic thebehavior of the teacher, in order to transfer the
+knowledge from the teacher to the student.
+However, this paradigm has the following draw-
+backs: (1) The teacher is unaware of the stu-
+dent’s capacity. Recent studies in pedagogy sug-
+gest student-centered learning, which considers
+students’ characteristics and learning capability,
+has shown effectiveness improving students’ per-
+formance (Cornelius-White, 2007; Wright, 2011).
+However, in conventional knowledge distillation,
+the student passively accepts knowledge from the
+teacher, without regard for the student model’s
+learning capability and performance. Recent
+works (Park et al., 2021; Shi et al., 2021) intro-
+duce student-aware distillation by jointly training
+the teacher and the student with task-speciﬁc objec-
+tives. However, there is still space for improvement
+since: (2) The teacher is not optimized for dis-
+tillation. In previous works, the teacher is often
+trained to optimize its own inference performance.
+However, the teacher is not aware of the need to
+transfer its knowledge to a student and thus usu-
+ally does so suboptimally. A real-world analogy is
+that a PhD student may have enough knowledge to
+solve problems themselves, but requires additional
+teaching training to qualify as a professor.
+To address these two drawbacks, we pro-
+pose Knowledge Distillation with Meta Learn-
+ing (MetaDistil), a new teacher-student distillation
+framework using meta learning (Finn et al., 2017)
+to exploit feedback about the student’s learning
+progress to improve the teacher’s knowledge trans-
+fer ability throughout the distillation process. On
+the basis of previous formulations of bi-level op-
+timization based meta learning (Finn et al., 2017),
+we propose a new mechanism called pilot update
+that aligns the learning of the bi-level learners (i.e.,
+the teacher and the student). We illustrate the work-
+ﬂow of MetaDistil in Figure 1. The teacher in
+MetaDistil is trainable, which enables the teacher to
+adjust to its student network and also improves its7037
+“teaching skills.” Motivated by the idea of student-
+centered learning, we allow the teacher to adjust
+its output based on the performance of the student
+model on a “quiz set,” which is a separate reserved
+data split from the original training set. For each
+training step, we ﬁrst copy the student StoSand
+updateSby a common knowledge distillation loss.
+We call this process a “teaching experiment.” In
+this way, we can obtain an experimental student
+Sthat can be quizzed. Then, we sample from
+the quiz set, and calculate the loss of Son these
+samples. We use this loss as a feedback signal
+to meta-update the teacher by calculating second
+derivatives and performing gradient descent (Finn
+et al., 2017). Finally, we discard the experimental
+subjectSand use the updated teacher to distill into
+the studentSon the same training batches. The
+use of meta learning allows the teacher model to
+receive feedback from the student in a completely
+differentiable way. We provide a simple and in-
+tuitive approach to explicitly optimize the teacher
+using the student’s quiz performance as a proxy.
+To test the effectiveness of MetaDistil, we con-
+duct extensive experiments on text and image clas-
+siﬁcation tasks. MetaDistil outperforms knowl-
+edge distillation by a large margin, verifying the
+effectiveness and versatility of our method. Also,
+our method achieves state-of-the-art performance
+compressing BERT (Devlin et al., 2019) on the
+GLUE benchmark (Wang et al., 2019) and shows
+competitive results compressing ResNet (He et al.,
+2016) and VGG (Simonyan & Zisserman, 2015)
+on CIFAR-100 (Krizhevsky et al., 2009). Addi-
+tionally, we design experiments to analyze and ex-
+plain the improvement. Ablation studies show the
+effectiveness of our proposed pilot update and dy-
+namic distillation. Also, compared to conventionalKD, MetaDistil is more robust to different student
+capacity and hyperparameters, which is probably
+because of its ability to adjust the parameters of the
+teacher model.
+2 Related Work
+Knowledge Distillation Recently, many at-
+tempts have been made to accelerate large neural
+networks (Xu et al., 2020, 2021b; Zhou et al., 2020,
+2021; Xu & McAuley, 2022). Knowledge distil-
+lation is a prominent method for training compact
+networks to achieve comparable performance to
+a deep network. Hinton et al. (2015b) ﬁrst intro-
+duced the idea of knowledge distillation to exploit
+the “dark knowledge” (i.e., soft label distribution)
+from a large teacher model as additional supervi-
+sion for training a smaller student model. Since its
+introduction, several works (Romero et al., 2015;
+Zagoruyko & Komodakis, 2017; Tung & Mori,
+2019; Park et al., 2019; Sun et al., 2019; Jiao et al.,
+2019) have investigated methods that align differ-
+ent latent representations between the student and
+teacher models for better knowledge transfer. In the
+context of knowledge distillation, MetaDistil shares
+some common ideas with the line of work that uti-
+lizes a sequence of intermediate teacher models to
+make the teacher network better adapt to the ca-
+pacity of the student model throughout the training
+process, including teacher assistant knowledge dis-
+tillation (TAKD) (Mirzadeh et al., 2020) and route
+constraint optimization (RCO) (Jin et al., 2019).
+However, the intermediate teachers are heuristi-
+cally selected independently of the training process
+and the evolution of the teacher network is discrete.
+In contrast, MetaDistil employs meta learning to
+make the teacher model adapt to the current state
+of the student model and provide a continuously7038evolving meta-teacher that can better teach the stu-
+dent. Concurrently, Park et al. (2021) and Shi et al.
+(2021) propose to update the teacher model jointly
+with the student model with task speciﬁc objectives
+(e.g., cross-entropy loss) during the KD process and
+add constraints to keep student and teacher similar
+to each other. Their approaches makes the teacher
+model aware of the student model by constraining
+the teacher model’s capacity. However, the teacher
+models in their methods are still not optimized for
+knowledge transfer. In addition, Zhang et al. (2018)
+introduced deep mutual learning where multiple
+models learn collaboratively and teach each other
+throughout the training process. While it is focused
+on a different setting where different models have
+approximately the same capacity and are learned
+from scratch, it also encourages the teacher model
+to behave similarly to the student model. Differ-
+ent from all aforementioned methods, MetaDistil
+employs meta learning to explicitly optimize the
+teacher model for better knowledge transfer ability,
+and leads to improved performance of the resulting
+student model.
+Meta Learning The core idea of meta learning
+is “learning to learn,” which means taking the opti-
+mization process of a learning algorithm into con-
+sideration when optimizing the learning algorithm
+itself. Meta learning typically involves a bi-level
+optimization process where the inner-learner pro-
+vides feedback for optimization of the meta-learner.
+Successful applications of meta learning include
+learning better initialization (Finn et al., 2017), ar-
+chitecture search (Liu et al., 2019), learning to op-
+timize the learning rate schedule (Baydin et al.,
+2018), and learning to optimize (Andrychowicz
+et al., 2016). These works typically aim to ob-
+tain an optimized meta-learner (i.e., the teacher
+model in MetaDistil), while the optimization of the
+inner-learner (i.e., the student model in MetaDis-
+til), is mainly used to provide learning signal for
+the meta optimization process. This is different
+from the objective of knowledge distillation where
+an optimized student model is the goal. Recently,
+there have been a few works investigating using
+this bi-level optimization framework to obtain a
+better inner-learner. For example, meta pseudo
+labels (Pham et al., 2020) use meta learning to
+optimize a pseudo label generator for better semi-
+supervised learning; meta back-translation (Pham
+et al., 2021) meta-trains a back-translation model
+to better train a machine translation model. Thesemethods adapt the same bi-level optimization pro-
+cess as previous works where the goal is to obtain
+an optimized meta-learner. In these approaches,
+during each iteration, the meta-learner is optimized
+for the original inner-learner and then applied to
+the updated inner-learner in the next iteration. This
+leads to a mismatch between the meta-learner and
+the inner-learner, and is therefore suboptimal for
+learning a good inner-learner. In this paper, we
+introduce a pilot update mechanism, which is a
+simple and general method for this kind of prob-
+lems, for the inner-learner to mitigate this issue and
+make the updated meta-learner better adapted to
+the inner-learner.
+Meta Knowledge Distillation Recently, some
+works on KD take a meta approach. Pan et al.
+(2020) proposed a framework to train a meta-
+teacher across domains that can better ﬁt new do-
+mains with meta-learning. Then, traditional KD
+is performed to transfer the knowledge from the
+meta-teacher to the student. Liu et al. (2020) pro-
+posed a self-distillation network which utilizes
+meta-learning to train a label-generator as a fusion
+of deep layers in the network, to generate more
+compatible soft targets for shallow layers. Different
+from the above, MetaDistil is a general knowledge
+distillation method that exploits meta-learning to
+allow the teacher to learn to teach dynamically. In-
+stead of merely training a meta-teacher, our method
+uses meta-learning throughout the procedure of
+knowledge transfer, making the teacher model com-
+patible for the student model for every training
+example during each training stage.
+3 Knowledge Distillation with Meta
+Learning
+An overview of MetaDistil is presented in Figure 1.
+MetaDistil includes two major components. First,
+the meta update enables the teacher model to re-
+ceive the student model’s feedback on the distilla-
+tion process, allowing the teacher model to “learn
+to teach” and provide distillation signals that are
+more suitable for the student model’s current ca-
+pacity. The pilot update mechanism ensures a ﬁner-
+grained match between the student model and the
+meta-updated teacher model.
+3.1 Background
+3.1.1 Knowledge Distillation
+Knowledge distillation algorithms aim to exploit
+the hidden knowledge from a large teacher network,7039denoted asT, to guide the training of a shallow
+student network, denoted as S. To help transfer the
+knowledge from the teacher to the student, apart
+from the original task-speciﬁc objective (e.g., cross-
+entropy loss), a knowledge distillation objective
+which aligns the behavior of the student and the
+teacher is included to train the student network.
+Formally, given a labeled dataset DofNsamples
+D=f(x;y);:::; (x;y)g, we can write the
+loss function of the student network as follows,
+L(D;;) =1
+NX[L(y;S(x;))
++ (1 )L(T(x;);S(x;))]
+(1)
+whereis a hyper-parameter to control the relative
+importance of the two terms; andare the
+parameters of the teacher Tand studentS, respec-
+tively.Lrefers to the task-speciﬁc loss and L
+refers to the knowledge distillation loss which mea-
+sures the similarity of the student and the teacher.
+Some popular similarity measurements include the
+KL divergence between the output probability dis-
+tribution, the mean squared error (MSE) between
+student and teacher logits, the similarity between
+the student and the teacher’s attention distribution,
+etc. We do not specify the detailed form of the loss
+function because MetaDistil is a general framework
+that can be easily applied to various kinds of KD
+objectives as long as the objective is differentiable
+with respect to the teacher parameters. In the ex-
+periments of this paper, we use mean squared error
+between the hidden states of the teacher and the
+student for both our method and the KD baseline
+since recent study Kim et al. (2021) ﬁnds that it
+is more stable and slightly outperforms than KL
+divergence.
+3.1.2 Meta Learning
+In meta learning algorithms that involve a bi-level
+optimization problem (Finn et al., 2017), there ex-
+ists an inner-learner fand a meta-learner f. The
+inner-learner is trained to accomplish a task Tor
+a distribution of tasks with help from the meta-
+learner. The training process of fonTwith the
+help offis typically called inner-loop , and we
+can denotef(f)as the updated inner-learner af-
+ter the inner-loop. We can express fas a function
+offbecause learning fdepends onf. In return,
+the meta-learner is optimized with a meta objective,
+which is generally the maximization of expectedperformance of the inner-learner after the inner-
+loop, i.e.,f(f). This learning process is called a
+meta-loop and is often accomplished by gradient
+descent with derivatives of L(f(f)), the loss of
+updated inner-leaner on some held-out support set
+(i.e., the quiz set in our paper).
+3.2 Methodology
+3.2.1 Pilot Update
+In the original formulation of meta learning (Finn
+et al., 2017), the purpose is to learn a good meta-
+learnerfthat can generalize to different inner-
+learnersffor different tasks. In their approach, the
+meta-learner is optimized for the “original” inner-
+learner at the beginning of each iteration and the
+current batch of training data. The updated meta-
+learner is then applied to the updated inner-learner
+and a different batch of data in the next iteration.
+This behavior is reasonable if the purpose is to opti-
+mize the meta-learner. However, in MetaDistil, we
+only care about the performance of the only inner-
+learner, i.e., the student. In this case, this behavior
+leads to a mismatch between the meta-learner and
+the inner-learner, and is therefore suboptimal for
+learning a good inner-learner. Therefore, we need
+a way to align and synchronize the learning of the
+meta- and inner-learner, in order to allow an up-
+date step of the meta-learner to have an instant
+effect on the inner-learner. This instant reﬂection
+prevents the meta-learner from catastrophic forget-
+ting (McCloskey & Cohen, 1989). To achieve this,
+we design a pilot update mechanism. For a batch
+of training data x, we ﬁrst make a temporary copy
+of the inner-learner fand update both the copy f
+and the meta learner fonx. Then, we discard
+fand updatefagain with the updated fon the
+same data x. This mechanism can apply the im-
+pact of data xto bothfandfat the same time,
+thus aligns the training process. Pilot update is a
+general technique that can potentially be applied
+to any meta learning application that optimizes the
+inner-learner performance. We will describe how
+we apply this mechanism to MetaDistil shortly and
+empirically verify the effectiveness of pilot update
+in Section 4.2.
+3.2.2 Learning to Teach
+In MetaDistil, we would like to optimize the
+teacher model, which is ﬁxed in traditional KD
+frameworks. Different from previous deep mu-
+tual learning (Zhang et al., 2018) methods that
+switch the role between the student and teacher7040Algorithm 1 Knowledge Distillation with Meta Learning (MetaDistil)
+network and train the original teacher model with
+soft labels generated by the student model, or re-
+cent works (Shi et al., 2021; Park et al., 2021) that
+update the teacher model with a task-speciﬁc loss
+during the KD process, MetaDistil explicitly op-
+timizes the teacher model in a “learning to teach”
+fashion, so that it can better transfer its knowledge
+to the student model. Concretely, the optimization
+objective of the teacher model in the MetaDistil
+framework is the performance of the student model
+after distilling from the teacher model. This “learn-
+ing to teach” paradigm naturally ﬁts the bi-level
+optimization framework in meta learning literature.
+In the MetaDistil framework, the student net-
+workis the inner-learner and the teacher net-
+workis the meta-learner. For each training step,
+we ﬁrst copy the student model to an “experi-
+mental student” . Then given a batch of training
+examples xand the learning rate , the experimen-
+tal student is updated in the same way as conven-
+tional KD algorithms:
+() = rL(x;;):(2)
+To simplify notation, we will consider one gradi-
+ent update for the rest of this section, but using
+multiple gradient updates is a straightforward ex-
+tension. We observe that the updated experimental
+student parameter , as well as the student quiz
+lossl=L(q;())on a batch of quiz sam-
+plesqsampled from a held-out quiz set Q, is a
+function of the teacher parameter . Therefore,
+we can optimize lwith respect to by a learning
+rate:
+  rL 
+q;()
+(3)
+We evaluate the performance of the experimental
+student on a separate quiz set to prevent overﬁtting
+the validation set, which is preserved for model se-
+lection. Note that the student is never trained on the
+quiz set and the teacher only performs meta-updateon the quiz set instead of ﬁtting it. We do not
+use a dynamic quiz set strategy because otherwise
+the student would have been trained on the quiz
+set and the loss would not be informative. After
+meta-updating the teacher model, we then update
+the “real” student model in the same way as de-
+scribed in Equation 2. Intuitively, optimizing the
+teacher network with Equation 3 is maximizing
+the expected performance of the student network
+after being taught by the teacher with the KD objec-
+tive in the inner-loop. This meta-objective allows
+the teacher model to adjust its parameters to better
+transfer its knowledge to the student model. We
+apply the pilot update strategy described in Sec-
+tion 3.2.1 to better align the learning of the teacher
+and student, as shown in Algorithm 1.
+4 Experiments
+4.1 Experimental Setup
+We evaluate MetaDistil on two commonly used
+classiﬁcation benchmarks for knowledge distilla-
+tion in both Natural Language Processing and Com-
+puter Vision (see Appendix A).
+Settings For NLP, we evaluate our proposed ap-
+proach on the GLUE benchmark (Wang et al.,
+2019). Speciﬁcally, we test on MRPC (Dolan
+& Brockett, 2005), QQP and STS-B (Conneau
+& Kiela, 2018) for Paraphrase Similarity Match-
+ing; SST-2 (Socher et al., 2013) for Sentiment
+Classiﬁcation; MNLI (Williams et al., 2018),
+QNLI (Rajpurkar et al., 2016) and RTE (Wang
+et al., 2019) for the Natural Language Inference;
+CoLA (Warstadt et al., 2019) for Linguistic Ac-
+ceptability. Following previous studies (Sun et al.,
+2019; Jiao et al., 2019; Xu et al., 2020), our goal
+is to distill BERT-Base (Devlin et al., 2019) into
+a 6-layer BERT with the hidden size of 768. We
+use MSE loss between model logits as the distilla-
+tion objective. The reported results are in the same
+format as on the GLUE leaderboard. For MNLI,7041
+we report the results on MNLI-m and MNLI-mm,
+respectively. For MRPC and QQP, we report both
+F1 and accuracy. For STS-B, we report Pearson
+and Spearman correlation. The metric for CoLA
+is Matthew’s correlation. The other tasks use accu-
+racy as the metric.
+Following previous works (Sun et al., 2019; Turc
+et al., 2019; Xu et al., 2020), we evaluate MetaDis-
+til in a task-speciﬁc setting where the teacher model
+is ﬁne-tuned on a downstream task and the stu-
+dent model is trained on the task with the KD loss.
+We do not choose the pretraining distillation set-
+ting since it requires signiﬁcant computational re-
+sources. We implement MetaDistil based on Hug-ging Face Transformers (Wolf et al., 2020).
+Baselines For comparison, we report the results
+of vanilla KD and patient knowledge distilla-
+tion (Sun et al., 2019). We also include the re-
+sults of progressive module replacing (Xu et al.,
+2020), a state-of-the-art task-speciﬁc compression
+method for BERT which also uses a larger teacher
+model to improve smaller ones like knowledge
+distillation. In addition, according to Turc et al.
+(2019), the reported performance of current task-
+speciﬁc BERT compression methods is underesti-
+mated because the student model is not appropri-
+ately initialized. To ensure fair comparison, we
+re-run task-speciﬁc baselines with student models7042initialized by a pretrained 6-layer BERT model
+and report our results in addition to the ofﬁcial
+numbers in the original papers. We also com-
+pare against deep mutual learning (DML) (Zhang
+et al., 2018), teacher assistant knowledge distilla-
+tion (TAKD) (Mirzadeh et al., 2020), route con-
+straint optimization (RCO) (Jin et al., 2019), proxi-
+mal knowledge teaching (ProKT) (Shi et al., 2021),
+and student-friendly teacher network (SFTN) (Park
+et al., 2021), where the teacher network is not ﬁxed.
+For reference, we also present results of pretraining
+distilled models including DistilBERT (Sanh et al.,
+2019), TinyBERT (Jiao et al., 2019), MiniLM v1
+and v2 (Wang et al., 2020b,a). Note that among
+these baselines, PKD (Sun et al., 2019) and The-
+seus (Xu et al., 2020) exploit intermediate features
+while TinyBERT and the MiniLM family use both
+intermediate and Transformer-speciﬁc features. In
+contrast, MetaDistil uses none of these but the
+vanilla KD loss (Equation 1).
+Training Details For training hyperparameters,
+we ﬁx the maximum sequence length to 128 and the
+temperature to 2 for all tasks. For our method and
+all baselines (except those with ofﬁcially reported
+numbers), we perform grid search over the sets of
+the student learning rate from {1e-5, 2e-5, 3e-5},
+the teacher learning rate from {2e-6, 5e-6, 1e-5},
+the batch size from {32, 64}, the weight of KD loss
+from {0.4, 0.5, 0.6}. We randomly split the original
+training set to a new training set and the quiz set
+by9 : 1 . For RCO, we select four unconverged
+teacher checkpoints as the intermediate training
+targets. For TAKD, we use KD to train a teacher
+assistant model with 10 Transformer layers.
+4.2 Experimental Results
+We report the experimental results on both the
+development set and test set of the eight GLUE
+tasks (Wang et al., 2019) in Table 1. MetaDis-
+til achieves state-of-the-art performance under the
+task-speciﬁc setting and outperforms all KD base-
+lines. Notably, without using any intermediate
+or model-speciﬁc features in the loss function,
+MetaDistil outperforms methods with carefully de-
+signed features, e.g., PKD and TinyBERT (without
+data augmentation). Compared with other meth-
+ods with a trainable teacher (Zhang et al., 2018;
+Mirzadeh et al., 2020; Jin et al., 2019; Shi et al.,
+2021), our method still demonstrates superior per-
+formance. As we analyze, with the help of meta
+learning, MetaDistil is able to directly optimize theteacher’s teaching ability thus yielding a further
+improvement in terms of student accuracy. Also,
+we observe a performance drop by replacing pilot
+update with a normal update. This ablation study
+veriﬁes the effectiveness of our proposed pilot up-
+date mechanism. Moreover, MetaDistil achieves
+very competitive results on image classiﬁcation as
+well, as described in Section A.2.
+5 Analysis
+5.1 Why Does MetaDistil Work?
+We investigate the effect of meta-update for each
+iteration. We inspect (1) the validation loss of S
+after the teaching experiment and that of Safter
+the real distillation update, and (2) the KD loss,
+which describes the discrepancy between student
+and teacher, before and after the teacher update.
+We ﬁnd that for 87% of updates, the student
+model’s validation loss after real update (Line 7 in
+Algorithm 1) is smaller than that after the teaching
+experiment (Line 4 in Algorithm 1), which would
+be the update to the student Sin the variant without
+pilot update. This conﬁrms the effectiveness of the
+pilot update mechanism on better matching the
+student and teacher model.
+Moreover, we ﬁnd that in 91% of the ﬁrst half
+of the updates, the teacher becomes more similar
+(in terms of logits distributions) to the student after
+the meta-update, which indicates that the teacher is
+learning to adapt to a low-performance student (like
+an elementary school teacher). However, in the
+second half of MetaDistil, this percentage drops to
+63%. We suspect this is because in the later training
+stages, the teacher needs to actively evolve itself
+beyond the student to guide the student towards
+further improvement (like a university professor).
+Finally, we try to apply a meta-learned teacher to
+a conventional static distillation and also to an un-
+familiar student. We describe the results in details
+in Section A.3.
+5.2 Hyper-parameter Sensitivity
+A motivation of MetaDistil is to enable the teacher
+to dynamically adjust its knowledge transfer in an
+optimal way. Similar to Adam (Kingma & Ba,
+2015) vs. SGD (Sinha & Griscik, 1971; Kiefer
+et al., 1952) for optimization, with the ability of
+dynamic adjusting, it is natural to expect MetaDistil
+to be more insensitive and robust to changes of the
+settings. Here, we evaluate the performance of
+MetaDistil with students of various capability, and7043
+a wide variety of hyperparameters, including loss
+weight andtemperature .
+Student Capability To investigate the perfor-
+mance of MetaDistil under different student ca-
+pacity, we experiment to distill BERT-Base into
+BERT-6L, Medium, Small, Mini and Tiny (Turc
+et al., 2019) with conventional KD and MetaDis-
+til. We plot the performance with the student’s
+parameter number in Figure 2. Additionally, we
+show results for different compression ratio in Ap-
+pendix B.
+Loss Weight In KD, tuning the loss weight is non-
+trivial and often requires hyperparameter search.
+To test the robustness of MetaDistil under different
+loss weights, we run experiments with different 
+(Equation 1). As shown in Figure 3, MetaDistil
+consistently outperforms conventional KD and is
+less sensitive to different .
+Temperature Temperature is a re-scaling trick in-
+troduced in Hinton et al. (2015b). We try different
+temperatures and illustrate the performance of KD
+and MetaDistil in Figure 4. MetaDistil shows better
+performance and robustness compared to KD.
+5.3 Limitation
+Like all meta learning algorithms, MetaDistil in-
+evitably requires two rounds of updates involv-
+ing both ﬁrst and second order derivatives. Thus,
+MetaDistil requires additional computational time
+and memory than a normal KD method, which can
+be a limitation of our method. We compare the
+computational overheads of MetaDistil with other
+methods in Table 2. Although our approach takes
+more time to achieve its own peak performance, it
+can match up the performance of PKD (Sun et al.,
+2019) with a similar time cost. The memory use
+of our method is higher than PKD and ProKT (Shi
+et al., 2021). However, this one-off investment can
+lead to a better student model for inference, thus
+can be worthy.
+6 Discussion
+In this paper, we present MetaDistil, a knowledge
+distillation algorithm powered by meta learning
+that explicitly optimizes the teacher network to
+better transfer its knowledge to the student network.
+The extensive experiments verify the effectiveness
+and robustness of MetaDistil.7044Ethical Consideration
+MetaDistil focuses on improving the performance
+of knowledge distillation and does not introduce ex-
+tra ethical concerns compared to vanilla KD meth-
+ods. Nevertheless, we would like to point out that
+as suggested by Hooker et al. (2020), model com-
+pression may lead to biases. However, this is not
+an outstanding problem of our method but a com-
+mon risk in model compression, which needs to be
+addressed in the future.
+Acknowledgments
+We would like to thank the anonymous reviewers
+and the area chair for their insightful comments.
+This project is partly supported by NSF Award
+#1750063.
+References70457046
+A MetaDistil for Image Classiﬁcation
+In addition to BERT compression, we also provide
+results on image classiﬁcation. Also, we conduct
+experiments of static teaching and cross teaching,
+to further verify the effectiveness of MetaDistil of
+adapting to different students.
+A.1 Experimental Settings
+For CV , following the settings in Tian et al. (2020),
+we experiment with the image classiﬁcation task on
+CIFAR-100 (Krizhevsky et al., 2009) with student-
+teacher combinations of different capacity and ar-
+chitectures, including ResNet (He et al., 2016) and
+VGG (Simonyan & Zisserman, 2015). Addition-
+ally, we run a distillation experiment between dif-
+ferent architectures (a ResNet teacher to a VGG
+student). We report the top-1 test accuracy of the
+compressed student networks. We inherit all hy-
+perparameters from Tian et al. (2020) except for
+the teacher learning rate, which is grid searched
+from {1e-4, 2e-4, 3e-4}. We randomly split the
+original training set to a new training set and the
+quiz set by 9 : 1 . We use the KL loss in Hinton
+et al. (2015a) as the distillation objective. We com-
+pare our results with a state-of-the-art distillation
+method, CRD (Tian et al., 2020) and other com-
+monly used knowledge distillation methods (Hin-
+ton et al., 2015b; Romero et al., 2015; Zagoruyko
+& Komodakis, 2017; Tung & Mori, 2019; Peng
+et al., 2019; Ahn et al., 2019; Park et al., 2019;
+Passalis & Tefas, 2018; Heo et al., 2019; Kim et al.,
+2018) including ProKT (Shi et al., 2021) which has
+a trainable teacher.
+A.2 Image Recognition Results
+We show the experimental results of MetaDistil
+distilling ResNet (He et al., 2016) and VGG (Si-
+monyan & Zisserman, 2015) with ﬁve different
+teacher-student pairs. MetaDistil achieves com-
+parable performance to CRD (Tian et al., 2020),
+the current state-of-the-art distillation method on
+image classiﬁcation while outperforming all other
+baselines with complex features and loss functions.
+Notably, CRD introduces additional negative sam-
+pling and contrastive training while our method
+achieves comparable performance without using
+these tricks. Additionally, we observe a substan-
+tial performance drop without pilot update, again
+verifying the importance of this mechanism.7047A.3 Static Teaching and Cross Teaching
+In MetaDistil, the student is trained in a dynamic
+manner. To investigate the effect of such a dynamic
+distillation process, we attempt to use the teacher
+at the end of MetaDistil training to perform a static
+conventional KD, to verify the effectiveness of our
+dynamic distillation strategy. As shown in Table 4,
+on both experiments, dynamic MetaDistil outper-
+forms conventional KD and static distillation with
+the teacher at the end of MetaDistil training.
+As mentioned in Section 3.2, a meta teacher is
+optimized to transfer its knowledge to a speciﬁc
+student network. To justify this motivation, we
+conduct experiments using a teacher optimized for
+the ResNet-32 student to statically distill to the
+ResNet-20 student, and also in reverse. As shown
+in Table 4, the cross-taught students underperform
+the static students taught by their own teachers
+by 0.27 and 0.12 for ResNet-32 and ResNet-20,
+respectively. This conﬁrms our motivation that
+the meta teacher in MetaDistil can adjust itself
+according to its student.
+B Results of Different Compression
+Ratios
+In this section, we present additional experimen-
+tal results in settings with different compression
+ratios to further demonstrate the effectiveness of
+MetaDistil on bridging the gap between the student
+and teacher capacity. Speciﬁcally, we conduct ex-
+periments in the following two settings: (1) distill-
+ing BERT-base into a 4-layer BERT (110M !52M)
+and (2) distilling BERT-large into a 6-layer BERT
+(345M!66M). The results are shown in Table 4
+and Table 5, respectively. We can see that MetaDis-
+til consistently outperforms PKD and ProKT in
+both settings. This conﬁrms the effectiveness of
+MetaDistil and also show its ability to adapt the
+teacher model to the student model, since the gap
+between teacher and student is even larger in these
+settings.
+C Distillation Dynamics
+We also investigate why MetaDistil works by con-
+ducting experiments on the development sets of
+MNLI, SST, and MRPC, which are important tasks
+in GLUE that have a large, medium, and small
+training set, respectively.
+We illustrate the validation accuracy curves of
+the meta teacher and student models with training
+steps in Figure 5, and compare them to the stu-
+dent performance in conventional KD. We can see
+that the meta teacher maintains high accuracy in
+the ﬁrst 5,000 steps and then begins to slowly de-
+grade. Starting from step 8,000, the teacher model
+underperforms the student while the student’s accu-
+racy keeps increasing. This veriﬁes our assumption
+that a model with the best accuracy is not neces-
+sarily the optimal teacher. Also, MetaDistil is not
+naively optimizing the teacher’s accuracy but its
+“teaching skills.” This phenomenon suggests that
+beyond high accuracy, there could be more im-
+portant properties of a good teacher that warrant
+further investigation.
+D Improvement Analysis
+While MetaDistil achieves improved student accu-
+racy on the GLUE benchmark, it is still not very
+clear where the performance improvement comes
+from. There are two possibilities: (1) the student
+better mimics the teacher, and (2) the changes of
+teacher helps student perform better on hard ex-
+amples that would be incorrectly classiﬁed by the
+student with vanilla KD. We conduct a series of
+analysis on the MRPC dataset.
+For the ﬁrst assumption, we compute the pre-
+diction loyalty (Xu et al., 2021a) of the student
+model distilled with PKD and MetaDistil, respec-
+tively. For MetaDistil, we measure the loyalty with
+respect to both the original teacher and the ﬁnal
+teacher. We ﬁnd that there is no signiﬁcant differ-
+ence between between PKD and MetaDistil. This
+suggests that the improvement does not come from
+student better mimicking the teacher.
+For the second assumption, we ﬁrst identify the
+examples in the quiz set for which our model gives
+correct predictions while the student distilled by
+PKD makes a wrong prediction. We then compute7048
+the loss (cross entropy) of the original teacher and
+the teacher updated by MetaDistil. We ﬁnd the loss
+is substantially reduced by MetaDistil. In contrast,
+the overall loss of teacher on the development set
+does not decrease. This suggests that MetaDistilcan help the teacher concentrate on hard examples
+that the student struggles in the quiz set and learn
+to perform better on these examples, thus facilitate
+student learning.7049

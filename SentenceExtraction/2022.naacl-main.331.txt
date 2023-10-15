@@ -1,1 +1,1043 @@
-4453 Proceedings of the 2022 Conference of the North American Chapter of the Association for Computational Linguistics : Human Language Technologies , pages 4453 4470 July 10 - 15 , 2022 © 2022 Association for Computational Linguistics 4454 4455 4456 4457 4458 4459 4460 4461 4462 4463 4464 4465 4466 4467 4468 4469 4470 
+
+Sheshera MysoreArman CohanTom HopeUniversity of Massachusetts Amherst,University of Washington,Allen Institute for Artiﬁcial Intelligence,
+smysore@cs.umass.edu {tomh,armanc}@allenai.org
+Abstract
+We present a new scientiﬁc document similar-
+ity model based on matching ﬁne-grained as-
+pects of texts. To train our model, we exploit a
+naturally-occurring source of supervision: sen-
+tences in the full-text of papers that cite mul-
+tiple papers together ( co-citations ). Such co-
+citations not only reﬂect close paper related-
+ness, but also provide textual descriptions of
+how the co-cited papers are related. This novel
+form of textual supervision is used for learn-
+ing to match aspects across papers. We de-
+velop multi-vector representations where vec-
+tors correspond to sentence-level aspects of
+documents, and present two methods for as-
+pect matching: (1) A fast method that only
+matches single aspects, and (2) a method that
+makes sparse multiple matches with an Op-
+timal Transport mechanism that computes an
+Earth Mover’s Distance between aspects. Our
+approach improves performance on document
+similarity tasks in four datasets. Further, our
+fast single-match method achieves competi-
+tive results, paving the way for applying ﬁne-
+grained similarity to large scientiﬁc corpora.
+1 Introduction
+The ability to identify similarity across documents
+in large scientiﬁc corpora is fundamental for many
+applications, including recommendation (Bhagavat-
+ula et al., 2018), exploratory or analogical search
+(Hope et al., 2017, 2021b; Lissandrini et al., 2019),
+paper-reviewer matching (Mimno and McCallum,
+2007; Berger et al., 2020) and many more uses.
+Scientiﬁc papers often describe multifaceted ar-
+guments and ideas (Hope et al., 2021a; Lahav et al.,
+2022), suggesting that models capable of matching
+speciﬁc aspects can better capture overall docu-
+ment relatedness, too. For example, sentences in
+research abstracts can often be categorized as de-
+scriptions of objectives, methods, or ﬁndings (Kimet al., 2011; Chan et al., 2018), centrally important
+discourse structures of scientiﬁc texts.
+In this paper, we propose a new model for doc-
+ument similarity that makes aspect-level matches
+across papers and aggregates them into a document-
+level similarity. We focus on sentence-level aspects
+of paper abstracts, and train multi-vector repre-
+sentations of papers in terms of their contextual-
+ized sentence embeddings. To train our models,
+we leverage a readily available data source: sen-
+tences that co-cite multiple papers. Unlike recent
+work that used citation links for learning scientiﬁc
+document similarity (Cohan et al., 2020), we ob-
+serve that papers cited in close proximity provide
+a more precise indication of relatedness. Further-
+more, the citing sentences typically describe how
+the co-cited papers are related, in terms of shared
+aspects (e.g., similar methods or ﬁndings, related
+challenges or directions, etc.). Building on this ob-
+servation, we leverage these textual descriptions as
+a novel source of textual supervision , using them
+to guide our model to learn which sentence-aspects
+match without any direct sentence-level supervi-
+sion. Guidance for the document similarity model
+is obtained via an auxiliary sentence encoder model
+that is used for aligning abstract sentences by ﬁnd-
+ing pairs most similar to the citing sentence text.
+Our document similarity objective is modeled
+as a function of similarity between sentence-level
+matches. We explore two strategies to aggregate
+over sentence-level distances between documents.
+First, a single-match method with minimum L2 dis-
+tances between document aspect vectors. This ap-
+proach readily supports approximate nearest neigh-
+bor search methods for large-scale retrieval. Sec-
+ond, a multi-match method that computes an Earth
+Mover’s Distance between documents’ aspect vec-
+tors by solving an Optimal Transport problem. This
+yields a soft sparse matching of aspect vectors,
+which when combined with their L2 distances gives
+a document-level distance.4453Finally, as an additional beneﬁt of our repre-
+sentation, our models also support a ﬁner aspect-
+conditional retrieval task (Hope et al., 2017, 2021a;
+Chan et al., 2018; Mysore et al., 2021) where as-
+pects can be speciﬁed by selecting abstract sen-
+tences — for example, selecting sentences describ-
+ing methods and retrieving papers using similar
+methods. As we show, naively encoding sentences
+without their context leads to subpar results in this
+task, and our representation that does take context
+into account dramatically improves results.
+Extensive empirical evaluation on four English
+scientiﬁc text datasets and seven similarity tasks
+at the level of documents and sentences demon-
+strates the effectiveness of our models. These in-
+clude biomedical document retrieval tasks and a re-
+cent faceted query-by-example corpus of computer
+science papers (Mysore et al., 2021). This latter
+dataset is used for evaluating retrieval conditioned
+on speciﬁc aspects in context (e.g., for ﬁnding pa-
+pers with similar methods to a query document),
+demonstrating that our model can be used in this
+challenging and important setting. In summary, we
+make the following main contributions:
+1.Multi-Vector Document Similarity Model :
+We present A, a multi-vector document
+similarity model that ﬂexibly aggregates over
+ﬁne-grained sentence-level aspect matches.
+2.Co-Citation Context Supervision : We ex-
+ploit widely-available co-citation sentences as
+a new source of training data for document
+similarity and provide a method using a novel
+form of textual supervision to guide represen-
+tation learning for aspect matching.
+3.State of the Art Results : Our A mod-
+els outperforms strong baseline methods
+across four datasets for the abstract and aspect-
+conditional similarity tasks.
+2 Problem Setup
+Given query document Qand a candidate amongst
+a set of documents C∈C, where documents con-
+sists ofNsentences/angbracketleftS,S,...S/angbracketrightwe aim to
+leverage ﬁne-grained document similarity in two
+problem settings. An abstract level retrieval task
+(Brown et al., 2019; Cohan et al., 2020) and an
+aspect-level retrieval task (Mysore et al., 2021):
+Def 1. Retrieval by abstracts: Given query and
+candidate documents – QandCa system must
+output the ranking over C.Def 2. Aspect-level retrieval by sentences: Given
+query and candidate documents – QandC, and a
+subset of sentences S⊆Qconditional on which
+to retrieve documents, a system must output the
+ranking overC.
+Modeling Desiderata: Next, we also outline
+key desired properties we require from models de-
+veloped for task deﬁnitions 1 and 2. We follow
+these desiderata when building our methods (§3.1).
+1.Allowing speciﬁcation of optional ﬁne-grained
+aspects : We would like models to allow the ability
+to specify ﬁne-grained query aspects in a query doc-
+ument based on which retrievals should be made.
+These may be obtained automatically (e.g., with a
+discourse tagging method) or via user speciﬁcation.
+2.Scalable to large corpora and efﬁcient inference :
+State of the art retrieval systems often rely on ex-
+pensive cross-attention mechanisms on query-docu-
+ment pairs making training and inference expensive
+(Zamani et al., 2018; Lin et al., 2021). This is ex-
+acerbated for longer scientiﬁc documents requiring
+speciﬁc transformer models (Caciularu et al., 2021).
+We require our methods to leverage large training
+corpora and allow efﬁcient inference at scale.
+3 Proposed Approach: A
+In this section we describe our approach to docu-
+ment similarity – A . We model ﬁner-grained
+matches between documents at the level of sen-
+tences via contextual representations and aggre-
+gating over matches to obtain similarities between
+whole documents. We leverage co-citation sen-
+tences as a source of document similarity and also
+as implicit textual supervision describing related
+aspects of co-cited documents. We formulate our
+multi-vector models (Luan et al., 2021; Humeau
+et al., 2020) that can support scalable inference as
+novel multiple-instance learning (MIL) models.
+3.1 Fine-grained Document Similarity
+We assume to be given a training set consisting
+of sets of documents Pwhich are weakly-labeled
+for similarity. We leverage widely-available sets
+of papers co-cited together in the same sentence
+as similar (see Figure 1). This builds on the obser-
+vation that co-citations in close proximity (e.g., in
+the same sentence) are strong indicators for paper
+relatedness (Gipp and Beel, 2009).
+We follow the contrastive learning framework,
+commonly used for learning semantic similarity
+(Reimers and Gurevych, 2019; Cohan et al., 2020).4454
+We train models on triples of the form (p,p,n)
+wherep,p∈ P andn /∈ P is a randomly se-
+lected negative, using the triple margin ranking
+lossL(p,p,n) =max[f(p,p)−f(p,n)+m,0],
+wheref(·,·)is a distance between documents. All
+pairwise-combinations p,p∈P are treated as pos-
+itive pairs in-turn. In this work, we parameterize f
+based on the distances between ﬁner-grained doc-
+ument aspectsA. Given documents pandp, we
+focus on a family of functions fof the form:
+f(p,p) =/summationdisplayw·d. (1)
+Here,A×Arepresents the space of alignments
+between aspects of document pandp,ddenotes
+a distance between two aspects i,i, andwrep-
+resents a weight indicating the contribution of the
+aspect similarity to the overall document similar-
+ity. Unlike previous work (Neves et al., 2019; Jain
+et al., 2018; Hope et al., 2017), we make no as-
+sumption on speciﬁc aspect semantics in deriving
+a model architecture, and focus on aspects in the
+form of general subsets of document sentences.
+For learning, we only assume to be given
+document-level supervision (sets of documents P),
+and no gold supervision on aspect-level similarity
+as in other related work, eg. Jain et al. (2018). Our
+task thus consists of learning wanddvia in-
+direct supervision. We cast this problem setting as
+a novel type of multi-instance learning (MIL) (Ilse
+et al., 2018) problem. Prior work in MIL broadly
+aims to learn instance level classiﬁers given labels
+for a bag of instances, this bears resemblance to
+our setting, where instances are aspects A. How-
+ever, unlike prior MIL work we focus on learning
+similarity rather than classiﬁcation . We formulate
+two variants of fin Equation 1:(1) A single match model (§3.2.2) which con-
+siders documents similar based on the single most
+similar alignment ˆi,ˆi∈A×A. This assumes
+w= 1for the best alignment and w= 0elsewhere.
+(2) A multi match model (§3.2.3) which makes
+multiple alignments between documents. We ﬁnd
+aspect importance weights w, by solving an Op-
+timal Transport (OT) problem (Peyré et al., 2019).
+In both variants, during training we learn con-
+textualized aspect embeddings that minimize the
+contrastive loss paramertized with f, described fur-
+ther in §3.2.
+Co-citation Contexts as Supervision: Finally,
+we present a method for incorporating implicit natu-
+ral language supervision during training, presented
+by co-citation sentences which describe speciﬁc
+relations between co-cited documents. For exam-
+ple, Figure 1 shows a case explaining the similarity
+between the co-cited papers’ methods. We leverage
+this textual supervision to ﬁnd a “best” alignment
+ˆi,ˆiin the single-alignment variant (1), and for
+guiding the optimal transport plan in variant (2).
+We describe the speciﬁc model components next.
+Fig 2a presents a schematic for our approach.
+3.2 Model Description
+3.2.1 Document Encoder
+We leverage a pre-trained BERT-based language
+model as a document encoder as the base of all our
+methods. Our encoder is mainly intended to output
+contextualized sentence representations. Given a
+document title and abstract, this is achieved as:
+S=BERT([CLS]Title [SEP]Abstract )(2)
+where S∈Rrepresents contextualized sen-
+tences s...sstacked into a matrix. Here, each4455
+sis obtained by mean-pooling word-piece embed-
+dings from the ﬁnal layer of BERTfor the sen-
+tence tokens. Pairwise distances between sentences
+din Eq 1 forp,p, are represented as a matrix
+D∈Rof L2 distances between SandS.
+3.2.2 Single Match & Textual Supervision
+Our single match model makes the assumption that
+document similarity is explained by a single best
+match, giving f(p,p) =D[ˆi,ˆi]. Here, we
+leverage weak supervision from co-citation con-
+texts for training. This is done by using an auxiliary
+sentence encoder to compute a maximally aligned
+sentence ˆiin co-cited paper pto the co-citation
+context, similarly ˆialigns a sentence in pto the
+co-citation context. Then the two context aligned
+sentences are treated as aligned to each other, for
+training. In practice, the same papers Pcan be
+co-cited in multiple different papers (in ∼30%
+of co-cited papers) giving us a set of co-citation
+sentences,e∈ E and training data of the form
+(E,P). Alignments of the sentences in pandpto
+the co-citation contexts e∈Eare computed as:
+ˆi,ˆk= argmaxRR
+ˆi,ˆk= argmaxRR(3)HereR,R, andRare independent sentence
+representations for p,pande, respectively, ob-
+tained from a auxiliary sentence encoder BERT
+(details below), and ˆi,ˆirepresent the single best
+alignment of sentences across p,p“anchored” on
+textual supervision sentences E. Importantly, this
+supervision is only used during training time to
+guide learning. This procedure is depicted in Fig-
+ure 2b with Figure 1 showing an example.
+Co-citation Context Encoder The encoder
+BERTrepresents a SBERT based sentence en-
+coder pre-trained for scientiﬁc text similarity. We
+train BERTon sets of co-citation contexts referenc-
+ing the same set of papers (i.e. E) in a contrastive
+learning setup with random in-batch negative sam-
+ples. This set,E, can be considered as paraphrases
+since co-citation sentences citing the same papers
+often describe similar relations between the papers.
+This model is similar to Sentence-BERT (Reimers
+and Gurevych, 2019) and we refer to it as CoSent-
+Bert . In training document encoder BERT, we
+keep BERTfrozen. Appendix C presents more
+detail on BERTdesign.
+3.2.3 Multiple Matches & Optimal Transport
+While a single best sentence alignment ˆi,ˆimay
+sufﬁciently explain document similarity for some
+documents and applications, documents often have4456a stronger and weaker alignments. So, in comput-
+ing sentence alignments between documents we
+would like a sparse matching that aptly weights
+alignments while ignoring non-alignments — cor-
+responding to learning weights win Eq 1. To
+model this intuition we leverage optimal transport.
+Optimal Transport The OT problem is consti-
+tuted by two sets of points, SandSas in our
+case, and distributions xandxaccording to
+which the set of points is distributed. The OT prob-
+lem involves computation of a transport plan ˆP,
+which converts xintoxby transporting prob-
+ability mass while minimizing an aggregate cost
+computed from the pairwise costs Dof aligning
+the points in SandS.ˆPis constrained such
+that its columns and rows marginalize respectively
+toxandx(so that all mass is accounted for).
+Speciﬁcally, the computation of ˆPtakes the form
+of a constrained linear optimization problem:
+W=min/angbracketleftD,P/angbracketright (4)
+=min/summationdisplay/summationdisplayD[i,j]P[i,j] (5)(6)
+whereWrefers to the Wasserstein or Earth Movers
+Distance and ˆPis the minimizer resulting from
+solving Eq 5. Of interest here is an established
+result which shows ˆPto be sparse withO(N+N)
+non-zero entries (Swanson et al., 2020). Therefore,
+ˆPrepresents a soft sparse alignment of sentences
+and can be used as weights win Eq 1, with doc-
+ument distances computed as f(p,p) =/angbracketleftD,ˆP/angbracketright.
+Fig 2c presents a schematic for this approach.
+Note that xandxallow control over impor-
+tance of sentences in pandpin the form of relative
+probability mass. We compute these distributions
+using pairwise distances as x=softmax (−s/τ)
+where s=minDands=minD, andτis a
+softmax temperature hyper-parameter.
+For our neural network models trained with auto-
+matic differentiation, we leverage an entropy regu-
+larized version of the Wasserstein distance in Eq 5
+(Cuturi, 2013). Here computation of ˆP, is achieved
+via Sinkhorn iterations, a set of iterative linear
+updates allowing training with autodiff libraries
+and leveraging GPU computation. Finally, Cuturi
+(2013) show that computing Wwith Sinkhorn it-
+erations shows an empirical quadratic complexity,
+i.e.O(N)— similar to that of attention as in a
+model for late interaction (Humeau et al., 2020).Multi-task model: To leverage training signals
+used in both the single and multi-match models, we
+train a multi match model supervised with textual
+supervision in a multi-task setup: L+L.
+3.3 Inference
+As outlined in §2, we are interested in a whole-
+abstract based retrieval (Def 1) and an aspect level
+retrieval (Def 2). In both setups given a query Q
+and candidate Cdocuments we denote sentence
+representations from a trained model by Sand
+S. For both tasks, we compute distances for rank-
+ing while controlling the aspects A(i.eA) over
+which the weighted sum of Eq 1 is performed.
+Whole abstract retrieval: This corresponds to
+a setup where all aspects of the query document
+Aare used in computing distances between docu-
+ments. In the single-alignment models, candidates
+Care ranked based on their maximally aligned sen-
+tence withQusing distances from a trained model:
+ˆi,ˆi=argminD. The multi match model
+ranks candidates using the distance /angbracketleftD,ˆP/angbracketright, where
+ˆPis the solution to transport problem of Eq 5.
+Aspect level retrieval: In aspect-level retrieval,
+a subset of sentences A⊂Ais used for query
+documentQ; for candidate documents C, we do
+not assume to be given speciﬁc aspects, and match-
+ing is done across all sentences in each C. In
+the single alignment models, we only consider a
+subset of the pairwise sentence distances to de-
+termine the maximally aligned sentences, giving
+D=D[A,:]. This corresponds to ﬁnding
+the maximally aligned candidate sentence to the
+query sentences in A. Similarly, in the multiple-
+alignment model we compute the plan ˆPbased
+on the subset of sentences corresponding to Aand
+generate rankings by /angbracketleftD,ˆP/angbracketright. Note that S
+inQis still contextualized, capturing document
+context of sentences not explicitly used in A.
+Scaling Inference: Our multi-vector model for
+single matching performs retrievals via minimum
+L2 distance. Therefore, this method is amenable
+to approximate nearest neighbour (ANN) search
+methods for large-scale retrieval (Andoni et al.,
+2018; Luan et al., 2021). Retrieval with our single-
+match model would involve |A|and|A|calls
+to an ANN structure for the whole abstract and
+aspect-level tasks respectively.
+On the other hand, as stated earlier our multi-
+match model using Sinkhorn iterations involves
+aO(N)computation (Cuturi, 2013), which is4457similar to late interaction methods. Humeau et al.
+(2020) show late interaction models to be signiﬁ-
+cantly cheaper than cross-encoders while retaining
+most of their performance in ad-hoc search setups.
+While quadratic, OT computation in practice can
+be time-consuming, however, recent work of Back-
+urs et al. (2020) has seen development of fast ANN
+methods for Wasserstein distances with practical
+run-times signiﬁcantly smaller than quadratic ones.
+This promises the use of ANN methods in large-
+scale retrieval with our multi-match model
+In our results we refer to our text supervised sin-
+gle match method asA , optimal transport
+multi match method asA , and the multi-
+task trained multi aspect method as+A .
+4 Experiments and Results
+Evaluation data: We evaluate the proposed meth-
+ods on datasets for whole abstract document sim-
+ilarity and ﬁne-grained document similarity. We
+overview these below. Appendix B provides detail.
+1. : An expert annotated dataset of
+biomedical abstract similarity (Brown et al., 2019).
+2.: The original
+dataset is labelled for ad-hoc search by experts
+(V oorhees et al., 2021). We reformulate the dataset
+for abstract similarity, treating all abstracts relevant
+to one ad-hoc query as similar to each other and
+dissimilar from abstracts relevant to other queries.
+3.SD: A benchmark suite of tasks intended
+for evaluating abstract-level scientiﬁc document
+representations (Cohan et al., 2020).
+4.CSFC: Fine-grained retrieval is evaluated
+using the recent dataset of Mysore et al. (2021), an
+expert-annotated dataset of machine learning and
+NLP abstracts labelled against candidates for rele-
+vance to one of 3 broad aspects capturing the main
+components of methodological research: back-
+ground/objective ,method ,result . Rel-
+evance is labelled for query sentences correspond-
+ing to those aspects, while considering the broader
+relevance of the sentences’ abstract context.
+Baselines: We compare the proposed ap-
+proaches to three classes of methods. We
+overview these classes and associated models be-
+low, with Appendix D presenting further detail:
+1. Sentence models: Sentence embedding mod-
+els present reasonable baselines since we consider
+ﬁne-grained matches at the sentence level. These
+are represented by MPN-1B, a sentence modeltrained on over 1 billion text pairs, Sentence-Bert
+(SB) (Reimers and Gurevych, 2019), S-
+CSE (Gao et al., 2021), cosentbert of §3.2.2,
+and ICTSB(Lee et al., 2019).
+2. Abstract models: The abstract level model
+S (Cohan et al., 2020), represents a SOTA
+model for scientiﬁc document similarity trained on
+cited abstract pairs. We also train a variant of this
+model on co-cited papers: S -CC. Fi-
+nally, we also compare to SNCL , introduced in
+recent concurrent work of Ostendorff et al. (2022).
+SNCL presents a bi-encoder model similar to
+S with improvements to its contrastive
+learning procedure – presenting a complementary
+direction to our approach.
+3. Sentence level models modiﬁed for whole
+abstract similarity: Here we combine the SOTA
+sentence encoder MPN-1B with the optimal
+transport (§3.2.3) for aggregating sentence level
+matches givingMPN-1B.
+Sentence models use the same inference proce-
+dure as our single match method, abstract mod-
+els rank using L2 distances between papers em-
+beddings, and the modiﬁed sentence model uses
+the multi match inference procedure. All reported
+model hyper-parameters are tuned, trained on 1.3M
+co-citation triples, and initialized with S
+unless noted otherwise.In reporting results, we
+report standard retrieval metrics Mean Average Pre-
+cision (MAP) and NDCG at rank K. For NDCG@K
+we follow Wang et al. (2013), and choose K =p∗|C|
+wherep∈(0,1). NDCG therefore refers
+to NDCG computed at 20% of the pool size for
+a query. This is apt since queries have varying
+pool sizes. Appendices A, E, and F detail train-
+ing data, algorithms, and hyper-parameters. Next,
+we present our main results comparing proposed
+approaches to baselines.
+4.1 Results
+Fine-grained similarity : Table 1 presents results
+onCSFC. We report performance on the three
+facets background ,method , and result an-
+notated in the dataset, and aggregated across all
+facets. We ﬁrst make some observations about base-
+line methods: 1. MPN-1Boutperforms all other
+sentence level models and a SOTA abstract repre-
+sentation, , indicating the value of sen-
+tence-level information for capturing ﬁne-grained4458
+similarities. WithMPN-1B indicating the
+value of modeling multiple matches. 2. S –
+CC, which is identical to S but
+trained on co-citations outperforms it, showing the
+value of co-citations for ﬁne-grained similarity.
+Next, we examine performance of the proposed
+methods: 1. First we note that all of the pro-
+posed approaches consistently outperform perfor-
+mant prior work,/MPN-1BandS , by
+about 5-6 points, and concurrent work of SNCL
+by about 1.5-2 points aggregated across queries.
+2. Next, we note that the proposed approaches out-
+perform S -CC, trained on co-c-
+itations by 2-3 points aggregated across queries.
+3. Our single match model trained with textual
+supervision,A consistently outperforms
+baselines. 4. Finally, our multi-match modelA , while outperforming baselines sees ag-
+gregate performance similar to single match meth-
+ods. This is reasonable given the aspect-speciﬁc an-
+notation of CSFC where we expect gains from
+modeling ﬁne-grained (contextualized) matches
+rather than aggregating multiple matches.
+Now, we examine facet-speciﬁc performance:
+1. Performance on background sees higher per-
+formance in general and the smallest gains for
+the proposed approaches. This may be attributed
+tobackground similarity being captured in
+coarse -grained topical similarity, a trait largely cap-tured in existing baselines. 2. method similarity in
+CSFC presents signiﬁcant challenges (Mysore
+et al., 2021, Sec 6) since it relies upon procedural
+similarities across steps of a method and on domain
+knowledge based similarities - this is often captured
+in co-citation data (Fig 1 presents one such com-
+plex paraphrase example). We see strongest perfor-
+mance forA here. 3. Finally, given that
+paper results interpretations are often dependent
+on all aspects of a given paper, result similar-
+ity often depends on similarity across the whole
+abstract. This leadsA which models mul-
+tiple matches to see strong performance.
+Whole-abstract similarity: Table 2 presents re-
+sults onand . At the out-
+set, we note that while being annotated for whole-
+abstract relevance, these datasets present differ-
+ent characteristics. Whilepresents
+queries centered on a very speciﬁc topic,
+presents a much more diverse set of queries. Fur-
+ther,pairs queries with pools of
+about 9000 candidates while has about 60
+candidates per query. Next, we examine baselines.
+1. In contrast to ﬁne-grained similarity datasets
+the best sentence level model MPN-1B, sig-
+niﬁcantly underperforms an abstract level model,
+S , indicating the need for whole abstract
+representations for these datasets. Aggregating sen-
+tence matches as inMPN-1B, drastically im-4459
+proves MPN-1B. 2. Next, similar to results in
+Table 1, a model identical to S , but trained
+on co-citations, S -CC, outper-
+forms S indicating the value of co-citation
+signal for whole-abstract similarity too. 3. Finally,
+we also note that while SNCL sees an expected
+stronger performance to S in , it
+sees comparable performance in–
+indicating the inﬂuence of the candidate pool size
+on its performance.
+In examining performance of our proposed meth-
+ods, we note the following: 1. Across datasets,
+our method for single matches,A , out-
+performs context-independent sentence baselines
+by several points indicating the value of contex-
+tualization. However, this method still under-
+performs abstract-level baselines. 2. However,
+methods modeling multiple matches,A
+and+A , substantially outperformA as well as baseline prior work S
+andMPN-1B. This performance indicates the
+strength of OT based aggregation of ﬁne-grained
+matches for abstract level similarity. The proposed
+methods additionally match or outperform the con-
+current approaches of SNCL . Note here, that
+given the complementary approach presented in
+SNCL - strong models are likely to result from
+combining both approaches.
+We present results demonstrating the value ofthe proposed approach on the SDbenchmark
+in Appendix G. Further, we also present a set of
+ablations in Appendix H. These ablations establish
+the value of textual supervision over the encoder
+(BERT) used for encoding the text, the value of
+optimal transport compared to attention alterna-
+tives, and alternative single-match models trained
+without co-citation contexts.
+5 Related Work
+Aspect-based paper representations: A large body
+of work learns structured representations of scien-
+tiﬁc papers. Jain et al. (2018) present an approach
+which learns pre-deﬁned aspect (PICO) encoders
+for biomedical papers. Similarly work of Neves
+et al. (2019), Chan et al. (2018), and Kobayashi
+et al. (2018) each label paper texts and then com-
+pute aspect-speciﬁc embeddings for document clas-
+siﬁcation or ranking using existing methods. This
+line of work often relies on pre-deﬁned aspects and
+building aspect-speciﬁc methods. Finally, work
+of Ostendorff et al. (2020) and Luu et al. (2021)
+present an approach with some similarities to the
+ones presented above – these approaches leverage
+classiﬁcation or language generation models to out-
+put ﬁne-grained relationships between pairs of pa-
+pers. Our work leverages co-citation contexts to
+supervise free-text aspects with a new model for
+document retrieval, that is also not tied to a speciﬁc
+schema of labels.
+Fine-grained document representations: An-
+other similar line of work is modeling ﬁne-grained
+document-document similarity at the level of words
+or latent topics. Examples include early work El-
+Arini and Guestrin (2011) presenting paper recom-
+mendation methods with unigram-level similarity
+between papers using authorship and citation links
+or using latent document topics (Gong et al., 2018;
+Yurochkin et al., 2019; Dieng et al., 2020).
+Our approach represents documents via sen-
+tences, a common and intuitive structure for reason-
+ing about scientiﬁc document facets (Chan et al.,
+2018; Zhou et al., 2020). Ginzburg et al. (2021)
+present a self-supervised model for contextual sen-
+tence representations in long documents similar to
+our ICT baseline (Lee et al., 2019).
+Ad-hoc Search: A range of recent work in in-
+formation retrieval presents multi-vector models
+intended to capture different aspects of candidate
+documents with score aggregation relying on sum-
+mations, max, or attention functions (Khattab and4460Zaharia, 2020; Luan et al., 2021; Humeau et al.,
+2020), these however focusing on short-text queries
+seen in search or question answering (QA). Mitra
+et al. (2017) explore an approach to model term-
+level ﬁne-grained similarities with neural networks,
+Liu et al. (2018) model ﬁne-grained matches at the
+level of entity spans, and Akkalyoncu Yilmaz et al.
+(2019) model document relevance by aggregating
+sentence relevance. Similarly, recent work of Lee
+et al. (2021) models ﬁne-grained matches for QA at
+the phrase level. Importantly, these methods rely on
+supervision from knowledge bases or QA datasets,
+limiting applicability to speciﬁc span deﬁnitions
+and areas with these resources, often not present in
+the scientiﬁc domain (Hope et al., 2021a).
+A range of modeling approaches in the context
+of other tasks resemble elements of our approach.
+We describe these in Appendix J.
+6 Conclusions
+We presented A , a scientiﬁc document simi-
+larity model that is trained by leveraging co-citation
+contexts for learning ﬁne-grained similarity. We
+use co-citation contexts as a novel form of tex-
+tual supervision to guide the learning of multi-
+vector document representations. Our model out-
+performed strong baselines on seven document
+similarity tasks across four English scientiﬁc text
+datasets. Moreover, we showed that a fast single-
+match method achieves competitive results, en-
+abling ﬁne-grained document similarity in large-
+scale scientiﬁc corpora. A future direction is the
+interactive use of our methods, with a system allow-
+ing users to highlight speciﬁc aspects of papers and
+retrieve contextually-relevant matches. Another
+promising application is for ﬁnding analogies —
+structural matches between texts describing ideas,
+as in scientiﬁc papers, to boost discovery (Hope
+et al., 2017, 2021b; Chan et al., 2018).
+7 Acknowledgements
+We are grateful to the members and fellow in-
+terns of Semantic Scholar at AI2, and members
+of the IESL and CIIR labs at the University of Mas-
+sachusetts Amherst for helpful discussions. This
+work was supported in part by the National Sci-
+ence Foundation under Grant Number IIS-1922090,
+the Chan Zuckerberg Initiative under the project
+Scientiﬁc Knowledge Base Construction, the NSF
+Convergence Accelerator Award #2132318, and
+using high performance computing equipment ob-tained under a grant from the Collaborative R&D
+Fund managed by the Massachusetts Technology
+Collaborative.
+References446144624463
+A Co-citation Data
+As noted in §3.1, we train the proposed methods
+on English co-cited papers. We build a dataset4464of co-cited papers from the S2ORC corpus(Lo
+et al., 2020). Since our evaluation datasets draw
+on text from different domains we build training
+sets with co-cited papers for each: biomedicine
+for and, computer science
+forCSFC, and a 60/40 mix of biomedicine
+and CS for SD. Each dataset contains 1.3M
+training triples.
+Next we describe construction of our co-citation
+data given 8.1 million English full text articles in
+the S2ORC corpus which have been parsed for
+citation mentions and linked to cited papers in the
+corpus using automatic tools (Lo et al., 2020):
+•Domain deﬁnition: We deﬁne our biomedical
+articles to be those tagged either “Medicine”
+or “Biology” in S2ORC. “Computer Science”
+tagged papers are treated as CS papers.
+•Co-citation contexts: To obtain co-cotation
+contexts - we ﬁrst obtain sentence boundaries
+for co-citation contexts using the en_core_-
+sci_sm pipeline included in spacy ..
+•Filtering abstracts: In selecting abstracts for
+our dataset we retain those that have a mini-
+mum of 3 sentences, and a maximum of 20
+sentences. Further, abstracts where all the
+sentences are too small (3 tokens) are ex-
+cluded. Similarly, abstracts with sentences
+greater than 80 tokens are excluded.
+•Selecting training co-citated abstract data
+{P}: Given contexts with qualifying abstracts
+as described above, we only retain co-citation
+contexts with 2 or 3 co-cited papers. A man-
+ual examination revealed that larger co-cited
+sets tended to be more loosely related.
+•Selecting co-citation sentence training data
+forBERT: Note that this represents a sen-
+tence encoder trained by treating co-citation
+contexts referencing the same paper as para-
+phrases. Here, we select co-citation contexts
+containing 2 or more co-cited papers as para-
+phrase setsE.
+Abstract level training triples for the biomedical
+and computer science sets are built by treating all
+unique pairs of papers as positives. 1.3 million
+triples were used for each domain - these were
+sampled from larger sets at random.B Evaluation Dataset Details
+Here we provide further detail on the evaluation
+datasets overviewed in §4. : An annotated dataset of biomedical
+abstract queries labelled by experts (Brown et al.,
+2019). In a number of cases expert annotators are
+the authors of query papers. Per query candidate
+pools are of size 60, with 1638 queries in develop-
+ment and test sets each. Dataset is released under
+a Creative Commons Attribution 4.0 International
+License.: While the original
+dataset of V oorhees et al. (2021) is labelled for ad-
+hoc search by experts, we reformulate the dataset
+for abstract similarity, treating all documents rel-
+evant to one ad-hoc query as similar to each
+other. From each original query and its respec-
+tive relevance-labeled documents, we sample an
+abstract from relevant documents (relevance of 2)
+and use that as our query document. We treat all
+other relevant documents as positive examples for
+the query. Documents relevant for other queries
+are treated as irrelevant for the sampled query. This
+results in about 9000 candidates per query abstract
+in.consists of about
+1200 queries in the development and test splits each.
+This dataset builds on the CORD-19 dataset (Wang
+et al., 2020) released under a Apache License 2.0,
+the license of however isn’t clear from
+the dataset release.
+SD: A benchmark suite of tasks intended
+for abstract-level scientiﬁc document representa-
+tions (Cohan et al., 2020). We evaluate our methods
+on the tasks of predicting: citations, co-citations,
+co-views, and co-reads. Per query candidate pools
+are of size 30 about 1000 queries per task and devel-
+opment and test split. We exclude classiﬁcation and
+recommendation sub-tasks relying on additional in-
+ference components. Dataset is released under a
+GNU General Public License v3.0 license.
+CSFC: The dataset consists of 50 queries
+labelled for relevance against about 120 candidates
+per query. Dataset is released under a Creative
+Commons Attribution-NonCommercial 4.0 Inter-
+national license.
+C Co-citation Context Encoder
+Here we present details of alternative design
+choices for our co-citation context encoder. In
+the use of BERT, we note in §3.2.2 that this en-
+coder is kept frozen during the course of training4465BERT. Fine-tuning BERTvia a straight-through
+estimator (Bengio et al., 2013) under-performed
+freezing it. Using other encoders for scientiﬁc
+text such as asBERTunder-performed
+CoSentBert . A recent strong model for sen-
+tence representation MPNet-1Blead to similar
+performance on abstract and aspect-conditional
+tasks as CoSentBert , indicating that a minimum
+requisite sentence encoder is all that is needed for
+BERT.
+D Baselines
+Here we provide further detail on the baselines
+overviewed in §4.
+MPN-1B &MPN-1B: A sentence level
+baseline of a MPNet (Song et al., 2020) base
+model, ﬁne-tuned on 1.17 billion similar text
+pairs in a contrastive learning setup.This
+training data broadly represents web and sci-
+entiﬁc texts. Further we combine MPN-1B
+with an OT based aggregation scheme similar
+to our multi-match model to yield,MPN-
+1Ba baseline using optimal transport with a
+performant sentence encoder.
+SimCSE: A recent sentence representation model
+(Gao et al., 2021). We compare to two model
+variants: an unsupervised model USCSE-
+BERT , and a variant supervised with NLI
+data, SSCSE-BERT.
+Sentence-Bert: A sentence level transformer
+model ﬁne-tuned on similar sentence pairs
+(Reimers and Gurevych, 2019). We com-
+pare performance to two variants, SB-
+PPandSB-NLI , ﬁne-tuned on para-
+phrases and natural language inference (NLI)
+data respectively.
+CoSentBert : The sentence-level model we de-
+scribe in §3.2.2: A SBERT model ﬁne-
+tuned on co-citation sentence contexts refer-
+encing the same set of co-cited papers.
+ICTSB: A SBERT sentence model
+trained using the self-supervised inverse close
+task (Lee et al., 2019). Here we train abstract
+sentence representations to capture the seman-
+tics of their paragraph contexts.
+S : A state of the art abstract level repre-
+sentation (Cohan et al., 2020). Here a SB-
+ERT model is ﬁne-tuned to maximize simi-
+larity between representations of cited papers.We also train a variant of this model on co-
+cited papers: S -CC.
+SNCL : A recent concurrent state of the art ab-
+stract level representation (Ostendorff et al.,
+2022). This approach trains a model similar to
+S , with improvements to the negative
+sampling strategies of Cohan et al. (2020) for
+contrastive learning. This presents a comple-
+mentary contribution to the one presented in
+our work - with future modeling approaches
+likely to beneﬁt from both approaches.
+For the baselines described above speciﬁc model
+names from the Hugging Faceand Sentence Trans-
+formerslibraries are as follows:
+MPNet-1B: HF; sentence-transformers/all-mpnet-
+base-v2.
+SimCSE: HF; princeton-nlp/sup-simcse-bert-base-
+uncased, princeton-nlp/unsup-simcse-bert-
+base-uncased.
+Sentence-Bert: ST; Paraphrases: paraphrase-
+TinyBERT-L6-v2. NLI: nli-roberta-base-v2
+from the Sentence-Transformers library.
+E Training
+All our approaches are trained using the Adam opti-
+mizer with an initial linear warm-up for 2000 steps
+followed by a linear decay using gradient accumi-
+lation for a batch size of 30. The margin min the
+triplet loss is set to 1. We implement all methods
+using PyTorch, HuggingFace, and GeomLoss li-
+braries. Training convergence is established based
+on the loss on a held out set of co-citation data
+ensuring that training does not rely on a labelled
+dataset for convergence checks.
+All experiments were run with data parallelism
+over servers nodes with the following GPU conﬁg-
+urations: 8×12GB NVIDIA GeForce GTX 1080
+Ti GPUs, 4×24GB NVIDIA Tesla M40 GPUs,
+or 2×48GB NVIDIA Quadro RTX 8000 GPUs.
+Servers had 12-24 CPUs per node and 256-385GB
+RAM. The training time per experiment varied
+from 5-20 hours, and the experiments in this paper
+represent about 4746 GPU hours of training.
+F Model Hyper-Parameters
+Here we report the best performing model hyper-
+parameters. This is done per training dataset. For4466computer science trained models evaluated on CS-
+FC:
+•Specter-CoCite: LR 2e-5.
+•Specter-CoCite: LR 2e-5.
+•A: LR 2e-5.
+•A: LR 2e-5.τ0.5.
+•+A: LR 1e-5.τ0.5.
+For biomedical trained models evaluated on and :
+•Specter-CoCite: LR 2e-5.
+•Specter-CoCite: LR 2e-5.
+•A: LR 2e-5.
+•A: LR 2e-5.τ5000 .
+•+A: LR 2e-5.τ5000 .
+For biomedical+computer science trained mod-
+els evaluated on and :
+•Specter-CoCite: LR 2e-5.
+•Specter-CoCite: LR 2e-5.
+•A: LR 1e-5.
+•A: LR 1e-5.τ5000 .
+•+A: LR 1e-5.τ5000 .
+We found it beneﬁcial to use a low temperature τ
+in computing distributions xfor OT computation
+forCSFC - a ﬁne-grained similarity dataset.
+On the other hand we found it beneﬁcial to use a
+high temperature τin computing distributions x,
+causing it to be effectively uniform, for OT com-
+putation in whole-abstract datasets SD,-, and. This is reasonable given
+the nature of similarity captured in these datasets.
+Hyper-parameters of the underlying encoders were
+not changed from their default values – other hyper-
+parameters are common to methods and desribed
+in §4.
+Finally, in computing OT transport plans,
+we optimize a entropy regularized objective:
+min/angbracketleftD,P/angbracketright−h(P). Our experiments use a ﬁxed
+value ofλ= 20 .
+Hyper-parameter tuning: We tune the hyper-
+parameters of all the ablated and proposed methods
+across the different datasets on development set per-
+formance. For CSFC theAggregated dev set
+performance was used for computer science train-
+ing data models,and dev
+sets were used for biomedical data models with ties
+between the two broken by the more challengingperformance, and computer science
++biomedical data models were tuned on averagetask performance of SD tasks. Given the
+expense of training models (about 20h for the pro-
+posed models) we ﬁrst tune softmax temperatures
+then tuned learning rates. Large changes across
+learning rates weren’t observed for the models. All
+learning rates are tuned over the range {1e-5, 2e-
+5, 3e-5}, OT sentence softmax temperatures τare
+tuned over {0.5, 1, 5, 5000}, and softmax tempera-
+tures for ablation A3 was tuned over {0.5, 1, 5}.
+G SD Benchmark Result
+SciDocs Benchmark: Table 3 indicates perfor-
+mance on the abstract level document similarity
+benchmark SD of Cohan et al. (2020). First
+we note that the strong performance of S
+indicates a smaller gap to be closed. Here, although
+our proposed methods see similar performance to
+each other they consistently outperform S
+on 3 of 4 tasks establishing state of the art perfor-
+mance. Given S ’s citation training signal
+and our co-citation signal, we see better perfor-
+mance on the Citations andCo-Citation
+tasks respectively. Finally, note that our co-citation
+trained approaches broadly see better performance
+(1-1.5 points) on extrinsic tasks of Co-Reads and
+Co-Views indicating the value of this signal.
+H Ablations
+Here we ablate a range of model components in
+establishing factors which contribute performance.
+In ablations we only report performance on CS-
+FC,, and .
+A1. DoesA gain from textual super-
+vision over the encoder used to compute align-
+ment?A relies upon a sentence alignment
+encoder, BERTin §3.2.2, to compute alignments,
+ˆi,ˆi, from the co-citation context to the co-cited
+abstracts. Here we investigate if improvements inA are attributable to BERTor to the co-
+citation contexts themselves. We investigate this
+by comparing the performance ofA to a
+model trained to maximize the alignment between
+abstract sentences directly computed using BERT,
+we refer to this asA . This may be viewed
+as a form of knowledge distillation where align-
+ments from a more local sentence encoder model,
+BERT, are distilled into the contextual sentence en-
+coder ofA . As Table 4 shows,A
+consistently outperformsA , indicating
+the value added by natural language supervision
+from the co-citation contexts.4467
+A2. Can multi-aspect matching use attention
+aggregation instead of optimal transport? Since
+our multi-aspect match model uses a soft sparse
+matching with optimal transport we examine con-
+tributions of this component by comparing perfor-
+mance of a model (A ) trained with soft-
+alignment using an attention mask, A– attention is
+also a popular choice in prior work Humeau et al.
+(2020); Zhou et al. (2020). Here, f(p,p) =
+/angbracketleftD,A/angbracketrightwith,A=softmax (−D/τ). Note that
+OT imposes speciﬁc inductive bias via the structure
+of the trasport plan in ensuring it to be a permu-
+tation matrix - a desirable property in computing
+multiple alignments between a set of points. Table
+5 examines performance of these model variants.
+Broadly,A sees performance compara-
+ble or worse thanA . WhileA
+sees improved performance in CSFC it sees
+much larger variation across runs. In our abstract
+retrieval datasets, where we expect gains from mod-
+eling multiple matches, we see better or similar
+performance fromA overA .
+A3. Can single-match models be learned
+without co-citation contexts? While our model
+for single matches leverages weak textual super-
+vision from co-citation contexts, we ask if these
+models can be learned in the absence of this su-
+pervision. We answer this by training a sim-
+pler model, A , which ﬁnds the maxi-
+mally aligned aspects between documents using
+the representations from BERTalone, giving us
+f(p,p) =maxD. To examine the role of
+BERTwe compare performance with different
+initializations, with S presenting a initial
+model ﬁne-tuned for similarity vs SBwhich
+isnt ﬁne-tuned for text similarity.4468
+We note the following from the results in Ta-
+ble 6: A sees a dependence on the un-
+derlying encoder, a SBinitialization nearly
+always sees poorer performance – only seeing per-
+formance competitive withA when initial-
+ized with . This is reasonable given that
+this model must bootstrap ﬁne-grained similarity
+while only relying on the encoder induced similar-
+ity. In cases where A matches perfor-
+mance ofA it sees larger performance dif-
+ferences across runs which may also be explained
+by the dependence on the initialization. Finally,A consistently sees similar or better per-
+formance with varying initialization, indicating the
+value of our text supervised method.
+I Extended Results
+Tables 1, 2 in §4.1 omit presentation of standard
+deviations across runs for the proposed approaches
+for brevity. We include these in Tables 7 and 8.
+J Extended Related Work
+A range of modeling approaches in multi-instance
+learning, models leveraging textual supervision,
+and optimal transport resemble elements of our
+approach. We describe these next.
+Multi-instance Learning: Our work applies MIL
+for learning ﬁne-grained similarity, while prior
+work has most often been applied to classiﬁcationor regression tasks (Hope and Shahaf, 2016, 2018;
+Ilse et al., 2018; Angelidis and Lapata, 2018). Our
+work bears resemblance to an application of MIL in
+content based image retrieval (Song and Soleymani,
+2019), where MIL is applied to learn alignments
+between image and text aspects.
+Textual Supervision: Our use of co-citation text
+as a source of textual supervision draws on other
+work leveraging textual justiﬁcations of labels as a
+source of supervision for classiﬁcation tasks (Han-
+cock et al., 2018; Murty et al., 2020; Hanjie et al.,
+2022), with recent concurrent work of Hanjie et al.
+including an overview of this line of work. Our co-
+citation contexts may be considered justiﬁcations
+for similarity of co-cited papers. Nie et al. (2020)
+presents work in a biomedical literature recommen-
+dation task, where human justiﬁcations of a rele-
+vance label are used to identify unigram features
+indicative of the label and train a recommendation
+model.
+Optimal Transport: Our use of optimal transport
+draws on other recent work in learning sparse align-
+ments between texts (Swanson et al., 2020; Tam
+et al., 2019). Work of Swanson et al. (2020) learns
+sparse binary alignments for sentence and docu-
+ment similarity tasks to rationalize decisions and
+Tam et al. (2019) leverage sparse soft alignments
+between characters for string similarity. Kusner
+et al. (2015) uses alignment based on word em-
+beddings for document classiﬁcation tasks using
+a K-nearest neighbors method. However, apply-
+ing OT at the word level in scientiﬁc documents
+would lead to a large increase in computational
+complexity.44694470

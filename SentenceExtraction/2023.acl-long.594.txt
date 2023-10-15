@@ -1,1 +1,969 @@
-10641 Proceedings of the 61st Annual Meeting of the Association for Computational Linguistics Volume 1 : Long Papers , pages 10641–10658 July 9 - 14 , 2023 © 2023 Association for Computational Linguistics 10642 10643 10644 10645 10646 10647 10648 10649 10650 10651 10652 10653 10654 10655 10656 10657 10658 
+
+Zhengyan Zhang, Zhiyuan Zeng, Yankai Lin, Huadong Wang, Deming Ye
+Chaojun Xiao, Xu Han, Zhiyuan Liu, Peng Li, Maosong Sun, Jie ZhouNLP Group, DCST, IAI, BNRIST, Tsinghua University, BeijingGaoling School of Artificial Intelligence, Renmin University of China, BeijingBeijing Key Laboratory of Big Data Management and Analysis MethodsInternational Innovation Center of Tsinghua University, ShanghaiQuan Cheng LaboratoryInstitute for AI Industry Research (AIR), Tsinghua University, ChinaPattern Recognition Center, WeChat AI, Tencent Inc
+{zy-z19,zengzy20}@mails.tsinghua.edu.cn {hanxu2022,liuzy}@tsinghua.edu.cn
+Abstract
+Injecting external knowledge can improve the
+performance of pre-trained language models
+(PLMs) on various downstream NLP tasks.
+However, massive retraining is required to
+deploy new knowledge injection methods or
+knowledge bases for downstream tasks. In this
+work, we are the first to study how to improve
+the flexibility and efficiency of knowledge in-
+jection by reusing existing downstream models.
+To this end, we explore a new paradigm plug-
+and-play knowledge injection , where knowl-
+edge bases are injected into frozen existing
+downstream models by a knowledge plugin .
+Correspondingly, we propose a plug-and-play
+injection method map-tuning , which trains a
+mapping of knowledge embeddings to enrich
+model inputs with mapped embeddings while
+keeping model parameters frozen. Experi-
+mental results on three knowledge-driven NLP
+tasks show that existing injection methods are
+not suitable for the new paradigm, while map-
+tuning effectively improves the performance of
+downstream models. Moreover, we show that a
+frozen downstream model can be well adapted
+to different domains with different mapping
+networks of domain knowledge. Our code and
+models are available at https://github.com/
+THUNLP/Knowledge-Plugin .
+1 Introduction
+Recent years have witnessed rapid development
+in enhancing pre-trained language models (PLMs)
+with various external knowledge bases, i.e., knowl-
+edge injection for PLMs (Levine et al., 2020; Zhou
+et al., 2020; Zhang et al., 2019; Peters et al., 2019;
+Bosselut et al., 2019; Guan et al., 2020). Knowl-
+edge injection improves the performance of PLMsFigure 1: Illustration of plug-and-play knowledge injec-
+tion, where knowledge bases and models are decoupled.
+on a wide range of tasks such as information extrac-
+tion (Liu et al., 2020a; Wang et al., 2021b), ques-
+tion answering (Xiong et al., 2020; Wang et al.,
+2021a), and text generation (Chen et al., 2020).
+Existing injection methods commonly inject
+knowledge by knowledge-aware pre-training or
+fine-tuning (Peters et al., 2019; Yamada et al., 2020;
+Liu et al., 2020a; Wang et al., 2021a). However,
+rarely studied is how to inject knowledge into a
+downstream model that is already adapted to a spe-
+cific task. If we want to apply a new knowledge
+injection method to enhance models on a specific
+task, we have to discard task-specific downstream
+models and retrain them. In addition, one down-
+stream model working with multiple knowledge
+bases requires retraining itself to inject each knowl-
+edge base. Retraining models is time-consuming
+and resource-intensive, leading to the need for a
+flexible and efficient injection paradigm.
+Toward flexible and efficient injection, we ex-
+plore a novel paradigm plug-and-play knowledge
+injection , where knowledge bases are injected into
+frozen existing downstream models by knowledge
+modules. The knowledge module bridges the
+knowledge base and the model, and we call it
+a plugin vividly. Under this paradigm, a down-
+stream model would have multiple plugins, each10641corresponding to a combination of an injection
+method and a knowledge base, which ensures flex-
+ibility. Moreover, knowledge plugins should be
+small enough to ensure efficiency. Intuitively, as
+shown in Figure 1, we treat models and knowledge
+bases as computers and flash disks, respectively.
+In this work, we study two settings for the plug-
+and-play knowledge injection paradigm. The first
+isgeneral plug-and-play knowledge injection , aim-
+ing to inject knowledge into all downstream models
+(trained from a particular PLM) by a general plugin
+without any task-specific training. In this setting,
+all downstream models share exactly one plugin
+for one combination of an injection method and a
+knowledge base. The second is task-specific plug-
+and-play knowledge injection , where knowledge
+plugins are trained to better adapt to downstream
+tasks while keeping downstream models frozen.
+By our pilot study, we find that existing meth-
+ods (Poerner et al., 2020; Ye et al., 2022; Wang
+et al., 2021a; Lewis et al., 2020) that can be used
+directly can not be well applied to the plug-and-
+play injection paradigm. To this end, we propose
+map-tuning , a preliminary exploration of learn-
+ing knowledge plugins. Specifically, we train a
+lightweight mapping network that augments model
+inputs with mapped knowledge representations,
+e.g., TransE (Bordes et al., 2013). To meet the
+general and task-specific injection requirements,
+we design general map-tuning and task-specific
+map-tuning, respectively. General map-tuning
+adopts language modeling as its objective to learn
+knowledge plugins and seeks better generalizabil-
+ity. Task-specific map-tuning adopts task targets
+for plugin learning and seeks better task adaptation.
+We use three typical knowledge-driven NLP
+tasks to evaluate our plug-and-play knowledge in-
+jection, including relation classification (Han et al.,
+2018), entity typing (Xin et al., 2018), and question
+answering (Sciavolino et al., 2021). The experi-
+mental results show that: (1) after adapting PLMs
+to downstream tasks through full-parameter fine-
+tuning or parameter-efficient tuning, also known as
+delta tuning (Liu et al., 2021; Ding et al., 2022),
+injecting knowledge into these downstream mod-
+els by general map-tuning leads to performance
+improvements in almost all cases; (2) using task-
+specific map-tuning to inject domain knowledge
+further enables a frozen downstream model to work
+well in different domains. We hope our contribu-
+tion can draw more attention to the plug-and-playknowledge injection paradigm and inspire more
+future research.
+2 Plug-and-Play Knowledge Injection
+Paradigm Description. Given a downstream
+modelDtrained on a downstream task with a PLM
+Pas the backbone, we intend to improve its per-
+formance on this task by incorporating an extra
+knowledge base Band freezing D’s parameters,
+for which we need to train a knowledge plugin M.
+Note that neither pre-training nor fine-tuning trains
+the model Dto cooperate with BorM.
+Two Injection Settings. As shown in Fig-
+ure 2(a), plug-and-play knowledge injection de-
+couples knowledge injection from model training,
+which is different from existing paradigms. For
+general plug-and-play knowledge injection, M
+is obtained based on only PandB, and then it
+is directly plugged into all downstream models,
+D,D, . . ., without any additional training. For
+task-specific plug-and-play knowledge injection,
+it is allowed to train M,M, . . .forD,D, . . .
+respectively while keeping D,D, . . .frozen.
+Challenges. The general plug-and-play knowl-
+edge injection poses serious challenges to methods
+designed for it. Mis expected to improve the per-
+formance of D, yetDhas never seen Mor been
+seen by Mduring training. The only prior condi-
+tion is that PandBare visible during training M.
+Therefore, the designed methods for general injec-
+tion need to endow Mwith enough generalizabil-
+ity such that Mcan adapt to unknown D,D, . . .
+well. Even though the knowledge base Bmay have
+rich knowledge, without a good adaptation of M,
+useful information brought to D will be less than
+disruptive noise.
+The task-specific plug-and-play knowledge in-
+jection relaxes the restrictions, where Mis al-
+lowed to be trained with frozen D. Compared to
+injection during fine-tuning, the training of M
+should be fast and the parameter number of M
+should be small compared to that of D. Otherwise,
+the methods would be meaningless. Hence, it re-
+quires simple and efficient architecture designs and
+informative training objectives for M.
+Potentiality of Using Existing Methods. Few
+existing knowledge injection methods can be di-
+rectly used for general plug-and-play knowledge
+injection. We summarize the existing knowledge10642
+injection methodsthat have the possibility to be
+used for general plug-and-play knowledge injec-
+tion as follows. (1) Embedding-based methods:
+E-BERT (Poerner et al., 2020) and PELT (Ye
+et al., 2022) build an entity embedding lookup ta-
+ble in the representation space of token embed-
+dings and combine entity embeddings with token
+embeddings to construct input embeddings. (2)
+Retrieval-based methods: RAG (Lewis et al., 2020)
+retrieves plain text from knowledge bases and aug-
+ments the original input text with the plain text as
+injected knowledge. (3) Adapter-based methods:
+K-Adapter (Wang et al., 2021a) computes knowl-
+edgeable representations based on the outputs of
+the downstream models accompanied by knowl-
+edgeable adapters, which are trained with frozen
+PLMs and plugged into all downstream models.
+Even though these methods may bring knowledge
+without training PLMs, it is unclear whether they
+work well in the plug-and-play knowledge injec-
+tion paradigm, i.e., whether the knowledge brought
+by them is utilizable for downstream models that
+have never learned how to use these methods.
+3 Map-Tuning
+In this section, we first present the overall frame-
+work of map-tuning, which is designed for plug-
+and-play knowledge injection. Then, we show how
+to use it for general injection and task-specific in-
+jection, where the methods are called general map-
+tuning and task-specific map-tuning respectively.
+3.1 Overall Framework
+We target knowledge bases consisting of a set of
+entities and structured or unstructured knowledgeabout these entities. To utilize such a knowledge
+baseB, we assume a knowledge representation
+model Kto assign each entity ean entity embed-
+ding e∈R, where dis the dimension of
+entity embeddings. Map-tuning injects knowledge
+by mapping knowledge representations into the
+space of token embeddings and using the mapped
+representations as additional inputs, which is also
+adopted by Poerner et al. (2020); Ye et al. (2022).
+Specifically, given an input text, we first match
+the entity mentions in the text with the entities in
+B. The input text is denoted by {w, w, . . . , w},
+where wis the i-th token and nis the number
+of tokens in the input text. We use a triple
+(e, l, r )to represent a mention span, where e
+is the matched entity, landrare the left and
+right token indices of the mention span. The
+corresponding mention span is {w, w, . . . , w}.
+Assume there are mentities in the text,
+(e, l, r),(e, l, r), . . . , (e, l, r), where
+1≤l≤r< l≤r<···< l≤r≤n.
+The original sequence of input embeddings are
+{w,w, . . . , w}, where w∈Ris the i-th
+token embedding and d is the dimension of to-
+ken embeddings. Then, we map each entity embed-
+dingetoM(e)∈Rby a mapping network
+M. Finally, we replace {w,w, . . . , w}
+with{M(e), /,w, . . . , w}for every (e, l, r)
+to construct a new input sequence. Note that /is
+the token embedding of “/”.
+3.2 General Map-tuning
+General map-tuning aims to train a mapping net-
+workMbased on PandK. It requires Mto have
+enough generalizability to handle different down-
+stream tasks because Mwill be plugged into all
+downstream models. Hence, we train Mwith a10643general pre-training task while plugging it into P,
+such as language modeling, which has been shown
+to be an unsupervised multi-task learning (Radford
+et al., 2019). We freeze the parameters of Pand
+only train the mapping network Mto meet the
+requirement of plug-and-play knowledge injection.
+We adopt a variant of Masked Language Model
+(MLM) (Devlin et al., 2019), named Mention-
+Masked Language Modeling (MMLM), as the task
+for training M. According to our observation in
+the preliminary experiments, the prediction of most
+tokens requires only language ability instead of ex-
+ternal knowledge, such as that of some stop words,
+while the prediction of entity mentions relies on
+external knowledge more often. Hence, as shown
+in Figure 2(b), we randomly mask only entity men-
+tionsin the input text to ensure that the mapping
+network is trained sufficiently and the mapped em-
+beddings are well utilized in the PLM. In this way,
+the ability of PLMs to predict masked entity men-
+tions is enhanced by the mapped embeddings of
+both the masked entity and other entities in the
+context. We mask all tokens of a masked entity
+mention, and the MMLM loss is the same as the
+original MLM loss (Devlin et al., 2019).
+After general map-tuning, Mcan be used for the
+general plug-and-play injection. Although the map-
+ping network Mwas not trained with any down-
+stream model Dbefore, we can directly plug M
+into each D.
+3.3 Task-specific Map-tuning
+Task-specific map-tuning aims to adapt a mapping
+network Mfor a given downstream model D. We
+freeze the parameters of Dand train the mapping
+network Mon the downstream task, whose proce-
+dure is shown in Figure 2(b). The training objective
+is identical to the original objective of this task. If
+the knowledge representations provide useful in-
+formation for this task, the mapping network will
+learn to extract this information and to make it rec-
+ognizable to the downstream model D. Note that
+the mapping network can not only be trained from
+scratch, but can also be initialized with a mapping
+network learned with general map-tuning, which
+could provide a good starting point.4 Experiments
+4.1 Experimental Setups
+Training Methods of Downstream Models. We
+adopt BERT(Devlin et al., 2019) as the back-
+bone PLM in the experiments and consider four
+training methods for its adaptation to downstream
+tasks. Besides vanilla full-model fine-tuning,
+we also consider three parameter-efficient tuning
+(PET) methods, which have been becoming increas-
+ingly important in the era of large-scale PLMs (Liu
+et al., 2021). As resource-saving are both plug-and-
+play knowledge injection and PET, it is meaning-
+ful to apply this paradigm to downstream models
+trained by PET methods in the resource-limited
+scenario. (1) Fine-tuning optimizes all the parame-
+ters of a PLM with the task objective following the
+original BERT. (2) LoRA (Hu et al., 2021) freezes
+most PLM parameters and represents the weight
+update during model training with a low-rank de-
+composition. (3) Adapter (Houlsby et al., 2019)
+injects additional adapter networks with the PLM
+parameters frozen. (4) BitFit (Zaken et al., 2021)
+only optimizes the parameters of bias vectors and
+freezes the rest parameters. The hyper-parameters
+are reported in Appendix A.
+Downstream Tasks. We evaluate methods under
+the plug-and-play knowledge injection paradigm
+on three kinds of knowledge-driven NLP tasks in-
+cluding relation classification, entity typing, and
+question answering. For relation classification,
+which requires models to classify the relation be-
+tween two entities given a context, we experiment
+on both few-shot and full-data settings. In the
+few-shot setting, we aim to evaluate model per-
+formance on long-tail relations whose training in-
+stances are not sufficient. Specifically, we use
+FewRel 1.0 (Han et al., 2018) and FewRel 2.0 (Gao
+et al., 2019).In the full-data setting, we evaluate
+models on Wiki80 (Han et al., 2019), which con-
+tains 80 relation types from Wikidata, and follow
+the data split of Zhang et al. (2019). For entity
+typing, which requires models to classify the type
+of an entity given a context, we evaluate models
+on Wiki-ET (Xin et al., 2018) containing 68 entity
+types from Freebase. For question answering, we
+evaluate models on EntityQuestions (Sciavolino10644et al., 2021), an open-domain QA dataset consist-
+ing of entity-centric questions. We use knowledge-
+enhanced models to directly answer questions with-
+out retrieving related documents. We report accu-
+racy on relation classification and question answer-
+ing, and F1 score on entity typing.
+Knowledge Bases. We use Wikidata5M (Wang
+et al., 2021b) and UMLSas our external knowl-
+edge bases for the Wikipedia domain and PubMed
+domain, respectively. To avoid information leakage
+in the relation classification task, we remove the
+triples appearing in the datasets from these knowl-
+edge bases. We adopt TransE (Bordes et al., 2013)
+as our knowledge representation model and the
+dimension of knowledge embeddings is set to 128.
+Evaluated Existing Methods. We evaluate ex-
+isting methods that can be applied to general plug-
+and-play knowledge injection. (1) E-BERT (Po-
+erner et al., 2020) also obtains a mapping net-
+work to transform knowledge embeddings. Dif-
+ferent from map-tuning, E-BERT builds the con-
+nection between the vocabulary and entities by
+string matching, and then make the mapped knowl-
+edge embeddings close to their corresponding to-
+ken embeddings. In this work, E-BERT uses the
+same TransE embeddings as map-tuning instead of
+wikipedia2vec for fair comparisons. (2) PELT (Ye
+et al., 2022) aggregates the output representations
+of a specific entity in multiple contexts to build
+the entity representation. Then, the entity rep-
+resentation can be appended to the model input
+without any mapping because the input space and
+output space are the same for most PLMs. The
+entity-related context can be treated as an external
+textual knowledge base. (3) Retrieval Augmen-
+tation (RA) is to augment input texts with addi-
+tional retrieved unstructured knowledge, such as
+RAG (Lewis et al., 2020) and REALM (Guu et al.,
+2020). In this work, we retrieve the entity descrip-
+tions from Wikidata5M and append them to the
+input texts. (4) K-Adapter (Wang et al., 2021a)
+implicitly stores knowledge in the parameters of
+adapter networks. We follow the original proce-
+dure of K-Adapter while keeping the parameters of
+PLMs and adapters frozen.
+Details of Map-tuning. The architecture of themapping network is simply an affine transformation
+We +b, where W∈Randb∈R.
+In this work, the parameter amount of the map-
+ping network is 768×128 + 768 <0.1M. For
+Mention-Masked Language Modeling, we use the
+raw texts of Wiki20M (Gao et al., 2021), which is
+sampled from the Wikipedia corpus and provides
+the annotations of entity linking. The total size is
+around 300MB, much smaller than common pre-
+training corpora. Since map-tuning only aims to
+adapt the mapping network for a PLM, it does not
+require much training data. We train the mapping
+network for 5epochs, which costs only 12hours
+on an NVIDIA Tesla V100. General map-tuning
+essentially builds an entity embedding lookup ta-
+ble. To evaluate its quality, we evaluate it in the
+traditional injection during fine-tuning paradigm as
+a preliminary experiment. To be more specific, we
+fine-tune the PLMs on downstream tasks, during
+which the mapping network is plugged into them.
+The details are in Appendix E. We find that map-
+tuning consistently outperforms E-BERT and PELT
+in the traditional paradigm, which also builds entity
+embedding lookup tables.
+4.2 General Plug-and-Play Injection
+In this subsection, we evaluate knowledge injection
+methods in the setting of general plug-and-play
+knowledge injection, where we directly plug knowl-
+edge modules into downstream models without any
+training. The results are reported in Table 1.
+From this table, we have four observations: (1)
+All of the four existing methods can not consis-
+tently improve the performance of downstream
+models. In most cases, injecting these knowledge
+modules degrades the model performance, often to
+a large degree. It empirically proves that the set-
+ting of general plug-and-play injection is chal-
+lenging and these four methods are not suitable
+in this setting. The knowledge provided by these
+methods can not be directly used, so they are ba-
+sically disruptive noise to the downstream models.
+(2) Our proposed general map-tuning achieves
+consistent improvement on almost all downstream
+models, suggesting that the mapping network ef-
+fectively transforms knowledge embeddings into
+the space of token embeddings and the mapped
+embeddings can be directly used by downstream
+models. We highlight the importance of Mention-
+Masked Language Modeling, which provides suf-
+ficient training instances for general map-tuning,10645
+while the matched entity-token pairs for E-BERT
+are insufficient for training the mapping network.
+(3) Intuitively, general map-tuning may work bet-
+ter with PET methods than with full-model fine-
+tuning because PET methods change much fewer
+parameters from the PLM and general map-tuning
+is trained based on the PLM. In fact, the perfor-
+mance improvement brought to models trained by
+full-model fine-tuning is comparable to that of
+PET methods. It demonstrates that map-tuning
+is a promising method regardless of the training
+methods of downstream models. (4) Remarkably
+high is the performance improvement brought by
+RA to fine-tuned BERT on EntityQuestions. We
+observe that the retrieved entity description con-
+tains the exact answer as a substring for 62.19%
+of instances in the test set, and we remove these
+instances and report the result in Table 16. We find
+that RA still gets a slightly higher performance than
+map-tuning does for fine-tuned BERT, but brings a
+significant performance drop to other downstream
+models, while map-tuning brings consistent perfor-
+mance improvement to all downstream models. It
+suggests that fine-tuned BERT has the surprising
+generalization ability to extract a substring in the
+additional context as the answer, and even to reveal
+the answer hidden in the additional context without
+string matches. On the contrary, other downstream
+models are not able to reveal the hidden answer.
+Thus, it is worth investigating RA with pluggable
+knowledge modules to stably provide information
+for different downstream models, rather than di-
+rectly appending unstructured text to model inputs.
+4.3 Task-specific Plug-and-Play Injection
+Since map-tuning achieves the best performance
+in the general plug-and-play injection setting, we
+further evaluate it in the setting of task-specific
+plug-and-play injection, where we train mapping
+networks based on downstream models with task
+objectives. If we have already conducted general
+map-tuning on a PLM, we can initialize the net-
+work with the general mapping network. Other-
+wise, we have to train the network from scratch.
+We first evaluate task-specific map-tuning on
+Wiki80 and Wiki-ET. The results are reported in
+Table 2. From the table, we have two observa-10646tions: (1) Task-specific map-tuning achieves better
+performance on these two datasets than general
+map-tuning does. It indicates that the mapping net-
+work extracts more informative knowledge for the
+specific task by task-specific training than the gen-
+eral one does. (2) If the general mapping network
+is available, it is recommended to use it to initialize
+the mapping network, which further improves the
+model performance.
+Then, we evaluate task-specific map-tuning in
+domain adaptation, which is a more challenging
+setting. In this setting, we aim to plug multiple
+knowledge bases into a single downstream model.
+Specifically, a downstream model is trained on a
+source domain, and then we plug the knowledge
+modules of the target domain into it for domain
+adaptation. Here, we use the relation classification
+datasets on the Wikipedia domain (FewRel 1.0)
+and the PubMed domain (FewRel 2.0). FewRel
+1.0 is the source domain. FewRel 2.0 is the target
+domain. The knowledge base for FewRel 2.0 is
+UMLS. Since the original FewRel 2.0 does not
+provide training instances, we rearrange FewRel
+2.0 and have the following data split. As FewRel
+2.0 has 25 relations, we separate 15 relations for
+training and development and the rest 10 relations
+are used for testing.
+From Table 3, we have two observations: (1) For
+the domain adaptation from Wikipedia to PubMed,
+map-tuning significantly improves the model per-
+formance (e.g., from 76.7 to 81.2 in 5-1) and
+achieves better performance than the model fine-
+tuned on PubMed domain (e.g., from 78.6 to 81.2
+in 5-1). It suggests that it is promising to use map-
+tuning to introduce external knowledge for domain
+adaptation. (2) Multi-domain training degrades
+the model performance on the Wikipedia domain
+and maintains its performance on the PubMed do-
+main while map-tuning does not degrade the per-
+formance on each domain. It indicates that the
+pluggable mapping networks are suitable for con-
+tinual domain adaptation.
+4.4 Computational Efficiency
+We compare our proposed plug-and-play knowl-
+edge injection paradigm with previous knowledge
+injection paradigms on the time cost. We evalu-
+ate the training time on an NVIDIA Tesla V100
+and compare the model performance on the 10-
+way 1-shot setting of FewRel 1.0. ERNIE (Zhang
+et al., 2019), KEPLER (Wang et al., 2021b), and
+LUKE (Yamada et al., 2020) inject knowledge
+during pre-training. PELT (Ye et al., 2022) in-
+jects knowledge during fine-tuning. The results
+of ERNIE, KEPLER, LUKE, and PELT are taken
+from Ye et al. (2022). Map-tuning injects knowl-
+edge after fine-tuning.
+The results are shown in Figure 3. From this
+figure, we observe that the training time of map-
+tuning is much shorter than those methods under
+the paradigm of injecting during pre-training, and
+it is comparable to PELT. Besides, the performance
+of map-tuning is also competitive compared to pre-
+vious knowledge injection methods. Moreover,
+map-tuning only optimizes additional 0.1% of pa-
+rameters and we report the number of parameters
+optimized for different knowledge injection meth-
+ods in Appendix G. Plug-and-play knowledge in-
+jection has great potential to be comparable to pre-
+vious paradigms w.r.t. task performance, while
+maintaining its innate flexibility and efficiency.
+4.5 Case Study
+We present a qualitative analysis of map-tuning in
+Table 4. In the first case, the original downstream
+model does not understand that “flying officer” is a
+military rank and wrongly predicts the relation as
+“occupation”. With the general mapping network,
+which enriches the meaning of “flying officer”, the
+model correctly predicts the relation.
+The general mapping network, however, may be
+misleading in some cases. In the second case, it is
+easy for the original downstream model to recog-
+nize “Wasp” as a member of “Avengers” without
+any external knowledge since this fact could be
+inferred by the word “other”. Compared to the
+external knowledge provided by the task-specific
+mapping network, coarse-grained is that provided
+by the general mapping network, because there is
+no additional training before the inference. As a
+result, the model wrongly recognizes “Avengers”
+as comic books instead of the fictional superhero10647
+team, and thus changes the correct model predic-
+tion. Task-specific map-tuning, which is further
+adapted to the task, corrects the prediction.
+5 Related Work
+To enhance PLMs with external knowledge, there
+are two mainstream paradigms: injection during
+pre-training and injection during fine-tuning (Yin
+et al., 2022). For injection during pre-training, re-
+searchers usually construct new knowledge-aware
+objectives, such as entity prediction (Xu et al.,
+2021), entity discrimination (Xiong et al., 2020),
+entity and relation discrimination (Qin et al., 2021),
+and link prediction (Wang et al., 2021b). In this
+way, knowledge will be implicitly stored in the pa-
+rameters of PLMs. Injection knowledge during pre-
+training can simultaneously improve performance
+on a range of downstream knowledge-driven tasks.
+However, the training cost of this paradigm is ex-
+pensive. Taking the typical knowledge-enhanced
+PLMs LUKE (Yamada et al., 2020) and KE-
+PLER (Wang et al., 2021b) as an example, it takes
+more than 3,000 GPU hours to train them.
+Injection knowledge during fine-tuning is a rela-
+tively lightweight paradigm, where external knowl-
+edge is often used to augment model inputs for
+specific tasks (Zhou et al., 2019; Lin et al., 2019;
+Liu et al., 2020b; Cheng et al., 2021; Kang et al.,2022). When injecting unstructured textual knowl-
+edge, some methods retrieve task-related informa-
+tion from external corpora to augment the origi-
+nal input text (Karpukhin et al., 2020; Liu et al.,
+2020a). When using structured knowledge, such as
+knowledge graphs, existing methods usually apply
+knowledge representation learning methods (Bor-
+des et al., 2013; Lin et al., 2015) to encode struc-
+tured knowledge into embeddings, and then fuse
+these knowledge embeddings with input token em-
+beddings using knowledge injection methods (Sun
+et al., 2020; Su et al., 2021; Yasunaga et al., 2021).
+In general, existing knowledge injection meth-
+ods mainly target PLMs and adopt paradigms
+where knowledge and models are highly coupled.
+Toward flexible and efficient injection, we study a
+new paradigm, plug-and-play knowledge injection,
+where we decouple models and knowledge sources,
+and then inject knowledge into downstream models
+without retraining the models. This work is also re-
+lated to parameter-efficient tuning (Liu et al., 2021;
+Ding et al., 2022) and plugins for large language
+models (Xiao et al., 2023; Dathathri et al., 2020;
+Lauscher et al., 2021; Chronopoulou et al., 2022;
+Yu et al., 2023; Xu et al., 2023; Alayrac et al., 2022)
+while we are the first to study knowledge injection
+in a parameter-efficient and plug-and-play way.106486 Conclusion
+In this work, we propose a new paradigm of in-
+jection toward flexible and efficient knowledge in-
+jection. In this paradigm, downstream models can
+be enhanced with little computational cost, which
+benefits large amounts of models. We first sys-
+tematically evaluate existing knowledge injection
+methods and find that they are not suitable for plug-
+and-play injection. Then, we propose map-tuning
+for this paradigm, which effectively injects knowl-
+edge into downstream models to enhance them.
+There are four promising directions for future
+investigation into plug-and-play knowledge injec-
+tion. (1) How can we reduce the performance gap
+between methods for this novel paradigm and those
+for the previous injection paradigms, while main-
+taining superior flexibility and efficiency? (2) Be-
+sides factual knowledge, how can we effectively
+plug diverse knowledge bases, such as text corpora,
+voice, images, and even other PLMs? (3) After
+injecting the knowledge in a plug-and-play way,
+how can the PLMs do various types of complex
+reasoning based on the injected knowledge (Onoe
+et al., 2023)? (4) Can the plug-and-play knowledge
+injection methods for these sources be unified, so
+we can plug a combination of multiple sources? We
+hope this work can attract attention to and inspire
+research on these problems.
+Limitations
+In this paper, we present a novel knowledge injec-
+tion paradigm plug-and-play knowledge injection
+for PLMs. We show existing methods can not be
+well applied to the new paradigm and propose map-
+tuning as a preliminary exploration of methods.
+The paradigm plug-and-play knowledge injec-
+tionhas a limitation in terms of its assumption. It
+assumes that a PLM should be fine-tuned for down-
+stream tasks. However, very large-scale PLMs can
+perform zero-shot learning or in-context learning
+on downstream tasks without being fine-tuned. Fu-
+ture work may extend the definition of the proposed
+paradigm to make it meaningful in these scenes.
+The method map-tuning has three limitations in
+terms of its applicability. Firstly, we did not evalu-
+ate map-tuning for PLMs pre-trained by other lan-
+guage modeling objectives (e.g., casual language
+modeling) besides MLM. As its spirit can be easily
+generalized to various language modeling objec-
+tives, we leave this evaluation as future work. Sec-
+ondly, we did not evaluate whether the PLM cando complex reasoning (e.g., multi-hop reasoning)
+based on the knowledge injected by map-tuning.
+Thirdly, map-tuning is designed to plug structural
+fact knowledge. It is also meaningful to plug other
+diverse knowledge bases, including text corpora,
+voice, images, and even other PLMs, which are not
+covered by our work.
+Acknowledgments
+This work is supported by the National Key
+R&D Program of China (No.2022ZD0116312), Na-
+tional Natural Science Foundation of China (No.
+62236004).
+Author Contributions Zhengyan Zhang,
+Zhiyuan Zeng, Huadong Wang, and Deming Ye
+wrote the code and conducted the experiments.
+Zhengyan Zhang constructed the basic experi-
+mental framework including codes and datasets.
+Zhiyuan Zeng was in charge of plug-and-play and
+fine-tuning experiments. Huadong Wang and Dem-
+ing Ye provided TransE and PELT embeddings
+respectively. Zhengyan Zhang and Zhiyuan Zeng
+contributed to the analysis experiments. Zhengyan
+Zhang and Zhiyuan Zeng wrote the initial draft.
+Yankai Lin, Huadong Wang, Chaojun Xiao, Xu
+Han, and Zhiyuan Liu significantly edited and
+improved the paper. Peng Li, Maosong Sun, and
+Jie Zhou provided valuable advice to the research.
+References106491065010651
+A Hyper-parameters
+A.1 Fine-tuning downstream PLMs
+We experiment with four training methods for the
+adaptation of PLMs on downstream tasks, which
+are Full-model fine-tuning, LoRA, Adapter, and
+BitFit. The embedding layer is frozen during
+training. We train all the models using AdamW
+with 10% warming-up steps. We list our hyper-
+parameters in Table 5.
+A.2 General Map-tuning
+For general map-tuning, we search the dropout rate
+in {0.15, 0.25, 0.35, 0.45}. We train all the map-
+ping networks using Adam (Kingma and Ba, 2015).
+The learning rate is 3E-5 and the batch size is 64.
+We train the mapping network on the Wikipedia
+corpus for 5 epochs. The hyper-parameters of the
+best mapping network in all cases are listed in Ta-
+ble 6. When we evaluate RA on these datasets, we
+set the sequence length to 512.
+A.3 Task-specifc Map-tuning
+We report hyper-parameters for task-specific map-
+tuning in Table 7. We train all mapping networks
+using Adam with 10% warming-up steps
+Regarding the results reported in Table 2, during
+task-specific map-tuning, we use dropout in the at-
+tention probabilities and all fully connected layers10652
+of the PLM. The dropout rate is 0.30, 0.20, and
+0.00 for Wiki80, Wiki-ET, and EntityQuestions,
+respectively. Regarding the results reported in Ta-
+ble 3, when using training data from the source
+domain for task-specific map-tuning, the dropout
+rate is 0.35. In these cases, the training data for
+task-specific map-tuning are identical to those for
+fine-tuning the downstream models. We search
+the dropout rate in {0.00, 0.15, 0.20, 0.25, 0.30,
+0.35}. When using training data from the target
+domain for task-specific map-tuning, we do not use
+dropout.
+The hyper-parameters for experiments with
+RoBERTa are identical to those with BERT.
+A.4 Fine-tuning with the Mapping Network
+Regarding the results reported in Table 14, the
+hyper-parameters for fine-tuning BERT are iden-
+tical to those in Table 5. We train all mapping
+networks using Adam without dropout, and the
+batch size is 64. For map-tuning on the Wikipedia
+corpus, the learning rate is 1E-5. We report other
+hyper-parameters for map-tuning on the Wikipedia
+corpus in Table 8, and those for map-tuning on
+downstream data in Table 9.
+A.5 Details of K-Adapter
+We use the open-source implementation of K-
+Adapter, and we only consider facAdapter (Fac-
+tual Adapter). The BERTlayers where adapter
+layers plug in are {5,10}. The hyper-parameters
+for pre-training facAdapter are identical to those
+reported in Wang et al. (2021a).
+In order to plug K-Adapter into frozen down-
+stream models in the setting of general plug-and-
+play injection, we tune the final fully connected
+layer on downstream data. We use Adam with 10%
+warming-up steps, and other hyper-parameters are
+listed in Table 10.
+A.6 Details of Data Preprocessing
+For FewRel and Wiki80, we mark the subject and
+object spans by # and $ tokens respectively. For
+WikiET and EntityQuestions, we mark the entity
+span by $ token.
+To evaluate encoder PLMs on EntityQuestions,
+we append the [MASK] token to the question, and
+only keep the instances whose answers are in the
+PLM token vocabulary. We train the model to fill in
+the [MASK] token. It is a classification task, where
+all tokens in the vocabulary are choices. Only when
+the answer token is ranked as the top 1 result is the
+model considered to give a correct prediction. We
+further remove the instances whose entity is not
+in the database. Finally, we have 37800 training
+instances, 4693 validation instances, and 4731 test
+instances.
+FewRel, Wiki80, and WikiET provide the anno-
+tation of entity linking, and for EntityQuestions we
+do entity liking by string matching.
+B Stability of Map-tuning
+We evaluate the stability of map-tuning in general
+plug-and-play knowledge injection. Training the
+PLMs on downstream tasks with three different
+seeds (one of which is used in all main experi-
+ments), for each task, we have three different down-
+stream models, into which we plug the mapping
+network. The mean and standard deviation of per-
+formance improvement brought by map-tuning is
+shown in Table 11. From this table, we observe that
+map-tuning is not sensitive to downstream models
+overall, showing its decent stability.10653
+C How Map-tuning Works with Other
+PLMs?
+In this section, we experiment map-tuning with
+RoBERTa (Liu et al., 2019), another representative
+PLM, on the domain transfer setting using task-
+specific map-tuning. The setting is identical to that
+in Section 4.3. The results are shown in Table 12.
+From this table, we observe that task-specific map-
+tuning significantly improves the performance of
+the model trained on the source domain by intro-
+ducing the knowledge of the target domain. More-
+over, the model plugged with map-tuning is even
+much better than the model trained on multiple do-
+mains. It indicates that map-tuning is a universal
+knowledge injection method for different PLMs.
+D Empirical Analysis of MMLM
+We conduct an empirical analysis of what MMLM
+trains the mapping network to learn. Concretely,
+we split the general map-tuning corpus into a train-
+ing set and a test set. During training on the training
+set, we plug M(e)andM(e)before two entity
+mentions eandefor each instance, and mask
+only the mention span of e. During inference on
+the test set, we evaluate the MMLM loss in four
+settings. (1) No-Perturbation plugs the M(e)
+andM(e), which is identical to the setting of
+training. (2) Self-Perturbation replaces M(e)
+withM(e), where eis a random entity. (3)
+Other-Perturbation replaces M(e)withM(e).
+(4)All-Perturbation replaces both M(e)and
+M(e)with random ones. We also evaluate these
+settings with a randomly-initialized mapping net-
+work without map-tuning. For analysis, we report
+the result in the setting No-Plug where there is no
+plugged embedding.
+The result is shown in Table 13. From this ta-
+ble, we have three observations. (1) With map-
+tuning, the loss in Self-Perturbation is significantly
+larger than that in No-Perturbation, even close to
+that in All-Perturbation. It proves that MMLM
+trains the mapping network to extract the entity
+information stored in the knowledge embedding
+so that PLMs can utilize the information. (2) The
+loss in Other-Perturbation is also larger than that
+in No-Perturbation, which indicates that the map-
+ping network learns to extract the connections be-
+tween different entities and to feed such informa-
+tion into PLMs. (3) Interestingly, the loss in All-
+Perturbation with map-tuning is smaller than that
+in No-Plug, and the loss in settings without map-
+tuning is close to the latter. The trained mapping
+network may be able to convert an arbitrary knowl-
+edge embedding to an embedding that can activate
+the PLM’s own memory of some factual knowl-
+edge. In conclusion, the three mentioned abilities
+of mapping networks trained by MMLM enable
+PLMs to know new knowledge or better recall
+their own knowledge. Future work may improve
+MMLM to get stronger mapping networks.10654
+E Is Map-tuning Competitive in the
+Traditional Paradigm?
+It is natural to use the general mapping net-
+work in the traditional injection during fine-tuning
+paradigm, as the general network essentially builds
+an entity embedding lookup table. We freeze the
+parameters of the mapping network and fine-tune
+the PLM on downstream tasks, during which we
+augment model inputs with mapped knowledge
+representations. Intuitively, the models learn to ef-
+fectively extract information from mapped knowl-
+edge representations during fine-tuning. Inspired
+by ULMFiT (Howard and Ruder, 2018), we also
+experiment on the setting where we use the task’s
+training data as the corpus for general map-tuning.
+Our results are shown in Table 14.
+From this table, we have two observations: (1)
+map-tuning consistently outperforms E-BERT and
+PELT in the traditional paradigm. Considering that
+E-BERT and map-tuning use the same knowledge
+embedding, we suggest that map-tuning provides
+more useful knowledge representations for BERT
+than E-BERT. (2) General map-tuning on down-
+stream data achieves comparable performance to
+that on the large-scale unsupervised corpus. It indi-
+cates that general map-tuning does not necessitate
+a large amount of training data for a specific task.
+F How do We Ensure the Generality of
+Map-tuning?
+In the setting of general plug-and-play injection, we
+train a general mapping network based on a PLM
+and directly plug it into various downstream mod-
+els during inference. There exists a gap between
+the general map-tuning procedure and the inference
+on downstream tasks, i.e., the PLM used for map-
+tuning is different from downstream models. To re-
+duce this gap, we use dropout (Hinton et al., 2012)
+in the attention probabilities and all fully connected
+layers of the PLM during general map-tuning. In-
+tuitively, dropout simulates different variants of the
+PLM and makes the mapping network have better
+generality for different downstream models trained
+from the PLM. We explore five different dropout
+rates. The results on the 5-way 1-shot of FewRel
+1.0 are chosen as the representative and shown in
+Figure 4.
+From this figure, we have two observations: (1)
+Training without dropout leads to the worst perfor-
+mance, which indicates that the generality of the
+mapping network is not good enough and down-
+stream models can not utilize the knowledge. (2)
+Large dropout rates are also not optimal. Empiri-
+cally, the dropout rate of 0.25 is a good choice.
+G Numbers of Optimized Parameters
+Compared to previous knowledge injection meth-
+ods, map-tuning is a parameter-efficient method.
+The numbers of optimized parameters for differ-
+ent knowledge injection methods are shown in
+Table 15. In order to introduce external knowl-10655
+edge, previous methods usually optimize all pa-
+rameters during pre-training and fine-tuning while
+map-tuning only optimizes additional 0.1% of pa-
+rameters and freezes the original model, which
+makes it flexible to use mapping networks for dif-
+ferent inputs with the same models.
+H Performance on EntityQuestions
+We report the performance on filtered EntityQues-
+tions in Table 16.10656ACL 2023 Responsible NLP Checklist
+A For every submission:
+/squareA1. Did you describe the limitations of your work?
+Left blank.
+/squareA2. Did you discuss any potential risks of your work?
+Not applicable. Left blank.
+/squareA3. Do the abstract and introduction summarize the paper’s main claims?
+Left blank.
+/squareA4. Have you used AI writing assistants when working on this paper?
+Left blank.
+B/squareDid you use or create scientiﬁc artifacts?
+4
+/squareB1. Did you cite the creators of artifacts you used?
+Left blank.
+/squareB2. Did you discuss the license or terms for use and / or distribution of any artifacts?
+These datasets are publicly available and free of use for research purposes.
+/squareB3. Did you discuss if your use of existing artifact(s) was consistent with their intended use, provided
+that it was speciﬁed? For the artifacts you create, do you specify intended use and whether that is
+compatible with the original access conditions (in particular, derivatives of data accessed for research
+purposes should not be used outside of research contexts)?
+The use is consistent with their intended use.
+/squareB4. Did you discuss the steps taken to check whether the data that was collected / used contains any
+information that names or uniquely identiﬁes individual people or offensive content, and the steps
+taken to protect / anonymize it?
+We use established public datasets, which should not cause privacy issues.
+/squareB5. Did you provide documentation of the artifacts, e.g., coverage of domains, languages, and
+linguistic phenomena, demographic groups represented, etc.?
+4
+/squareB6. Did you report relevant statistics like the number of examples, details of train / test / dev splits,
+etc. for the data that you used / created? Even for commonly-used benchmark datasets, include the
+number of examples in train / validation / test splits, as these provide necessary context for a reader
+to understand experimental results. For example, small differences in accuracy on large test sets may
+be signiﬁcant, while on small test sets they may not be.
+4
+C/squareDid you run computational experiments?
+4
+/squareC1. Did you report the number of parameters in the models used, the total computational budget
+(e.g., GPU hours), and computing infrastructure used?
+410657/squareC2. Did you discuss the experimental setup, including hyperparameter search and best-found
+hyperparameter values?
+A
+/squareC3. Did you report descriptive statistics about your results (e.g., error bars around results, summary
+statistics from sets of experiments), and is it transparent whether you are reporting the max, mean,
+etc. or just a single run?
+A
+/squareC4. If you used existing packages (e.g., for preprocessing, for normalization, or for evaluation), did
+you report the implementation, model, and parameter settings used (e.g., NLTK, Spacy, ROUGE,
+etc.)?
+4
+D/squareDid you use human annotators (e.g., crowdworkers) or research with human participants?
+Left blank.
+/squareD1. Did you report the full text of instructions given to participants, including e.g., screenshots,
+disclaimers of any risks to participants or annotators, etc.?
+No response.
+/squareD2. Did you report information about how you recruited (e.g., crowdsourcing platform, students)
+and paid participants, and discuss if such payment is adequate given the participants’ demographic
+(e.g., country of residence)?
+No response.
+/squareD3. Did you discuss whether and how consent was obtained from people whose data you’re
+using/curating? For example, if you collected data via crowdsourcing, did your instructions to
+crowdworkers explain how the data would be used?
+No response.
+/squareD4. Was the data collection protocol approved (or determined exempt) by an ethics review board?
+No response.
+/squareD5. Did you report the basic demographic and geographic characteristics of the annotator population
+that is the source of the data?
+No response.10658
