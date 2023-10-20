@@ -12,11 +12,12 @@ import json
 import glob
 
 from tokenizer import tokenize_sentences
-
+import time
 
 def text_extraction(element):
     # Extracting the text from the in-line text element
     line_text = element.get_text()
+    print(line_text)
 
     # Find the formats of the text
     # Initialize the list with all the formats that appeared in the line of text
@@ -57,6 +58,7 @@ def parse_file(pdf_path):
             if isinstance(element, LTTextContainer):
                 if table_extraction_flag == False:
                     (line_text, format_per_line) = text_extraction(element)
+                    print(line_text)
                     page_text.append(line_text)
                     line_format.append(format_per_line)
                     page_content.append(line_text)
@@ -68,10 +70,10 @@ def parse_file(pdf_path):
         dctkey = 'Page_' + str(pagenum)
         # Add the list of list as the value of the page key
         text_per_page[dctkey] = page_content
-
     paper_text = ''
     for v in text_per_page.values():
         sentences = tokenize_sentences(''.join(v).replace('\n', ' ').replace('- ', ''))
+        end = time.time()
         # print('References' in sentences, sentences)
         if 'References' in sentences:
             break

@@ -10,6 +10,7 @@ import pandas as pd
 from tqdm import tqdm
 from sklearn.metrics import classification_report
 from transformers import AutoTokenizer, AutoModelForTokenClassification, Trainer, TrainingArguments, DataCollatorForTokenClassification
+from torch.nn import CrossEntropyLoss
 import datasets
 from datasets import Dataset, DatasetDict, load_dataset
 import evaluate
@@ -34,7 +35,8 @@ label_to_id = {"O": 0,
            }
 id_to_label = {v: k for k, v in label_to_id.items()}
 label_list = list(label_to_id.keys())
-tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
+weights = torch.tensor([1.0] + [10.0] * 14).cuda()
+tokenizer = AutoTokenizer.from_pretrained("roberta-base", add_prefix_space=True)
 
 # Read data from CoNLL format
 def read_conll(file_path):
@@ -53,8 +55,9 @@ def convert_to_hf(lines):
             continue
         word, tag = line[0], line[1]
         hf_data.append((word, tag))
+
     # Combine every 512 elements of hf_data words and tags into a single list
-    hf_data = [hf_data[i:i + 512] for i in range(0, len(hf_data), 512)]
+    hf_data = [hf_data[i:i + 32] for i in range(0, len(hf_data), 32)]
     hf_data = [{'id': idx, 'tokens': [x[0] for x in batch], 'ner_tags': [label_to_id[x[1]] for x in batch]} for idx, batch in enumerate(hf_data)]
     return hf_data
 
@@ -92,7 +95,11 @@ def compute_metrics(p):
         for prediction, label in zip(predictions, labels)
     ]
 
+    true_labels = [label for label in true_labels if label != 'O']
+    true_predictions = [predicted for label, predicted in zip(true_labels, true_predictions) if label != 'O']
+    print(true_labels, true_predictions)
     results = seqeval.compute(predictions=true_predictions, references=true_labels)
+    print(results)
     return {
         "precision": results["overall_precision"],
         "recall": results["overall_recall"],
@@ -100,15 +107,28 @@ def compute_metrics(p):
         "accuracy": results["overall_accuracy"],
     }
 
+class WeightedCrossEntropyTrainer(Trainer):
+    def __init__(self, *args, weight=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.weight = weight
+
+    def compute_loss(self, model, inputs, return_outputs=False):
+        labels = inputs.pop("labels")
+        outputs = model(**inputs)
+        logits = outputs.logits
+        loss_fct = CrossEntropyLoss(weight=self.weight).cuda()
+        loss = loss_fct(logits.view(-1, model.config.num_labels).cuda(), labels.view(-1).cuda())
+        return (loss, outputs) if return_outputs else loss
+
 # define a function to train the model
 def train_model(ds):
     # Load the model
-    model = AutoModelForTokenClassification.from_pretrained("bert-base-uncased", num_labels=len(id_to_label), id2label=id_to_label, label2id=label_to_id)
+    model = AutoModelForTokenClassification.from_pretrained("roberta-base", num_labels=len(id_to_label), id2label=id_to_label, label2id=label_to_id)
     data_collator = DataCollatorForTokenClassification(tokenizer=tokenizer)
     # Define the training arguments
     training_args = TrainingArguments(
-        output_dir="./results",
-        learning_rate=2e-2,
+        output_dir="/home/scratch/vdas/results_anlp",
+        learning_rate=0.0001,
         num_train_epochs=30,
         per_device_train_batch_size=16,
         per_device_eval_batch_size=16,
@@ -121,7 +141,7 @@ def train_model(ds):
         save_strategy="epoch",
     )
     # Define the trainer
-    trainer = Trainer(
+    trainer = WeightedCrossEntropyTrainer(
         model=model,
         args=training_args,
         train_dataset=ds["train"],
@@ -129,6 +149,7 @@ def train_model(ds):
         data_collator=data_collator,
         tokenizer=tokenizer,
         compute_metrics=compute_metrics,
+        weight=weights
     )
     # Train the model
     trainer.train()
@@ -175,8 +196,13 @@ if __name__ == "__main__":
     ds['train'] = trainds
     ds['validation'] = valds
     ds['test'] = testds
+    # print(len(train_lines))
+    # print(len(train_data))
+    # print(len(train_df))
 
-    # datasets = load_dataset("conll2003")
+    # ds = load_dataset("conll2003")
+    # for i in range(50):
+    #     print(ds['train'][i])
     ds = ds.map(tokenize_and_align_labels, batched=True)
     train_model(ds)
 
