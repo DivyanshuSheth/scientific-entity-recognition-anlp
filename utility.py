@@ -30,14 +30,16 @@ label_list = list(label_to_id.keys())
 def read_conll(file_path):
     with open(file_path, "r", encoding="utf-8") as f:
         lines = f.readlines()
-    
-    groups = itertools.groupby(lines, key=lambda x: x == "\n")
-    print(groups)
-
+ 
     lines = [line.strip() for line in lines]
     lines = [line.split() for line in lines]
-    lines = [[line[0], line[3]] for line in lines[1:-1] if len(line) > 0]
-    return lines
+    lines = [('' if len(line) == 0 else [line[0], line[3]]) for line in lines[1:-1]]
+
+    groups = itertools.groupby(lines, key=lambda x: x != "")
+    groups = (list(group) for k, group in groups if k)
+    all_papers = [a + b for a, b in zip(groups, groups)]
+
+    return all_papers
 
 # Convert data to huggingface format
 def convert_to_hf(lines):
@@ -77,3 +79,12 @@ def compute_metrics(p):
         "f1": results["overall_f1"],
         "accuracy": results["overall_accuracy"],
     }
+
+def train_val_split(list_of_paper_lines):
+    val_indices = np.random.choice(len(list_of_paper_lines), size=5, replace=False)
+    train_indices = [i for i in range(len(list_of_paper_lines)) if i not in val_indices]
+
+    train_lines = [list_of_paper_lines[i] for i in train_indices]
+    val_lines = [list_of_paper_lines[i] for i in val_indices]
+
+    return train_lines, val_lines

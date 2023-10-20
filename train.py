@@ -15,7 +15,7 @@ import datasets
 from datasets import Dataset, DatasetDict, load_dataset
 import evaluate
 
-from utility import compute_metrics, read_conll, convert_to_hf, label_to_id, id_to_label, label_list
+from utility import compute_metrics, read_conll, convert_to_hf, train_val_split, label_to_id, id_to_label
 
 
 weights = torch.tensor([1.0] + [10.0] * 14).cuda()
@@ -110,27 +110,23 @@ def print_results(results):
 # Call previous methods
 if __name__ == "__main__":
     # Read data
-    train_lines = read_conll("./AnnotatedData/data_temp.conll")
-    dev_lines = read_conll("./AnnotatedData/data_temp.conll")
-    test_lines = read_conll("./AnnotatedData/data_temp.conll")
+    lines = read_conll("./AnnotatedData/data_temp.conll")
+    train_lines, dev_lines = train_val_split(lines)
+
     # Convert data to huggingface format
     train_data = convert_to_hf(train_lines)
-    dev_data = convert_to_hf(dev_lines)
-    test_data = convert_to_hf(test_lines)
+    dev_data = convert_to_hf(val_lines)
     # print(train_data[0])
     # # Convert data to pandas dataframe
     train_df = pd.DataFrame(train_data, columns=["id", "tokens", "ner_tags"])
     dev_df = pd.DataFrame(dev_data, columns=["id", "tokens", "ner_tags"])
-    test_df = pd.DataFrame(test_data, columns=["id", "tokens", "ner_tags"])
     trainds = Dataset.from_pandas(train_df)
-    testds = Dataset.from_pandas(test_df)
     valds = Dataset.from_pandas(dev_df)
 
     ds = DatasetDict()
 
     ds['train'] = trainds
     ds['validation'] = valds
-    ds['test'] = testds
     # print(len(train_lines))
     # print(len(train_data))
     # print(len(train_df))
