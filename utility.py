@@ -1,5 +1,6 @@
 import numpy as np
 import evaluate
+import itertools
 
 seqeval = evaluate.load("seqeval")
 
@@ -29,6 +30,10 @@ label_list = list(label_to_id.keys())
 def read_conll(file_path):
     with open(file_path, "r", encoding="utf-8") as f:
         lines = f.readlines()
+    
+    groups = itertools.groupby(lines, key=lambda x: x == "\n")
+    print(groups)
+
     lines = [line.strip() for line in lines]
     lines = [line.split() for line in lines]
     lines = [[line[0], line[3]] for line in lines[1:-1] if len(line) > 0]
