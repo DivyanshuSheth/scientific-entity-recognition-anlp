@@ -87,4 +87,7 @@ def train_val_split(list_of_paper_lines):
     train_lines = [list_of_paper_lines[i] for i in train_indices]
     val_lines = [list_of_paper_lines[i] for i in val_indices]
 
+    train_lines = [line for paper in train_lines for line in paper]
+    val_lines = [line for paper in val_lines for line in paper]
+
     return train_lines, val_lines
