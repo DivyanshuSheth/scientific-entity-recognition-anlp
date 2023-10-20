@@ -37,7 +37,10 @@ def read_conll(file_path):
 
     groups = itertools.groupby(lines, key=lambda x: x != "")
     groups = (list(group) for k, group in groups if k)
-    all_papers = [a + b for a, b in zip(groups, groups)]
+
+    all_papers = [g for g in groups]
+
+    print(all_papers[0])
 
     return all_papers
 

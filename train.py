@@ -115,7 +115,7 @@ if __name__ == "__main__":
 
     # Convert data to huggingface format
     train_data = convert_to_hf(train_lines)
-    dev_data = convert_to_hf(val_lines)
+    dev_data = convert_to_hf(dev_lines)
     # print(train_data[0])
     # # Convert data to pandas dataframe
     train_df = pd.DataFrame(train_data, columns=["id", "tokens", "ner_tags"])
