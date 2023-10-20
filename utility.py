@@ -40,8 +40,6 @@ def read_conll(file_path):
 
     all_papers = [g for g in groups]
 
-    print(all_papers[0])
-
     return all_papers
 
 # Convert data to huggingface format
