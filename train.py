@@ -91,7 +91,7 @@ def train_model(ds):
     # Evaluate the model
     trainer.evaluate()
     # Save the model
-    trainer.save_model("./models")
+    # trainer.save_model("./models")
 
 
 # define a function to print the results
@@ -110,9 +110,8 @@ def print_results(results):
 # Call previous methods
 if __name__ == "__main__":
     # Read data
-    lines = read_conll("./AnnotatedData/data_temp.conll")
+    lines = read_conll("./AnnotatedData/data.conll")
     train_lines, dev_lines = train_val_split(lines)
-
     # Convert data to huggingface format
     train_data = convert_to_hf(train_lines)
     dev_data = convert_to_hf(dev_lines)
@@ -122,6 +121,10 @@ if __name__ == "__main__":
     dev_df = pd.DataFrame(dev_data, columns=["id", "tokens", "ner_tags"])
     trainds = Dataset.from_pandas(train_df)
     valds = Dataset.from_pandas(dev_df)
+    print(len(trainds))
+    print(len(valds))
+    print(trainds[0])
+    exit(0)
 
     ds = DatasetDict()
 

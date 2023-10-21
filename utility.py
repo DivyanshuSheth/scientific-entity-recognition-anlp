@@ -34,15 +34,10 @@ def read_conll(file_path):
     lines = [line.strip() for line in lines]
     lines = [line.split() for line in lines]
     lines = [('' if len(line) == 0 else [line[0], line[3]]) for line in lines[1:-1]]
+    # Divide list by the blank strings
+    lines = [list(y) for x, y in itertools.groupby(lines, lambda z: z == '') if not x]
+    return lines
 
-    groups = itertools.groupby(lines, key=lambda x: x != "")
-    groups = (list(group) for k, group in groups if k)
-
-    all_papers = [g for g in groups]
-
-    print(all_papers[0])
-
-    return all_papers
 
 # Convert data to huggingface format
 def convert_to_hf(lines):
@@ -73,7 +68,6 @@ def compute_metrics(p):
 
     true_labels = [label for label in true_labels if label != 'O']
     true_predictions = [predicted for label, predicted in zip(true_labels, true_predictions) if label != 'O']
-    print(true_labels, true_predictions)
     results = seqeval.compute(predictions=true_predictions, references=true_labels)
     print(results)
     return {
