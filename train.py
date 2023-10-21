@@ -15,7 +15,7 @@ import datasets
 from datasets import Dataset, DatasetDict, load_dataset
 import evaluate
 
-from utility import compute_metrics, read_conll, convert_to_hf, train_val_split, label_to_id, id_to_label
+from utility import compute_metrics, read_conll, convert_to_hf, train_val_split, label_to_id, id_to_label, predict, flatten_list, predict_on_file
 
 
 weights = torch.tensor([1.0] + [10.0] * 14).cuda()
@@ -56,9 +56,10 @@ class WeightedCrossEntropyTrainer(Trainer):
         return (loss, outputs) if return_outputs else loss
 
 # define a function to train the model
-def train_model(ds):
+def train_model(ds, model=None):
     # Load the model
-    model = AutoModelForTokenClassification.from_pretrained("roberta-base", num_labels=len(id_to_label), id2label=id_to_label, label2id=label_to_id)
+    if model is None:
+        model = AutoModelForTokenClassification.from_pretrained("roberta-base", num_labels=len(id_to_label), id2label=id_to_label, label2id=label_to_id)
     data_collator = DataCollatorForTokenClassification(tokenizer=tokenizer)
     # Define the training arguments
     training_args = TrainingArguments(
@@ -92,52 +93,45 @@ def train_model(ds):
     trainer.evaluate()
     # Save the model
     # trainer.save_model("./models")
-
-
-# define a function to print the results
-def print_results(results):
-    print("Results on test data:")
-    print(results)
-    print("\n")
-    print("Results on each class:")
-    print("Class\tPrecision\tRecall\tF1-score")
-    for line in results.split("\n")[2:-5]:
-        line = line.split()
-        if len(line) == 0:
-            continue
-        print(line[0], "\t", line[1], "\t", line[2], "\t", line[3])
+    return model
 
 # Call previous methods
 if __name__ == "__main__":
     # Read data
-    lines = read_conll("./AnnotatedData/data.conll")
-    train_lines, dev_lines = train_val_split(lines)
-    # Convert data to huggingface format
-    train_data = convert_to_hf(train_lines)
-    dev_data = convert_to_hf(dev_lines)
-    # print(train_data[0])
-    # # Convert data to pandas dataframe
-    train_df = pd.DataFrame(train_data, columns=["id", "tokens", "ner_tags"])
-    dev_df = pd.DataFrame(dev_data, columns=["id", "tokens", "ner_tags"])
-    trainds = Dataset.from_pandas(train_df)
-    valds = Dataset.from_pandas(dev_df)
-    print(len(trainds))
-    print(len(valds))
-    print(trainds[0])
-    exit(0)
-
-    ds = DatasetDict()
-
-    ds['train'] = trainds
-    ds['validation'] = valds
-    # print(len(train_lines))
-    # print(len(train_data))
-    # print(len(train_df))
-
-    # ds = load_dataset("conll2003")
-    # for i in range(50):
-    #     print(ds['train'][i])
-    ds = ds.map(tokenize_and_align_labels, batched=True)
-    train_model(ds)
-
-
+    # lines_scierc = read_conll("./AnnotatedData/train_scierc.conll")
+    # lines_scierc_val = read_conll("./AnnotatedData/dev_scierc.conll")
+    # lines_scierc = flatten_list(lines_scierc)
+    # lines_scierc_val = flatten_list(lines_scierc_val)
+    # train_scierc = convert_to_hf(lines_scierc)
+    # val_scierc = convert_to_hf(lines_scierc_val)
+    # train_scierc_df = pd.DataFrame(train_scierc, columns=["id", "tokens", "ner_tags"])
+    # val_scierc_df = pd.DataFrame(val_scierc, columns=["id", "tokens", "ner_tags"])
+    # train_scierc_ds = Dataset.from_pandas(train_scierc_df)
+    # val_scierc_ds = Dataset.from_pandas(val_scierc_df)
+    # ds_scierc = DatasetDict()
+    # ds_scierc['train'] = train_scierc_ds
+    # ds_scierc['validation'] = val_scierc_ds
+    # ds_scierc = ds_scierc.map(tokenize_and_align_labels, batched=True)
+    # model = train_model(ds_scierc)
+    #
+    # lines = read_conll("./AnnotatedData/data.conll")
+    # train_lines, dev_lines = train_val_split(lines)
+    # # Convert data to huggingface format
+    # train_data = convert_to_hf(train_lines)
+    # dev_data = convert_to_hf(dev_lines)
+    # # print(train_data[0])
+    # # # Convert data to pandas dataframe
+    # train_df = pd.DataFrame(train_data, columns=["id", "tokens", "ner_tags"])
+    # dev_df = pd.DataFrame(dev_data, columns=["id", "tokens", "ner_tags"])
+    # trainds = Dataset.from_pandas(train_df)
+    # valds = Dataset.from_pandas(dev_df)
+    #
+    # ds = DatasetDict()
+    #
+    # ds['train'] = trainds
+    # ds['validation'] = valds
+    # ds = ds.map(tokenize_and_align_labels, batched=True)
+    # model = train_model(ds, model)
+    model = AutoModelForTokenClassification.from_pretrained("roberta-base", num_labels=len(id_to_label),
+                                                            id2label=id_to_label, label2id=label_to_id)
+    predict_on_file("./AnnotatedData/test.csv", model, tokenizer)
