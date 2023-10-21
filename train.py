@@ -1,7 +1,3 @@
-# The "AnnotatedData" folder contains NER data in CoNLL format.
-# Read from that folder and train a huggingface AutoModelForTokenClassification model.
-# Print training metrics and performance of model on each class
-
 import os
 import sys
 import torch
@@ -14,9 +10,26 @@ from torch.nn import CrossEntropyLoss
 import datasets
 from datasets import Dataset, DatasetDict, load_dataset
 import evaluate
+import argparse
+import wandb
 
 from utility import compute_metrics, read_conll, convert_to_hf, train_val_split, label_to_id, id_to_label, predict, flatten_list, predict_on_file
 
+# argument for wandb directory
+parser = argparse.ArgumentParser()
+parser.add_argument('--local_dir', type=str, default='/home/scratch/vdas/anlp')
+parser.add_argument('--output_dir', type=str, default='/home/scratch/vdas/anlp/models')
+parser.add_argument('--exp_name', type=str, default='transformer')
+args = parser.parse_args()
+
+os.environ['WANDB_CACHE_DIR'] = args.local_dir
+wandb.init(
+    entity='advanced-nlp23',
+    project='sciner',
+    dir=args.local_dir,
+    job_type=args.exp_name,
+    name=args.exp_name
+)
 
 weights = torch.tensor([1.0] + [10.0] * 14).cuda()
 tokenizer = AutoTokenizer.from_pretrained("roberta-base", add_prefix_space=True)
@@ -63,7 +76,7 @@ def train_model(ds, model=None):
     data_collator = DataCollatorForTokenClassification(tokenizer=tokenizer)
     # Define the training arguments
     training_args = TrainingArguments(
-        output_dir="/home/scratch/vdas/results_anlp",
+        output_dir=args.output_dir,
         learning_rate=0.0001,
         num_train_epochs=30,
         per_device_train_batch_size=16,
@@ -75,6 +88,7 @@ def train_model(ds, model=None):
         load_best_model_at_end=True,
         evaluation_strategy="epoch",
         save_strategy="epoch",
+        report_to="wandb"
     )
     # Define the trainer
     trainer = WeightedCrossEntropyTrainer(
@@ -90,7 +104,8 @@ def train_model(ds, model=None):
     # Train the model
     trainer.train()
     # Evaluate the model
-    trainer.evaluate()
+    results = trainer.evaluate()
+    wandb.log(results)
     # Save the model
     # trainer.save_model("./models")
     return model
