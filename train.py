@@ -98,40 +98,38 @@ def train_model(ds, model=None):
 # Call previous methods
 if __name__ == "__main__":
     # Read data
-    # lines_scierc = read_conll("./AnnotatedData/train_scierc.conll")
-    # lines_scierc_val = read_conll("./AnnotatedData/dev_scierc.conll")
-    # lines_scierc = flatten_list(lines_scierc)
-    # lines_scierc_val = flatten_list(lines_scierc_val)
-    # train_scierc = convert_to_hf(lines_scierc)
-    # val_scierc = convert_to_hf(lines_scierc_val)
-    # train_scierc_df = pd.DataFrame(train_scierc, columns=["id", "tokens", "ner_tags"])
-    # val_scierc_df = pd.DataFrame(val_scierc, columns=["id", "tokens", "ner_tags"])
-    # train_scierc_ds = Dataset.from_pandas(train_scierc_df)
-    # val_scierc_ds = Dataset.from_pandas(val_scierc_df)
-    # ds_scierc = DatasetDict()
-    # ds_scierc['train'] = train_scierc_ds
-    # ds_scierc['validation'] = val_scierc_ds
-    # ds_scierc = ds_scierc.map(tokenize_and_align_labels, batched=True)
-    # model = train_model(ds_scierc)
-    #
-    # lines = read_conll("./AnnotatedData/data.conll")
-    # train_lines, dev_lines = train_val_split(lines)
-    # # Convert data to huggingface format
-    # train_data = convert_to_hf(train_lines)
-    # dev_data = convert_to_hf(dev_lines)
-    # # print(train_data[0])
-    # # # Convert data to pandas dataframe
-    # train_df = pd.DataFrame(train_data, columns=["id", "tokens", "ner_tags"])
-    # dev_df = pd.DataFrame(dev_data, columns=["id", "tokens", "ner_tags"])
-    # trainds = Dataset.from_pandas(train_df)
-    # valds = Dataset.from_pandas(dev_df)
-    #
-    # ds = DatasetDict()
-    #
-    # ds['train'] = trainds
-    # ds['validation'] = valds
-    # ds = ds.map(tokenize_and_align_labels, batched=True)
-    # model = train_model(ds, model)
-    model = AutoModelForTokenClassification.from_pretrained("roberta-base", num_labels=len(id_to_label),
-                                                            id2label=id_to_label, label2id=label_to_id)
+    lines_scierc = read_conll("./AnnotatedData/train_scierc.conll")
+    lines_scierc_val = read_conll("./AnnotatedData/dev_scierc.conll")
+    lines_scierc = flatten_list(lines_scierc)
+    lines_scierc_val = flatten_list(lines_scierc_val)
+    train_scierc = convert_to_hf(lines_scierc)
+    val_scierc = convert_to_hf(lines_scierc_val)
+    train_scierc_df = pd.DataFrame(train_scierc, columns=["id", "tokens", "ner_tags"])
+    val_scierc_df = pd.DataFrame(val_scierc, columns=["id", "tokens", "ner_tags"])
+    train_scierc_ds = Dataset.from_pandas(train_scierc_df)
+    val_scierc_ds = Dataset.from_pandas(val_scierc_df)
+    ds_scierc = DatasetDict()
+    ds_scierc['train'] = train_scierc_ds
+    ds_scierc['validation'] = val_scierc_ds
+    ds_scierc = ds_scierc.map(tokenize_and_align_labels, batched=True)
+    model = train_model(ds_scierc)
+
+    lines = read_conll("./AnnotatedData/data.conll")
+    train_lines, dev_lines = train_val_split(lines)
+    # Convert data to huggingface format
+    train_data = convert_to_hf(train_lines)
+    dev_data = convert_to_hf(dev_lines)
+    # print(train_data[0])
+    # # Convert data to pandas dataframe
+    train_df = pd.DataFrame(train_data, columns=["id", "tokens", "ner_tags"])
+    dev_df = pd.DataFrame(dev_data, columns=["id", "tokens", "ner_tags"])
+    trainds = Dataset.from_pandas(train_df)
+    valds = Dataset.from_pandas(dev_df)
+
+    ds = DatasetDict()
+
+    ds['train'] = trainds
+    ds['validation'] = valds
+    ds = ds.map(tokenize_and_align_labels, batched=True)
+    model = train_model(ds, model)
     predict_on_file("./AnnotatedData/test.csv", model, tokenizer)
