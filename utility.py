@@ -38,7 +38,6 @@ def read_conll(file_path):
     lines = [list(y) for x, y in itertools.groupby(lines, lambda z: z == '') if not x]
     return lines
 
-
 # Convert data to huggingface format
 def convert_to_hf(lines):
     hf_data = []
