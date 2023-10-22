@@ -66,16 +66,35 @@ def compute_metrics(p):
         [label_list[l] for (p, l) in zip(prediction, label) if l != -100]
         for prediction, label in zip(predictions, labels)
     ]
+    true_labels = [[label] for sentence in true_labels for label in sentence]
+    true_predictions = [[predicted] for sentence in true_predictions for predicted in sentence]
 
-    true_labels = [label for label in true_labels if label != 'O']
-    true_predictions = [predicted for label, predicted in zip(true_labels, true_predictions) if label != 'O']
+    results_witho = seqeval.compute(predictions=true_predictions, references=true_labels)
+    true_predictions = [
+        [label_list[p] for (p, l) in zip(prediction, label) if l != -100 and label_list[l] != 'O']
+        for prediction, label in zip(predictions, labels)
+    ]
+    true_labels = [
+        [label_list[l] for (p, l) in zip(prediction, label) if l != -100 and label_list[l] != 'O']
+        for prediction, label in zip(predictions, labels)
+    ]
+    true_labels = [[label] for sentence in true_labels for label in sentence]
+    true_predictions = [[predicted] for sentence in true_predictions for predicted in sentence]
     results = seqeval.compute(predictions=true_predictions, references=true_labels)
+    print('--------------')
+    print_results(results_witho)
+    print('--------------')
     print_results(results)
+    print('--------------')
     return {
         "precision": results["overall_precision"],
         "recall": results["overall_recall"],
         "f1": results["overall_f1"],
         "accuracy": results["overall_accuracy"],
+        "precision_witho": results_witho["overall_precision"],
+        "recall_witho": results_witho["overall_recall"],
+        "f1_witho": results_witho["overall_f1"],
+        "accuracy_witho": results_witho["overall_accuracy"]
     }
 
 def print_results(results):

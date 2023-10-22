@@ -20,16 +20,10 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--local_dir', type=str, default='/home/scratch/vdas/anlp')
 parser.add_argument('--output_dir', type=str, default='/home/scratch/vdas/anlp/models')
 parser.add_argument('--exp_name', type=str, default='transformer')
+parser.add_argument('--lr', type=float, default=0.0001)
 args = parser.parse_args()
 
 os.environ['WANDB_CACHE_DIR'] = args.local_dir
-wandb.init(
-    entity='advanced-nlp23',
-    project='sciner',
-    dir=args.local_dir,
-    job_type=args.exp_name,
-    name=args.exp_name
-)
 
 weights = torch.tensor([1.0] + [10.0] * 14).cuda()
 tokenizer = AutoTokenizer.from_pretrained("roberta-base", add_prefix_space=True)
@@ -69,7 +63,7 @@ class WeightedCrossEntropyTrainer(Trainer):
         return (loss, outputs) if return_outputs else loss
 
 # define a function to train the model
-def train_model(ds, model=None):
+def train_model(ds, model=None, run_name="sciner", learning_rate=0.0001):
     # Load the model
     if model is None:
         model = AutoModelForTokenClassification.from_pretrained("roberta-base", num_labels=len(id_to_label), id2label=id_to_label, label2id=label_to_id)
@@ -77,8 +71,8 @@ def train_model(ds, model=None):
     # Define the training arguments
     training_args = TrainingArguments(
         output_dir=args.output_dir,
-        learning_rate=0.0001,
-        num_train_epochs=30,
+        learning_rate=learning_rate,
+        num_train_epochs=10,
         per_device_train_batch_size=16,
         per_device_eval_batch_size=16,
         warmup_steps=500,
@@ -88,7 +82,8 @@ def train_model(ds, model=None):
         load_best_model_at_end=True,
         evaluation_strategy="epoch",
         save_strategy="epoch",
-        report_to="wandb"
+        report_to="wandb",
+        run_name=run_name
     )
     # Define the trainer
     trainer = WeightedCrossEntropyTrainer(
@@ -112,7 +107,12 @@ def train_model(ds, model=None):
 
 # Call previous methods
 if __name__ == "__main__":
-    # Read data
+    wandb.init(
+        entity='advanced-nlp23',
+        project='sciner',
+        dir=args.local_dir,
+        name=f'{args.exp_name}-pretrain_{args.lr}'
+    )
     lines_scierc = read_conll("./AnnotatedData/train_scierc.conll")
     lines_scierc_val = read_conll("./AnnotatedData/dev_scierc.conll")
     lines_scierc = flatten_list(lines_scierc)
@@ -127,8 +127,14 @@ if __name__ == "__main__":
     ds_scierc['train'] = train_scierc_ds
     ds_scierc['validation'] = val_scierc_ds
     ds_scierc = ds_scierc.map(tokenize_and_align_labels, batched=True)
-    model = train_model(ds_scierc)
+    model = train_model(ds_scierc, run_name="pretrain", learning_rate=args.lr)
 
+    wandb.init(
+        entity='advanced-nlp23',
+        project='sciner',
+        dir=args.local_dir,
+        name=f'{args.exp_name}-finetune_{args.lr}'
+    )
     lines = read_conll("./AnnotatedData/data.conll")
     train_lines, dev_lines = train_val_split(lines)
     # Convert data to huggingface format
@@ -146,5 +152,5 @@ if __name__ == "__main__":
     ds['train'] = trainds
     ds['validation'] = valds
     ds = ds.map(tokenize_and_align_labels, batched=True)
-    model = train_model(ds, model)
+    model = train_model(ds, model, run_name="finetune", learning_rate=args.lr)
     predict_on_file("./AnnotatedData/test.csv", model, tokenizer)
