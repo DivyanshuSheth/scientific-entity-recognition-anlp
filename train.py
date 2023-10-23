@@ -19,14 +19,14 @@ from utility import compute_metrics, read_conll, convert_to_hf, train_val_split,
 parser = argparse.ArgumentParser()
 parser.add_argument('--local_dir', type=str, default='/home/scratch/vdas/anlp')
 parser.add_argument('--output_dir', type=str, default='/home/scratch/vdas/anlp/models')
-parser.add_argument('--exp_name', type=str, default='transformer')
-parser.add_argument('--lr', type=float, default=0.0001)
+parser.add_argument('--model_name', type=str, default='roberta-large')
+parser.add_argument('--lr', type=float, default=0.00001)
 args = parser.parse_args()
 
 os.environ['WANDB_CACHE_DIR'] = args.local_dir
 
 weights = torch.tensor([1.0] + [10.0] * 14).cuda()
-tokenizer = AutoTokenizer.from_pretrained("roberta-base", add_prefix_space=True)
+tokenizer = AutoTokenizer.from_pretrained("roberta-large", add_prefix_space=True)
 
 def tokenize_and_align_labels(examples):
     tokenized_inputs = tokenizer(examples["tokens"], truncation=True, is_split_into_words=True)
@@ -63,10 +63,10 @@ class WeightedCrossEntropyTrainer(Trainer):
         return (loss, outputs) if return_outputs else loss
 
 # define a function to train the model
-def train_model(ds, model=None, run_name="sciner", learning_rate=0.0001):
+def train_model(ds, model=None, run_name="sciner", learning_rate=0.0001, model_name="roberta-base"):
     # Load the model
     if model is None:
-        model = AutoModelForTokenClassification.from_pretrained("roberta-base", num_labels=len(id_to_label), id2label=id_to_label, label2id=label_to_id)
+        model = AutoModelForTokenClassification.from_pretrained(model_name, num_labels=len(id_to_label), id2label=id_to_label, label2id=label_to_id)
     data_collator = DataCollatorForTokenClassification(tokenizer=tokenizer)
     # Define the training arguments
     training_args = TrainingArguments(
@@ -111,7 +111,7 @@ if __name__ == "__main__":
         entity='advanced-nlp23',
         project='sciner',
         dir=args.local_dir,
-        name=f'{args.exp_name}-pretrain_{args.lr}'
+        name=f'{args.model_name}-pretrain_{args.lr}'
     )
     lines_scierc = read_conll("./AnnotatedData/train_scierc.conll")
     lines_scierc_val = read_conll("./AnnotatedData/dev_scierc.conll")
@@ -128,12 +128,11 @@ if __name__ == "__main__":
     ds_scierc['validation'] = val_scierc_ds
     ds_scierc = ds_scierc.map(tokenize_and_align_labels, batched=True)
     model = train_model(ds_scierc, run_name="pretrain", learning_rate=args.lr)
-
     wandb.init(
         entity='advanced-nlp23',
         project='sciner',
         dir=args.local_dir,
-        name=f'{args.exp_name}-finetune_{args.lr}'
+        name=f'{args.model_name}-finetune_{args.lr}'
     )
     lines = read_conll("./AnnotatedData/data.conll")
     train_lines, dev_lines = train_val_split(lines)
@@ -152,5 +151,7 @@ if __name__ == "__main__":
     ds['train'] = trainds
     ds['validation'] = valds
     ds = ds.map(tokenize_and_align_labels, batched=True)
-    model = train_model(ds, model, run_name="finetune", learning_rate=args.lr)
+    model = train_model(ds, run_name="finetune", learning_rate=args.lr)
+    # model = AutoModelForTokenClassification.from_pretrained('roberta-base', num_labels=len(id_to_label),
+    #                                                         id2label=id_to_label, label2id=label_to_id)
     predict_on_file("./AnnotatedData/test.csv", model, tokenizer)
