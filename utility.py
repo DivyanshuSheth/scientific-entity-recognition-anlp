@@ -166,7 +166,7 @@ def predict(model, tokenizer, sentence):
             new_tokens.append(token[1:])
     return [(token, label) for token, label in zip(new_tokens, new_labels)]
 
-def predict_on_file(filepath, model, tokenizer):
+def predict_on_file(filepath, model, tokenizer, output_file):
     # Read csv
     df = pd.read_csv(filepath)
     pred_ids = []
@@ -204,4 +204,4 @@ def predict_on_file(filepath, model, tokenizer):
             pred_labels[idx + 1] = 'B' + label[1:]
 
     pred_df = pd.DataFrame({'id': pred_ids, 'target': pred_labels})
-    pred_df.to_csv('predictions_fixed.csv', index=False)
+    pred_df.to_csv(output_file, index=False)

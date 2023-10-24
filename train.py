@@ -21,12 +21,17 @@ parser.add_argument('--local_dir', type=str, default='/home/scratch/vdas/anlp')
 parser.add_argument('--output_dir', type=str, default='/home/scratch/vdas/anlp/models')
 parser.add_argument('--model_name', type=str, default='roberta-large')
 parser.add_argument('--lr', type=float, default=0.00001)
+parser.add_argument('--pretrain', action='store_true')
+parser.add_argument('--wandb', action='store_true')
 args = parser.parse_args()
 
 os.environ['WANDB_CACHE_DIR'] = args.local_dir
 
 weights = torch.tensor([1.0] + [10.0] * 14).cuda()
-tokenizer = AutoTokenizer.from_pretrained(args.model_name, add_prefix_space=True)
+try:
+    tokenizer = AutoTokenizer.from_pretrained(args.model_name, add_prefix_space=True)
+except:
+    tokenizer = AutoTokenizer.from_pretrained('roberta-base', add_prefix_space=True)
 
 def tokenize_and_align_labels(examples):
     tokenized_inputs = tokenizer(examples["tokens"], truncation=True, is_split_into_words=True)
@@ -100,7 +105,7 @@ def train_model(ds, model=None, run_name="sciner", learning_rate=0.0001, model_n
     trainer.train()
     # Evaluate the model
     results = trainer.evaluate()
-    if wandb:
+    if wandb_log:
         wandb.log(results)
     # Save the model
     # trainer.save_model("./models")
@@ -108,30 +113,42 @@ def train_model(ds, model=None, run_name="sciner", learning_rate=0.0001, model_n
 
 # Call previous methods
 if __name__ == "__main__":
-    wandb.init(
-        entity='advanced-nlp23',
-        project='sciner',
-        dir=args.local_dir,
-        name=f'{args.model_name}_{args.lr}'
-    )
-    lines_scierc = read_conll("./AnnotatedData/train_scierc.conll")
-    lines_scierc_val = read_conll("./AnnotatedData/dev_scierc.conll")
-    lines_scierc = flatten_list(lines_scierc)
-    lines_scierc_val = flatten_list(lines_scierc_val)
-    train_scierc = convert_to_hf(lines_scierc)
-    val_scierc = convert_to_hf(lines_scierc_val)
-    train_scierc_df = pd.DataFrame(train_scierc, columns=["id", "tokens", "ner_tags"])
-    val_scierc_df = pd.DataFrame(val_scierc, columns=["id", "tokens", "ner_tags"])
-    train_scierc_ds = Dataset.from_pandas(train_scierc_df)
-    val_scierc_ds = Dataset.from_pandas(val_scierc_df)
-    ds_scierc = DatasetDict()
-    ds_scierc['train'] = train_scierc_ds
-    ds_scierc['validation'] = val_scierc_ds
-    ds_scierc = ds_scierc.map(tokenize_and_align_labels, batched=True)
-    model = train_model(ds_scierc, run_name="pretrain", learning_rate=args.lr, wandb_log=False)
+    print("Training model")
+    if args.wandb:
+        wandb.init(
+            entity='advanced-nlp23',
+            project='sciner',
+            dir=args.local_dir,
+            name=f'{args.model_name}_{args.lr}'
+        )
+    print("Loading data")
+    if args.pretrain:
+        print("Pretraining")
+        lines_scierc = read_conll("./AnnotatedData/train_scierc.conll")
+        lines_scierc_val = read_conll("./AnnotatedData/dev_scierc.conll")
+        lines_scierc = flatten_list(lines_scierc)
+        lines_scierc_val = flatten_list(lines_scierc_val)
+        train_scierc = convert_to_hf(lines_scierc)
+        val_scierc = convert_to_hf(lines_scierc_val)
+        train_scierc_df = pd.DataFrame(train_scierc, columns=["id", "tokens", "ner_tags"])
+        val_scierc_df = pd.DataFrame(val_scierc, columns=["id", "tokens", "ner_tags"])
+        train_scierc_ds = Dataset.from_pandas(train_scierc_df)
+        val_scierc_ds = Dataset.from_pandas(val_scierc_df)
+        ds_scierc = DatasetDict()
+        ds_scierc['train'] = train_scierc_ds
+        ds_scierc['validation'] = val_scierc_ds
+        ds_scierc = ds_scierc.map(tokenize_and_align_labels, batched=True)
+        model = train_model(ds_scierc, run_name="pretrain", learning_rate=args.lr, wandb_log=False)
+    else:
+        print("Loading model")
+        model = AutoModelForTokenClassification.from_pretrained(args.model_name, num_labels=len(id_to_label), id2label=id_to_label, label2id=label_to_id)
+        print("Model loaded")
 
-    lines = read_conll("./AnnotatedData/data.conll")
-    train_lines, dev_lines = train_val_split(lines)
+    print("Finetuning")
+    train_lines = read_conll("./FinalData/train.conll")
+    dev_lines = read_conll("./FinalData/val.conll")
+    train_lines = flatten_list(train_lines)
+    dev_lines = flatten_list(dev_lines)
     # Convert data to huggingface format
     train_data = convert_to_hf(train_lines)
     dev_data = convert_to_hf(dev_lines)
@@ -147,7 +164,8 @@ if __name__ == "__main__":
     ds['train'] = trainds
     ds['validation'] = valds
     ds = ds.map(tokenize_and_align_labels, batched=True)
-    model = train_model(ds, model, run_name="finetune", learning_rate=args.lr, wandb_log=True)
+    model = train_model(ds, model, run_name="finetune", learning_rate=args.lr, wandb_log=args.wandb)
     # model = AutoModelForTokenClassification.from_pretrained('roberta-base', num_labels=len(id_to_label),
     #                                                         id2label=id_to_label, label2id=label_to_id)
-    predict_on_file("./AnnotatedData/test.csv", model, tokenizer)
+    predict_on_file("./AnnotatedData/test_public.csv", model, tokenizer, output_file="test_predictions_public.csv")
+    predict_on_file("./AnnotatedData/test_private.csv", model, tokenizer, output_file="test_predictions_private.csv")
