@@ -1,7 +1,3 @@
-# The "AnnotatedData" folder contains NER data in CoNLL format.
-# Read from that folder and train a huggingface AutoModelForTokenClassification model.
-# Print training metrics and performance of model on each class
-
 import os
 import sys
 import torch
@@ -14,12 +10,23 @@ from torch.nn import CrossEntropyLoss
 import datasets
 from datasets import Dataset, DatasetDict, load_dataset
 import evaluate
+import argparse
+import wandb
 
-from utility import compute_metrics, read_conll, convert_to_hf, train_val_split, label_to_id, id_to_label
+from utility import compute_metrics, read_conll, convert_to_hf, train_val_split, label_to_id, id_to_label, predict, flatten_list, predict_on_file
 
+# argument for wandb directory
+parser = argparse.ArgumentParser()
+parser.add_argument('--local_dir', type=str, default='/home/scratch/vdas/anlp')
+parser.add_argument('--output_dir', type=str, default='/home/scratch/vdas/anlp/models')
+parser.add_argument('--model_name', type=str, default='roberta-large')
+parser.add_argument('--lr', type=float, default=0.00001)
+args = parser.parse_args()
+
+os.environ['WANDB_CACHE_DIR'] = args.local_dir
 
 weights = torch.tensor([1.0] + [10.0] * 14).cuda()
-tokenizer = AutoTokenizer.from_pretrained("roberta-base", add_prefix_space=True)
+tokenizer = AutoTokenizer.from_pretrained(args.model_name, add_prefix_space=True)
 
 def tokenize_and_align_labels(examples):
     tokenized_inputs = tokenizer(examples["tokens"], truncation=True, is_split_into_words=True)
@@ -56,15 +63,16 @@ class WeightedCrossEntropyTrainer(Trainer):
         return (loss, outputs) if return_outputs else loss
 
 # define a function to train the model
-def train_model(ds):
+def train_model(ds, model=None, run_name="sciner", learning_rate=0.0001, model_name="roberta-base", wandb_log=False):
     # Load the model
-    model = AutoModelForTokenClassification.from_pretrained("roberta-base", num_labels=len(id_to_label), id2label=id_to_label, label2id=label_to_id)
+    if model is None:
+        model = AutoModelForTokenClassification.from_pretrained(model_name, num_labels=len(id_to_label), id2label=id_to_label, label2id=label_to_id)
     data_collator = DataCollatorForTokenClassification(tokenizer=tokenizer)
     # Define the training arguments
     training_args = TrainingArguments(
-        output_dir="/home/scratch/vdas/results_anlp",
-        learning_rate=0.0001,
-        num_train_epochs=30,
+        output_dir=args.output_dir,
+        learning_rate=learning_rate,
+        num_train_epochs=10,
         per_device_train_batch_size=16,
         per_device_eval_batch_size=16,
         warmup_steps=500,
@@ -74,6 +82,8 @@ def train_model(ds):
         load_best_model_at_end=True,
         evaluation_strategy="epoch",
         save_strategy="epoch",
+        report_to="wandb" if wandb_log else "none",
+        run_name=run_name
     )
     # Define the trainer
     trainer = WeightedCrossEntropyTrainer(
@@ -89,27 +99,37 @@ def train_model(ds):
     # Train the model
     trainer.train()
     # Evaluate the model
-    trainer.evaluate()
+    results = trainer.evaluate()
+    if wandb:
+        wandb.log(results)
     # Save the model
     # trainer.save_model("./models")
-
-
-# define a function to print the results
-def print_results(results):
-    print("Results on test data:")
-    print(results)
-    print("\n")
-    print("Results on each class:")
-    print("Class\tPrecision\tRecall\tF1-score")
-    for line in results.split("\n")[2:-5]:
-        line = line.split()
-        if len(line) == 0:
-            continue
-        print(line[0], "\t", line[1], "\t", line[2], "\t", line[3])
+    return model
 
 # Call previous methods
 if __name__ == "__main__":
-    # Read data
+    wandb.init(
+        entity='advanced-nlp23',
+        project='sciner',
+        dir=args.local_dir,
+        name=f'{args.model_name}_{args.lr}'
+    )
+    lines_scierc = read_conll("./AnnotatedData/train_scierc.conll")
+    lines_scierc_val = read_conll("./AnnotatedData/dev_scierc.conll")
+    lines_scierc = flatten_list(lines_scierc)
+    lines_scierc_val = flatten_list(lines_scierc_val)
+    train_scierc = convert_to_hf(lines_scierc)
+    val_scierc = convert_to_hf(lines_scierc_val)
+    train_scierc_df = pd.DataFrame(train_scierc, columns=["id", "tokens", "ner_tags"])
+    val_scierc_df = pd.DataFrame(val_scierc, columns=["id", "tokens", "ner_tags"])
+    train_scierc_ds = Dataset.from_pandas(train_scierc_df)
+    val_scierc_ds = Dataset.from_pandas(val_scierc_df)
+    ds_scierc = DatasetDict()
+    ds_scierc['train'] = train_scierc_ds
+    ds_scierc['validation'] = val_scierc_ds
+    ds_scierc = ds_scierc.map(tokenize_and_align_labels, batched=True)
+    model = train_model(ds_scierc, run_name="pretrain", learning_rate=args.lr, wandb_log=False)
+
     lines = read_conll("./AnnotatedData/data.conll")
     train_lines, dev_lines = train_val_split(lines)
     # Convert data to huggingface format
@@ -121,23 +141,13 @@ if __name__ == "__main__":
     dev_df = pd.DataFrame(dev_data, columns=["id", "tokens", "ner_tags"])
     trainds = Dataset.from_pandas(train_df)
     valds = Dataset.from_pandas(dev_df)
-    print(len(trainds))
-    print(len(valds))
-    print(trainds[0])
-    exit(0)
 
     ds = DatasetDict()
 
     ds['train'] = trainds
     ds['validation'] = valds
-    # print(len(train_lines))
-    # print(len(train_data))
-    # print(len(train_df))
-
-    # ds = load_dataset("conll2003")
-    # for i in range(50):
-    #     print(ds['train'][i])
     ds = ds.map(tokenize_and_align_labels, batched=True)
-    train_model(ds)
-
-
+    model = train_model(ds, model, run_name="finetune", learning_rate=args.lr, wandb_log=True)
+    # model = AutoModelForTokenClassification.from_pretrained('roberta-base', num_labels=len(id_to_label),
+    #                                                         id2label=id_to_label, label2id=label_to_id)
+    predict_on_file("./AnnotatedData/test.csv", model, tokenizer)
