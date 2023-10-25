@@ -42,4 +42,5 @@ Vikramjeet Das:
 
 # Running the code
 Install requirements using `pip install -r requirements.txt`.
+
 Run `python train.py --model_name [model_name] [--pretrain]` to train the model. Replace model_name with the transformer architecture to use (Eg: roberta-large). Add the `pretrain` flag to pretrain on SCIERC first.
