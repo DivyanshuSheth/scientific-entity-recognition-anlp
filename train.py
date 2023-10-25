@@ -119,7 +119,7 @@ if __name__ == "__main__":
             entity='advanced-nlp23',
             project='sciner',
             dir=args.local_dir,
-            name=f'{args.model_name}_{args.lr}'
+            name=f'{args.model_name}_{args.lr}_nopretrain' if not args.pretrain else f'{args.model_name}_{args.lr}'
         )
     print("Loading data")
     if args.pretrain:
