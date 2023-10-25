@@ -41,4 +41,4 @@ Vikramjeet Das:
 
 
 # Running the code
-Run `python train.py --model_name [model_name] [--pretrain]` to train the model. Replace model_name with the transformer architecture to use (Eg: RoBERTa-large). Add the `finetune` flag to pretrain on SCIERC first.
+Run `python train.py --model_name [model_name] [--pretrain]` to train the model. Replace model_name with the transformer architecture to use (Eg: roberta-large). Add the `pretrain` flag to pretrain on SCIERC first.
