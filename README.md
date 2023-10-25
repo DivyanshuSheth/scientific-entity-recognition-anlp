@@ -4,7 +4,7 @@
 In this project, we build an end-to-end system to perform named entity recognition on scientific texts.
 
 # Data
-The train and test sets we use are located at `FinalData/train.conll` and `FinalData/test.conll` respectively.
+The train and test sets we use are located at `FinalData/train.conll` and `FinalData/test.conll` respectively. Different papers are separated by a blank line. The first line of each paper has its name (eg. "2022.acl-long.100.txt").
 
 # Annotation Contributions
 Each of us annotated 8 research papers.
