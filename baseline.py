@@ -1,4 +1,4 @@
-from utility import read_conll, train_val_split
+from utility import read_conll, train_val_split, flatten_list
 import pandas as pd
 from collections import defaultdict
 import evaluate
@@ -21,7 +21,6 @@ def train(train_df):
         
         seen_tokens[tag] = {token: count for token, count in zip(unique_tokens_count.index, unique_tokens_count.values)}
 
-
     return seen_tokens
 
 def eval(seen_tokens, val_df):
@@ -30,7 +29,27 @@ def eval(seen_tokens, val_df):
 
     pred = val_df[seen_tokens.keys()].idxmax(axis=1)
     val_df['pred'] = pred
-    
+
+    #remove I if not connected to a relevant 'B'
+    idx = 0
+    while idx < len(val_df):
+        prefix = val_df.iloc[idx]['pred'][0]
+        suffix = val_df.iloc[idx]['pred'][1:]
+        
+        if prefix == 'B':
+            idx += 1
+            next_prefix = val_df.iloc[idx]['pred'][0]
+            next_suffix = val_df.iloc[idx]['pred'][1:] 
+            while idx < len(val_df) and next_prefix == 'I' and next_suffix == suffix:
+                idx += 1
+                next_prefix = val_df.iloc[idx]['pred'][0]
+                next_suffix = val_df.iloc[idx]['pred'][1:]
+        elif prefix == 'I':
+            val_df.iloc[idx, val_df.columns.get_loc('pred')] = 'O'
+            idx += 1
+        else:
+            idx += 1
+
     correct = val_df['pred'] == val_df['ner_tags']
     print(correct.value_counts())
 
@@ -62,16 +81,19 @@ def eval(seen_tokens, val_df):
     print(f"Results with O: {res_witho}")
     print(f"Results without O: {res_withouto}")
 
+    #save results
+    val_df_final = val_df[['tokens', 'ner_tags', 'pred']]
+    val_df_final.to_csv("ValidationResults/baseline_results.csv")
+
 
 if __name__ == "__main__":
-    list_of_paper_lines = read_conll("./AnnotatedData/export_42758_project-42758-at-2023-10-20-18-39-a9525692.conll")
-    print(len(list_of_paper_lines))
-    
-    train_lines, val_lines = train_val_split(list_of_paper_lines)
+    train_lines = read_conll("./FinalData/train.conll")
+    train_lines = flatten_list(train_lines)
+    val_lines = read_conll("./FinalData/val.conll")
+    val_lines = flatten_list(val_lines)
 
     train_df= pd.DataFrame(train_lines, columns=["tokens", "ner_tags"])
     val_df = pd.DataFrame(val_lines, columns=["tokens", "ner_tags"])
 
     seen_tokens = train(train_df)
-
     eval(seen_tokens, val_df)
