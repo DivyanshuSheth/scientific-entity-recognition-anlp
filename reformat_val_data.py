@@ -17,6 +17,7 @@ val_df = val_df.rename(columns={"tokens": "input", "ner_tags": "target"})
 #Insert "-DOCSTART-" before each of these lines
 import re
 train_df['input'] = train_df['input'].apply(lambda x: re.sub(r'\d{4}\..*\.txt', '-DOCSTART-', x))
+val_df['input'] = val_df['input'].apply(lambda x: re.sub(r'\d{4}\..*\.txt', '-DOCSTART-', x))
 
 #name id column
 train_df['id'] = train_df.index
