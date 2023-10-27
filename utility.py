@@ -205,3 +205,44 @@ def predict_on_file(filepath, model, tokenizer, output_file):
 
     pred_df = pd.DataFrame({'id': pred_ids, 'target': pred_labels})
     pred_df.to_csv(output_file, index=False)
+
+
+def predict_on_file_val(filepath, model, tokenizer, output_file):
+    # Read csv
+    df = pd.read_csv(filepath)
+    pred_ids = []
+    pred_labels = []
+    sentence = ''
+    i = 0
+    for index, row in df.iterrows():
+        if pd.isna(row['input']) or row['input'] == '-DOCSTART-' or index % 32 == 0:
+            preds = predict(model.cuda(), tokenizer, sentence[:-1])
+            pred_labels.extend([pred[1] for pred in preds])
+            assert i == len(preds)
+            i = 0
+            sentence = ''
+            if pd.isna(row['input']) or row['input'] == '-DOCSTART-':
+                pred_ids.append(row['id'])
+                pred_labels.append('X')
+            elif index % 32 == 0:
+                pred_ids.append(row['id'])
+                sentence += row['input'] + ' '
+                i += 1
+        else:
+            pred_ids.append(row['id'])
+            sentence += row['input'] + ' '
+            i += 1
+
+    preds = predict(model.cuda(), tokenizer, sentence[:-1])
+    pred_labels.extend([pred[1] for pred in preds])
+    # for i in range(63097):
+    #     if i not in pred_ids:
+    #         print(i)
+
+    # Fix predictions starting with I
+    for idx, label in enumerate(pred_labels[1:]):
+        if label[0] == 'I' and pred_labels[idx][0] in ['O', 'X']:
+            pred_labels[idx + 1] = 'B' + label[1:]
+
+    pred_df = pd.DataFrame({'id': pred_ids, 'target': pred_labels})
+    pred_df.to_csv(output_file, index=False)

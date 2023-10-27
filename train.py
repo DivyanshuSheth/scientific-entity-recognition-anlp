@@ -167,5 +167,7 @@ if __name__ == "__main__":
     model = train_model(ds, model, run_name="finetune", learning_rate=args.lr, wandb_log=args.wandb)
     # model = AutoModelForTokenClassification.from_pretrained('roberta-base', num_labels=len(id_to_label),
     #                                                         id2label=id_to_label, label2id=label_to_id)
-    predict_on_file("./AnnotatedData/test_public.csv", model, tokenizer, output_file="test_predictions_public.csv")
-    predict_on_file("./AnnotatedData/test_private.csv", model, tokenizer, output_file="test_predictions_private.csv")
+    # predict_on_file("./AnnotatedData/test_public.csv", model, tokenizer, output_file="test_predictions_public.csv")
+    # predict_on_file("./AnnotatedData/test_private.csv", model, tokenizer, output_file="test_predictions_private.csv")
+    predict_on_file("./FinalData/train.csv", model, tokenizer, output_file="train_predictions_ours.csv")
+    predict_on_file("./FinalData/val.csv", model, tokenizer, output_file="val_predictions_ours.csv")
