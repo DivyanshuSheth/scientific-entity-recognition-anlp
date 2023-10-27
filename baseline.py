@@ -23,7 +23,7 @@ def train(train_df):
 
     return seen_tokens
 
-def eval(seen_tokens, val_df):
+def eval(seen_tokens, val_df, out_path):
     for tag in seen_tokens.keys():
         val_df[tag] = val_df['tokens'].apply(lambda x: seen_tokens[tag].get(x, 0))
 
@@ -83,7 +83,7 @@ def eval(seen_tokens, val_df):
 
     #save results
     val_df_final = val_df[['tokens', 'ner_tags', 'pred']]
-    val_df_final.to_csv("ValidationResults/baseline_results.csv")
+    val_df_final.to_csv(out_path)
 
 
 if __name__ == "__main__":
@@ -96,4 +96,5 @@ if __name__ == "__main__":
     val_df = pd.DataFrame(val_lines, columns=["tokens", "ner_tags"])
 
     seen_tokens = train(train_df)
-    eval(seen_tokens, val_df)
+    eval(seen_tokens, val_df, out_path="ValidationResults/baseline_val_results.csv")
+    eval(seen_tokens, train_df, out_path="ValidationResults/baseline_train_results.csv")

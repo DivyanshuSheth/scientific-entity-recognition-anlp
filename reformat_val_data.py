@@ -27,9 +27,9 @@ val_df['id'] = val_df.index
 train_df = train_df.set_index('id')
 val_df = val_df.set_index('id')
 
-#deleta all values from target
-train_df['target'] = train_df['target'].apply(lambda x: '')
-val_df['target'] = val_df['target'].apply(lambda x: '')
+# #deleta all values from target
+# train_df['target'] = train_df['target'].apply(lambda x: '')
+# val_df['target'] = val_df['target'].apply(lambda x: '')
 
 train_df.to_csv("./FinalData/train.csv")
 val_df.to_csv("./FinalData/val.csv")
