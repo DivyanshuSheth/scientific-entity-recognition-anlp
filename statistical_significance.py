@@ -50,6 +50,8 @@ def plot_ci(several_bootstrap_results, experiment_names, alpha=0.05, metric='f1'
         scores = sorted(scores)
         lower = scores[int((alpha/2) * N)]
         upper = scores[int((1-alpha/2) * N)]
+        
+        print(f"{experiment_name}, {metric} CI: ({lower}, {upper})")
 
         color = next(ax._get_lines.prop_cycler)['color']
 
@@ -88,22 +90,23 @@ if __name__ == "__main__":
     val_baseline_results_path = "ValidationResults/baseline_val_results.csv"
     val_baseline_results_df = pd.read_csv(val_baseline_results_path)
 
-    train_roberta_finetune_path = "ValidationResults/train_predictions_ours_roberta_finetune.csv"
-    roberta_finetune_train_results_df = load_transformer_results(train_roberta_finetune_path, train_label_path)
-    val_roberta_finetune_path = "ValidationResults/val_predictions_ours_roberta_finetune.csv"
-    roberta_finetune_val_results_df = load_transformer_results(val_roberta_finetune_path, val_label_path)
+    train_roberta_pretrain_path = "ValidationResults/train_predictions_ours_roberta_pretrain.csv"
+    roberta_pretrain_train_results_df = load_transformer_results(train_roberta_pretrain_path, train_label_path)
+    val_roberta_pretrain_path = "ValidationResults/val_predictions_ours_roberta_pretrain.csv"
+    roberta_pretrain_val_results_df = load_transformer_results(val_roberta_pretrain_path, val_label_path)
 
-    train_roberta_nofinetune_path = "ValidationResults/train_predictions_ours_roberta_nofinetune.csv"
-    roberta_nofinetune_train_results_df = load_transformer_results(train_roberta_nofinetune_path, train_label_path)
-    val_roberta_nofinetune_path = "ValidationResults/val_predictions_ours_roberta_nofinetune.csv"
-    roberta_nofinetune_val_results_df = load_transformer_results(val_roberta_nofinetune_path, val_label_path)
+    train_roberta_nopretrain_path = "ValidationResults/train_predictions_ours_roberta_nopretrain.csv"
+    roberta_nopretrain_train_results_df = load_transformer_results(train_roberta_nopretrain_path, train_label_path)
+    val_roberta_nopretrain_path = "ValidationResults/val_predictions_ours_roberta_nopretrain.csv"
+    roberta_nopretrain_val_results_df = load_transformer_results(val_roberta_nopretrain_path, val_label_path)
 
-    # bootstrap(train_baseline_results_df, out_path="BootstrapResults/baseline__train_bootstrap.json")
-    # bootstrap(val_baseline_results_df, out_path="BootstrapResults/baseline__val_bootstrap.json")
-    # bootstrap(roberta_finetune_train_results_df, out_path="BootstrapResults/roberta_pretrain_train_bootstrap.json")
-    # bootstrap(roberta_finetune_val_results_df, out_path="BootstrapResults/roberta_pretrain_val_bootstrap.json")
-    # bootstrap(roberta_nofinetune_train_results_df, out_path="BootstrapResults/roberta_nopretrain_train_bootstrap.json")
-    # bootstrap(roberta_nofinetune_val_results_df, out_path="BootstrapResults/roberta_nopretrain_val_bootstrap.json")
+    N = 1000
+    # bootstrap(train_baseline_results_df, out_path="BootstrapResults/baseline__train_bootstrap.json", N=N)
+    bootstrap(val_baseline_results_df, out_path="BootstrapResults/baseline__val_bootstrap.json", N=N)
+    # bootstrap(roberta_pretrain_train_results_df, out_path="BootstrapResults/roberta_pretrain_train_bootstrap.json")
+    bootstrap(roberta_pretrain_val_results_df, out_path="BootstrapResults/roberta_pretrain_val_bootstrap.json", N=N)
+    # bootstrap(roberta_nopretrain_train_results_df, out_path="BootstrapResults/roberta_nopretrain_train_bootstrap.json")
+    bootstrap(roberta_nopretrain_val_results_df, out_path="BootstrapResults/roberta_nopretrain_val_bootstrap.json", N=N)
 
     several_bootstrap_results_paths = sorted(glob.glob("BootstrapResults/*.json"))
     several_bootstrap_results = []
