@@ -75,6 +75,57 @@ def format_latex_table(list_of_results, method_names, metric):
 
     print(latex_table)
 
+import matplotlib.pyplot as plt
+def confusion_matrix(df, name):
+    #remove B and I
+    df['ner_tags'] = df['ner_tags'].apply(lambda x: x[2:] if x.startswith('B-') or x.startswith('I-') else x)
+    df['pred'] = df['pred'].apply(lambda x: x[2:] if x.startswith('B-') or x.startswith('I-') else x)
+
+    classes = df['ner_tags'].unique()
+    
+    classes.sort()
+    classes = [c for c in classes if c != 'O']
+    classes.append('O')
+    
+    N = len(classes)
+
+    true_labels = df['ner_tags'].tolist()
+    pred_labels = df['pred'].tolist()
+
+    #plot confusion matrix
+    from sklearn.metrics import confusion_matrix
+
+    cm = confusion_matrix(true_labels, pred_labels, labels=classes)
+    #separate cm for o, since it's so much larger
+
+    fig, ax = plt.subplots(figsize=(9, 6))
+    #red to blue
+    # im = ax.imshow(cm, cmap=plt.cm.magma)
+    cm_norm = cm / cm.sum(axis=1)[:, np.newaxis]    
+
+    im = ax.imshow(cm_norm, cmap=plt.cm.magma)
+
+    ax.set_xticks(np.arange(N))
+    ax.set_yticks(np.arange(N))
+    
+    ax.set_xticklabels(classes, rotation=90)
+    ax.set_yticklabels(classes)
+
+    ax.set_xlabel("Predicted")
+    ax.set_ylabel("True")
+
+    for i in range(N):
+        for j in range(N):
+            ax.text(j, i, int(cm[i, j]),ha="center", va="center", color="w" if cm_norm[i, j] < np.max(cm_norm) / 3 else "k")
+
+    ax.set_title(f"{name}", fontsize=15, fontweight='bold')
+
+    fig.tight_layout()
+
+    name_sanitized = name.replace(' ', '_').replace('-', '').replace('/', '').lower()
+    fig.savefig(f"Plots/{name_sanitized}_confusion_matrix.png")
+
+
 
 
 if __name__ == "__main__":
@@ -103,4 +154,8 @@ if __name__ == "__main__":
 
     method_names = ["Baseline", "RB-large w/o pretraining", "RB-large w/ pretraining"]
     list_of_results = [val_baseline_results, roberta_nopretrain_val_results, roberta_pretrain_val_results]
-    format_latex_table(list_of_results, method_names, metric='f1')
+    # format_latex_table(list_of_results, method_names, metric='f1')
+
+    confusion_matrix(val_baseline_results_df, name="Baseline")
+    confusion_matrix(roberta_pretrain_val_results_df, name="RB-large w/ pretraining")
+    confusion_matrix(roberta_nopretrain_val_results_df, name="RB-large w/o pretraining")
